@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createIdentityDirectoryFromEnv,
   createLumaTeamIdentityDirectory,
+  renderDiscordMentions,
   renderGitHubMentions
 } from "../../src/identity/static-identity-directory.js";
 
@@ -23,7 +24,7 @@ describe("IdentityDirectory", () => {
     ]);
   });
 
-  it("stores the visible Discord usernames while leaving numeric Discord IDs unset", async () => {
+  it("stores Discord usernames and numeric Discord IDs", async () => {
     const identityDirectory = createLumaTeamIdentityDirectory();
 
     const people = await identityDirectory.getPeople({
@@ -40,24 +41,41 @@ describe("IdentityDirectory", () => {
     ).toEqual([
       {
         personId: "person_jakob",
-        discordUserId: null,
+        discordUserId: "779381502311137301",
         discordUsername: "fleetadmiraljakob"
       },
       {
         personId: "person_fabius",
-        discordUserId: null,
+        discordUserId: "726409024894926869",
         discordUsername: "gamius_official"
       },
       {
         personId: "person_julius",
-        discordUserId: null,
+        discordUserId: "1376219174723911841",
         discordUsername: "juliusd1234_18271"
       },
       {
         personId: "person_philipp",
-        discordUserId: null,
+        discordUserId: "1492911575806251219",
         discordUsername: "philipp_54277"
       }
+    ]);
+  });
+
+  it("renders Discord mentions from numeric Discord IDs", async () => {
+    const identityDirectory = createLumaTeamIdentityDirectory();
+
+    const mentions = await renderDiscordMentions({
+      identityDirectory,
+      workspaceId: "workspace_luma",
+      personIds: ["person_fabius", "person_jakob", "person_julius", "person_philipp"]
+    });
+
+    expect(mentions).toEqual([
+      "<@726409024894926869>",
+      "<@779381502311137301>",
+      "<@1376219174723911841>",
+      "<@1492911575806251219>"
     ]);
   });
 

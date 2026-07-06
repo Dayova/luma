@@ -49,7 +49,7 @@ export const lumaTeamPeople: PersonIdentity[] = [
   {
     personId: "person_fabius",
     displayName: "Fabius Schurig",
-    discordUserId: null,
+    discordUserId: "726409024894926869",
     discordUsername: "gamius_official",
     githubLogin: "Gamius00",
     githubUserId: null,
@@ -61,7 +61,7 @@ export const lumaTeamPeople: PersonIdentity[] = [
   {
     personId: "person_jakob",
     displayName: "Jakob Rössner",
-    discordUserId: null,
+    discordUserId: "779381502311137301",
     discordUsername: "fleetadmiraljakob",
     githubLogin: "FleetAdmiralJakob",
     githubUserId: null,
@@ -73,7 +73,7 @@ export const lumaTeamPeople: PersonIdentity[] = [
   {
     personId: "person_julius",
     displayName: "Julius",
-    discordUserId: null,
+    discordUserId: "1376219174723911841",
     discordUsername: "juliusd1234_18271",
     githubLogin: "juliusdietrich2407-lab",
     githubUserId: null,
@@ -85,7 +85,7 @@ export const lumaTeamPeople: PersonIdentity[] = [
   {
     personId: "person_philipp",
     displayName: "Philipp",
-    discordUserId: null,
+    discordUserId: "1492911575806251219",
     discordUsername: "philipp_54277",
     githubLogin: "PhilippSchossig",
     githubUserId: null,
@@ -131,6 +131,26 @@ export async function renderGitHubMentions(input: {
     .map((person) => person.githubLogin)
     .filter((login): login is string => Boolean(login))
     .map((login) => `@${login}`);
+}
+
+export async function renderDiscordMentions(input: {
+  identityDirectory: IdentityDirectory | undefined;
+  workspaceId: WorkspaceId;
+  personIds: PersonId[];
+}): Promise<string[]> {
+  if (!input.identityDirectory) {
+    return [];
+  }
+
+  const people = await input.identityDirectory.getPeople({
+    workspaceId: input.workspaceId,
+    personIds: unique(input.personIds)
+  });
+
+  return people
+    .map((person) => person.discordUserId)
+    .filter((discordUserId): discordUserId is string => Boolean(discordUserId))
+    .map((discordUserId) => `<@${discordUserId}>`);
 }
 
 function unique(values: PersonId[]): PersonId[] {

@@ -15,7 +15,9 @@ export {
   createIdentityDirectoryFromEnv,
   createLumaTeamIdentityDirectory,
   createStaticIdentityDirectory,
-  lumaTeamPeople
+  lumaTeamPeople,
+  renderDiscordMentions,
+  renderGitHubMentions
 } from "./identity/static-identity-directory.js";
 export type * from "./knowledge/interface.js";
 export type * from "./work/interface.js";

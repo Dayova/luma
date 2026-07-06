@@ -4,6 +4,7 @@ export type PersonIdentity = {
   personId: PersonId;
   displayName: string;
   discordUserId: string | null;
+  discordUsername: string | null;
   githubLogin: string | null;
   githubUserId: string | null;
   atlassianAccountId: string | null;

@@ -8,12 +8,14 @@ This keeps Meeting Intelligence independent from GitHub, Confluence, Notion, Lin
 
 The current local development mapping is:
 
-| Person         | Internal `PersonId` | GitHub login             |
-| -------------- | ------------------- | ------------------------ |
-| Fabius Schurig | `person_fabius`     | `Gamius00`               |
-| Jakob Rössner  | `person_jakob`      | `FleetAdmiralJakob`      |
-| Julius         | `person_julius`     | `juliusdietrich2407-lab` |
-| Philipp        | `person_philipp`    | `PhilippSchossig`        |
+| Person         | Internal `PersonId` | Discord username    | Discord user ID | GitHub login             |
+| -------------- | ------------------- | ------------------- | --------------- | ------------------------ |
+| Fabius Schurig | `person_fabius`     | `gamius_official`   | unknown         | `Gamius00`               |
+| Jakob Rössner  | `person_jakob`      | `fleetadmiraljakob` | unknown         | `FleetAdmiralJakob`      |
+| Julius         | `person_julius`     | `juliusd1234_18271` | unknown         | `juliusdietrich2407-lab` |
+| Philipp        | `person_philipp`    | `philipp_54277`     | unknown         | `PhilippSchossig`        |
+
+Discord usernames are useful for human-readable identity matching. Discord bot mentions require numeric Discord user IDs, so `discordUserId` remains `null` until the bot can look up guild members or the IDs are provided manually.
 
 ## GitHub Mentions
 
@@ -44,6 +46,7 @@ LUMA_IDENTITY_PEOPLE_JSON='[
     "personId": "person_other",
     "displayName": "Other Person",
     "discordUserId": null,
+    "discordUsername": "other_discord",
     "githubLogin": "OtherGitHubLogin",
     "githubUserId": null,
     "atlassianAccountId": null,

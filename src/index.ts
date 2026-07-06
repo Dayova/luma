@@ -12,6 +12,12 @@ export type * from "./domain/model.js";
 export type * from "./ai/reasoning-model.js";
 export type * from "./knowledge/interface.js";
 export type * from "./work/interface.js";
+export {
+  GitHubIssuesAdapterError,
+  createGitHubIssuesWorkProvider,
+  createGitHubIssuesWorkProviderFromEnv
+} from "./work/github-issues-adapter.js";
+export type { GitHubIssuesWorkProviderConfig } from "./work/github-issues-adapter.js";
 export type * from "./code/interface.js";
 export type * from "./organizational-context/interface.js";
 export {

@@ -1,0 +1,21 @@
+import { describe, expect, it } from "vitest";
+import { createGitHubIssuesWorkProviderFromEnv } from "../../src/work/github-issues-adapter.js";
+
+const liveGitHubEnabled =
+  process.env["LUMA_LIVE_GITHUB_TESTS"] === "1" &&
+  Boolean(process.env["GITHUB_TOKEN"]) &&
+  Boolean(process.env["GITHUB_REPOSITORY"]);
+
+describe.skipIf(!liveGitHubEnabled)("GitHub Issues WorkProvider live integration", () => {
+  it("can search the configured GitHub repository without leaking provider types", async () => {
+    const provider = createGitHubIssuesWorkProviderFromEnv();
+
+    const results = await provider.searchWorkItems({
+      workspaceId: "workspace_live_test",
+      text: "",
+      limit: 1
+    });
+
+    expect(Array.isArray(results)).toBe(true);
+  });
+});

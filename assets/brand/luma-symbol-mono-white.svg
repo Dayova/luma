@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Luma logo asset</title>
+  <desc id="desc">Original vector logo asset for Luma, an AI meeting intelligence product.</desc>
+  <g>
+    <path d="M42 116C44 74 76 42 121 36C125 35 128 38 128 42V78C128 103 107 124 82 124H45C42 124 40 121 42 116Z" fill="#FFFFFF"/>
+    <path d="M135 42C135 38 138 35 142 36C187 42 219 74 221 116C223 121 220 124 215 124H178C153 124 135 103 135 78V42Z" fill="#FFFFFF"/>
+    <path d="M42 140C40 135 43 132 48 132H82C107 132 128 153 128 178V216C128 220 125 223 121 222C76 216 44 183 42 140Z" fill="#FFFFFF"/>
+    <path d="M135 178C135 153 156 132 181 132H215C220 132 223 135 221 140C218 177 193 207 158 218L151 229C148 234 140 232 139 226L137 213C136 206 135 195 135 178Z" fill="#FFFFFF"/>
+  </g>
+</svg>

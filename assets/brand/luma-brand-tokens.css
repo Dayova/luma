@@ -1,0 +1,18 @@
+:root {
+  --luma-blue: #2563ff;
+  --luma-indigo: #5b4dff;
+  --luma-violet: #a855f7;
+  --luma-cyan: #22d3ee;
+  --luma-mist: #eef2f8;
+  --luma-ink: #0b1020;
+  --luma-slate: #65708a;
+
+  --luma-gradient-primary: linear-gradient(
+    135deg,
+    #22d3ee 0%,
+    #2563ff 42%,
+    #5b4dff 66%,
+    #a855f7 100%
+  );
+  --luma-radius-app-icon: 28%;
+}

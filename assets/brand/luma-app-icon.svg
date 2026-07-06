@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Luma logo asset</title>
+  <desc id="desc">Original vector logo asset for Luma, an AI meeting intelligence product.</desc>
+
+  <defs>
+    <linearGradient id="tileBg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF2F8"/>
+    </linearGradient>
+    <filter id="tileShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#0B1020" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+  <rect x="14" y="14" width="228" height="228" rx="56" fill="url(#tileBg)" filter="url(#tileShadow)"/>
+
+  <defs>
+    <linearGradient id="lumaGradTL" x1="40" y1="36" x2="128" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.55" stop-color="#2563FF"/>
+      <stop offset="1" stop-color="#5B4DFF"/>
+    </linearGradient>
+    <linearGradient id="lumaGradTR" x1="135" y1="36" x2="221" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.55" stop-color="#2563FF"/>
+      <stop offset="1" stop-color="#5B4DFF"/>
+    </linearGradient>
+    <linearGradient id="lumaGradBL" x1="42" y1="132" x2="128" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563FF"/>
+      <stop offset="0.65" stop-color="#5B4DFF"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="lumaGradBR" x1="135" y1="132" x2="221" y2="231" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B4DFF"/>
+      <stop offset="0.55" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <filter id="lumaSoftGlow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.15  0 0 0 0 0.38  0 0 0 0 1  0 0 0 .55 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g transform="translate(34 34) scale(0.734375)">
+  <g>
+    <path d="M42 116C44 74 76 42 121 36C125 35 128 38 128 42V78C128 103 107 124 82 124H45C42 124 40 121 42 116Z" fill="url(#lumaGradTL)"/>
+    <path d="M135 42C135 38 138 35 142 36C187 42 219 74 221 116C223 121 220 124 215 124H178C153 124 135 103 135 78V42Z" fill="url(#lumaGradTR)"/>
+    <path d="M42 140C40 135 43 132 48 132H82C107 132 128 153 128 178V216C128 220 125 223 121 222C76 216 44 183 42 140Z" fill="url(#lumaGradBL)"/>
+    <path d="M135 178C135 153 156 132 181 132H215C220 132 223 135 221 140C218 177 193 207 158 218L151 229C148 234 140 232 139 226L137 213C136 206 135 195 135 178Z" fill="url(#lumaGradBR)"/>
+  </g>
+  </g>
+
+</svg>

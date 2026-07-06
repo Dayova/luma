@@ -24,6 +24,7 @@ This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural
 
 - `CONTEXT.md` defines the domain vocabulary.
 - `AGENTS.md` defines future coding-agent rules.
+- `docs/brand.md` documents the Luma brand assets, colors, and UI usage guidance.
 - `docs/architecture/design-it-twice.md` compares four architecture candidates.
 - `docs/adr/` records architecture decisions.
 - `docs/configuration/environment.md` documents environment variables and live integration setup.

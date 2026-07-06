@@ -25,6 +25,19 @@ Required environment:
 - `GITHUB_TOKEN`: a token that can read and write issues for the configured repository.
 - `GITHUB_REPOSITORY`: `owner/repo`.
 
+You can source `GITHUB_TOKEN` from the GitHub CLI for local development:
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+export GITHUB_REPOSITORY="owner/repo"
+```
+
+If the current repo has a GitHub remote, derive `GITHUB_REPOSITORY` with:
+
+```bash
+export GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+```
+
 Optional environment:
 
 - `GITHUB_API_BASE_URL`: defaults to `https://api.github.com`.
@@ -60,7 +73,9 @@ The live test is non-mutating and skipped by default:
 
 ```bash
 LUMA_LIVE_GITHUB_TESTS=1 \
-GITHUB_TOKEN=... \
+GITHUB_TOKEN="$(gh auth token)" \
 GITHUB_REPOSITORY=owner/repo \
 npm test -- tests/work/github-issues-adapter.live.test.ts
 ```
+
+If this command fails with `no git remotes found`, set `GITHUB_REPOSITORY` manually or add a GitHub remote to the local repo.

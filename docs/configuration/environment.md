@@ -1,0 +1,85 @@
+# Environment Configuration
+
+This document defines Luma's environment variables and which Module owns each one.
+
+Runtime code must keep provider configuration at Adapter seams. Meeting Intelligence must not read provider-specific environment variables, import provider SDKs, or depend on development-only tools such as `gh`.
+
+## Loading Environment
+
+For local development, copy:
+
+```bash
+cp .env.example .env
+```
+
+Then fill in the values you need. `.env` is ignored by git.
+
+The current code does not auto-load `.env`; pass environment variables through your shell, test runner, process manager, or a future app bootstrap loader. For one-off shell usage:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+## GitHub CLI Shortcut
+
+The GitHub Issues Adapter needs a GitHub token and target repository. If you are authenticated with the GitHub CLI, you can avoid storing the token in `.env`:
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+export GITHUB_REPOSITORY="owner/repo"
+```
+
+If this local repo has a GitHub remote, `GITHUB_REPOSITORY` can be derived:
+
+```bash
+export GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+```
+
+In this workspace, `gh auth status` is authenticated, but this local repo currently has no remote, so `gh repo view` cannot infer `GITHUB_REPOSITORY`.
+
+## Variables
+
+| Variable                          | Required now    | Owner                        | Description                                                            |
+| --------------------------------- | --------------- | ---------------------------- | ---------------------------------------------------------------------- |
+| `NODE_ENV`                        | No              | App                          | Runtime mode. Defaults to `development`.                               |
+| `LUMA_DEFAULT_WORKSPACE_TIMEZONE` | No              | App                          | Default workspace timezone. Defaults to `Europe/Berlin`.               |
+| `DATABASE_URL`                    | No              | Persistence                  | Planned production PostgreSQL connection. Current tests use PGlite.    |
+| `GITHUB_TOKEN`                    | For live GitHub | GitHub Issues WorkProvider   | Token with issue read/write access. Can come from `gh auth token`.     |
+| `GITHUB_REPOSITORY`               | For live GitHub | GitHub Issues WorkProvider   | Target repository as `owner/repo`.                                     |
+| `GITHUB_API_BASE_URL`             | No              | GitHub Issues WorkProvider   | GitHub REST base URL. Defaults to `https://api.github.com`.            |
+| `LUMA_GITHUB_WORK_PROVIDER_ID`    | No              | GitHub Issues WorkProvider   | Provider ID for Work external references. Defaults to `github-issues`. |
+| `LUMA_GITHUB_USER_AGENT`          | No              | GitHub Issues WorkProvider   | User-Agent sent to GitHub REST.                                        |
+| `LUMA_LIVE_GITHUB_TESTS`          | No              | Tests                        | Set to `1` to run non-mutating live GitHub WorkProvider tests.         |
+| `LUMA_GITHUB_CODE_PROVIDER_ID`    | No              | GitHub CodeProvider          | Planned Code provider ID. GitHub Code is separate from Work.           |
+| `CONFLUENCE_BASE_URL`             | Planned         | Confluence KnowledgeProvider | Atlassian Confluence base URL.                                         |
+| `CONFLUENCE_EMAIL`                | Planned         | Confluence KnowledgeProvider | Atlassian account email for API auth.                                  |
+| `CONFLUENCE_API_TOKEN`            | Planned         | Confluence KnowledgeProvider | Atlassian API token.                                                   |
+| `CONFLUENCE_SPACE_KEY`            | Planned         | Confluence KnowledgeProvider | Space for meeting notes and knowledge updates.                         |
+| `CONFLUENCE_PARENT_PAGE_ID`       | Planned         | Confluence KnowledgeProvider | Parent page for generated meeting records.                             |
+| `LUMA_CONFLUENCE_PROVIDER_ID`     | Planned         | Confluence KnowledgeProvider | Provider ID for Knowledge external references.                         |
+| `DISCORD_TOKEN`                   | Planned         | Discord Module               | Bot token.                                                             |
+| `DISCORD_CLIENT_ID`               | Planned         | Discord Module               | Bot application/client ID.                                             |
+| `DISCORD_GUILD_ID`                | Planned         | Discord Module               | Development guild for command registration.                            |
+| `OPENAI_API_KEY`                  | Planned         | ReasoningModel Adapter       | Model provider credential.                                             |
+| `LUMA_REASONING_MODEL_PROVIDER`   | Planned         | ReasoningModel Adapter       | Model provider selector.                                               |
+| `LUMA_REASONING_MODEL_NAME`       | Planned         | ReasoningModel Adapter       | Concrete model name.                                                   |
+
+## Current Live GitHub Validation
+
+The live GitHub test is intentionally non-mutating. It searches the configured repository and validates that the Adapter returns provider-neutral `WorkItem` values.
+
+```bash
+export GITHUB_TOKEN="$(gh auth token)"
+export GITHUB_REPOSITORY="owner/repo"
+LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.ts
+```
+
+## Security Rules
+
+- Do not commit `.env`.
+- Do not log tokens or raw provider credentials.
+- Do not put provider-specific env reads inside Meeting Intelligence.
+- Do not make runtime application code depend on `gh`, MCP tools, or Codex plugins.
+- Use provider-neutral `ExternalReference` values outside provider Adapters.

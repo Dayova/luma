@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "german-relative-deadline",
+      "language": "de",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Das muss bis übernächsten Dienstag fertig sein."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "original-language-preserved",
+          "relative-deadline-normalized-with-workspace-timezone",
+          "ambiguous-owner-remains-null"
+        ]
+      }
+    },
+    {
+      "id": "english-code-identifier",
+      "language": "en",
+      "utterances": [
+        {
+          "speakerId": "person_philipp",
+          "text": "The bug is probably in use-auth-session, not the token refresh worker."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "code-identifier-preserved",
+          "unsupported-implementation-claim-rate-zero",
+          "code-context-can-be-linked"
+        ]
+      }
+    },
+    {
+      "id": "mixed-github-issue",
+      "language": "mixed",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Jakob übernimmt das GitHub Issue bis Montag."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "owner-is-jakob",
+          "deadline-is-next-monday",
+          "technical-term-preserved",
+          "no-provider-specific-work-created-before-approval"
+        ]
+      }
+    },
+    {
+      "id": "uncertain-proposal",
+      "language": "de",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Wir könnten vielleicht Linear verwenden."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "decision-status-candidate",
+          "modality-preserved",
+          "confirmation-intervention-emitted"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+import type {
+  ActionItemStatus,
+  Confidence,
+  DecisionStatus,
+  DueDateConfidence,
+  EvidenceId,
+  EvidenceReference,
+  FollowUpIntent,
+  MeetingId,
+  PersonId,
+  WorkspaceId
+} from "../domain/model.js";
+
+export type StructuredReasoningRequest<T> = {
+  workspaceId: WorkspaceId;
+  meetingId: MeetingId;
+  purpose:
+    | "understand-discussion"
+    | "answer-question"
+    | "prepare-conclusion"
+    | "prepare-follow-up";
+  promptVersion: string;
+  schemaName: string;
+  evidence: EvidenceReference[];
+  context: string[];
+  input: Record<string, unknown>;
+  expectedType?: T;
+};
+
+export type StructuredReasoningResult<T> = {
+  value: T;
+  metadata: {
+    provider: string;
+    model: string;
+    promptVersion: string;
+  };
+};
+
+export interface ReasoningModel {
+  generateStructured<T>(
+    request: StructuredReasoningRequest<T>
+  ): Promise<StructuredReasoningResult<T>>;
+}
+
+export type ProposedDueDate = {
+  originalPhrase: string | null;
+  normalizedDate: string | null;
+  confidence: DueDateConfidence;
+  timezone: string;
+};
+
+export type ActionItemProposal = {
+  stableKey: string;
+  description: string;
+  ownerId: PersonId | null;
+  dueDate: ProposedDueDate;
+  status: ActionItemStatus;
+  relatedDecisionIds: string[];
+  evidenceIds: EvidenceId[];
+  confidence: Confidence;
+};
+
+export type DecisionProposal = {
+  stableKey: string;
+  statement: string;
+  rationale: string[];
+  status: DecisionStatus;
+  supportingParticipantIds: PersonId[];
+  objectingParticipantIds: PersonId[];
+  relatedTopicIds: string[];
+  evidenceIds: EvidenceId[];
+  confidence: Confidence;
+};
+
+export type OpenQuestionProposal = {
+  stableKey: string;
+  question: string;
+  raisedBy: PersonId | null;
+  evidenceIds: EvidenceId[];
+  confidence: Confidence;
+};
+
+export type RiskProposal = {
+  stableKey: string;
+  statement: string;
+  severity: "low" | "medium" | "high" | "unknown";
+  mitigation: string | null;
+  evidenceIds: EvidenceId[];
+  confidence: Confidence;
+};
+
+export type FollowUpIntentProposal = FollowUpIntent & {
+  evidenceIds?: EvidenceId[];
+};
+
+export type MeetingAnalysisProposalBatch = {
+  actionItems: ActionItemProposal[];
+  decisions: DecisionProposal[];
+  openQuestions: OpenQuestionProposal[];
+  risks: RiskProposal[];
+  followUpIntentions: FollowUpIntentProposal[];
+};

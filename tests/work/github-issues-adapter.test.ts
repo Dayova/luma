@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createGitHubIssuesWorkProvider } from "../../src/work/github-issues-adapter.js";
 
@@ -5,6 +6,7 @@ type CapturedRequest = {
   url: string;
   method: string;
   body: unknown;
+  authorization: string | null;
 };
 
 function githubIssue(
@@ -63,7 +65,8 @@ function createFakeFetch(handler: (request: CapturedRequest) => Response): {
       const request = {
         url,
         method: init?.method ?? "GET",
-        body
+        body,
+        authorization: new Headers(init?.headers).get("Authorization")
       };
       requests.push(request);
       return Promise.resolve(handler(request));
@@ -192,5 +195,71 @@ describe("GitHub Issues WorkProvider", () => {
       url: "https://github.example/owner/repo/issues/312",
       updatedAt: "2026-06-26T10:20:00Z"
     });
+  });
+
+  it("uses a GitHub App installation token so created issues are authored by the bot", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048
+    });
+    const privateKeyPem = privateKey
+      .export({
+        type: "pkcs1",
+        format: "pem"
+      })
+      .toString();
+    const fake = createFakeFetch((request) => {
+      if (request.url.endsWith("/app/installations/999/access_tokens")) {
+        return responseJson({
+          token: "ghs_installation_token",
+          expires_at: "2026-06-26T11:00:00Z"
+        });
+      }
+
+      if (request.url.includes("/search/issues")) {
+        return responseJson({ items: [] });
+      }
+
+      if (request.url.endsWith("/repos/owner/repo/issues")) {
+        return responseJson(githubIssue());
+      }
+
+      return responseJson({ message: "not found" }, 404);
+    });
+    const provider = createGitHubIssuesWorkProvider({
+      auth: {
+        type: "github-app",
+        appId: "12345",
+        installationId: "999",
+        privateKey: privateKeyPem
+      },
+      owner: "owner",
+      repo: "repo",
+      apiBaseUrl: "https://api.github.example",
+      fetchImpl: fake.fetchImpl,
+      now: () => new Date("2026-06-26T10:20:00Z")
+    });
+
+    await provider.createWorkItem({
+      title: "Investigate session migration strategy",
+      description: "Follow up.",
+      assigneeProviderUserId: "jakob",
+      dueDate: "2026-06-29",
+      labels: ["meeting-follow-up"],
+      idempotencyKey: "workspace:meeting:intent:execute"
+    });
+
+    const tokenRequests = fake.requests.filter((request) =>
+      request.url.endsWith("/app/installations/999/access_tokens")
+    );
+    const githubApiRequests = fake.requests.filter(
+      (request) => !request.url.endsWith("/app/installations/999/access_tokens")
+    );
+
+    expect(tokenRequests).toHaveLength(1);
+    expect(tokenRequests[0]?.authorization).toMatch(/^Bearer [^.]+\.[^.]+\.[^.]+$/);
+    expect(githubApiRequests.map((request) => request.authorization)).toEqual([
+      "Bearer ghs_installation_token",
+      "Bearer ghs_installation_token"
+    ]);
   });
 });

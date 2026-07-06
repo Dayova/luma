@@ -4,28 +4,37 @@ Luma supports GitHub Issues as the current Work provider through `createGitHubIs
 
 ## Runtime Configuration
 
-```ts
-import { createGitHubIssuesWorkProvider } from "luma";
-
-const workProvider = createGitHubIssuesWorkProvider({
-  token: process.env.GITHUB_TOKEN!,
-  owner: "owner",
-  repo: "repo"
-});
-```
-
-Or:
+Use GitHub App installation authentication for production. That is the path that makes issues and comments appear as the bot, similar to Codex/ChatGPT, Claude, or Vercel bot accounts.
 
 ```ts
+import { createGitHubIssuesWorkProviderFromEnv } from "luma";
+
 const workProvider = createGitHubIssuesWorkProviderFromEnv();
 ```
 
-Required environment:
+Required environment for bot-authored GitHub activity:
 
-- `GITHUB_TOKEN`: a token that can read and write issues for the configured repository.
-- `GITHUB_REPOSITORY`: `owner/repo`.
+```bash
+GITHUB_REPOSITORY=owner/repo
+GITHUB_APP_ID=12345
+GITHUB_APP_INSTALLATION_ID=67890
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+```
 
-You can source `GITHUB_TOKEN` from the GitHub CLI for local development:
+Or use a base64-encoded private key:
+
+```bash
+GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
+```
+
+Required GitHub App repository permissions:
+
+- Metadata: read
+- Issues: read and write
+
+## Local User-authored Fallback
+
+A PAT or `gh auth token` works for local development, but GitHub will attribute issue/comment authorship to that user. Do not use this for production bot-authored activity.
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
@@ -43,6 +52,15 @@ Optional environment:
 - `GITHUB_API_BASE_URL`: defaults to `https://api.github.com`.
 - `LUMA_GITHUB_WORK_PROVIDER_ID`: defaults to `github-issues`.
 - `LUMA_GITHUB_USER_AGENT`: defaults to `luma-meeting-intelligence`.
+
+## Auth Flow
+
+With GitHub App envs configured, the Adapter:
+
+1. Signs a short-lived RS256 JWT with `GITHUB_APP_ID` and the private key.
+2. Calls `POST /app/installations/{installation_id}/access_tokens`.
+3. Uses the returned installation access token for issue search, creation, updates, and comments.
+4. Caches the installation token until shortly before expiry.
 
 ## Idempotency
 
@@ -70,6 +88,19 @@ This Adapter implements the WorkProvider Interface only. GitHub PRs, commits, fi
 ## Live Test
 
 The live test is non-mutating and skipped by default:
+
+Bot-authored:
+
+```bash
+LUMA_LIVE_GITHUB_TESTS=1 \
+GITHUB_REPOSITORY=owner/repo \
+GITHUB_APP_ID=12345 \
+GITHUB_APP_INSTALLATION_ID=67890 \
+GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)" \
+npm test -- tests/work/github-issues-adapter.live.test.ts
+```
+
+User-authored fallback:
 
 ```bash
 LUMA_LIVE_GITHUB_TESTS=1 \

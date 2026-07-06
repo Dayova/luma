@@ -1,3 +1,4 @@
+import { createSign } from "node:crypto";
 import { z } from "zod";
 import type { ExternalReference, ExternalUser } from "../domain/model.js";
 import type {
@@ -11,6 +12,7 @@ import type {
 const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";
 const IDEMPOTENCY_MARKER_PREFIX = "luma-idempotency-key:";
+const INSTALLATION_TOKEN_REFRESH_SKEW_MS = 60_000;
 
 const githubUserSchema = z
   .object({
@@ -49,18 +51,39 @@ const githubSearchIssuesSchema = z
   })
   .passthrough();
 
+const githubInstallationAccessTokenSchema = z
+  .object({
+    token: z.string(),
+    expires_at: z.string()
+  })
+  .passthrough();
+
 type GitHubIssue = z.output<typeof githubIssueSchema>;
 type GitHubLabel = z.output<typeof githubLabelSchema>;
 type GitHubUser = z.output<typeof githubUserSchema>;
 
+export type GitHubIssuesAuthConfig =
+  | {
+      type: "token";
+      token: string;
+    }
+  | {
+      type: "github-app";
+      appId: string;
+      installationId: string;
+      privateKey: string;
+    };
+
 export type GitHubIssuesWorkProviderConfig = {
-  token: string;
+  token?: string;
+  auth?: GitHubIssuesAuthConfig;
   owner: string;
   repo: string;
   apiBaseUrl?: string;
   providerId?: string;
   userAgent?: string;
   fetchImpl?: typeof fetch;
+  now?: () => Date;
 };
 
 export class GitHubIssuesAdapterError extends Error {
@@ -99,17 +122,7 @@ export function createGitHubIssuesWorkProvider(
 export function createGitHubIssuesWorkProviderFromEnv(
   env: NodeJS.ProcessEnv = process.env
 ): WorkProvider {
-  const token = env["GITHUB_TOKEN"];
   const repository = env["GITHUB_REPOSITORY"];
-
-  if (!token) {
-    throw new GitHubIssuesAdapterError({
-      code: "missing-github-token",
-      message: "GITHUB_TOKEN is required to configure GitHub Issues WorkProvider",
-      status: null,
-      retryable: false
-    });
-  }
 
   if (!repository) {
     throw new GitHubIssuesAdapterError({
@@ -132,9 +145,9 @@ export function createGitHubIssuesWorkProviderFromEnv(
   }
 
   const config: GitHubIssuesWorkProviderConfig = {
-    token,
     owner,
-    repo
+    repo,
+    auth: authFromEnv(env)
   };
   const apiBaseUrl = env["GITHUB_API_BASE_URL"];
   const providerId = env["LUMA_GITHUB_WORK_PROVIDER_ID"];
@@ -156,22 +169,28 @@ export function createGitHubIssuesWorkProviderFromEnv(
 }
 
 class GitHubIssuesAdapter implements WorkProvider {
-  private readonly token: string;
+  private readonly auth: GitHubIssuesAuthConfig;
   private readonly owner: string;
   private readonly repo: string;
   private readonly apiBaseUrl: string;
   private readonly providerId: string;
   private readonly userAgent: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly now: () => Date;
+  private cachedInstallationAccessToken: {
+    token: string;
+    expiresAtMs: number;
+  } | null = null;
 
   constructor(config: GitHubIssuesWorkProviderConfig) {
-    this.token = config.token;
+    this.auth = normalizeAuthConfig(config);
     this.owner = config.owner;
     this.repo = config.repo;
     this.apiBaseUrl = config.apiBaseUrl ?? DEFAULT_GITHUB_API_BASE_URL;
     this.providerId = config.providerId ?? "github-issues";
     this.userAgent = config.userAgent ?? "luma-meeting-intelligence";
     this.fetchImpl = config.fetchImpl ?? fetch;
+    this.now = config.now ?? (() => new Date());
   }
 
   async searchWorkItems(query: WorkQuery): Promise<WorkItem[]> {
@@ -301,7 +320,7 @@ class GitHubIssuesAdapter implements WorkProvider {
       method: options.method,
       headers: {
         Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
+        Authorization: await this.authorizationHeader(),
         "Content-Type": "application/json",
         "User-Agent": this.userAgent,
         "X-GitHub-Api-Version": GITHUB_API_VERSION
@@ -329,6 +348,78 @@ class GitHubIssuesAdapter implements WorkProvider {
     const raw = await response.json();
     const parsed = options.schema.parse(raw) as z.output<Schema>;
     return parsed;
+  }
+
+  private async authorizationHeader(): Promise<string> {
+    switch (this.auth.type) {
+      case "token":
+        return `Bearer ${this.auth.token}`;
+      case "github-app":
+        return `Bearer ${await this.getInstallationAccessToken(this.auth)}`;
+    }
+  }
+
+  private async getInstallationAccessToken(
+    auth: Extract<GitHubIssuesAuthConfig, { type: "github-app" }>
+  ): Promise<string> {
+    const nowMs = this.now().getTime();
+
+    if (
+      this.cachedInstallationAccessToken &&
+      this.cachedInstallationAccessToken.expiresAtMs -
+        INSTALLATION_TOKEN_REFRESH_SKEW_MS >
+        nowMs
+    ) {
+      return this.cachedInstallationAccessToken.token;
+    }
+
+    const jwt = createGitHubAppJwt({
+      appId: auth.appId,
+      privateKey: auth.privateKey,
+      now: this.now
+    });
+    const response = await this.fetchImpl(
+      `${trimTrailingSlash(this.apiBaseUrl)}/app/installations/${auth.installationId}/access_tokens`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json",
+          "User-Agent": this.userAgent,
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new GitHubIssuesAdapterError({
+        code: "github-app-token-request-failed",
+        message: await readErrorMessage(response),
+        status: response.status,
+        retryable: response.status === 429 || response.status >= 500
+      });
+    }
+
+    const raw = await response.json();
+    const parsed = githubInstallationAccessTokenSchema.parse(raw);
+    const expiresAtMs = Date.parse(parsed.expires_at);
+
+    if (!Number.isFinite(expiresAtMs)) {
+      throw new GitHubIssuesAdapterError({
+        code: "invalid-github-app-token-expiration",
+        message: "GitHub returned an installation token without a valid expires_at",
+        status: null,
+        retryable: true
+      });
+    }
+
+    this.cachedInstallationAccessToken = {
+      token: parsed.token,
+      expiresAtMs
+    };
+
+    return parsed.token;
   }
 
   private toWorkItem(issue: GitHubIssue): WorkItem {
@@ -369,6 +460,118 @@ function renderIssueBody(input: CreateWorkItemInput): string {
     `<!-- ${IDEMPOTENCY_MARKER_PREFIX} ${input.idempotencyKey} -->`,
     "<!-- luma-generated-section-end -->"
   ].join("\n");
+}
+
+function normalizeAuthConfig(
+  config: GitHubIssuesWorkProviderConfig
+): GitHubIssuesAuthConfig {
+  if (config.auth) {
+    return config.auth;
+  }
+
+  if (config.token) {
+    return {
+      type: "token",
+      token: config.token
+    };
+  }
+
+  throw new GitHubIssuesAdapterError({
+    code: "missing-github-auth",
+    message: "Configure GitHub Issues with GitHub App credentials or a token fallback",
+    status: null,
+    retryable: false
+  });
+}
+
+function authFromEnv(env: NodeJS.ProcessEnv): GitHubIssuesAuthConfig {
+  const appId = env["GITHUB_APP_ID"];
+  const installationId = env["GITHUB_APP_INSTALLATION_ID"];
+  const privateKey =
+    env["GITHUB_APP_PRIVATE_KEY"] ??
+    decodeBase64PrivateKey(env["GITHUB_APP_PRIVATE_KEY_BASE64"]);
+
+  if (appId || installationId || privateKey) {
+    if (!appId || !installationId || !privateKey) {
+      throw new GitHubIssuesAdapterError({
+        code: "incomplete-github-app-auth",
+        message:
+          "GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_BASE64 are required for bot-authored GitHub activity",
+        status: null,
+        retryable: false
+      });
+    }
+
+    return {
+      type: "github-app",
+      appId,
+      installationId,
+      privateKey
+    };
+  }
+
+  const token = env["GITHUB_TOKEN"];
+
+  if (token) {
+    return {
+      type: "token",
+      token
+    };
+  }
+
+  throw new GitHubIssuesAdapterError({
+    code: "missing-github-auth",
+    message:
+      "Configure GitHub App credentials for bot-authored activity, or GITHUB_TOKEN for local user-authored development fallback",
+    status: null,
+    retryable: false
+  });
+}
+
+function decodeBase64PrivateKey(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return Buffer.from(value, "base64").toString("utf8");
+}
+
+function createGitHubAppJwt(input: {
+  appId: string;
+  privateKey: string;
+  now: () => Date;
+}): string {
+  const nowSeconds = Math.floor(input.now().getTime() / 1000);
+  const issuedAt = nowSeconds - 60;
+  const expiresAt = nowSeconds + 9 * 60;
+  const encodedHeader = base64UrlEncode(
+    JSON.stringify({
+      alg: "RS256",
+      typ: "JWT"
+    })
+  );
+  const encodedPayload = base64UrlEncode(
+    JSON.stringify({
+      iat: issuedAt,
+      exp: expiresAt,
+      iss: input.appId
+    })
+  );
+  const unsignedToken = `${encodedHeader}.${encodedPayload}`;
+  const signature = createSign("RSA-SHA256")
+    .update(unsignedToken)
+    .end()
+    .sign(normalizePrivateKey(input.privateKey));
+
+  return `${unsignedToken}.${base64UrlEncode(signature)}`;
+}
+
+function normalizePrivateKey(privateKey: string): string {
+  return privateKey.replace(/\\n/g, "\n");
+}
+
+function base64UrlEncode(input: string | Buffer): string {
+  return Buffer.from(input).toString("base64url");
 }
 
 function renderUpdatedIssueBody(input: UpdateWorkItemInput): string {

@@ -22,9 +22,35 @@ source .env
 set +a
 ```
 
+## GitHub App Auth For Bot-authored Activity
+
+Use GitHub App installation authentication for production. This is what makes GitHub show issues and comments as the App bot rather than a human user.
+
+Minimum GitHub App repository permissions for the current WorkProvider:
+
+- Metadata: read
+- Issues: read and write
+
+Required env:
+
+```bash
+GITHUB_REPOSITORY=owner/repo
+GITHUB_APP_ID=12345
+GITHUB_APP_INSTALLATION_ID=67890
+GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+```
+
+For env stores that dislike multiline values, use:
+
+```bash
+GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
+```
+
+If GitHub App credentials are present, the Adapter ignores `GITHUB_TOKEN` and uses an installation access token.
+
 ## GitHub CLI Shortcut
 
-The GitHub Issues Adapter needs a GitHub token and target repository. If you are authenticated with the GitHub CLI, you can avoid storing the token in `.env`:
+The GitHub CLI is acceptable for local development only. A `gh` token is user-authored, so issues/comments will appear as the GitHub user, not as the bot.
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
@@ -46,8 +72,12 @@ In this workspace, `gh auth status` is authenticated, but this local repo curren
 | `NODE_ENV`                        | No              | App                          | Runtime mode. Defaults to `development`.                               |
 | `LUMA_DEFAULT_WORKSPACE_TIMEZONE` | No              | App                          | Default workspace timezone. Defaults to `Europe/Berlin`.               |
 | `DATABASE_URL`                    | No              | Persistence                  | Planned production PostgreSQL connection. Current tests use PGlite.    |
-| `GITHUB_TOKEN`                    | For live GitHub | GitHub Issues WorkProvider   | Token with issue read/write access. Can come from `gh auth token`.     |
 | `GITHUB_REPOSITORY`               | For live GitHub | GitHub Issues WorkProvider   | Target repository as `owner/repo`.                                     |
+| `GITHUB_APP_ID`                   | Preferred       | GitHub Issues WorkProvider   | GitHub App ID used to sign a JWT for bot-authored activity.            |
+| `GITHUB_APP_INSTALLATION_ID`      | Preferred       | GitHub Issues WorkProvider   | Installation ID for the target account/repository.                     |
+| `GITHUB_APP_PRIVATE_KEY`          | Preferred       | GitHub Issues WorkProvider   | GitHub App private key PEM, with real or escaped newlines.             |
+| `GITHUB_APP_PRIVATE_KEY_BASE64`   | Preferred       | GitHub Issues WorkProvider   | Base64 encoded private key PEM alternative.                            |
+| `GITHUB_TOKEN`                    | Fallback only   | GitHub Issues WorkProvider   | User-authored local fallback. Can come from `gh auth token`.           |
 | `GITHUB_API_BASE_URL`             | No              | GitHub Issues WorkProvider   | GitHub REST base URL. Defaults to `https://api.github.com`.            |
 | `LUMA_GITHUB_WORK_PROVIDER_ID`    | No              | GitHub Issues WorkProvider   | Provider ID for Work external references. Defaults to `github-issues`. |
 | `LUMA_GITHUB_USER_AGENT`          | No              | GitHub Issues WorkProvider   | User-Agent sent to GitHub REST.                                        |
@@ -70,6 +100,18 @@ In this workspace, `gh auth status` is authenticated, but this local repo curren
 
 The live GitHub test is intentionally non-mutating. It searches the configured repository and validates that the Adapter returns provider-neutral `WorkItem` values.
 
+Bot-authored validation:
+
+```bash
+export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_APP_ID="12345"
+export GITHUB_APP_INSTALLATION_ID="67890"
+export GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
+LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.ts
+```
+
+User-authored local fallback:
+
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
 export GITHUB_REPOSITORY="owner/repo"
@@ -83,3 +125,4 @@ LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.
 - Do not put provider-specific env reads inside Meeting Intelligence.
 - Do not make runtime application code depend on `gh`, MCP tools, or Codex plugins.
 - Use provider-neutral `ExternalReference` values outside provider Adapters.
+- Use GitHub App installation auth for production bot-authored activity.

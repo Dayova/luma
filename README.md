@@ -27,6 +27,7 @@ This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural
 - `docs/architecture/design-it-twice.md` compares four architecture candidates.
 - `docs/adr/` records architecture decisions.
 - `docs/configuration/environment.md` documents environment variables and live integration setup.
+- `docs/configuration/identity.md` documents internal Person to provider-account mapping.
 - `docs/integrations/github-issues.md` documents the GitHub Issues WorkProvider.
 - `docs/modules/` documents Module responsibilities and Interfaces.
 - `evals/fixtures/meeting-corpus.json` contains the initial evaluation fixture corpus.

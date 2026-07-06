@@ -99,6 +99,7 @@ describe("GitHub Issues WorkProvider", () => {
       title: "Investigate session migration strategy",
       description: "Follow up.",
       assigneeProviderUserId: "jakob",
+      mentionProviderUserIds: ["jakob", "philipp"],
       dueDate: "2026-06-29",
       labels: ["meeting-follow-up"],
       idempotencyKey: "workspace:meeting:intent:execute"
@@ -116,6 +117,7 @@ describe("GitHub Issues WorkProvider", () => {
       title: "Investigate session migration strategy",
       body: [
         "Follow up.",
+        "\ncc @jakob @philipp",
         "",
         "<!-- luma-generated-section-start -->",
         "Due date: 2026-06-29",
@@ -147,6 +149,7 @@ describe("GitHub Issues WorkProvider", () => {
       title: "Investigate session migration strategy",
       description: "Follow up.",
       assigneeProviderUserId: "jakob",
+      mentionProviderUserIds: ["jakob"],
       dueDate: "2026-06-29",
       labels: ["meeting-follow-up"],
       idempotencyKey: "workspace:meeting:intent:execute"
@@ -243,6 +246,7 @@ describe("GitHub Issues WorkProvider", () => {
       title: "Investigate session migration strategy",
       description: "Follow up.",
       assigneeProviderUserId: "jakob",
+      mentionProviderUserIds: [],
       dueDate: "2026-06-29",
       labels: ["meeting-follow-up"],
       idempotencyKey: "workspace:meeting:intent:execute"

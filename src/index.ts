@@ -10,6 +10,13 @@ export type {
 } from "./meeting-intelligence/interface.js";
 export type * from "./domain/model.js";
 export type * from "./ai/reasoning-model.js";
+export type * from "./identity/interface.js";
+export {
+  createIdentityDirectoryFromEnv,
+  createLumaTeamIdentityDirectory,
+  createStaticIdentityDirectory,
+  lumaTeamPeople
+} from "./identity/static-identity-directory.js";
 export type * from "./knowledge/interface.js";
 export type * from "./work/interface.js";
 export {

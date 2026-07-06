@@ -82,6 +82,7 @@ In this workspace, `gh auth status` is authenticated, but this local repo curren
 | `LUMA_GITHUB_WORK_PROVIDER_ID`    | No              | GitHub Issues WorkProvider   | Provider ID for Work external references. Defaults to `github-issues`. |
 | `LUMA_GITHUB_USER_AGENT`          | No              | GitHub Issues WorkProvider   | User-Agent sent to GitHub REST.                                        |
 | `LUMA_LIVE_GITHUB_TESTS`          | No              | Tests                        | Set to `1` to run non-mutating live GitHub WorkProvider tests.         |
+| `LUMA_IDENTITY_PEOPLE_JSON`       | No              | Identity Directory           | JSON array mapping internal people to provider accounts.               |
 | `LUMA_GITHUB_CODE_PROVIDER_ID`    | No              | GitHub CodeProvider          | Planned Code provider ID. GitHub Code is separate from Work.           |
 | `CONFLUENCE_BASE_URL`             | Planned         | Confluence KnowledgeProvider | Atlassian Confluence base URL.                                         |
 | `CONFLUENCE_EMAIL`                | Planned         | Confluence KnowledgeProvider | Atlassian account email for API auth.                                  |
@@ -126,3 +127,7 @@ LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.
 - Do not make runtime application code depend on `gh`, MCP tools, or Codex plugins.
 - Use provider-neutral `ExternalReference` values outside provider Adapters.
 - Use GitHub App installation auth for production bot-authored activity.
+
+## Identity Mapping
+
+See `docs/configuration/identity.md` for the built-in Luma team mapping and the `LUMA_IDENTITY_PEOPLE_JSON` format.

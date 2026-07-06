@@ -454,12 +454,21 @@ class GitHubIssuesAdapter implements WorkProvider {
 function renderIssueBody(input: CreateWorkItemInput): string {
   return [
     input.description.trim(),
+    renderMentions(input.mentionProviderUserIds),
     "",
     "<!-- luma-generated-section-start -->",
     input.dueDate ? `Due date: ${input.dueDate}` : "Due date: not confirmed",
     `<!-- ${IDEMPOTENCY_MARKER_PREFIX} ${input.idempotencyKey} -->`,
     "<!-- luma-generated-section-end -->"
   ].join("\n");
+}
+
+function renderMentions(mentionProviderUserIds: string[]): string {
+  if (mentionProviderUserIds.length === 0) {
+    return "";
+  }
+
+  return `\ncc ${mentionProviderUserIds.map((login) => `@${login}`).join(" ")}`;
 }
 
 function normalizeAuthConfig(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
+import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
 import type {
   MeetingAnalysisProposalBatch,
@@ -667,6 +668,7 @@ describe("MeetingIntelligence observe/query", () => {
               title: "Handle the GitHub Issue",
               description: "Follow up on the Meeting Action Item.",
               assigneeId: "person_jakob",
+              mentionPersonIds: ["person_fabius", "person_julius", "person_philipp"],
               dueDate: "2026-06-29",
               relatedMeetingItemIds: ["action:github-issue-owner"],
               status: "suggested",
@@ -738,6 +740,7 @@ describe("MeetingIntelligence observe/query", () => {
     const workProvider = new FakeWorkProvider();
     const followUpExecution = createFollowUpExecution({
       meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
       workProvider,
       now: () => new Date("2026-06-26T10:20:00.000Z")
     });
@@ -764,6 +767,17 @@ describe("MeetingIntelligence observe/query", () => {
       "workspace_luma:meeting_product:intent_create_issue:execute"
     );
     expect(workProvider.createCalls).toHaveLength(1);
+    expect(workProvider.createCalls[0]).toEqual(
+      expect.objectContaining({
+        assigneeProviderUserId: "FleetAdmiralJakob",
+        mentionProviderUserIds: [
+          "FleetAdmiralJakob",
+          "Gamius00",
+          "juliusdietrich2407-lab",
+          "PhilippSchossig"
+        ]
+      })
+    );
     expect(retry).toEqual(result);
     expect(result.events).toEqual([
       {

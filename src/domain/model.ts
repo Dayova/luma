@@ -361,6 +361,7 @@ export type CreateWorkItemIntent = {
   title: string;
   description: string;
   assigneeId: PersonId | null;
+  mentionPersonIds?: PersonId[];
   dueDate: string | null;
   relatedMeetingItemIds: MeetingItemId[];
   status: FollowUpIntentStatus;

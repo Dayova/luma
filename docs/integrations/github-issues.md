@@ -81,6 +81,19 @@ Before creating an issue, the Adapter searches the configured repository for tha
 - Open issues with `blocked`, `planned`, or `backlog` labels map to those statuses. Other open issues map to `active`.
 - GitHub has no native issue due date; the Adapter stores generated due-date metadata in the issue body.
 
+## Mentions and Assignees
+
+Meeting Intelligence emits internal `PersonId`s. Follow-up Execution resolves those IDs through the Identity Directory before calling the WorkProvider.
+
+Current team mapping:
+
+- Fabius Schurig: `person_fabius` -> `@Gamius00`
+- Jakob Rössner: `person_jakob` -> `@FleetAdmiralJakob`
+- Julius: `person_julius` -> `@juliusdietrich2407-lab`
+- Philipp: `person_philipp` -> `@PhilippSchossig`
+
+For a `CreateWorkItemIntent`, `assigneeId` becomes the GitHub issue assignee when GitHub allows that user to be assigned. `mentionPersonIds` becomes a Markdown `cc` line in the issue body.
+
 ## Capability Separation
 
 This Adapter implements the WorkProvider Interface only. GitHub PRs, commits, files, reviews, releases, and implementation status belong to the separate CodeProvider Interface.

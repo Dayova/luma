@@ -26,6 +26,7 @@ export type CreateWorkItemInput = {
   title: string;
   description: string;
   assigneeProviderUserId: string | null;
+  mentionProviderUserIds: string[];
   dueDate: string | null;
   labels: string[];
   idempotencyKey: string;

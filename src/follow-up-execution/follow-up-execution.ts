@@ -1,6 +1,11 @@
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { WorkProvider } from "../work/interface.js";
 import type { CodeProvider } from "../code/interface.js";
+import type { IdentityDirectory } from "../identity/interface.js";
+import {
+  renderGitHubMentions,
+  resolveGitHubLogin
+} from "../identity/static-identity-directory.js";
 import type {
   ExternalReference,
   FollowUpExecutionRecorded,
@@ -16,6 +21,7 @@ import type {
 
 export type CreateFollowUpExecutionInput = {
   meetingIntelligence: MeetingIntelligence;
+  identityDirectory?: IdentityDirectory;
   knowledgeProvider?: KnowledgeProvider;
   workProvider?: WorkProvider;
   codeProvider?: CodeProvider;
@@ -69,7 +75,7 @@ async function executeIntent(
   try {
     const externalReferences = await runProviderMutation(
       dependencies,
-      input.intent,
+      input,
       idempotencyKey
     );
     return {
@@ -107,9 +113,11 @@ async function executeIntent(
 
 async function runProviderMutation(
   dependencies: CreateFollowUpExecutionInput,
-  intent: FollowUpIntent,
+  input: ExecuteFollowUpInput,
   idempotencyKey: string
 ): Promise<ExternalReference[]> {
+  const { intent } = input;
+
   switch (intent.type) {
     case "record-meeting": {
       if (!dependencies.knowledgeProvider) {
@@ -142,10 +150,21 @@ async function runProviderMutation(
         throw new Error("WorkProvider is not configured");
       }
 
+      const assigneeProviderUserId = await resolveGitHubLogin({
+        identityDirectory: dependencies.identityDirectory,
+        workspaceId: input.workspace.workspaceId,
+        personId: intent.assigneeId
+      });
+      const mentionProviderUserIds = await resolveMentionProviderUserIds(
+        dependencies.identityDirectory,
+        input.workspace.workspaceId,
+        intent
+      );
       const reference = await dependencies.workProvider.createWorkItem({
         title: intent.title,
         description: intent.description,
-        assigneeProviderUserId: intent.assigneeId,
+        assigneeProviderUserId,
+        mentionProviderUserIds,
         dueDate: intent.dueDate,
         labels: [],
         idempotencyKey
@@ -201,4 +220,21 @@ export function renderDiscordReceiptEvents(
   result: ExecuteFollowUpResult
 ): MeetingIntelligenceEvent[] {
   return result.events;
+}
+
+async function resolveMentionProviderUserIds(
+  identityDirectory: IdentityDirectory | undefined,
+  workspaceId: string,
+  intent: Extract<FollowUpIntent, { type: "create-work-item" }>
+): Promise<string[]> {
+  const personIds = [intent.assigneeId, ...(intent.mentionPersonIds ?? [])].filter(
+    (personId): personId is string => Boolean(personId)
+  );
+  const mentions = await renderGitHubMentions({
+    identityDirectory,
+    workspaceId,
+    personIds
+  });
+
+  return mentions.map((mention) => mention.slice(1));
 }

@@ -24,6 +24,10 @@ _Avoid_: Citation, source text
 An explicit participant confirmation, rejection, correction, merge, split, or override.
 _Avoid_: Feedback, annotation
 
+**Person**:
+An internal participant identity that can be linked to provider-specific accounts such as Discord users, GitHub logins, Atlassian accounts, Notion users, and Linear users.
+_Avoid_: Display name, account
+
 **Meeting Item**:
 A structured part of the Meeting understanding, such as a topic, proposal, decision, action item, open question, or risk.
 _Avoid_: Extract, insight, bullet

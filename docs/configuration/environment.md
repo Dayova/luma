@@ -34,7 +34,7 @@ Minimum GitHub App repository permissions for the current WorkProvider:
 Required env:
 
 ```bash
-GITHUB_REPOSITORY=owner/repo
+GITHUB_REPOSITORY=Dayova/dayova-mvp
 GITHUB_APP_ID=12345
 GITHUB_APP_INSTALLATION_ID=67890
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
@@ -54,7 +54,7 @@ The GitHub CLI is acceptable for local development only. A `gh` token is user-au
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 ```
 
 If this local repo has a GitHub remote, `GITHUB_REPOSITORY` can be derived:
@@ -63,7 +63,7 @@ If this local repo has a GitHub remote, `GITHUB_REPOSITORY` can be derived:
 export GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 ```
 
-In this workspace, `gh auth status` is authenticated, but this local repo currently has no remote, so `gh repo view` cannot infer `GITHUB_REPOSITORY`.
+The primary GitHub Issues target for this workspace is `Dayova/dayova-mvp`. If this local repo has no GitHub remote, keep `GITHUB_REPOSITORY` set manually.
 
 ## Variables
 
@@ -104,7 +104,7 @@ The live GitHub test is intentionally non-mutating. It searches the configured r
 Bot-authored validation:
 
 ```bash
-export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 export GITHUB_APP_ID="12345"
 export GITHUB_APP_INSTALLATION_ID="67890"
 export GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
@@ -115,7 +115,7 @@ User-authored local fallback:
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.ts
 ```
 

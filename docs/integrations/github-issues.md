@@ -15,7 +15,7 @@ const workProvider = createGitHubIssuesWorkProviderFromEnv();
 Required environment for bot-authored GitHub activity:
 
 ```bash
-GITHUB_REPOSITORY=owner/repo
+GITHUB_REPOSITORY=Dayova/dayova-mvp
 GITHUB_APP_ID=12345
 GITHUB_APP_INSTALLATION_ID=67890
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
@@ -38,7 +38,7 @@ A PAT or `gh auth token` works for local development, but GitHub will attribute 
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 ```
 
 If the current repo has a GitHub remote, derive `GITHUB_REPOSITORY` with:
@@ -106,7 +106,7 @@ Bot-authored:
 
 ```bash
 LUMA_LIVE_GITHUB_TESTS=1 \
-GITHUB_REPOSITORY=owner/repo \
+GITHUB_REPOSITORY=Dayova/dayova-mvp \
 GITHUB_APP_ID=12345 \
 GITHUB_APP_INSTALLATION_ID=67890 \
 GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)" \
@@ -118,8 +118,8 @@ User-authored fallback:
 ```bash
 LUMA_LIVE_GITHUB_TESTS=1 \
 GITHUB_TOKEN="$(gh auth token)" \
-GITHUB_REPOSITORY=owner/repo \
+GITHUB_REPOSITORY=Dayova/dayova-mvp \
 npm test -- tests/work/github-issues-adapter.live.test.ts
 ```
 
-If this command fails with `no git remotes found`, set `GITHUB_REPOSITORY` manually or add a GitHub remote to the local repo.
+If this command fails with `no git remotes found`, keep `GITHUB_REPOSITORY=Dayova/dayova-mvp` set manually or add a GitHub remote to the local repo.

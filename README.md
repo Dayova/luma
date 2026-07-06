@@ -44,7 +44,7 @@ For GitHub live validation, either set `GITHUB_TOKEN` in `.env` or export it fro
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-export GITHUB_REPOSITORY="owner/repo"
+export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 ```
 
 See `docs/configuration/environment.md` for the full variable reference.

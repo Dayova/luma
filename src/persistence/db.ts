@@ -1,8 +1,13 @@
 import { PGlite } from "@electric-sql/pglite";
+import { mkdir } from "node:fs/promises";
 
 export type LumaDatabase = PGlite;
 
 export async function createPgliteDatabase(dataDir?: string): Promise<LumaDatabase> {
+  if (dataDir && !dataDir.includes("://")) {
+    await mkdir(dataDir, { recursive: true });
+  }
+
   const database = new PGlite(dataDir);
   await runMigrations(database);
   return database;

@@ -103,6 +103,123 @@ async function createHarness(model: ReasoningModel): Promise<MeetingIntelligence
 }
 
 describe("MeetingIntelligence observe/query", () => {
+  it("returns grounded changes after the requested Revision", async () => {
+    const meetingIntelligence = await createHarness(
+      new ProgrammableReasoningModel((request) => {
+        const evidence = request.evidence[0];
+
+        if (!evidence) {
+          throw new Error("expected utterance evidence");
+        }
+
+        return {
+          actionItems: [
+            {
+              stableKey: "release-checklist",
+              description: "Prepare the release checklist",
+              ownerId: "person_jakob",
+              dueDate: {
+                originalPhrase: null,
+                normalizedDate: null,
+                confidence: "unknown",
+                timezone: "Europe/Berlin"
+              },
+              status: "confirmed",
+              relatedDecisionIds: [],
+              evidenceIds: [evidence.evidenceId],
+              confidence: "high"
+            }
+          ],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      })
+    );
+    const start = await meetingIntelligence.observe({
+      workspace: {
+        workspaceId: "workspace_luma",
+        timezone: "Europe/Berlin"
+      },
+      observations: [
+        {
+          type: "meeting-started",
+          observationId: "obs_catchup_start",
+          workspaceId: "workspace_luma",
+          meetingId: "meeting_catchup",
+          occurredAt: "2026-06-26T10:00:00.000Z",
+          observedAt: "2026-06-26T10:00:01.000Z",
+          title: "Release Meeting",
+          startedAt: "2026-06-26T10:00:00.000Z",
+          languageMode: "en",
+          participantIds: ["person_jakob"]
+        }
+      ]
+    });
+    await meetingIntelligence.observe({
+      workspace: {
+        workspaceId: "workspace_luma",
+        timezone: "Europe/Berlin"
+      },
+      observations: [
+        {
+          type: "utterance-committed",
+          observationId: "obs_catchup_utterance",
+          workspaceId: "workspace_luma",
+          meetingId: "meeting_catchup",
+          occurredAt: "2026-06-26T10:05:00.000Z",
+          observedAt: "2026-06-26T10:05:01.000Z",
+          utteranceId: "utt_catchup",
+          version: 1,
+          speakerId: "person_jakob",
+          startedAt: "2026-06-26T10:04:58.000Z",
+          endedAt: "2026-06-26T10:05:02.000Z",
+          originalText: "I will prepare the release checklist.",
+          language: "en"
+        }
+      ]
+    });
+    const snapshot = await meetingIntelligence.query({
+      workspaceId: "workspace_luma",
+      meetingId: "meeting_catchup",
+      query: { type: "snapshot" }
+    });
+
+    if (snapshot.type !== "snapshot") {
+      throw new Error("expected snapshot result");
+    }
+
+    const afterStart = await meetingIntelligence.query({
+      workspaceId: "workspace_luma",
+      meetingId: "meeting_catchup",
+      query: {
+        type: "catch-up",
+        since: { type: "revision", value: start.revision }
+      }
+    });
+    const afterCurrent = await meetingIntelligence.query({
+      workspaceId: "workspace_luma",
+      meetingId: "meeting_catchup",
+      query: {
+        type: "catch-up",
+        since: { type: "revision", value: snapshot.state.revision }
+      }
+    });
+
+    expect(afterStart.type === "catch-up" ? afterStart.answer.text : null).toContain(
+      "Prepare the release checklist"
+    );
+    expect(afterCurrent).toEqual({
+      type: "catch-up",
+      answer: {
+        text: "No grounded changes are available for this Meeting yet.",
+        evidence: [],
+        uncertainty: "insufficient-evidence"
+      }
+    });
+  });
+
   it("observes mixed-language speech as evidence and returns a grounded action item without provider work", async () => {
     const meetingIntelligence = await createHarness(
       new ProgrammableReasoningModel((request) => {
@@ -558,6 +675,106 @@ describe("MeetingIntelligence observe/query", () => {
 
     expect(snapshot.state.revision).toBe(1);
     expect(snapshot.state.actionItems).toEqual([]);
+  });
+
+  it("uses the Meeting majority language for a Conclusion when no language is requested", async () => {
+    const meetingIntelligence = await createHarness(
+      new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      }))
+    );
+
+    await meetingIntelligence.observe({
+      workspace: {
+        workspaceId: "workspace_luma",
+        timezone: "Europe/Berlin",
+        outputLanguagePolicy: "meeting-majority"
+      },
+      observations: [
+        {
+          type: "meeting-started",
+          observationId: "obs_german_start",
+          workspaceId: "workspace_luma",
+          meetingId: "meeting_german",
+          occurredAt: "2026-06-26T10:00:00.000Z",
+          observedAt: "2026-06-26T10:00:01.000Z",
+          title: "Produktbesprechung",
+          startedAt: "2026-06-26T10:00:00.000Z",
+          languageMode: "de",
+          participantIds: ["person_jakob"]
+        },
+        {
+          type: "utterance-committed",
+          observationId: "obs_german_utterance",
+          workspaceId: "workspace_luma",
+          meetingId: "meeting_german",
+          occurredAt: "2026-06-26T10:05:00.000Z",
+          observedAt: "2026-06-26T10:05:01.000Z",
+          utteranceId: "utt_german",
+          version: 1,
+          speakerId: "person_jakob",
+          startedAt: "2026-06-26T10:04:58.000Z",
+          endedAt: "2026-06-26T10:05:02.000Z",
+          originalText: "Wir veröffentlichen die neue Version am Montag.",
+          language: "de"
+        }
+      ]
+    });
+
+    const conclusion = await meetingIntelligence.conclude({
+      workspaceId: "workspace_luma",
+      meetingId: "meeting_german"
+    });
+
+    expect(conclusion.outputLanguage).toBe("de");
+    expect(conclusion.summary.brief).toBe(
+      "Das Meeting hat noch keine belegten Action Items."
+    );
+  });
+
+  it("uses the declared Meeting language before the first Utterance", async () => {
+    const meetingIntelligence = await createHarness(
+      new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      }))
+    );
+
+    await meetingIntelligence.observe({
+      workspace: {
+        workspaceId: "workspace_luma",
+        timezone: "Europe/Berlin",
+        outputLanguagePolicy: "meeting-majority"
+      },
+      observations: [
+        {
+          type: "meeting-started",
+          observationId: "obs_declared_german_start",
+          workspaceId: "workspace_luma",
+          meetingId: "meeting_declared_german",
+          occurredAt: "2026-06-26T10:00:00.000Z",
+          observedAt: "2026-06-26T10:00:01.000Z",
+          title: "Produktbesprechung",
+          startedAt: "2026-06-26T10:00:00.000Z",
+          languageMode: "de",
+          participantIds: ["person_jakob"]
+        }
+      ]
+    });
+
+    const conclusion = await meetingIntelligence.conclude({
+      workspaceId: "workspace_luma",
+      meetingId: "meeting_declared_german"
+    });
+
+    expect(conclusion.outputLanguage).toBe("de");
   });
 
   it("returns the same persisted Conclusion when called again at the same Revision", async () => {

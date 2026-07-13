@@ -9,10 +9,20 @@ export function createStaticIdentityDirectory(
   input: StaticIdentityDirectoryInput
 ): IdentityDirectory {
   const peopleById = new Map(input.people.map((person) => [person.personId, person]));
+  const peopleByDiscordUserId = new Map(
+    input.people
+      .filter((person): person is PersonIdentity & { discordUserId: string } =>
+        Boolean(person.discordUserId)
+      )
+      .map((person) => [person.discordUserId, person])
+  );
 
   return {
     getPerson({ personId }) {
       return Promise.resolve(peopleById.get(personId) ?? null);
+    },
+    findPersonByDiscordUserId({ discordUserId }) {
+      return Promise.resolve(peopleByDiscordUserId.get(discordUserId) ?? null);
     },
     getPeople({ personIds }) {
       return Promise.resolve(
@@ -39,9 +49,15 @@ export function createIdentityDirectoryFromEnv(
     return createLumaTeamIdentityDirectory();
   }
 
-  const people = parsePeopleJson(peopleJson);
+  const configuredPeople = parsePeopleJson(peopleJson);
+  const people = new Map(lumaTeamPeople.map((person) => [person.personId, person]));
+
+  for (const person of configuredPeople) {
+    people.set(person.personId, person);
+  }
+
   return createStaticIdentityDirectory({
-    people
+    people: [...people.values()]
   });
 }
 
@@ -138,6 +154,20 @@ export async function renderDiscordMentions(input: {
   workspaceId: WorkspaceId;
   personIds: PersonId[];
 }): Promise<string[]> {
+  const mentions = await resolveDiscordMentions(input);
+  return mentions.map((mention) => mention.content);
+}
+
+export type DiscordMention = {
+  content: string;
+  userId: string;
+};
+
+export async function resolveDiscordMentions(input: {
+  identityDirectory: IdentityDirectory | undefined;
+  workspaceId: WorkspaceId;
+  personIds: PersonId[];
+}): Promise<DiscordMention[]> {
   if (!input.identityDirectory) {
     return [];
   }
@@ -150,7 +180,10 @@ export async function renderDiscordMentions(input: {
   return people
     .map((person) => person.discordUserId)
     .filter((discordUserId): discordUserId is string => Boolean(discordUserId))
-    .map((discordUserId) => `<@${discordUserId}>`);
+    .map((discordUserId) => ({
+      content: `<@${discordUserId}>`,
+      userId: discordUserId
+    }));
 }
 
 function unique(values: PersonId[]): PersonId[] {

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev": "npm run build && node --env-file=.env dist/src/app/main.js",
+    "start": "node dist/src/app/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,7 +17,11 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.12",
+    "discord.js": "^14.26.5",
     "zod": "^3.25.76"
+  },
+  "overrides": {
+    "undici": "6.27.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

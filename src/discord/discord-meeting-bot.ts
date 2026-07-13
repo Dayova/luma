@@ -1,0 +1,784 @@
+import type {
+  MeetingIntelligenceEvent,
+  MeetingLanguageMode,
+  PersonId,
+  WorkspaceConfig
+} from "../domain/model.js";
+import type { IdentityDirectory } from "../identity/interface.js";
+import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
+import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
+import type { LumaDatabase } from "../persistence/db.js";
+
+type DiscordCommandBase = {
+  interactionId: string;
+  guildId: string;
+  channelId: string;
+  actorDiscordUserId: string;
+  occurredAt: string;
+};
+
+export type DiscordCommand =
+  | (DiscordCommandBase & {
+      type: "start";
+      title: string;
+      languageMode: MeetingLanguageMode;
+    })
+  | (DiscordCommandBase & {
+      type: "ask";
+      question: string;
+    })
+  | (DiscordCommandBase & {
+      type: "catchup";
+      sinceRevision: number;
+    })
+  | (DiscordCommandBase & {
+      type: "stop";
+    });
+
+export type DiscordCommandResponse = {
+  content: string;
+};
+
+export type DiscordThread = {
+  id: string;
+  url: string;
+};
+
+export interface DiscordTransport {
+  connect(
+    commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>
+  ): Promise<void>;
+  disconnect(): Promise<void>;
+  createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
+  sendMessage(input: {
+    channelId: string;
+    content: string;
+    allowedUserIds?: string[];
+    idempotencyKey?: string;
+  }): Promise<void>;
+}
+
+export interface DiscordMeetingBot {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  publishMeetingEvents(input: {
+    workspaceId: string;
+    meetingId: string;
+    events: MeetingIntelligenceEvent[];
+    mentionPersonIds?: PersonId[];
+  }): Promise<void>;
+}
+
+export type CreateDiscordMeetingBotInput = {
+  database: LumaDatabase;
+  meetingIntelligence: MeetingIntelligence;
+  identityDirectory: IdentityDirectory;
+  transport: DiscordTransport;
+  workspace: WorkspaceConfig;
+  guildId: string;
+  now?: () => Date;
+};
+
+export function createDiscordMeetingBot(
+  input: CreateDiscordMeetingBotInput
+): DiscordMeetingBot {
+  const now = input.now ?? (() => new Date());
+  const startLocks = new Map<string, Promise<void>>();
+
+  return {
+    start: () =>
+      input.transport.connect((command) => {
+        if (command.type !== "start") {
+          return handleCommand(input, command, now);
+        }
+
+        return withStartLock(startLocks, `${command.guildId}:${command.channelId}`, () =>
+          handleCommand(input, command, now)
+        );
+      }),
+    stop: () => input.transport.disconnect(),
+    publishMeetingEvents: (publishInput) => publishMeetingEvents(input, publishInput)
+  };
+}
+
+async function withStartLock(
+  locks: Map<string, Promise<void>>,
+  key: string,
+  operation: () => Promise<DiscordCommandResponse>
+): Promise<DiscordCommandResponse> {
+  const previous = locks.get(key) ?? Promise.resolve();
+  let release = (): void => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  locks.set(key, tail);
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    release();
+
+    if (locks.get(key) === tail) {
+      locks.delete(key);
+    }
+  }
+}
+
+async function publishMeetingEvents(
+  input: CreateDiscordMeetingBotInput,
+  publishInput: {
+    workspaceId: string;
+    meetingId: string;
+    events: MeetingIntelligenceEvent[];
+    mentionPersonIds?: PersonId[];
+  }
+): Promise<void> {
+  const meetingThread = await findMeetingThread(
+    input.database,
+    publishInput.workspaceId,
+    publishInput.meetingId
+  );
+
+  if (!meetingThread?.thread_id) {
+    throw new Error("Cannot publish Discord events without an attached Meeting thread");
+  }
+
+  const mentions = await resolveDiscordMentions({
+    identityDirectory: input.identityDirectory,
+    workspaceId: publishInput.workspaceId,
+    personIds: publishInput.mentionPersonIds ?? []
+  });
+  const allowedUserIds = mentions.map((mention) => mention.userId);
+  const mentionContent = mentions.map((mention) => mention.content);
+
+  for (const event of publishInput.events) {
+    const content = renderMeetingEvent(event, mentionContent);
+    const message: {
+      channelId: string;
+      content: string;
+      allowedUserIds?: string[];
+    } = {
+      channelId: meetingThread.thread_id,
+      content
+    };
+
+    if (allowedUserIds.length > 0) {
+      message.allowedUserIds = allowedUserIds;
+    }
+
+    await input.transport.sendMessage(message);
+  }
+}
+
+async function handleCommand(
+  input: CreateDiscordMeetingBotInput,
+  command: DiscordCommand,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  if (command.guildId !== input.guildId) {
+    return {
+      content: "Luma is not configured for this Discord server."
+    };
+  }
+
+  switch (command.type) {
+    case "start":
+      return startMeeting(input, command, now);
+    case "ask":
+      return answerMeetingQuestion(input, command);
+    case "catchup":
+      return catchUpMeeting(input, command);
+    case "stop":
+      return stopMeeting(input, command, now);
+  }
+}
+
+async function stopMeeting(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "stop" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const meetingThread = await findActiveMeetingThread(
+    input.database,
+    command.guildId,
+    command.channelId
+  );
+
+  if (!meetingThread) {
+    return {
+      content: "There is no active Meeting in this Discord channel."
+    };
+  }
+
+  if (!meetingThread.thread_id) {
+    return {
+      content: "The Meeting thread is still being created. Please retry shortly."
+    };
+  }
+
+  if (!meetingThread.conclusion_message_sent_at) {
+    await input.meetingIntelligence.observe({
+      workspace: input.workspace,
+      observations: [
+        {
+          type: "meeting-ended",
+          observationId: `discord:${meetingThread.meeting_id}:meeting-ended`,
+          workspaceId: meetingThread.workspace_id,
+          meetingId: meetingThread.meeting_id,
+          occurredAt: command.occurredAt,
+          observedAt: now().toISOString(),
+          endedAt: command.occurredAt
+        }
+      ]
+    });
+    const snapshot = await input.meetingIntelligence.query({
+      workspaceId: meetingThread.workspace_id,
+      meetingId: meetingThread.meeting_id,
+      query: {
+        type: "snapshot"
+      }
+    });
+
+    if (snapshot.type !== "snapshot") {
+      throw new Error("Meeting Intelligence returned an unexpected query result");
+    }
+
+    const conclusion = await input.meetingIntelligence.conclude({
+      workspaceId: meetingThread.workspace_id,
+      meetingId: meetingThread.meeting_id
+    });
+
+    await input.transport.sendMessage({
+      channelId: meetingThread.thread_id,
+      content: `Meeting ended: **${snapshot.state.title}**\n\n${conclusion.summary.brief}`,
+      idempotencyKey: `meeting:${meetingThread.meeting_id}:conclusion:${conclusion.revision}`
+    });
+    await markMeetingConclusionSent(
+      input.database,
+      meetingThread.workspace_id,
+      meetingThread.meeting_id,
+      now().toISOString()
+    );
+  }
+
+  await markMeetingThreadEnded(
+    input.database,
+    meetingThread.workspace_id,
+    meetingThread.meeting_id,
+    command.occurredAt,
+    now().toISOString()
+  );
+
+  return {
+    content: "Meeting ended. The Conclusion was posted in the Meeting thread."
+  };
+}
+
+async function startMeeting(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "start" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const existing = await findActiveMeetingThread(
+    input.database,
+    command.guildId,
+    command.channelId
+  );
+
+  const meetingId = existing?.meeting_id ?? `discord_${command.interactionId}`;
+  const meetingTitle = existing?.meeting_title ?? command.title;
+  const startedAt = existing?.started_at ?? command.occurredAt;
+  const languageMode = existing?.language_mode ?? command.languageMode;
+  const actorDiscordUserId =
+    existing?.actor_discord_user_id ?? command.actorDiscordUserId;
+  const threadName =
+    existing?.thread_name ??
+    renderThreadName(
+      command.title,
+      command.occurredAt,
+      input.workspace.timezone,
+      meetingId
+    );
+
+  if (!existing) {
+    await reserveMeetingThread(input.database, {
+      workspaceId: input.workspace.workspaceId,
+      meetingId,
+      guildId: command.guildId,
+      parentChannelId: command.channelId,
+      meetingTitle,
+      threadName,
+      languageMode,
+      actorDiscordUserId,
+      startedAt,
+      createdAt: now().toISOString()
+    });
+  }
+
+  if (!existing?.meeting_observed_at) {
+    const actor = await input.identityDirectory.findPersonByDiscordUserId({
+      workspaceId: input.workspace.workspaceId,
+      discordUserId: actorDiscordUserId
+    });
+
+    await input.meetingIntelligence.observe({
+      workspace: input.workspace,
+      observations: [
+        {
+          type: "meeting-started",
+          observationId: `discord:${meetingId}:meeting-started`,
+          workspaceId: input.workspace.workspaceId,
+          meetingId,
+          occurredAt: startedAt,
+          observedAt: now().toISOString(),
+          title: meetingTitle,
+          startedAt,
+          languageMode,
+          participantIds: actor ? [actor.personId] : []
+        }
+      ]
+    });
+    await markMeetingObserved(
+      input.database,
+      input.workspace.workspaceId,
+      meetingId,
+      now().toISOString()
+    );
+  }
+
+  if (existing?.thread_url && existing.thread_id) {
+    if (!existing.start_message_sent_at) {
+      await postMeetingStartedMessage(input, {
+        workspaceId: existing.workspace_id,
+        meetingId: existing.meeting_id,
+        meetingTitle: existing.meeting_title,
+        threadId: existing.thread_id,
+        updatedAt: now().toISOString()
+      });
+    }
+
+    return {
+      content: `A Meeting is already active in ${existing.thread_url}`
+    };
+  }
+
+  const thread = await input.transport.createThread({
+    parentChannelId: command.channelId,
+    name: threadName
+  });
+
+  await attachMeetingThread(input.database, {
+    workspaceId: input.workspace.workspaceId,
+    meetingId,
+    thread,
+    updatedAt: now().toISOString()
+  });
+
+  await postMeetingStartedMessage(input, {
+    workspaceId: input.workspace.workspaceId,
+    meetingId,
+    meetingTitle,
+    threadId: thread.id,
+    updatedAt: now().toISOString()
+  });
+
+  return {
+    content: `Meeting started in ${thread.url}`
+  };
+}
+
+async function catchUpMeeting(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "catchup" }>
+): Promise<DiscordCommandResponse> {
+  const meetingThread = await findActiveMeetingThread(
+    input.database,
+    command.guildId,
+    command.channelId
+  );
+
+  if (!meetingThread) {
+    return {
+      content: "There is no active Meeting in this Discord channel."
+    };
+  }
+
+  const result = await input.meetingIntelligence.query({
+    workspaceId: meetingThread.workspace_id,
+    meetingId: meetingThread.meeting_id,
+    query: {
+      type: "catch-up",
+      since: {
+        type: "revision",
+        value: command.sinceRevision
+      }
+    }
+  });
+
+  if (result.type !== "catch-up") {
+    throw new Error("Meeting Intelligence returned an unexpected query result");
+  }
+
+  return {
+    content: `${result.answer.text}\n\n${renderEvidenceSummary(result.answer.evidence)}`
+  };
+}
+
+async function answerMeetingQuestion(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "ask" }>
+): Promise<DiscordCommandResponse> {
+  const meetingThread = await findActiveMeetingThread(
+    input.database,
+    command.guildId,
+    command.channelId
+  );
+
+  if (!meetingThread) {
+    return {
+      content: "There is no active Meeting in this Discord channel."
+    };
+  }
+
+  const actor = await input.identityDirectory.findPersonByDiscordUserId({
+    workspaceId: meetingThread.workspace_id,
+    discordUserId: command.actorDiscordUserId
+  });
+  const query: {
+    type: "freeform";
+    text: string;
+    participantId?: PersonId;
+  } = {
+    type: "freeform",
+    text: command.question
+  };
+
+  if (actor) {
+    query.participantId = actor.personId;
+  }
+
+  const result = await input.meetingIntelligence.query({
+    workspaceId: meetingThread.workspace_id,
+    meetingId: meetingThread.meeting_id,
+    query
+  });
+
+  if (result.type !== "freeform") {
+    throw new Error("Meeting Intelligence returned an unexpected query result");
+  }
+
+  return {
+    content: `${result.answer.text}\n\n${renderEvidenceSummary(result.answer.evidence)}`
+  };
+}
+
+type DiscordMeetingThreadRow = {
+  workspace_id: string;
+  meeting_id: string;
+  meeting_title: string;
+  thread_name: string;
+  language_mode: MeetingLanguageMode;
+  actor_discord_user_id: string;
+  started_at: string;
+  meeting_observed_at: string | null;
+  thread_id: string | null;
+  thread_url: string | null;
+  start_message_sent_at: string | null;
+  conclusion_message_sent_at: string | null;
+};
+
+async function findMeetingThread(
+  database: LumaDatabase,
+  workspaceId: string,
+  meetingId: string
+): Promise<DiscordMeetingThreadRow | null> {
+  const result = await database.query<DiscordMeetingThreadRow>(
+    `SELECT workspace_id, meeting_id, meeting_title, thread_name, language_mode,
+            actor_discord_user_id, started_at, meeting_observed_at, thread_id, thread_url,
+            start_message_sent_at, conclusion_message_sent_at
+       FROM discord_meeting_threads
+      WHERE workspace_id = $1 AND meeting_id = $2
+      LIMIT 1`,
+    [workspaceId, meetingId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function findActiveMeetingThread(
+  database: LumaDatabase,
+  guildId: string,
+  channelId: string
+): Promise<DiscordMeetingThreadRow | null> {
+  const result = await database.query<DiscordMeetingThreadRow>(
+    `SELECT workspace_id, meeting_id, meeting_title, thread_name, language_mode,
+            actor_discord_user_id, started_at, meeting_observed_at, thread_id, thread_url,
+            start_message_sent_at, conclusion_message_sent_at
+       FROM discord_meeting_threads
+      WHERE guild_id = $1
+        AND ended_at IS NULL
+        AND (parent_channel_id = $2 OR thread_id = $2)
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [guildId, channelId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function markMeetingThreadEnded(
+  database: LumaDatabase,
+  workspaceId: string,
+  meetingId: string,
+  endedAt: string,
+  updatedAt: string
+): Promise<void> {
+  await database.query(
+    `UPDATE discord_meeting_threads
+        SET ended_at = $3, updated_at = $4
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [workspaceId, meetingId, endedAt, updatedAt]
+  );
+}
+
+async function markMeetingConclusionSent(
+  database: LumaDatabase,
+  workspaceId: string,
+  meetingId: string,
+  updatedAt: string
+): Promise<void> {
+  await database.query(
+    `UPDATE discord_meeting_threads
+        SET conclusion_message_sent_at = $3, updated_at = $3
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [workspaceId, meetingId, updatedAt]
+  );
+}
+
+async function markMeetingObserved(
+  database: LumaDatabase,
+  workspaceId: string,
+  meetingId: string,
+  updatedAt: string
+): Promise<void> {
+  await database.query(
+    `UPDATE discord_meeting_threads
+        SET meeting_observed_at = $3, updated_at = $3
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [workspaceId, meetingId, updatedAt]
+  );
+}
+
+function renderEvidenceSummary(
+  evidence: Array<{ source: string; sourceObjectId: string }>
+): string {
+  if (evidence.length === 0) {
+    return "Evidence: none";
+  }
+
+  return `Evidence: ${evidence
+    .map((reference) => `${reference.source}:${reference.sourceObjectId}`)
+    .join(", ")}`;
+}
+
+function renderMeetingEvent(event: MeetingIntelligenceEvent, mentions: string[]): string {
+  switch (event.type) {
+    case "follow-up-awaiting-approval":
+      return withMentions(
+        ["Follow-up approval needed", "", `Intents: ${event.intentIds.join(", ")}`],
+        mentions
+      );
+    case "follow-up-execution-started":
+      return withMentions(
+        ["Follow-up started", "", `Intent: ${event.intentId}`],
+        mentions
+      );
+    case "follow-up-execution-succeeded":
+      return withMentions(
+        ["Follow-up completed", "", event.summary, ...renderReferences(event)],
+        mentions
+      );
+    case "follow-up-execution-partially-succeeded":
+      return withMentions(
+        ["Follow-up needs attention", "", event.message, ...renderReferences(event)],
+        mentions
+      );
+    case "follow-up-execution-failed":
+      return withMentions(
+        [
+          "Follow-up failed",
+          "",
+          event.message,
+          `Retry: ${event.retryable ? "available" : "not available"}`
+        ],
+        mentions
+      );
+    case "action-item-status-changed":
+      return withMentions(
+        [
+          "Action Item status changed",
+          "",
+          `${event.actionItemId}: ${event.previousStatus} -> ${event.currentStatus}`,
+          ...renderReferences(event)
+        ],
+        mentions
+      );
+    case "meeting-follow-up-completed":
+      return withMentions(
+        [
+          "Meeting follow-up completed",
+          "",
+          `Completed: ${renderIdList(event.completedIntentIds)}`,
+          `Outstanding: ${renderIdList(event.outstandingIntentIds)}`
+        ],
+        mentions
+      );
+  }
+}
+
+function renderReferences(input: {
+  externalReferences: Array<{ providerId: string; url: string }>;
+}): string[] {
+  return input.externalReferences.map(
+    (reference) => `${providerDisplayName(reference.providerId)}: ${reference.url}`
+  );
+}
+
+function withMentions(lines: string[], mentions: string[]): string {
+  return [...lines, ...(mentions.length > 0 ? ["", mentions.join(" ")] : [])].join("\n");
+}
+
+function renderIdList(ids: string[]): string {
+  return ids.length > 0 ? ids.join(", ") : "none";
+}
+
+function providerDisplayName(providerId: string): string {
+  if (providerId === "github-issues" || providerId === "github-code") {
+    return "GitHub";
+  }
+
+  if (providerId === "confluence") {
+    return "Confluence";
+  }
+
+  return providerId;
+}
+
+async function reserveMeetingThread(
+  database: LumaDatabase,
+  input: {
+    workspaceId: string;
+    meetingId: string;
+    guildId: string;
+    parentChannelId: string;
+    meetingTitle: string;
+    threadName: string;
+    languageMode: MeetingLanguageMode;
+    actorDiscordUserId: string;
+    startedAt: string;
+    createdAt: string;
+  }
+): Promise<void> {
+  await database.query(
+    `INSERT INTO discord_meeting_threads (
+       workspace_id,
+       meeting_id,
+       guild_id,
+       parent_channel_id,
+       meeting_title,
+       thread_name,
+       language_mode,
+       actor_discord_user_id,
+       meeting_observed_at,
+       thread_id,
+       thread_url,
+       started_at,
+       ended_at,
+       created_at,
+       updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL, $9, NULL, $10, $10)`,
+    [
+      input.workspaceId,
+      input.meetingId,
+      input.guildId,
+      input.parentChannelId,
+      input.meetingTitle,
+      input.threadName,
+      input.languageMode,
+      input.actorDiscordUserId,
+      input.startedAt,
+      input.createdAt
+    ]
+  );
+}
+
+async function attachMeetingThread(
+  database: LumaDatabase,
+  input: {
+    workspaceId: string;
+    meetingId: string;
+    thread: DiscordThread;
+    updatedAt: string;
+  }
+): Promise<void> {
+  await database.query(
+    `UPDATE discord_meeting_threads
+        SET thread_id = $3, thread_url = $4, updated_at = $5
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [
+      input.workspaceId,
+      input.meetingId,
+      input.thread.id,
+      input.thread.url,
+      input.updatedAt
+    ]
+  );
+}
+
+async function postMeetingStartedMessage(
+  input: CreateDiscordMeetingBotInput,
+  message: {
+    workspaceId: string;
+    meetingId: string;
+    meetingTitle: string;
+    threadId: string;
+    updatedAt: string;
+  }
+): Promise<void> {
+  await input.transport.sendMessage({
+    channelId: message.threadId,
+    content: `Meeting started: **${message.meetingTitle}**`,
+    idempotencyKey: `meeting:${message.meetingId}:started`
+  });
+  await input.database.query(
+    `UPDATE discord_meeting_threads
+        SET start_message_sent_at = $3, updated_at = $3
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [message.workspaceId, message.meetingId, message.updatedAt]
+  );
+}
+
+function renderThreadName(
+  title: string,
+  occurredAt: string,
+  timezone: string,
+  meetingId: string
+): string {
+  const date = new Date(occurredAt);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: timezone
+  }).formatToParts(date);
+  const day = parts.find((part) => part.type === "day")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const year = parts.find((part) => part.type === "year")?.value;
+
+  const suffix = ` [${meetingId}]`;
+  const base = `${title} - ${day} ${month} ${year}`;
+
+  return `${base.slice(0, Math.max(0, 100 - suffix.length))}${suffix}`.slice(-100);
+}

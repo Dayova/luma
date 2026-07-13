@@ -1,6 +1,6 @@
 # Luma
 
-Luma is a Discord-native AI meeting intelligence system. The current repository contains the first evidence-first TypeScript foundation: a durable Meeting Intelligence Module, provider-neutral capability Interfaces, and a Follow-up Execution tracer bullet.
+Luma is a Discord-native AI meeting intelligence system. The repository contains a durable Meeting Intelligence Module, provider-neutral capability Interfaces, a GitHub Issues WorkProvider, Follow-up Execution, and a real Discord Adapter for persistent Meeting threads, commands, summaries, and execution receipts.
 
 ## Public Interfaces
 
@@ -30,6 +30,7 @@ This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural
 - `docs/configuration/environment.md` documents environment variables and live integration setup.
 - `docs/configuration/identity.md` documents internal Person to provider-account mapping.
 - `docs/integrations/github-issues.md` documents the GitHub Issues WorkProvider.
+- `docs/integrations/discord.md` documents the Discord bot setup and current commands.
 - `docs/modules/` documents Module responsibilities and Interfaces.
 - `evals/fixtures/meeting-corpus.json` contains the initial evaluation fixture corpus.
 
@@ -49,3 +50,9 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 ```
 
 See `docs/configuration/environment.md` for the full variable reference.
+
+With the Discord variables configured, start the development bot with:
+
+```bash
+npm run dev
+```

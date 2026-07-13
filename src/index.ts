@@ -17,8 +17,10 @@ export {
   createStaticIdentityDirectory,
   lumaTeamPeople,
   renderDiscordMentions,
-  renderGitHubMentions
+  renderGitHubMentions,
+  resolveDiscordMentions
 } from "./identity/static-identity-directory.js";
+export type { DiscordMention } from "./identity/static-identity-directory.js";
 export type * from "./knowledge/interface.js";
 export type * from "./work/interface.js";
 export {
@@ -38,3 +40,18 @@ export type {
   ExecuteFollowUpResult,
   FollowUpExecution
 } from "./follow-up-execution/interface.js";
+export {
+  DiscordJsAdapterError,
+  createDiscordJsTransport,
+  createDiscordJsTransportFromEnv
+} from "./discord/discord-js-adapter.js";
+export type { DiscordJsTransportConfig } from "./discord/discord-js-adapter.js";
+export { createDiscordMeetingBot } from "./discord/discord-meeting-bot.js";
+export type {
+  CreateDiscordMeetingBotInput,
+  DiscordCommand,
+  DiscordCommandResponse,
+  DiscordMeetingBot,
+  DiscordThread,
+  DiscordTransport
+} from "./discord/discord-meeting-bot.js";

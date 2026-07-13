@@ -52,6 +52,22 @@ type MeetingRow = {
   state_json: string;
 };
 
+type MeetingRevisionRow = {
+  state_json: string;
+};
+
+type WorkspaceConfigRow = {
+  config_json: string;
+};
+
+type UtteranceLanguageRow = {
+  language: "de" | "en" | "mixed" | "unknown";
+};
+
+type ObservationPayloadRow = {
+  payload_json: string;
+};
+
 type ObservationInsertRow = {
   observation_id: string;
 };
@@ -226,20 +242,19 @@ async function queryMeeting(
         state
       };
     case "catch-up": {
-      const relevantEvidence = state.actionItems.flatMap(
-        (item) => item.provenance.evidence
+      const previousState = await loadMeetingStateAtBoundary(
+        database,
+        input.workspaceId,
+        input.meetingId,
+        query.since
       );
+      const changes = deriveCatchUpChanges(previousState, state);
       return {
         type: "catch-up",
         answer: {
-          text:
-            state.actionItems.length === 0
-              ? "No grounded changes are available for this Meeting yet."
-              : `Current grounded Action Items: ${state.actionItems
-                  .map((item) => item.description)
-                  .join("; ")}.`,
-          evidence: relevantEvidence,
-          uncertainty: relevantEvidence.length > 0 ? "none" : "insufficient-evidence"
+          text: changes.text,
+          evidence: changes.evidence,
+          uncertainty: changes.evidence.length > 0 ? "none" : "insufficient-evidence"
         }
       };
     }
@@ -292,13 +307,102 @@ async function queryMeeting(
   }
 }
 
+async function loadMeetingStateAtBoundary(
+  database: LumaDatabase,
+  workspaceId: WorkspaceId,
+  meetingId: MeetingId,
+  since: { type: "time"; value: string } | { type: "revision"; value: number }
+): Promise<MeetingState | null> {
+  const result =
+    since.type === "revision"
+      ? await database.query<MeetingRevisionRow>(
+          `SELECT state_json
+             FROM meeting_revisions
+            WHERE workspace_id = $1 AND meeting_id = $2 AND revision <= $3
+            ORDER BY revision DESC
+            LIMIT 1`,
+          [workspaceId, meetingId, since.value]
+        )
+      : await database.query<MeetingRevisionRow>(
+          `SELECT state_json
+             FROM meeting_revisions
+            WHERE workspace_id = $1 AND meeting_id = $2 AND created_at <= $3
+            ORDER BY revision DESC
+            LIMIT 1`,
+          [workspaceId, meetingId, since.value]
+        );
+  const row = result.rows[0];
+  return row ? parseJson<MeetingState>(row.state_json) : null;
+}
+
+function deriveCatchUpChanges(
+  previousState: MeetingState | null,
+  currentState: MeetingState
+): {
+  text: string;
+  evidence: EvidenceReference[];
+} {
+  const decisions = changedMeetingItems(
+    previousState?.decisions ?? [],
+    currentState.decisions
+  );
+  const actionItems = changedMeetingItems(
+    previousState?.actionItems ?? [],
+    currentState.actionItems
+  );
+  const openQuestions = changedMeetingItems(
+    previousState?.openQuestions ?? [],
+    currentState.openQuestions
+  );
+  const risks = changedMeetingItems(previousState?.risks ?? [], currentState.risks);
+  const lines = [
+    ...decisions.map(
+      (decision) => `Decision (${decision.status}): ${decision.statement}`
+    ),
+    ...actionItems.map((item) => `Action Item (${item.status}): ${item.description}`),
+    ...openQuestions.map(
+      (question) => `Open Question (${question.status}): ${question.question}`
+    ),
+    ...risks.map((risk) => `Risk (${risk.severity}): ${risk.statement}`)
+  ];
+  const evidence = uniqueEvidence([
+    ...decisions.flatMap((decision) => decision.provenance.evidence),
+    ...actionItems.flatMap((item) => item.provenance.evidence),
+    ...openQuestions.flatMap((question) => question.provenance.evidence),
+    ...risks.flatMap((risk) => risk.provenance.evidence)
+  ]);
+
+  return {
+    text:
+      lines.length > 0
+        ? `Grounded changes:\n${lines.join("\n")}`
+        : "No grounded changes are available for this Meeting yet.",
+    evidence
+  };
+}
+
+function changedMeetingItems<T extends { id: string }>(previous: T[], current: T[]): T[] {
+  const previousById = new Map(previous.map((item) => [item.id, item]));
+
+  return current.filter((item) => {
+    const previousItem = previousById.get(item.id);
+    return !previousItem || JSON.stringify(previousItem) !== JSON.stringify(item);
+  });
+}
+
+function uniqueEvidence(evidence: EvidenceReference[]): EvidenceReference[] {
+  return [
+    ...new Map(evidence.map((reference) => [reference.evidenceId, reference])).values()
+  ];
+}
+
 async function concludeMeeting(
   database: LumaDatabase,
   now: () => Date,
   input: ConcludeMeeting
 ): Promise<MeetingConclusion> {
   const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
-  const outputLanguage = input.outputLanguage ?? "en";
+  const outputLanguage = await resolveConclusionOutputLanguage(database, input);
   const optionsHash = outputLanguage;
   const existing = await database.query<ConclusionRow>(
     `SELECT conclusion_json FROM conclusions
@@ -317,14 +421,8 @@ async function concludeMeeting(
     meetingId: state.meetingId,
     revision: state.revision,
     summary: {
-      brief:
-        state.actionItems.length > 0
-          ? `The Meeting has ${state.actionItems.length} grounded Action Item(s).`
-          : "The Meeting has no grounded Action Items yet.",
-      detailed: [
-        ...state.decisions.map((decision) => `Decision: ${decision.statement}`),
-        ...state.actionItems.map((item) => `Action Item: ${item.description}`)
-      ].join("\n")
+      brief: renderConclusionBrief(state, outputLanguage),
+      detailed: renderConclusionDetail(state, outputLanguage)
     },
     topics: state.topics,
     decisions: state.decisions,
@@ -355,6 +453,106 @@ async function concludeMeeting(
   );
 
   return conclusion;
+}
+
+async function resolveConclusionOutputLanguage(
+  database: LumaDatabase,
+  input: ConcludeMeeting
+): Promise<"de" | "en"> {
+  if (input.outputLanguage) {
+    return input.outputLanguage;
+  }
+
+  const workspaceResult = await database.query<WorkspaceConfigRow>(
+    `SELECT config_json FROM workspaces WHERE workspace_id = $1`,
+    [input.workspaceId]
+  );
+  const workspaceRow = workspaceResult.rows[0];
+  const workspace = workspaceRow
+    ? parseJson<WorkspaceConfig>(workspaceRow.config_json)
+    : null;
+
+  if (workspace?.outputLanguagePolicy === "german") {
+    return "de";
+  }
+
+  if (workspace?.outputLanguagePolicy === "english") {
+    return "en";
+  }
+
+  const utteranceResult = await database.query<UtteranceLanguageRow>(
+    `SELECT language
+       FROM utterance_versions
+      WHERE workspace_id = $1
+        AND meeting_id = $2
+        AND superseded_by_version IS NULL`,
+    [input.workspaceId, input.meetingId]
+  );
+  let germanScore = 0;
+  let englishScore = 0;
+
+  for (const utterance of utteranceResult.rows) {
+    if (utterance.language === "de") {
+      germanScore += 1;
+    } else if (utterance.language === "en") {
+      englishScore += 1;
+    } else if (utterance.language === "mixed") {
+      germanScore += 0.5;
+      englishScore += 0.5;
+    }
+  }
+
+  if (germanScore !== englishScore) {
+    return germanScore > englishScore ? "de" : "en";
+  }
+
+  const meetingStartedResult = await database.query<ObservationPayloadRow>(
+    `SELECT payload_json
+       FROM meeting_observations
+      WHERE workspace_id = $1 AND meeting_id = $2 AND type = 'meeting-started'
+      ORDER BY occurred_at ASC
+      LIMIT 1`,
+    [input.workspaceId, input.meetingId]
+  );
+  const meetingStartedRow = meetingStartedResult.rows[0];
+
+  if (meetingStartedRow) {
+    const observation = parseJson<MeetingObservation>(meetingStartedRow.payload_json);
+
+    if (
+      observation.type === "meeting-started" &&
+      (observation.languageMode === "de" || observation.languageMode === "en")
+    ) {
+      return observation.languageMode;
+    }
+  }
+
+  return "en";
+}
+
+function renderConclusionBrief(state: MeetingState, outputLanguage: "de" | "en"): string {
+  if (outputLanguage === "de") {
+    return state.actionItems.length > 0
+      ? `Das Meeting hat ${state.actionItems.length} belegte Action Item(s).`
+      : "Das Meeting hat noch keine belegten Action Items.";
+  }
+
+  return state.actionItems.length > 0
+    ? `The Meeting has ${state.actionItems.length} grounded Action Item(s).`
+    : "The Meeting has no grounded Action Items yet.";
+}
+
+function renderConclusionDetail(
+  state: MeetingState,
+  outputLanguage: "de" | "en"
+): string {
+  return [
+    ...state.decisions.map(
+      (decision) =>
+        `${outputLanguage === "de" ? "Entscheidung" : "Decision"}: ${decision.statement}`
+    ),
+    ...state.actionItems.map((item) => `Action Item: ${item.description}`)
+  ].join("\n");
 }
 
 async function ensureWorkspace(

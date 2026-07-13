@@ -48,7 +48,8 @@ Discord usernames should not be used for bot mentions.
 
 ## Adding People
 
-Set `LUMA_IDENTITY_PEOPLE_JSON` to a JSON array:
+Set `LUMA_IDENTITY_PEOPLE_JSON` to a JSON array. Entries extend the built-in team;
+using a built-in `personId` overrides that Person's mapping:
 
 ```bash
 LUMA_IDENTITY_PEOPLE_JSON='[

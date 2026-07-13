@@ -1,9 +1,9 @@
 node_modules/
 dist/
 coverage/
+.luma/
 .env
 .env.*
 !.env.example
 .agents/
 .DS_Store
-

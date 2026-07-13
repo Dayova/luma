@@ -20,6 +20,10 @@ export type IdentityLookup = {
 
 export interface IdentityDirectory {
   getPerson(input: IdentityLookup): Promise<PersonIdentity | null>;
+  findPersonByDiscordUserId(input: {
+    workspaceId: WorkspaceId;
+    discordUserId: string;
+  }): Promise<PersonIdentity | null>;
   getPeople(input: {
     workspaceId: WorkspaceId;
     personIds: PersonId[];

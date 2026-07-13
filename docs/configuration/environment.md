@@ -12,9 +12,9 @@ For local development, copy:
 cp .env.example .env
 ```
 
-Then fill in the values you need. `.env` is ignored by git.
+Then fill in the values you need. `.env` is ignored by git. `npm run dev` builds the application and loads `.env` through Node's `--env-file` option.
 
-The current code does not auto-load `.env`; pass environment variables through your shell, test runner, process manager, or a future app bootstrap loader. For one-off shell usage:
+For one-off shell usage:
 
 ```bash
 set -a
@@ -71,7 +71,9 @@ The primary GitHub Issues target for this workspace is `Dayova/dayova-mvp`. If t
 | --------------------------------- | --------------- | ---------------------------- | ---------------------------------------------------------------------- |
 | `NODE_ENV`                        | No              | App                          | Runtime mode. Defaults to `development`.                               |
 | `LUMA_DEFAULT_WORKSPACE_TIMEZONE` | No              | App                          | Default workspace timezone. Defaults to `Europe/Berlin`.               |
-| `DATABASE_URL`                    | No              | Persistence                  | Planned production PostgreSQL connection. Current tests use PGlite.    |
+| `LUMA_WORKSPACE_ID`               | No              | App                          | Internal workspace ID. Defaults to `workspace_dayova`.                 |
+| `LUMA_PGLITE_DATA_DIR`            | No              | Persistence                  | Durable local PGlite directory. Defaults to `.luma/pglite`.            |
+| `DATABASE_URL`                    | Planned         | Persistence                  | Planned production PostgreSQL connection.                              |
 | `GITHUB_REPOSITORY`               | For live GitHub | GitHub Issues WorkProvider   | Target repository as `owner/repo`.                                     |
 | `GITHUB_APP_ID`                   | Preferred       | GitHub Issues WorkProvider   | GitHub App ID used to sign a JWT for bot-authored activity.            |
 | `GITHUB_APP_INSTALLATION_ID`      | Preferred       | GitHub Issues WorkProvider   | Installation ID for the target account/repository.                     |
@@ -90,9 +92,9 @@ The primary GitHub Issues target for this workspace is `Dayova/dayova-mvp`. If t
 | `CONFLUENCE_SPACE_KEY`            | Planned         | Confluence KnowledgeProvider | Space for meeting notes and knowledge updates.                         |
 | `CONFLUENCE_PARENT_PAGE_ID`       | Planned         | Confluence KnowledgeProvider | Parent page for generated meeting records.                             |
 | `LUMA_CONFLUENCE_PROVIDER_ID`     | Planned         | Confluence KnowledgeProvider | Provider ID for Knowledge external references.                         |
-| `DISCORD_TOKEN`                   | Planned         | Discord Module               | Bot token.                                                             |
-| `DISCORD_CLIENT_ID`               | Planned         | Discord Module               | Bot application/client ID.                                             |
-| `DISCORD_GUILD_ID`                | Planned         | Discord Module               | Development guild for command registration.                            |
+| `DISCORD_TOKEN`                   | For Discord     | Discord Adapter              | Secret bot token used for Gateway and REST authentication.             |
+| `DISCORD_CLIENT_ID`               | For Discord     | Discord Adapter              | Discord Application ID used for guild command registration.            |
+| `DISCORD_GUILD_ID`                | For Discord     | Discord Adapter              | Server receiving the guild-scoped `/meeting` command.                  |
 | `OPENAI_API_KEY`                  | Planned         | ReasoningModel Adapter       | Model provider credential.                                             |
 | `LUMA_REASONING_MODEL_PROVIDER`   | Planned         | ReasoningModel Adapter       | Model provider selector.                                               |
 | `LUMA_REASONING_MODEL_NAME`       | Planned         | ReasoningModel Adapter       | Concrete model name.                                                   |
@@ -127,7 +129,13 @@ LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.
 - Do not make runtime application code depend on `gh`, MCP tools, or Codex plugins.
 - Use provider-neutral `ExternalReference` values outside provider Adapters.
 - Use GitHub App installation auth for production bot-authored activity.
+- Give the Discord bot only the permissions documented in `docs/integrations/discord.md`.
+- Keep development and production Discord Applications and bot tokens separate.
 
 ## Identity Mapping
 
 See `docs/configuration/identity.md` for the built-in Luma team mapping and the `LUMA_IDENTITY_PEOPLE_JSON` format.
+
+## Discord
+
+See `docs/integrations/discord.md` for Discord Developer Portal setup, permissions, commands, startup, and live verification.

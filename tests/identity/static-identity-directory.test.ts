@@ -79,6 +79,17 @@ describe("IdentityDirectory", () => {
     ]);
   });
 
+  it("resolves a Person from a Discord command actor", async () => {
+    const identityDirectory = createLumaTeamIdentityDirectory();
+
+    const person = await identityDirectory.findPersonByDiscordUserId({
+      workspaceId: "workspace_luma",
+      discordUserId: "779381502311137301"
+    });
+
+    expect(person?.personId).toBe("person_jakob");
+  });
+
   it("can load additional people from environment JSON", async () => {
     const identityDirectory = createIdentityDirectoryFromEnv({
       LUMA_IDENTITY_PEOPLE_JSON: JSON.stringify([
@@ -95,9 +106,9 @@ describe("IdentityDirectory", () => {
     const mentions = await renderGitHubMentions({
       identityDirectory,
       workspaceId: "workspace_luma",
-      personIds: ["person_other"]
+      personIds: ["person_jakob", "person_other"]
     });
 
-    expect(mentions).toEqual(["@OtherGitHubLogin"]);
+    expect(mentions).toEqual(["@FleetAdmiralJakob", "@OtherGitHubLogin"]);
   });
 });

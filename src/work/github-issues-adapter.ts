@@ -494,11 +494,11 @@ function normalizeAuthConfig(
 }
 
 function authFromEnv(env: NodeJS.ProcessEnv): GitHubIssuesAuthConfig {
-  const appId = env["GITHUB_APP_ID"];
-  const installationId = env["GITHUB_APP_INSTALLATION_ID"];
+  const appId = nonBlankEnvValue(env["GITHUB_APP_ID"]);
+  const installationId = nonBlankEnvValue(env["GITHUB_APP_INSTALLATION_ID"]);
   const privateKey =
-    env["GITHUB_APP_PRIVATE_KEY"] ??
-    decodeBase64PrivateKey(env["GITHUB_APP_PRIVATE_KEY_BASE64"]);
+    nonBlankEnvValue(env["GITHUB_APP_PRIVATE_KEY"]) ??
+    decodeBase64PrivateKey(nonBlankEnvValue(env["GITHUB_APP_PRIVATE_KEY_BASE64"]));
 
   if (appId || installationId || privateKey) {
     if (!appId || !installationId || !privateKey) {
@@ -519,7 +519,7 @@ function authFromEnv(env: NodeJS.ProcessEnv): GitHubIssuesAuthConfig {
     };
   }
 
-  const token = env["GITHUB_TOKEN"];
+  const token = nonBlankEnvValue(env["GITHUB_TOKEN"]);
 
   if (token) {
     return {
@@ -535,6 +535,10 @@ function authFromEnv(env: NodeJS.ProcessEnv): GitHubIssuesAuthConfig {
     status: null,
     retryable: false
   });
+}
+
+function nonBlankEnvValue(value: string | undefined): string | undefined {
+  return value && value.trim().length > 0 ? value : undefined;
 }
 
 function decodeBase64PrivateKey(value: string | undefined): string | undefined {

@@ -1,6 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createGitHubIssuesWorkProvider } from "../../src/work/github-issues-adapter.js";
+import {
+  createGitHubIssuesWorkProvider,
+  createGitHubIssuesWorkProviderFromEnv
+} from "../../src/work/github-issues-adapter.js";
 
 type CapturedRequest = {
   url: string;
@@ -75,6 +78,25 @@ function createFakeFetch(handler: (request: CapturedRequest) => Response): {
 }
 
 describe("GitHub Issues WorkProvider", () => {
+  it("uses the base64 private key when the direct-key env variable is blank", () => {
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048
+    });
+    const privateKeyBase64 = Buffer.from(
+      privateKey.export({ type: "pkcs1", format: "pem" })
+    ).toString("base64");
+
+    expect(() =>
+      createGitHubIssuesWorkProviderFromEnv({
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_APP_ID: "12345",
+        GITHUB_APP_INSTALLATION_ID: "999",
+        GITHUB_APP_PRIVATE_KEY: "",
+        GITHUB_APP_PRIVATE_KEY_BASE64: privateKeyBase64
+      })
+    ).not.toThrow();
+  });
+
   it("creates a GitHub issue with a Luma idempotency marker and returns a provider-neutral reference", async () => {
     const fake = createFakeFetch((request) => {
       if (request.url.includes("/search/issues")) {

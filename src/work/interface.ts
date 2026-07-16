@@ -42,6 +42,8 @@ export type UpdateWorkItemInput = {
 };
 
 export interface WorkProvider {
+  readonly providerId: string;
+  readonly identityProviderId?: string;
   searchWorkItems(query: WorkQuery): Promise<WorkItem[]>;
   getWorkItem(id: string): Promise<WorkItem>;
   createWorkItem(input: CreateWorkItemInput): Promise<ExternalReference>;

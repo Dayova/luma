@@ -253,6 +253,28 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         type: "catchup",
         sinceRevision: interaction.options.getInteger("since_revision") ?? 0
       };
+    case "note":
+      return {
+        ...base,
+        type: "note",
+        text: interaction.options.getString("text", true),
+        language: readUtteranceLanguage(interaction.options.getString("language"))
+      };
+    case "approve":
+      return {
+        ...base,
+        type: "approve",
+        intentId: interaction.options.getString("intent_id", true)
+      };
+    case "reject": {
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "reject",
+        intentId: interaction.options.getString("intent_id", true),
+        ...(reason ? { reason } : {})
+      };
+    }
     default:
       throw new DiscordJsAdapterError(
         "discord-command-unsupported",
@@ -263,6 +285,10 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
 
 function readLanguageMode(value: string | null): "auto" | "de" | "en" | "multilingual" {
   return value === "auto" || value === "de" || value === "en" ? value : "multilingual";
+}
+
+function readUtteranceLanguage(value: string | null): "de" | "en" | "mixed" | "unknown" {
+  return value === "de" || value === "en" || value === "mixed" ? value : "unknown";
 }
 
 function truncateDiscordMessage(
@@ -384,6 +410,59 @@ const meetingCommand = new SlashCommandBuilder()
             { name: "English", value: "en" },
             { name: "Automatic", value: "auto" }
           )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("note")
+      .setDescription("Record typed evidence in the active Meeting")
+      .addStringOption((option) =>
+        option
+          .setName("text")
+          .setDescription("What was said")
+          .setRequired(true)
+          .setMaxLength(1_800)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("language")
+          .setDescription("Language of the original evidence")
+          .addChoices(
+            { name: "German", value: "de" },
+            { name: "English", value: "en" },
+            { name: "German and English", value: "mixed" },
+            { name: "Unknown", value: "unknown" }
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("approve")
+      .setDescription("Approve and execute a proposed Follow-up Intent")
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Follow-up Intent ID")
+          .setRequired(true)
+          .setMaxLength(200)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("reject")
+      .setDescription("Reject a proposed Follow-up Intent")
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Follow-up Intent ID")
+          .setRequired(true)
+          .setMaxLength(200)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Optional reason for rejection")
+          .setMaxLength(1_000)
       )
   )
   .addSubcommand((command) =>

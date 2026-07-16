@@ -5,7 +5,7 @@ import type {
   DueDateConfidence,
   EvidenceId,
   EvidenceReference,
-  FollowUpIntent,
+  ExternalReference,
   MeetingId,
   PersonId,
   WorkspaceId
@@ -89,9 +89,41 @@ export type RiskProposal = {
   confidence: Confidence;
 };
 
-export type FollowUpIntentProposal = FollowUpIntent & {
-  evidenceIds?: EvidenceId[];
+type FollowUpIntentProposalBase = {
+  id: string;
+  relatedMeetingItemIds: string[];
+  evidenceIds: EvidenceId[];
+  confidence: Confidence;
 };
+
+export type FollowUpIntentProposal =
+  | (FollowUpIntentProposalBase & {
+      type: "record-meeting";
+      title: string;
+    })
+  | (FollowUpIntentProposalBase & {
+      type: "update-knowledge";
+      title: string;
+      bodyMarkdown: string;
+    })
+  | (FollowUpIntentProposalBase & {
+      type: "create-work-item";
+      title: string;
+      description: string;
+      assigneeId: PersonId | null;
+      mentionPersonIds: PersonId[];
+      dueDate: string | null;
+    })
+  | (FollowUpIntentProposalBase & {
+      type: "update-work-item";
+      externalReference: ExternalReference;
+      description: string;
+    })
+  | (FollowUpIntentProposalBase & {
+      type: "comment-on-code-change";
+      externalReference: ExternalReference;
+      bodyMarkdown: string;
+    });
 
 export type MeetingAnalysisProposalBatch = {
   actionItems: ActionItemProposal[];

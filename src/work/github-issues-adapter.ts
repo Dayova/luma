@@ -111,6 +111,8 @@ export function createGitHubIssuesWorkProvider(
   const adapter = new GitHubIssuesAdapter(config);
 
   return {
+    providerId: adapter.providerId,
+    identityProviderId: "github-issues",
     searchWorkItems: (query) => adapter.searchWorkItems(query),
     getWorkItem: (id) => adapter.getWorkItem(id),
     createWorkItem: (input) => adapter.createWorkItem(input),
@@ -173,7 +175,7 @@ class GitHubIssuesAdapter implements WorkProvider {
   private readonly owner: string;
   private readonly repo: string;
   private readonly apiBaseUrl: string;
-  private readonly providerId: string;
+  readonly providerId: string;
   private readonly userAgent: string;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;

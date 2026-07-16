@@ -7,11 +7,13 @@ Discord is Luma's primary meeting surface. The Discord Module translates Discord
 Implemented now:
 
 - guild-scoped `/meeting` slash command registration
-- `/meeting start`, `/meeting stop`, `/meeting ask`, and `/meeting catchup`
+- `/meeting start`, `/meeting note`, `/meeting approve`, `/meeting reject`, `/meeting stop`, `/meeting ask`, and `/meeting catchup`
 - one persistent public Discord thread per Meeting
 - durable Discord-thread-to-Meeting mapping in PGlite
 - versioned Conclusion summary on Meeting stop
 - provider-independent Follow-up lifecycle receipts
+- typed German, English, or mixed-language notes as canonical Evidence
+- explicit approval before Linear or Notion mutation
 - explicit Discord user mentions for Jakob, Fabius, Julius, Philipp, and configured additional People
 - bot-authored messages with restricted allowed mentions
 - graceful Gateway shutdown
@@ -19,12 +21,9 @@ Implemented now:
 Not implemented in this slice:
 
 - Discord voice connection and per-user audio capture
-- transcription and utterance revision
-- the production ReasoningModel Adapter
-- `/meeting approve`, `/meeting reject`, and correction UI
-- automatic wiring from Follow-up Execution to the running Discord bot
+- voice transcription, utterance revision, and correction UI
 
-Until transcription and the production ReasoningModel Adapter are connected, `/meeting ask` and `/meeting catchup` correctly return insufficient evidence rather than producing unsupported claims.
+With OpenAI configured, typed notes are analyzed through the production ReasoningModel Adapter. Without it, Luma still persists the original note and reports that analysis is deferred rather than producing unsupported claims.
 
 ## Discord Application Setup
 
@@ -87,10 +86,10 @@ LUMA_PGLITE_DATA_DIR=.luma/pglite
 
 ```bash
 cp .env.example .env
-npm run dev
+pnpm dev
 ```
 
-`npm run dev` builds TypeScript, loads `.env`, registers the guild command, connects the Discord Gateway, and prints a single connection message. Stop with `Ctrl+C`; Luma closes the Gateway and local database cleanly.
+`pnpm dev` builds TypeScript, loads `.env`, registers the guild command, connects the Discord Gateway, and prints a single connection message. Stop with `Ctrl+C`; Luma closes the Gateway and local database cleanly.
 
 ## Commands
 
@@ -103,6 +102,30 @@ npm run dev
 Creates a public thread in the current text channel, persists the mapping, records a `meeting-started` Observation, and posts the first thread message.
 
 Only one active Meeting is allowed per parent channel. Retrying start while a Meeting is active returns its existing thread instead of opening another one.
+
+### Note
+
+```text
+/meeting note text:"Ich übernehme die release checklist bis Montag." language:"German and English"
+```
+
+Stores the exact typed text as an `utterance-committed` Observation attributed to the Discord actor. It preserves German, English, and mixed language and returns any evidence-grounded Follow-up Intent IDs proposed by the ReasoningModel.
+
+### Approve
+
+```text
+/meeting approve intent_id:"intent_create_release_checklist"
+```
+
+Records explicit Human approval and executes exactly that Intent. Executable work goes to Linear; Meeting records and knowledge updates go to Notion. The bot posts an idempotent receipt and tags only the relevant mapped People.
+
+### Reject
+
+```text
+/meeting reject intent_id:"intent_create_release_checklist" reason:"Already tracked in DAY-180"
+```
+
+Records Human rejection and performs no provider mutation. Rejected Intents cannot later be approved without a new proposal.
 
 ### Ask
 
@@ -146,15 +169,17 @@ External links are rendered from provider-neutral `ExternalReference` values. Di
 
 After the development Application is installed and `.env` is populated:
 
-1. Run `npm run dev`.
+1. Run `pnpm dev`.
 2. Confirm `Luma Discord bot connected in development mode` appears.
 3. Confirm `/meeting` appears in the configured server.
 4. Run `/meeting start` in a normal text channel.
 5. Confirm Luma creates a public thread and replies privately with its link.
-6. Run `/meeting ask` in the thread and confirm it reports insufficient evidence.
-7. Run `/meeting catchup` and confirm the response is private.
-8. Run `/meeting stop` and confirm the Conclusion appears in the thread.
-9. Restart the bot and confirm the `.luma/pglite` directory preserves prior thread mappings.
+6. Run `/meeting note` in the thread and confirm the original note is saved.
+7. With OpenAI configured, copy a proposed Intent ID and run `/meeting approve` or `/meeting reject`.
+8. Confirm approved work appears once in Linear or the Meeting record appears once in Notion.
+9. Run `/meeting catchup` and confirm the response is private.
+10. Run `/meeting stop` and confirm the Conclusion appears in the thread.
+11. Restart the bot and confirm `.luma/pglite` preserves thread and execution records.
 
 ## Architecture
 

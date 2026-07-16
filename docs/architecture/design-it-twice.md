@@ -5,8 +5,8 @@ The chosen Module is Meeting Intelligence. Its Interface must accept meeting obs
 ## Constraints
 
 - Discord is the primary meeting surface, but Discord SDK concepts must not leak into Meeting Intelligence.
-- Confluence is the current Knowledge provider and Notion is a future Knowledge provider.
-- GitHub Issues is the current Work provider and Linear is a future Work provider.
+- Notion is the canonical Knowledge provider for Meeting records and decisions.
+- Linear is the canonical Work provider; synced GitHub Issues are compatibility mirrors.
 - GitHub remains the Code provider for PRs, commits, repositories, files, and implementation status.
 - Original German, English, and mixed-language speech is canonical Evidence.
 - Every factual Meeting Item must retain provenance.

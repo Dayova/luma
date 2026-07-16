@@ -1,15 +1,22 @@
-# Issue tracker: Local Markdown
+# Issue Tracker: Linear
 
-Issues and PRDs for this repo live as markdown files in `.scratch/`.
+Linear is the canonical tracker for executable Luma work. Use the Dayova team and a `DAY-<number>` identifier in branches, commits, implementation notes, and status reporting.
 
-## Conventions
+## Provider Ownership
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The PRD is `.scratch/<feature-slug>/PRD.md`
-- Implementation issues are `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`
-- Triage state is recorded as a `Status:` line near the top of each issue file
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- Create and update tasks in Linear.
+- Store specifications, Meeting records, decisions, and durable context in Notion.
+- Use GitHub for code, pull requests, review, CI, and releases.
+- Treat GitHub Issues created by the Linear sync as compatibility mirrors. Do not independently create or update both sides of one task.
 
-## When a skill says "publish to the issue tracker"
+DAY-39 and GitHub #20 record the task-pipeline migration. DAY-175 records the provider ownership rule.
 
-Create a new file under `.scratch/<feature-slug>/` or `.scratch/<feature-slug>/issues/`, creating the directory if needed.
+## Agent Workflow
+
+1. Find or create the Linear issue before substantial implementation.
+2. Move it to In Progress when work begins.
+3. Link related decisions or source issues rather than duplicating their content.
+4. Add a concise implementation and verification comment when the slice is complete.
+5. Move it to Done only after tests and required documentation pass.
+
+Use local `.scratch/` files only for disposable investigation notes that should not become team work or durable knowledge.

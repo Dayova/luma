@@ -10,6 +10,16 @@ export type {
 } from "./meeting-intelligence/interface.js";
 export type * from "./domain/model.js";
 export type * from "./ai/reasoning-model.js";
+export {
+  OpenAIReasoningModelError,
+  createOpenAIReasoningModel,
+  createOpenAIReasoningModelFromEnv
+} from "./ai/openai-reasoning-model.js";
+export type {
+  OpenAIReasoningModelConfig,
+  OpenAIResponseClient,
+  OpenAIResponseRequest
+} from "./ai/openai-reasoning-model.js";
 export type * from "./identity/interface.js";
 export {
   createIdentityDirectoryFromEnv,
@@ -18,11 +28,36 @@ export {
   lumaTeamPeople,
   renderDiscordMentions,
   renderGitHubMentions,
-  resolveDiscordMentions
+  resolveDiscordMentions,
+  resolveProviderUserId,
+  resolveProviderUserIds
 } from "./identity/static-identity-directory.js";
 export type { DiscordMention } from "./identity/static-identity-directory.js";
 export type * from "./knowledge/interface.js";
+export {
+  NotionKnowledgeProviderError,
+  createNotionKnowledgeProvider,
+  createNotionKnowledgeProviderFromEnv
+} from "./knowledge/notion-knowledge-provider.js";
+export type {
+  NotionApi,
+  NotionApiDocument,
+  NotionCreateDocumentInput,
+  NotionKnowledgeProviderConfig
+} from "./knowledge/notion-knowledge-provider.js";
 export type * from "./work/interface.js";
+export {
+  LinearWorkProviderError,
+  createLinearWorkProvider,
+  createLinearWorkProviderFromEnv
+} from "./work/linear-work-provider.js";
+export type {
+  LinearApi,
+  LinearApiIssue,
+  LinearCreateIssueInput,
+  LinearUpdateIssueInput,
+  LinearWorkProviderConfig
+} from "./work/linear-work-provider.js";
 export {
   GitHubIssuesAdapterError,
   createGitHubIssuesWorkProvider,

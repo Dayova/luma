@@ -1,6 +1,6 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This repo uses those strings as local markdown status text.
+The skills speak in terms of five canonical triage roles. Use the matching Linear labels where present and express progress through Linear workflow states. Do not create a second task solely to carry a triage label.
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |

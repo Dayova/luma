@@ -3,7 +3,9 @@ import {
   createIdentityDirectoryFromEnv,
   createLumaTeamIdentityDirectory,
   renderDiscordMentions,
-  renderGitHubMentions
+  renderGitHubMentions,
+  resolveProviderUserId,
+  resolveProviderUserIds
 } from "../../src/identity/static-identity-directory.js";
 
 describe("IdentityDirectory", () => {
@@ -88,6 +90,30 @@ describe("IdentityDirectory", () => {
     });
 
     expect(person?.personId).toBe("person_jakob");
+  });
+
+  it("resolves provider accounts without coupling callers to a provider", async () => {
+    const identityDirectory = createLumaTeamIdentityDirectory();
+
+    await expect(
+      resolveProviderUserId({
+        identityDirectory,
+        workspaceId: "workspace_luma",
+        providerId: "linear",
+        personId: "person_jakob"
+      })
+    ).resolves.toBe("67e00026-a426-4476-83bb-fe679fc5ca9c");
+    await expect(
+      resolveProviderUserIds({
+        identityDirectory,
+        workspaceId: "workspace_luma",
+        providerId: "notion",
+        personIds: ["person_fabius", "person_jakob", "person_fabius"]
+      })
+    ).resolves.toEqual([
+      "398d872b-594c-81f6-ac94-00026a72946d",
+      "612665e1-6fad-4c71-a856-a41a0fb1f32e"
+    ]);
   });
 
   it("can load additional people from environment JSON", async () => {

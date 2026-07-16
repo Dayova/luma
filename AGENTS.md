@@ -4,11 +4,11 @@
 
 ### Issue tracker
 
-This repo currently uses local markdown issues under `.scratch/` because it has no GitHub remote yet. See `docs/agents/issue-tracker.md`.
+Linear is the canonical tracker for executable work. GitHub Issues are compatibility mirrors where the Dayova sync creates them. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The default Matt Pocock triage label vocabulary is used as local markdown status text. See `docs/agents/triage-labels.md`.
+The default Matt Pocock triage vocabulary maps onto Linear workflow states and labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

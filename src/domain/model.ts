@@ -239,6 +239,7 @@ export type EvidenceReference = {
     | "previous-meeting"
     | "external-activity";
   sourceObjectId: string;
+  participantId?: PersonId;
   sourceVersion?: string;
   excerpt?: string;
   startedAtMs?: number;

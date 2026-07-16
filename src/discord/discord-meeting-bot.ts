@@ -1,9 +1,13 @@
 import type {
+  FollowUpIntent,
   MeetingIntelligenceEvent,
   MeetingLanguageMode,
+  MeetingState,
   PersonId,
+  UtteranceLanguage,
   WorkspaceConfig
 } from "../domain/model.js";
+import type { FollowUpExecution } from "../follow-up-execution/interface.js";
 import type { IdentityDirectory } from "../identity/interface.js";
 import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
@@ -30,6 +34,20 @@ export type DiscordCommand =
   | (DiscordCommandBase & {
       type: "catchup";
       sinceRevision: number;
+    })
+  | (DiscordCommandBase & {
+      type: "note";
+      text: string;
+      language: UtteranceLanguage;
+    })
+  | (DiscordCommandBase & {
+      type: "approve";
+      intentId: string;
+    })
+  | (DiscordCommandBase & {
+      type: "reject";
+      intentId: string;
+      reason?: string;
     })
   | (DiscordCommandBase & {
       type: "stop";
@@ -66,12 +84,14 @@ export interface DiscordMeetingBot {
     meetingId: string;
     events: MeetingIntelligenceEvent[];
     mentionPersonIds?: PersonId[];
+    idempotencyKeyPrefix?: string;
   }): Promise<void>;
 }
 
 export type CreateDiscordMeetingBotInput = {
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
+  followUpExecution?: FollowUpExecution;
   identityDirectory: IdentityDirectory;
   transport: DiscordTransport;
   workspace: WorkspaceConfig;
@@ -133,6 +153,7 @@ async function publishMeetingEvents(
     meetingId: string;
     events: MeetingIntelligenceEvent[];
     mentionPersonIds?: PersonId[];
+    idempotencyKeyPrefix?: string;
   }
 ): Promise<void> {
   const meetingThread = await findMeetingThread(
@@ -159,6 +180,7 @@ async function publishMeetingEvents(
       channelId: string;
       content: string;
       allowedUserIds?: string[];
+      idempotencyKey?: string;
     } = {
       channelId: meetingThread.thread_id,
       content
@@ -166,6 +188,10 @@ async function publishMeetingEvents(
 
     if (allowedUserIds.length > 0) {
       message.allowedUserIds = allowedUserIds;
+    }
+
+    if (publishInput.idempotencyKeyPrefix) {
+      message.idempotencyKey = `${publishInput.idempotencyKeyPrefix}:${event.type}`;
     }
 
     await input.transport.sendMessage(message);
@@ -190,9 +216,202 @@ async function handleCommand(
       return answerMeetingQuestion(input, command);
     case "catchup":
       return catchUpMeeting(input, command);
+    case "note":
+      return recordMeetingNote(input, command, now);
+    case "approve":
+      return approveFollowUp(input, command, now);
+    case "reject":
+      return rejectFollowUp(input, command, now);
     case "stop":
       return stopMeeting(input, command, now);
   }
+}
+
+async function recordMeetingNote(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "note" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const context = await resolveActiveMeetingActor(input, command);
+
+  if ("response" in context) {
+    return context.response;
+  }
+
+  const update = await input.meetingIntelligence.observe({
+    workspace: input.workspace,
+    observations: [
+      {
+        type: "utterance-committed",
+        observationId: `discord:${command.interactionId}:utterance`,
+        workspaceId: context.meetingThread.workspace_id,
+        meetingId: context.meetingThread.meeting_id,
+        occurredAt: command.occurredAt,
+        observedAt: now().toISOString(),
+        utteranceId: `discord_${command.interactionId}`,
+        version: 1,
+        speakerId: context.actor.personId,
+        startedAt: command.occurredAt,
+        endedAt: command.occurredAt,
+        originalText: command.text,
+        language: command.language
+      }
+    ]
+  });
+  const snapshot = await queryMeetingSnapshot(input, context.meetingThread);
+  const suggestedIntents = snapshot.followUpIntentions.filter(
+    (intent) => intent.status === "suggested"
+  );
+
+  if (update.analysisStatus === "deferred") {
+    return {
+      content:
+        "Note saved. Analysis is temporarily deferred; the original evidence is safe."
+    };
+  }
+
+  return {
+    content:
+      suggestedIntents.length > 0
+        ? [
+            "Note saved.",
+            "",
+            "Follow-up approval needed:",
+            ...suggestedIntents.map(
+              (intent) => `- ${intent.id}: ${followUpIntentLabel(intent)}`
+            )
+          ].join("\n")
+        : "Note saved. No grounded follow-up was proposed."
+  };
+}
+
+async function approveFollowUp(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "approve" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const context = await resolveActiveMeetingActor(input, command);
+
+  if ("response" in context) {
+    return context.response;
+  }
+
+  const snapshot = await queryMeetingSnapshot(input, context.meetingThread);
+  const intent = snapshot.followUpIntentions.find(
+    (candidate) => candidate.id === command.intentId
+  );
+
+  if (!intent) {
+    return { content: `Follow-up Intent not found: ${command.intentId}` };
+  }
+
+  if (intent.status === "rejected") {
+    return { content: `Follow-up Intent was rejected: ${command.intentId}` };
+  }
+
+  if (intent.status === "succeeded" || intent.status === "partially-succeeded") {
+    return { content: `Follow-up already executed: ${command.intentId}` };
+  }
+
+  if (!input.followUpExecution) {
+    return { content: "Follow-up execution is not configured." };
+  }
+
+  await input.meetingIntelligence.observe({
+    workspace: input.workspace,
+    observations: [
+      {
+        type: "follow-up-intent-approved",
+        observationId: `discord:${command.interactionId}:approve:${intent.id}`,
+        workspaceId: context.meetingThread.workspace_id,
+        meetingId: context.meetingThread.meeting_id,
+        occurredAt: command.occurredAt,
+        observedAt: now().toISOString(),
+        intentId: intent.id,
+        approvedBy: context.actor.personId
+      }
+    ]
+  });
+  const approvedSnapshot = await queryMeetingSnapshot(input, context.meetingThread);
+  const approvedIntent = approvedSnapshot.followUpIntentions.find(
+    (candidate) => candidate.id === intent.id
+  );
+
+  if (!approvedIntent) {
+    throw new Error(`Approved Follow-up Intent disappeared: ${intent.id}`);
+  }
+
+  const result = await input.followUpExecution.execute({
+    workspace: input.workspace,
+    meetingId: context.meetingThread.meeting_id,
+    intent: approvedIntent
+  });
+  await publishMeetingEvents(input, {
+    workspaceId: context.meetingThread.workspace_id,
+    meetingId: context.meetingThread.meeting_id,
+    events: result.events,
+    mentionPersonIds: relevantPeople(approvedIntent, context.actor.personId),
+    idempotencyKeyPrefix: result.idempotencyKey
+  });
+  const references =
+    result.observation.outcome.status === "failed"
+      ? []
+      : result.observation.outcome.externalReferences;
+  const firstReference = references[0];
+
+  if (result.observation.outcome.status === "failed") {
+    return { content: `Follow-up failed: ${result.observation.outcome.message}` };
+  }
+
+  return {
+    content: firstReference
+      ? `Follow-up completed: ${firstReference.url}`
+      : `Follow-up completed: ${intent.id}`
+  };
+}
+
+async function rejectFollowUp(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "reject" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const context = await resolveActiveMeetingActor(input, command);
+
+  if ("response" in context) {
+    return context.response;
+  }
+
+  const snapshot = await queryMeetingSnapshot(input, context.meetingThread);
+  const intent = snapshot.followUpIntentions.find(
+    (candidate) => candidate.id === command.intentId
+  );
+
+  if (!intent) {
+    return { content: `Follow-up Intent not found: ${command.intentId}` };
+  }
+
+  if (intent.status !== "suggested") {
+    return { content: `Follow-up Intent is already ${intent.status}: ${intent.id}` };
+  }
+
+  await input.meetingIntelligence.observe({
+    workspace: input.workspace,
+    observations: [
+      {
+        type: "follow-up-intent-rejected",
+        observationId: `discord:${command.interactionId}:reject:${intent.id}`,
+        workspaceId: context.meetingThread.workspace_id,
+        meetingId: context.meetingThread.meeting_id,
+        occurredAt: command.occurredAt,
+        observedAt: now().toISOString(),
+        intentId: intent.id,
+        rejectedBy: context.actor.personId,
+        ...(command.reason ? { reason: command.reason } : {})
+      }
+    ]
+  });
+
+  return { content: `Follow-up rejected: ${intent.id}` };
 }
 
 async function stopMeeting(
@@ -489,6 +708,87 @@ type DiscordMeetingThreadRow = {
   conclusion_message_sent_at: string | null;
 };
 
+async function resolveActiveMeetingActor(
+  input: CreateDiscordMeetingBotInput,
+  command: DiscordCommandBase
+): Promise<
+  | {
+      meetingThread: DiscordMeetingThreadRow;
+      actor: NonNullable<
+        Awaited<ReturnType<IdentityDirectory["findPersonByDiscordUserId"]>>
+      >;
+    }
+  | { response: DiscordCommandResponse }
+> {
+  const meetingThread = await findActiveMeetingThread(
+    input.database,
+    command.guildId,
+    command.channelId
+  );
+
+  if (!meetingThread) {
+    return {
+      response: { content: "There is no active Meeting in this Discord channel." }
+    };
+  }
+
+  const actor = await input.identityDirectory.findPersonByDiscordUserId({
+    workspaceId: meetingThread.workspace_id,
+    discordUserId: command.actorDiscordUserId
+  });
+
+  if (!actor) {
+    return {
+      response: {
+        content: "Only a mapped Luma participant can record or judge Meeting evidence."
+      }
+    };
+  }
+
+  return { meetingThread, actor };
+}
+
+async function queryMeetingSnapshot(
+  input: CreateDiscordMeetingBotInput,
+  meetingThread: DiscordMeetingThreadRow
+): Promise<MeetingState> {
+  const result = await input.meetingIntelligence.query({
+    workspaceId: meetingThread.workspace_id,
+    meetingId: meetingThread.meeting_id,
+    query: { type: "snapshot" }
+  });
+
+  if (result.type !== "snapshot") {
+    throw new Error("Meeting Intelligence returned an unexpected query result");
+  }
+
+  return result.state;
+}
+
+function relevantPeople(intent: FollowUpIntent, actorId: PersonId): PersonId[] {
+  if (intent.type !== "create-work-item") {
+    return [actorId];
+  }
+
+  return [intent.assigneeId, ...(intent.mentionPersonIds ?? [])].filter(
+    (personId, index, personIds): personId is PersonId =>
+      Boolean(personId) && personIds.indexOf(personId) === index
+  );
+}
+
+function followUpIntentLabel(intent: FollowUpIntent): string {
+  switch (intent.type) {
+    case "record-meeting":
+    case "update-knowledge":
+    case "create-work-item":
+      return intent.title;
+    case "update-work-item":
+      return `Update ${intent.externalReference.externalId}`;
+    case "comment-on-code-change":
+      return `Comment on ${intent.externalReference.externalId}`;
+  }
+}
+
 async function findMeetingThread(
   database: LumaDatabase,
   workspaceId: string,
@@ -661,6 +961,14 @@ function providerDisplayName(providerId: string): string {
 
   if (providerId === "confluence") {
     return "Confluence";
+  }
+
+  if (providerId === "linear") {
+    return "Linear";
+  }
+
+  if (providerId === "notion") {
+    return "Notion";
   }
 
   return providerId;

@@ -1,6 +1,6 @@
 # Luma
 
-Luma is a Discord-native AI meeting intelligence system. The repository contains a durable Meeting Intelligence Module, provider-neutral capability Interfaces, a GitHub Issues WorkProvider, Follow-up Execution, and a real Discord Adapter for persistent Meeting threads, commands, summaries, and execution receipts.
+Luma is a Discord-native AI meeting intelligence system. The repository contains a durable Meeting Intelligence Module, provider-neutral capability Interfaces, Linear and Notion Adapters, approved Follow-up Execution, and a real Discord Adapter for persistent Meeting threads, commands, summaries, and execution receipts.
 
 ## Public Interfaces
 
@@ -15,10 +15,21 @@ The Meeting Intelligence Interface is intentionally small. It hides persistence,
 ## Verification
 
 ```bash
-npm run verify
+pnpm verify
 ```
 
 This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural Vitest suite.
+
+## Toolchain
+
+Luma uses `pnpm@11.12.0`. Its strict dependency layout catches undeclared dependencies, while its workspace support leaves room for provider Adapters to become separate packages without changing package managers. Node.js 24 or newer and Corepack are required.
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+```
+
+The `packageManager` field in `package.json` lets Corepack select the correct pnpm version automatically.
 
 ## Documentation
 
@@ -29,7 +40,9 @@ This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural
 - `docs/adr/` records architecture decisions.
 - `docs/configuration/environment.md` documents environment variables and live integration setup.
 - `docs/configuration/identity.md` documents internal Person to provider-account mapping.
-- `docs/integrations/github-issues.md` documents the GitHub Issues WorkProvider.
+- `docs/integrations/linear.md` documents the canonical Linear WorkProvider.
+- `docs/integrations/notion.md` documents the canonical Notion KnowledgeProvider.
+- `docs/integrations/github-issues.md` documents the compatibility GitHub Issues WorkProvider.
 - `docs/integrations/discord.md` documents the Discord bot setup and current commands.
 - `docs/modules/` documents Module responsibilities and Interfaces.
 - `evals/fixtures/meeting-corpus.json` contains the initial evaluation fixture corpus.
@@ -42,7 +55,7 @@ Start from:
 cp .env.example .env
 ```
 
-For GitHub live validation, either set `GITHUB_TOKEN` in `.env` or export it from the GitHub CLI:
+For approved external follow-up, configure Linear and Notion in `.env`. GitHub live validation can use a token exported from the GitHub CLI:
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
@@ -54,5 +67,5 @@ See `docs/configuration/environment.md` for the full variable reference.
 With the Discord variables configured, start the development bot with:
 
 ```bash
-npm run dev
+pnpm dev
 ```

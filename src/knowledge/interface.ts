@@ -41,6 +41,7 @@ export type CreateDocumentInput = {
   title: string;
   contentMarkdown: string;
   parentId: string | null;
+  participantProviderUserIds?: string[];
   idempotencyKey: string;
 };
 
@@ -51,6 +52,8 @@ export type UpdateDocumentInput = {
 };
 
 export interface KnowledgeProvider {
+  readonly providerId: string;
+  readonly identityProviderId?: string;
   search(query: KnowledgeQuery): Promise<KnowledgeResult[]>;
   getDocument(id: string): Promise<KnowledgeDocument>;
   createDocument(input: CreateDocumentInput): Promise<ExternalReference>;

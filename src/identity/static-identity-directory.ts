@@ -70,8 +70,8 @@ export const lumaTeamPeople: PersonIdentity[] = [
     githubLogin: "Gamius00",
     githubUserId: null,
     atlassianAccountId: null,
-    notionUserId: null,
-    linearUserId: null,
+    notionUserId: "398d872b-594c-81f6-ac94-00026a72946d",
+    linearUserId: "5213a22b-1699-499f-8901-e34204add045",
     languagePreference: "auto"
   },
   {
@@ -82,8 +82,8 @@ export const lumaTeamPeople: PersonIdentity[] = [
     githubLogin: "FleetAdmiralJakob",
     githubUserId: null,
     atlassianAccountId: null,
-    notionUserId: null,
-    linearUserId: null,
+    notionUserId: "612665e1-6fad-4c71-a856-a41a0fb1f32e",
+    linearUserId: "67e00026-a426-4476-83bb-fe679fc5ca9c",
     languagePreference: "auto"
   },
   {
@@ -94,8 +94,8 @@ export const lumaTeamPeople: PersonIdentity[] = [
     githubLogin: "juliusdietrich2407-lab",
     githubUserId: null,
     atlassianAccountId: null,
-    notionUserId: null,
-    linearUserId: null,
+    notionUserId: "398d872b-594c-81af-9821-0002ec39922d",
+    linearUserId: "cfca93a4-7a23-4d8a-a5c9-56dd9b4b84c8",
     languagePreference: "auto"
   },
   {
@@ -106,8 +106,8 @@ export const lumaTeamPeople: PersonIdentity[] = [
     githubLogin: "PhilippSchossig",
     githubUserId: null,
     atlassianAccountId: null,
-    notionUserId: null,
-    linearUserId: null,
+    notionUserId: "1ebd872b-594c-8119-8a8e-000285918013",
+    linearUserId: "810f1e3b-321b-4e74-bb7b-92cf1608e3ba",
     languagePreference: "auto"
   }
 ];
@@ -149,6 +149,44 @@ export async function renderGitHubMentions(input: {
     .map((login) => `@${login}`);
 }
 
+export async function resolveProviderUserId(input: {
+  identityDirectory: IdentityDirectory | undefined;
+  workspaceId: WorkspaceId;
+  providerId: string;
+  personId: PersonId | null;
+}): Promise<string | null> {
+  if (!input.identityDirectory || !input.personId) {
+    return null;
+  }
+
+  const person = await input.identityDirectory.getPerson({
+    workspaceId: input.workspaceId,
+    personId: input.personId
+  });
+
+  return person ? providerUserId(person, input.providerId) : null;
+}
+
+export async function resolveProviderUserIds(input: {
+  identityDirectory: IdentityDirectory | undefined;
+  workspaceId: WorkspaceId;
+  providerId: string;
+  personIds: PersonId[];
+}): Promise<string[]> {
+  if (!input.identityDirectory) {
+    return [];
+  }
+
+  const people = await input.identityDirectory.getPeople({
+    workspaceId: input.workspaceId,
+    personIds: unique(input.personIds)
+  });
+
+  return people
+    .map((person) => providerUserId(person, input.providerId))
+    .filter((providerUserId): providerUserId is string => Boolean(providerUserId));
+}
+
 export async function renderDiscordMentions(input: {
   identityDirectory: IdentityDirectory | undefined;
   workspaceId: WorkspaceId;
@@ -188,6 +226,24 @@ export async function resolveDiscordMentions(input: {
 
 function unique(values: PersonId[]): PersonId[] {
   return [...new Set(values)];
+}
+
+function providerUserId(person: PersonIdentity, providerId: string): string | null {
+  switch (providerId) {
+    case "linear":
+      return person.linearUserId;
+    case "notion":
+      return person.notionUserId;
+    case "github-issues":
+    case "github-code":
+      return person.githubLogin;
+    case "confluence":
+      return person.atlassianAccountId;
+    case "discord":
+      return person.discordUserId;
+    default:
+      return null;
+  }
 }
 
 function parsePeopleJson(value: string): PersonIdentity[] {

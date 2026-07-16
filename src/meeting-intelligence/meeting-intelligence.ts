@@ -23,6 +23,7 @@ import type {
 import type {
   ActionItemProposal,
   DecisionProposal,
+  FollowUpIntentProposal,
   MeetingAnalysisProposalBatch,
   OpenQuestionProposal,
   ReasoningModel,
@@ -194,6 +195,7 @@ async function observeMeeting(
           context: [],
           input: {
             revision: state.revision,
+            timezone: input.workspace.timezone,
             languagePolicy: input.workspace.outputLanguagePolicy ?? "meeting-majority"
           }
         });
@@ -754,19 +756,25 @@ async function applyObservation(
         evidenceForAnalysis: [],
         events: []
       };
-    case "follow-up-intent-approved":
+    case "follow-up-intent-approved": {
+      const nextState = updateFollowUpIntentStatus(
+        state,
+        observation.intentId,
+        "approved"
+      );
       return {
-        state: updateFollowUpIntentStatus(state, observation.intentId, "approved"),
+        state: nextState,
         evidenceForAnalysis: [],
         events: [
           {
             type: "follow-up-awaiting-approval",
-            intentIds: state.followUpIntentions
+            intentIds: nextState.followUpIntentions
               .filter((intent) => intent.status === "suggested")
               .map((intent) => intent.id)
           }
         ]
       };
+    }
     case "follow-up-intent-rejected":
       return {
         state: updateFollowUpIntentStatus(state, observation.intentId, "rejected"),
@@ -921,9 +929,12 @@ function reconcileAnalysis(
       analysis
     ),
     risks: reconcileRisks(state, analysis.value.risks, evidenceById, analysis),
-    followUpIntentions: mergeFollowUpIntentions(
+    followUpIntentions: reconcileFollowUpIntentions(
       state.followUpIntentions,
-      analysis.value.followUpIntentions
+      analysis.value.followUpIntentions,
+      evidenceById,
+      state.revision,
+      analysis
     )
   };
 }
@@ -1108,6 +1119,7 @@ function evidenceFromUtterance(observation: UtteranceCommitted): EvidenceReferen
     evidenceId: evidenceIdForUtterance(observation.utteranceId, observation.version),
     source: "transcript",
     sourceObjectId: observation.utteranceId,
+    participantId: observation.speakerId,
     sourceVersion: String(observation.version),
     excerpt: observation.originalText
   };
@@ -1453,14 +1465,78 @@ function updateFollowUpIntentStatus(
   };
 }
 
-function mergeFollowUpIntentions(
+function reconcileFollowUpIntentions(
   current: FollowUpIntent[],
-  proposed: FollowUpIntent[]
+  proposed: FollowUpIntentProposal[],
+  evidenceById: Map<string, EvidenceReference>,
+  revision: number,
+  analysis: StructuredReasoningResult<MeetingAnalysisProposalBatch>
 ): FollowUpIntent[] {
   const byId = new Map(current.map((intent) => [intent.id, intent]));
 
-  for (const intent of proposed) {
-    byId.set(intent.id, byId.get(intent.id) ?? intent);
+  for (const proposal of proposed) {
+    if (byId.has(proposal.id)) {
+      continue;
+    }
+
+    const provenance = provenanceFromEvidenceIds(
+      proposal.evidenceIds,
+      evidenceById,
+      revision,
+      proposal.confidence,
+      analysis
+    );
+    const common = {
+      id: proposal.id,
+      relatedMeetingItemIds: proposal.relatedMeetingItemIds,
+      status: "suggested" as const,
+      provenance
+    };
+
+    switch (proposal.type) {
+      case "record-meeting":
+        byId.set(proposal.id, {
+          ...common,
+          type: proposal.type,
+          title: proposal.title
+        });
+        break;
+      case "update-knowledge":
+        byId.set(proposal.id, {
+          ...common,
+          type: proposal.type,
+          title: proposal.title,
+          bodyMarkdown: proposal.bodyMarkdown
+        });
+        break;
+      case "create-work-item":
+        byId.set(proposal.id, {
+          ...common,
+          type: proposal.type,
+          title: proposal.title,
+          description: proposal.description,
+          assigneeId: proposal.assigneeId,
+          mentionPersonIds: proposal.mentionPersonIds,
+          dueDate: proposal.dueDate
+        });
+        break;
+      case "update-work-item":
+        byId.set(proposal.id, {
+          ...common,
+          type: proposal.type,
+          externalReference: proposal.externalReference,
+          description: proposal.description
+        });
+        break;
+      case "comment-on-code-change":
+        byId.set(proposal.id, {
+          ...common,
+          type: proposal.type,
+          externalReference: proposal.externalReference,
+          bodyMarkdown: proposal.bodyMarkdown
+        });
+        break;
+    }
   }
 
   return [...byId.values()];

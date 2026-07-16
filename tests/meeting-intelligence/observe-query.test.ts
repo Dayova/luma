@@ -48,6 +48,7 @@ class ProgrammableReasoningModel implements ReasoningModel {
 }
 
 class FakeWorkProvider implements WorkProvider {
+  readonly providerId = "linear";
   createCalls: CreateWorkItemInput[] = [];
 
   searchWorkItems(_query: WorkQuery): Promise<WorkItem[]> {
@@ -58,7 +59,7 @@ class FakeWorkProvider implements WorkProvider {
   getWorkItem(id: string): Promise<WorkItem> {
     return Promise.resolve({
       id,
-      providerId: "github-issues",
+      providerId: this.providerId,
       externalId: id,
       title: "Issue",
       description: "",
@@ -68,7 +69,7 @@ class FakeWorkProvider implements WorkProvider {
       labels: [],
       projectId: null,
       parentId: null,
-      url: `https://github.example/issues/${id}`,
+      url: `https://linear.example/DAY-${id}`,
       updatedAt: "2026-06-26T10:20:00.000Z"
     });
   }
@@ -76,10 +77,10 @@ class FakeWorkProvider implements WorkProvider {
   createWorkItem(input: CreateWorkItemInput): Promise<ExternalReference> {
     this.createCalls.push(input);
     return Promise.resolve({
-      providerId: "github-issues",
+      providerId: this.providerId,
       objectType: "work-item",
       externalId: "312",
-      url: "https://github.example/issues/312"
+      url: "https://linear.example/DAY-312"
     });
   }
 
@@ -849,8 +850,11 @@ describe("MeetingIntelligence observe/query", () => {
   });
 
   it("executes an approved provider-independent create-work-item intent and records a Discord receipt event", async () => {
-    const meetingIntelligence = await createHarness(
-      new ProgrammableReasoningModel((request) => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      now: () => new Date("2026-06-26T10:20:00.000Z"),
+      reasoningModel: new ProgrammableReasoningModel((request) => {
         const evidence = request.evidence[0];
 
         if (!evidence) {
@@ -888,18 +892,13 @@ describe("MeetingIntelligence observe/query", () => {
               mentionPersonIds: ["person_fabius", "person_julius", "person_philipp"],
               dueDate: "2026-06-29",
               relatedMeetingItemIds: ["action:github-issue-owner"],
-              status: "suggested",
-              provenance: {
-                evidence: [evidence],
-                confidence: "high",
-                producedAtRevision: 1,
-                analysisVersion: "test"
-              }
+              evidenceIds: [evidence.evidenceId],
+              confidence: "high"
             }
           ]
         };
       })
-    );
+    });
     const workspace = {
       workspaceId: "workspace_luma",
       timezone: "Europe/Berlin"
@@ -922,7 +921,12 @@ describe("MeetingIntelligence observe/query", () => {
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das GitHub Issue bis Montag.",
           language: "mixed"
-        },
+        }
+      ]
+    });
+    await meetingIntelligence.observe({
+      workspace,
+      observations: [
         {
           type: "follow-up-intent-approved",
           observationId: "obs_approve_intent",
@@ -956,6 +960,7 @@ describe("MeetingIntelligence observe/query", () => {
 
     const workProvider = new FakeWorkProvider();
     const followUpExecution = createFollowUpExecution({
+      database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
       workProvider,
@@ -967,7 +972,14 @@ describe("MeetingIntelligence observe/query", () => {
       meetingId: "meeting_product",
       intent: approvedIntent
     });
-    const retry = await followUpExecution.execute({
+    const restartedFollowUpExecution = createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      workProvider,
+      now: () => new Date("2026-06-26T10:21:00.000Z")
+    });
+    const retry = await restartedFollowUpExecution.execute({
       workspace,
       meetingId: "meeting_product",
       intent: approvedIntent
@@ -986,12 +998,12 @@ describe("MeetingIntelligence observe/query", () => {
     expect(workProvider.createCalls).toHaveLength(1);
     expect(workProvider.createCalls[0]).toEqual(
       expect.objectContaining({
-        assigneeProviderUserId: "FleetAdmiralJakob",
+        assigneeProviderUserId: "67e00026-a426-4476-83bb-fe679fc5ca9c",
         mentionProviderUserIds: [
-          "FleetAdmiralJakob",
-          "Gamius00",
-          "juliusdietrich2407-lab",
-          "PhilippSchossig"
+          "67e00026-a426-4476-83bb-fe679fc5ca9c",
+          "5213a22b-1699-499f-8901-e34204add045",
+          "cfca93a4-7a23-4d8a-a5c9-56dd9b4b84c8",
+          "810f1e3b-321b-4e74-bb7b-92cf1608e3ba"
         ]
       })
     );
@@ -1002,13 +1014,13 @@ describe("MeetingIntelligence observe/query", () => {
         intentId: "intent_create_issue",
         externalReferences: [
           {
-            providerId: "github-issues",
+            providerId: "linear",
             objectType: "work-item",
             externalId: "312",
-            url: "https://github.example/issues/312"
+            url: "https://linear.example/DAY-312"
           }
         ],
-        summary: "create-work-item succeeded: https://github.example/issues/312"
+        summary: "create-work-item succeeded: https://linear.example/DAY-312"
       }
     ]);
     expect(afterExecution.type).toBe("snapshot");
@@ -1025,10 +1037,10 @@ describe("MeetingIntelligence observe/query", () => {
     );
     expect(afterExecution.state.actionItems[0]?.externalReferences).toEqual([
       {
-        providerId: "github-issues",
+        providerId: "linear",
         objectType: "work-item",
         externalId: "312",
-        url: "https://github.example/issues/312"
+        url: "https://linear.example/DAY-312"
       }
     ]);
   });

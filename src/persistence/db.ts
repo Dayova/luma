@@ -125,6 +125,20 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       ON discord_meeting_threads (guild_id, parent_channel_id)
       WHERE ended_at IS NULL;
 
+    CREATE TABLE IF NOT EXISTS follow_up_executions (
+      workspace_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      intent_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (idempotency_key)
+    );
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS meeting_title TEXT;
 

@@ -1,141 +1,145 @@
 # Environment Configuration
 
-This document defines Luma's environment variables and which Module owns each one.
+Provider configuration belongs at Adapter boundaries. Meeting Intelligence never reads provider credentials or imports provider SDK types.
 
-Runtime code must keep provider configuration at Adapter seams. Meeting Intelligence must not read provider-specific environment variables, import provider SDKs, or depend on development-only tools such as `gh`.
-
-## Loading Environment
-
-For local development, copy:
+## Local Setup
 
 ```bash
 cp .env.example .env
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-Then fill in the values you need. `.env` is ignored by git. `npm run dev` builds the application and loads `.env` through Node's `--env-file` option.
+`.env` is ignored by git. `pnpm dev` builds the application and loads it with Node's `--env-file=.env` support. Configure separate `.env` values and separate provider Applications for development and production.
 
-For one-off shell usage:
+The Discord variables are required to start the executable bot. Linear, Notion, and OpenAI are optional capability groups: omitting a whole group leaves that capability unavailable. Setting only part of a group fails startup with the missing variable name.
 
-```bash
-set -a
-source .env
-set +a
+## Ownership Rule
+
+- **Linear** owns executable work. Approved `create-work-item` Follow-up Intents create Linear issues.
+- **Notion** owns Meeting records, decisions, and organizational knowledge. Approved `record-meeting` Follow-up Intents create pages in the Meetings data source.
+- **GitHub** owns code, pull requests, reviews, and CI. The Linear integration may expose synced GitHub Issues as a compatibility surface; Luma does not create a second task independently.
+- **Discord** owns the live Meeting interaction and receipt surface.
+
+This implements the task-pipeline decisions in DAY-39, GitHub #20, and DAY-175.
+
+## Linear Setup
+
+Create an API key in Linear workspace settings under **Security & access > API**, then set:
+
+```dotenv
+LINEAR_API_KEY=lin_api_...
+LINEAR_TEAM_ID=63c160e7-ab70-4ef9-9822-0f85590ebb7f
+LUMA_LINEAR_PROVIDER_ID=linear
 ```
 
-## GitHub App Auth For Bot-authored Activity
+The key's Linear user must be able to read and create issues in the Dayova team. Follow-up Execution resolves internal assignee and mention IDs to Linear member UUIDs. The Adapter adds mentioned People as subscribers and stores an idempotency marker in the issue description.
 
-Use GitHub App installation authentication for production. This is what makes GitHub show issues and comments as the App bot rather than a human user.
+Use a development key for the development bot and a production integration identity for production. Do not put the key in Discord, Linear issues, Notion pages, logs, or commits.
 
-Minimum GitHub App repository permissions for the current WorkProvider:
+## Notion Setup
 
-- Metadata: read
-- Issues: read and write
+Create a Notion internal integration, copy its secret, and connect it to the Dayova **Meetings** data source. The integration needs permission to read content, insert content, and update content. Then set:
 
-Required env:
+```dotenv
+NOTION_API_TOKEN=ntn_...
+NOTION_MEETINGS_DATA_SOURCE_ID=3982e872-28bf-8080-bf00-000b188b90d6
+NOTION_MEETINGS_TITLE_PROPERTY=Name
+NOTION_MEETINGS_ATTENDEES_PROPERTY=Attendees
+LUMA_NOTION_PROVIDER_ID=notion
+```
 
-```bash
+`Name` must be the title property. `Attendees` must be a People property. Follow-up Execution maps Meeting participants to Notion user IDs before creating a Meeting record. The page contains the Conclusion summary, decisions, Action Items, open questions, risks, provenance revision, and an idempotency marker.
+
+If Notion returns `object_not_found`, reconnect the integration to the Meetings data source and verify that the data-source ID, rather than a page URL fragment from another database, is configured.
+
+## OpenAI Setup
+
+```dotenv
+OPENAI_API_KEY=sk-...
+LUMA_REASONING_MODEL_PROVIDER=openai
+LUMA_REASONING_MODEL_NAME=gpt-5.6-luna
+```
+
+The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model; override it per environment when a different quality/cost point is required.
+
+When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and reports analysis as deferred. Set `LUMA_REASONING_MODEL_PROVIDER=disabled` to make that behavior explicit.
+
+## Discord Setup
+
+```dotenv
+DISCORD_TOKEN=
+DISCORD_CLIENT_ID=
+DISCORD_GUILD_ID=
+```
+
+See `docs/integrations/discord.md` for Application creation, installation permissions, command behavior, and smoke testing. Never reuse the development token in production.
+
+## GitHub App Setup
+
+The GitHub Issues WorkProvider remains available for compatibility and testing. It is not the default runtime WorkProvider after DAY-39. GitHub code access remains a separate CodeProvider concern.
+
+For bot-authored GitHub activity:
+
+```dotenv
 GITHUB_REPOSITORY=Dayova/dayova-mvp
-GITHUB_APP_ID=12345
-GITHUB_APP_INSTALLATION_ID=67890
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+GITHUB_APP_ID=
+GITHUB_APP_INSTALLATION_ID=
+GITHUB_APP_PRIVATE_KEY_BASE64=
 ```
 
-For env stores that dislike multiline values, use:
-
-```bash
-GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
-```
-
-If GitHub App credentials are present, the Adapter ignores `GITHUB_TOKEN` and uses an installation access token.
-
-## GitHub CLI Shortcut
-
-The GitHub CLI is acceptable for local development only. A `gh` token is user-authored, so issues/comments will appear as the GitHub user, not as the bot.
+Required GitHub App repository permissions are Metadata read and Issues read/write. For a local user-authored fallback only:
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
 export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 ```
 
-If this local repo has a GitHub remote, `GITHUB_REPOSITORY` can be derived:
+## Variable Reference
 
-```bash
-export GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
-```
-
-The primary GitHub Issues target for this workspace is `Dayova/dayova-mvp`. If this local repo has no GitHub remote, keep `GITHUB_REPOSITORY` set manually.
-
-## Variables
-
-| Variable                          | Required now    | Owner                        | Description                                                            |
-| --------------------------------- | --------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| `NODE_ENV`                        | No              | App                          | Runtime mode. Defaults to `development`.                               |
-| `LUMA_DEFAULT_WORKSPACE_TIMEZONE` | No              | App                          | Default workspace timezone. Defaults to `Europe/Berlin`.               |
-| `LUMA_WORKSPACE_ID`               | No              | App                          | Internal workspace ID. Defaults to `workspace_dayova`.                 |
-| `LUMA_PGLITE_DATA_DIR`            | No              | Persistence                  | Durable local PGlite directory. Defaults to `.luma/pglite`.            |
-| `DATABASE_URL`                    | Planned         | Persistence                  | Planned production PostgreSQL connection.                              |
-| `GITHUB_REPOSITORY`               | For live GitHub | GitHub Issues WorkProvider   | Target repository as `owner/repo`.                                     |
-| `GITHUB_APP_ID`                   | Preferred       | GitHub Issues WorkProvider   | GitHub App ID used to sign a JWT for bot-authored activity.            |
-| `GITHUB_APP_INSTALLATION_ID`      | Preferred       | GitHub Issues WorkProvider   | Installation ID for the target account/repository.                     |
-| `GITHUB_APP_PRIVATE_KEY`          | Preferred       | GitHub Issues WorkProvider   | GitHub App private key PEM, with real or escaped newlines.             |
-| `GITHUB_APP_PRIVATE_KEY_BASE64`   | Preferred       | GitHub Issues WorkProvider   | Base64 encoded private key PEM alternative.                            |
-| `GITHUB_TOKEN`                    | Fallback only   | GitHub Issues WorkProvider   | User-authored local fallback. Can come from `gh auth token`.           |
-| `GITHUB_API_BASE_URL`             | No              | GitHub Issues WorkProvider   | GitHub REST base URL. Defaults to `https://api.github.com`.            |
-| `LUMA_GITHUB_WORK_PROVIDER_ID`    | No              | GitHub Issues WorkProvider   | Provider ID for Work external references. Defaults to `github-issues`. |
-| `LUMA_GITHUB_USER_AGENT`          | No              | GitHub Issues WorkProvider   | User-Agent sent to GitHub REST.                                        |
-| `LUMA_LIVE_GITHUB_TESTS`          | No              | Tests                        | Set to `1` to run non-mutating live GitHub WorkProvider tests.         |
-| `LUMA_IDENTITY_PEOPLE_JSON`       | No              | Identity Directory           | JSON array mapping internal people to provider accounts.               |
-| `LUMA_GITHUB_CODE_PROVIDER_ID`    | No              | GitHub CodeProvider          | Planned Code provider ID. GitHub Code is separate from Work.           |
-| `CONFLUENCE_BASE_URL`             | Planned         | Confluence KnowledgeProvider | Atlassian Confluence base URL.                                         |
-| `CONFLUENCE_EMAIL`                | Planned         | Confluence KnowledgeProvider | Atlassian account email for API auth.                                  |
-| `CONFLUENCE_API_TOKEN`            | Planned         | Confluence KnowledgeProvider | Atlassian API token.                                                   |
-| `CONFLUENCE_SPACE_KEY`            | Planned         | Confluence KnowledgeProvider | Space for meeting notes and knowledge updates.                         |
-| `CONFLUENCE_PARENT_PAGE_ID`       | Planned         | Confluence KnowledgeProvider | Parent page for generated meeting records.                             |
-| `LUMA_CONFLUENCE_PROVIDER_ID`     | Planned         | Confluence KnowledgeProvider | Provider ID for Knowledge external references.                         |
-| `DISCORD_TOKEN`                   | For Discord     | Discord Adapter              | Secret bot token used for Gateway and REST authentication.             |
-| `DISCORD_CLIENT_ID`               | For Discord     | Discord Adapter              | Discord Application ID used for guild command registration.            |
-| `DISCORD_GUILD_ID`                | For Discord     | Discord Adapter              | Server receiving the guild-scoped `/meeting` command.                  |
-| `OPENAI_API_KEY`                  | Planned         | ReasoningModel Adapter       | Model provider credential.                                             |
-| `LUMA_REASONING_MODEL_PROVIDER`   | Planned         | ReasoningModel Adapter       | Model provider selector.                                               |
-| `LUMA_REASONING_MODEL_NAME`       | Planned         | ReasoningModel Adapter       | Concrete model name.                                                   |
-
-## Current Live GitHub Validation
-
-The live GitHub test is intentionally non-mutating. It searches the configured repository and validates that the Adapter returns provider-neutral `WorkItem` values.
-
-Bot-authored validation:
-
-```bash
-export GITHUB_REPOSITORY="Dayova/dayova-mvp"
-export GITHUB_APP_ID="12345"
-export GITHUB_APP_INSTALLATION_ID="67890"
-export GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)"
-LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.ts
-```
-
-User-authored local fallback:
-
-```bash
-export GITHUB_TOKEN="$(gh auth token)"
-export GITHUB_REPOSITORY="Dayova/dayova-mvp"
-LUMA_LIVE_GITHUB_TESTS=1 npm test -- tests/work/github-issues-adapter.live.test.ts
-```
+| Variable                             | Required        | Owner                    | Purpose                                                          |
+| ------------------------------------ | --------------- | ------------------------ | ---------------------------------------------------------------- |
+| `NODE_ENV`                           | No              | App                      | `development`, `test`, or `production`; defaults to development. |
+| `LUMA_DEFAULT_WORKSPACE_TIMEZONE`    | No              | App                      | Defaults to `Europe/Berlin`; used for relative dates.            |
+| `LUMA_WORKSPACE_ID`                  | No              | App                      | Defaults to `workspace_dayova`.                                  |
+| `LUMA_PGLITE_DATA_DIR`               | No              | Persistence              | Durable local database directory; defaults to `.luma/pglite`.    |
+| `DATABASE_URL`                       | Planned         | Persistence              | Future production PostgreSQL connection.                         |
+| `LINEAR_API_KEY`                     | With Linear     | Linear WorkProvider      | API credential for issue reads and mutations.                    |
+| `LINEAR_TEAM_ID`                     | With Linear     | Linear WorkProvider      | Team receiving approved work items.                              |
+| `LINEAR_API_URL`                     | No              | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                    |
+| `LUMA_LINEAR_PROVIDER_ID`            | No              | Linear WorkProvider      | External reference namespace; defaults to `linear`.              |
+| `NOTION_API_TOKEN`                   | With Notion     | Notion KnowledgeProvider | Internal integration secret.                                     |
+| `NOTION_MEETINGS_DATA_SOURCE_ID`     | With Notion     | Notion KnowledgeProvider | Parent data source for approved Meeting records.                 |
+| `NOTION_MEETINGS_TITLE_PROPERTY`     | No              | Notion KnowledgeProvider | Defaults to `Name`.                                              |
+| `NOTION_MEETINGS_ATTENDEES_PROPERTY` | No              | Notion KnowledgeProvider | Defaults to `Attendees`.                                         |
+| `LUMA_NOTION_PROVIDER_ID`            | No              | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.              |
+| `OPENAI_API_KEY`                     | For analysis    | ReasoningModel           | OpenAI API credential.                                           |
+| `LUMA_REASONING_MODEL_PROVIDER`      | No              | ReasoningModel           | `openai` by default; `disabled` defers analysis.                 |
+| `LUMA_REASONING_MODEL_NAME`          | No              | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                      |
+| `DISCORD_TOKEN`                      | For bot         | Discord Adapter          | Secret Gateway and REST token.                                   |
+| `DISCORD_CLIENT_ID`                  | For bot         | Discord Adapter          | Discord Application ID.                                          |
+| `DISCORD_GUILD_ID`                   | For bot         | Discord Adapter          | Server receiving guild-scoped commands.                          |
+| `LUMA_IDENTITY_PEOPLE_JSON`          | No              | Identity Directory       | Extends or overrides built-in provider identities.               |
+| `GITHUB_REPOSITORY`                  | GitHub only     | GitHub Adapter           | Target as `owner/repo`.                                          |
+| `GITHUB_APP_ID`                      | GitHub App auth | GitHub Adapter           | App identity used for JWT auth.                                  |
+| `GITHUB_APP_INSTALLATION_ID`         | GitHub App auth | GitHub Adapter           | Installation receiving access tokens.                            |
+| `GITHUB_APP_PRIVATE_KEY`             | GitHub App auth | GitHub Adapter           | PEM with real or escaped newlines.                               |
+| `GITHUB_APP_PRIVATE_KEY_BASE64`      | Alternative     | GitHub Adapter           | Single-line alternative to the PEM variable.                     |
+| `GITHUB_TOKEN`                       | Local fallback  | GitHub Adapter           | User-attributed token, optionally from `gh`.                     |
+| `LUMA_GITHUB_CODE_PROVIDER_ID`       | Planned         | GitHub CodeProvider      | Separate GitHub code-context namespace.                          |
+| `LUMA_LIVE_LINEAR_TESTS`             | No              | Tests                    | Set to `1` for non-mutating live validation.                     |
+| `LUMA_LIVE_NOTION_TESTS`             | No              | Tests                    | Set to `1` for non-mutating live validation.                     |
+| `LUMA_LIVE_GITHUB_TESTS`             | No              | Tests                    | Set to `1` for the GitHub compatibility smoke test.              |
 
 ## Security Rules
 
-- Do not commit `.env`.
-- Do not log tokens or raw provider credentials.
-- Do not put provider-specific env reads inside Meeting Intelligence.
-- Do not make runtime application code depend on `gh`, MCP tools, or Codex plugins.
-- Use provider-neutral `ExternalReference` values outside provider Adapters.
-- Use GitHub App installation auth for production bot-authored activity.
-- Give the Discord bot only the permissions documented in `docs/integrations/discord.md`.
-- Keep development and production Discord Applications and bot tokens separate.
+- Never commit `.env`, provider keys, private-key files, or copied tokens.
+- Rotate a credential immediately if it appears in chat, an issue, a page, or a log.
+- Do not log provider request headers or complete environment objects.
+- Keep development and production credentials separate.
+- Grant only the provider access documented for the active capability.
+- Keep SDKs, MCP tools, CLIs, and provider IDs out of Meeting Intelligence domain state.
+- External mutations require an approved Follow-up Intent and use a durable idempotency key.
 
-## Identity Mapping
-
-See `docs/configuration/identity.md` for the built-in Luma team mapping and the `LUMA_IDENTITY_PEOPLE_JSON` format.
-
-## Discord
-
-See `docs/integrations/discord.md` for Discord Developer Portal setup, permissions, commands, startup, and live verification.
+See `docs/configuration/identity.md` for the built-in Person mappings.

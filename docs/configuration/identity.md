@@ -8,16 +8,20 @@ This keeps Meeting Intelligence independent from GitHub, Confluence, Notion, Lin
 
 The current local development mapping is:
 
-| Person         | Internal `PersonId` | Discord username    | Discord user ID       | GitHub login             |
-| -------------- | ------------------- | ------------------- | --------------------- | ------------------------ |
-| Fabius Schurig | `person_fabius`     | `gamius_official`   | `726409024894926869`  | `Gamius00`               |
-| Jakob Rössner  | `person_jakob`      | `fleetadmiraljakob` | `779381502311137301`  | `FleetAdmiralJakob`      |
-| Julius         | `person_julius`     | `juliusd1234_18271` | `1376219174723911841` | `juliusdietrich2407-lab` |
-| Philipp        | `person_philipp`    | `philipp_54277`     | `1492911575806251219` | `PhilippSchossig`        |
+| Person         | Internal `PersonId` | Discord user ID       | GitHub login             | Linear user ID                         | Notion user ID                         |
+| -------------- | ------------------- | --------------------- | ------------------------ | -------------------------------------- | -------------------------------------- |
+| Fabius Schurig | `person_fabius`     | `726409024894926869`  | `Gamius00`               | `5213a22b-1699-499f-8901-e34204add045` | `398d872b-594c-81f6-ac94-00026a72946d` |
+| Jakob Rössner  | `person_jakob`      | `779381502311137301`  | `FleetAdmiralJakob`      | `67e00026-a426-4476-83bb-fe679fc5ca9c` | `612665e1-6fad-4c71-a856-a41a0fb1f32e` |
+| Julius         | `person_julius`     | `1376219174723911841` | `juliusdietrich2407-lab` | `cfca93a4-7a23-4d8a-a5c9-56dd9b4b84c8` | `398d872b-594c-81af-9821-0002ec39922d` |
+| Philipp        | `person_philipp`    | `1492911575806251219` | `PhilippSchossig`        | `810f1e3b-321b-4e74-bb7b-92cf1608e3ba` | `1ebd872b-594c-8119-8a8e-000285918013` |
 
 Discord usernames are useful for human-readable identity matching. Discord bot mentions use the numeric Discord user IDs and render as `<@discordUserId>`.
 
-## GitHub Mentions
+## Linear Assignment And Subscribers
+
+Approved work creation resolves `assigneeId` to a Linear user ID and `mentionPersonIds` to Linear subscriber IDs. This lets the bot notify team members without embedding provider identities in Meeting State.
+
+## GitHub Compatibility Mentions
 
 When a provider-independent `CreateWorkItemIntent` has:
 
@@ -78,3 +82,5 @@ GitHub assignment and GitHub mentions are different:
 - Mentions use `mentionPersonIds` resolved to `@login` Markdown.
 
 GitHub may only allow assignment for users who are assignable in the target repository. Mentions can still be rendered in issue bodies and comments for users or teams GitHub recognizes.
+
+Notion Meeting participants are resolved separately and written to the `Attendees` People property. Custom provider reference IDs do not affect identity resolution: the production Adapters declare the canonical identity namespace (`linear`, `notion`, or `github-issues`).

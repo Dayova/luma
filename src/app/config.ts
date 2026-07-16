@@ -17,7 +17,7 @@ export const defaultAppConfig: AppConfig = {
     publishRawTranscript: false,
     publishTranslatedTranscript: false,
     transcriptPlacement: "attachment",
-    defaultKnowledgeDestination: "confluence",
+    defaultKnowledgeDestination: "notion",
     requireHumanApprovalBeforePublishing: true
   }
 };

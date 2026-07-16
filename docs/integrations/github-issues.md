@@ -1,6 +1,8 @@
 # GitHub Issues WorkProvider
 
-Luma supports GitHub Issues as the current Work provider through `createGitHubIssuesWorkProvider`.
+Luma supports GitHub Issues as a compatibility WorkProvider through `createGitHubIssuesWorkProvider`. Linear is canonical for new executable work after DAY-39 and GitHub #20; GitHub remains canonical for code and pull requests.
+
+The executable Discord runtime wires Linear, not this Adapter. Use the GitHub Issues Adapter for compatibility deployments and tests. Do not create one task in both Providers; the Dayova Linear integration owns any synchronized GitHub Issue.
 
 ## Runtime Configuration
 
@@ -110,7 +112,7 @@ GITHUB_REPOSITORY=Dayova/dayova-mvp \
 GITHUB_APP_ID=12345 \
 GITHUB_APP_INSTALLATION_ID=67890 \
 GITHUB_APP_PRIVATE_KEY_BASE64="$(base64 -i path/to/private-key.pem)" \
-npm test -- tests/work/github-issues-adapter.live.test.ts
+pnpm test -- tests/work/github-issues-adapter.live.test.ts
 ```
 
 User-authored fallback:
@@ -119,7 +121,7 @@ User-authored fallback:
 LUMA_LIVE_GITHUB_TESTS=1 \
 GITHUB_TOKEN="$(gh auth token)" \
 GITHUB_REPOSITORY=Dayova/dayova-mvp \
-npm test -- tests/work/github-issues-adapter.live.test.ts
+pnpm test -- tests/work/github-issues-adapter.live.test.ts
 ```
 
 If this command fails with `no git remotes found`, keep `GITHUB_REPOSITORY=Dayova/dayova-mvp` set manually or add a GitHub remote to the local repo.

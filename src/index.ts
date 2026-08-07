@@ -34,6 +34,23 @@ export {
 } from "./identity/static-identity-directory.js";
 export type { DiscordMention } from "./identity/static-identity-directory.js";
 export type * from "./knowledge/interface.js";
+export type * from "./knowledge/meeting-notes-source.js";
+export type * from "./knowledge/observed-source-ledger.js";
+export { createObservedSourceLedger } from "./knowledge/observed-source-ledger.js";
+export {
+  NotionMeetingNotesReadError,
+  NotionMeetingNotesSourceError,
+  createNotionMeetingNotesSource,
+  createNotionMeetingNotesSourceFromEnv
+} from "./knowledge/notion-meeting-notes-source.js";
+export type {
+  CreateNotionMeetingNotesSourceFromEnvInput,
+  NotionMeetingNotesApi,
+  NotionMeetingNotesBlock,
+  NotionMeetingNotesPage,
+  NotionMeetingNotesReadErrorCode,
+  NotionMeetingNotesSourceConfig
+} from "./knowledge/notion-meeting-notes-source.js";
 export {
   NotionKnowledgeProviderError,
   createNotionKnowledgeProvider,

@@ -1,10 +1,10 @@
 # Issue Tracker: Linear
 
-Linear is the canonical tracker for executable Luma work. Use the Dayova team and a `DAY-<number>` identifier in branches, commits, implementation notes, and status reporting.
+Linear is the canonical tracker for executable Luma work. Use the Luma team and a `LUM-<number>` identifier in branches, commits, implementation notes, and status reporting. The Dayova team remains the home for non-Luma company work and legacy issues; do not create new Luma work there.
 
 ## Provider Ownership
 
-- Create and update tasks in Linear.
+- Create and update Luma tasks in the Luma Linear team.
 - Store specifications, Meeting records, decisions, and durable context in Notion.
 - Use GitHub for code, pull requests, review, CI, and releases.
 - Treat GitHub Issues created by the Linear sync as compatibility mirrors. Do not independently create or update both sides of one task.

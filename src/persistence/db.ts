@@ -139,6 +139,53 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       PRIMARY KEY (idempotency_key)
     );
 
+    CREATE TABLE IF NOT EXISTS observed_sources (
+      workspace_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      parent_object_id TEXT,
+      source_reference_json TEXT NOT NULL,
+      current_revision INTEGER NOT NULL DEFAULT 0,
+      current_content_hash TEXT,
+      first_observed_at TEXT NOT NULL,
+      last_observed_at TEXT NOT NULL,
+      last_provider_version TEXT,
+      PRIMARY KEY (workspace_id, provider_id, source_kind, source_object_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS observed_source_snapshots (
+      workspace_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      content_hash TEXT NOT NULL,
+      provider_version TEXT,
+      source_reference_json TEXT NOT NULL,
+      canonical_payload_json TEXT NOT NULL,
+      raw_payload_json TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      PRIMARY KEY (
+        workspace_id,
+        provider_id,
+        source_kind,
+        source_object_id,
+        source_revision
+      ),
+      FOREIGN KEY (workspace_id, provider_id, source_kind, source_object_id)
+        REFERENCES observed_sources (workspace_id, provider_id, source_kind, source_object_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS observed_source_snapshots_hash_idx
+      ON observed_source_snapshots (
+        workspace_id,
+        provider_id,
+        source_kind,
+        source_object_id,
+        content_hash
+      );
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS meeting_title TEXT;
 

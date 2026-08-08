@@ -1,4 +1,5 @@
 import type {
+  ActionItemOwnershipAttribution,
   ActionItemReconciliationOutcome,
   ExternalReference
 } from "../domain/model.js";
@@ -24,6 +25,8 @@ export type OperationalOutcomeEntry = {
     sourceRevision: number;
     sourceContentHash: string;
   };
+  /** Never omit responsibility state: blank would look falsely settled. */
+  ownership: ActionItemOwnershipAttribution;
   resolution: ActionItemReconciliationOutcome;
   /** Provider-neutral work-item links (Linear, GitHub Issues, or another WorkProvider). */
   workReferences: ExternalReference[];

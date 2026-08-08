@@ -23,6 +23,21 @@ interface MeetingIntelligence {
 - Revisions are monotonic.
 - Human Judgment outranks AI inference: a confirmed, rejected, or corrected
   Meeting Item remains Human-authoritative across later fresh model analyses.
+- Speaker Attribution and Ownership Attribution are separate, Evidence-grounded
+  claims. A speaker claim answers who produced an Utterance; an ownership claim
+  answers who, if anyone, is responsible for an Action Item. Neither a source
+  speaker label nor a participant mention is sufficient to collapse the two.
+- Source Attribution Claims preserve original wording, basis, confidence, and
+  Evidence immutably. A Human Attribution Resolution is a durable overlay that
+  determines the effective result and outranks later inference without
+  rewriting the source claim.
+- No accepted Action Item may leave Meeting Intelligence with a silently
+  guessed, silently missing, or falsely certain owner. Effective ownership is
+  explicitly `confirmed`, `proposed`, `intentionally-unassigned`, or `unresolved`.
+- Linear assignment is a hard safety gate: only `confirmed` ownership may map
+  to a Linear user, and only explicitly `intentionally-unassigned` ownership may create work
+  without an assignee. `proposed` and `unresolved` ownership require targeted
+  clarification and cannot produce an automatic Linear work mutation.
 - Transcript revisions preserve old utterance versions and reconsider affected Meeting Items.
 - Conclusions are persisted by Meeting Revision and output options.
 - Imported Meeting Note source revisions retain their source Evidence and
@@ -73,6 +88,11 @@ the model analyzed. If a new Observation, source revision, or Human Judgment
 arrived in the meantime, it discards the stale model result rather than
 rebasing it over canonical state.
 
+Attribution assessment remains inside Meeting Intelligence. Source Adapters
+submit provider-neutral Evidence and Observations; callers may record Human
+Judgment, but never orchestrate speaker extraction, owner inference, Linear
+account mapping, or the clarification workflow.
+
 ## Errors
 
 The Interface reports domain errors such as invalid Observations and temporary analysis unavailability. It does not leak raw provider or model SDK errors.
@@ -100,6 +120,10 @@ The current implementation analyzes only new/revised Evidence supplied to an `ob
   view, or `{ type: "action-item-reconciliation-history" }` for immutable
   attempts; callers never orchestrate source extraction, work searches,
   ranking, or provider writes.
+- Submit source attribution through provider-neutral Observations and correct it
+  through Human Judgment. Adapters and callers never turn a display label,
+  pronunciation guess, or participant mention directly into a confirmed Person
+  or Linear assignee.
 - Add model SDKs behind ReasoningModel.
 - Add richer Organizational Context retrieval behind the OrganizationalContext Interface.
 
@@ -110,6 +134,8 @@ The current implementation analyzes only new/revised Evidence supplied to an `ob
 - Provider SDK imports in Meeting Intelligence.
 - Agent framework state as canonical Meeting State.
 - Direct Confluence, GitHub, Notion, or Linear mutation from AI output.
+- Treating a source speaker label, a suggested owner, or an unresolved owner as
+  a confirmed Linear assignee.
 
 ## Example
 

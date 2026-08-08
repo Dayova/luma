@@ -108,6 +108,11 @@ function outcome(
           sourceContentHash: target.sourceContentHash
         },
         resolution: { type: "needs-clarification", rationale },
+        ownership: {
+          status: "unresolved",
+          reason: "no-owner-stated",
+          likelyOwnerPersonId: null
+        },
         workReferences: [workReference()],
         knowledgeReferences: [],
         githubReferences: [],

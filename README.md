@@ -1,6 +1,26 @@
 # Luma
 
-Luma is a Discord-native AI meeting intelligence system. The repository contains a durable Meeting Intelligence Module, provider-neutral capability Interfaces, Linear and Notion Adapters, approved Follow-up Execution, and a real Discord Adapter for persistent Meeting threads, commands, summaries, and execution receipts.
+Luma is Dayova's organizational context and execution agent. It turns
+conversation Evidence into reconciled organizational reality across Linear
+(canonical work), Notion (canonical knowledge and raw Meeting Notes), and
+GitHub (canonical implementation evidence). Notion Meeting Notes and Discord
+conversations are first-class sources; the Notion Custom Agent and Discord
+`@Luma` are surfaces over the same shared Luma core.
+
+The repository currently contains a durable Meeting Intelligence Module,
+provider-neutral capability Interfaces, Linear and Notion Adapters,
+Follow-up Execution foundations, a persistent Discord Meeting bot, and a
+bounded read-only Discord Context Ask slice. It does not yet implement the
+complete Discord Ask → Verify → Reconcile → Execute product path.
+
+## Current Delivery Boundary
+
+LUM-2 (Notion Meeting Notes ingestion and observed revisions) and LUM-3
+(read-only Linear reconciliation) are complete foundations. LUM-9 is the
+current German speaker-attribution and Action Item-ownership safety P0 before
+the meeting wedge can be called production-safe. LUM-6, LUM-7, and LUM-8—the
+approved settlement, durable execution, and compact Operational Outcome
+writeback work—remain incomplete.
 
 ## Public Interfaces
 

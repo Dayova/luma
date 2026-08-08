@@ -1,4 +1,5 @@
 import type {
+  ActionItemOwnershipAttribution,
   ActionItemReconciliationHumanResolution,
   ActionItemReconciliationIntentBinding,
   ExternalReference,
@@ -11,12 +12,24 @@ import type {
 import type { LumaDatabase } from "../persistence/db.js";
 
 export type OperationalOutcomeSettlementPlan = {
-  version: 1;
+  /**
+   * Version 1 is a read-compatible historical plan. New plans are always v2;
+   * v1 gets an explicit unresolved ownership projection when read so it can
+   * remain in an aggregate without authorizing a new provider mutation.
+   */
+  version: 1 | 2;
   intentId: string;
   binding: ActionItemReconciliationIntentBinding;
   target: OperationalOutcomeTarget;
   candidate: ImportedActionItemCandidate;
+  /** Effective reviewed ownership; source candidate wording stays immutable. */
+  ownership: ActionItemOwnershipAttribution;
   resolution: ActionItemReconciliationHumanResolution;
+};
+
+/** New execution plans must carry the v2 ownership binding. */
+export type NewOperationalOutcomeSettlementPlan = OperationalOutcomeSettlementPlan & {
+  version: 2;
 };
 
 export type OperationalOutcomeSettlementStageName = "work" | "outcome";
@@ -89,12 +102,16 @@ export async function ensureOperationalOutcomeSettlement(input: {
   database: LumaDatabase;
   workspaceId: string;
   meetingId: string;
-  plan: OperationalOutcomeSettlementPlan;
+  plan: NewOperationalOutcomeSettlementPlan;
   now: Date;
 }): Promise<OperationalOutcomeSettlement> {
   const { database, workspaceId, meetingId, plan } = input;
   const timestamp = input.now.toISOString();
   const planJson = JSON.stringify(plan);
+
+  if (plan.version !== 2) {
+    throw new Error("Legacy Operational Outcome plans are read-only and not executable");
+  }
 
   return database.transaction(async (transaction) => {
     const existing = await transaction.query<SettlementRow>(
@@ -1046,7 +1063,7 @@ export function settlementStageIdempotencyKey(
 }
 
 function workStageInitialStatus(
-  plan: OperationalOutcomeSettlementPlan
+  plan: NewOperationalOutcomeSettlementPlan
 ): OperationalOutcomeSettlementStageStatus {
   switch (plan.resolution.outcome.type) {
     case "create-new":
@@ -1119,13 +1136,36 @@ function stageFromRow(row: SettlementStageRow): OperationalOutcomeSettlementStag
 
 function parsePlan(json: string): OperationalOutcomeSettlementPlan {
   try {
-    const parsed = JSON.parse(json) as OperationalOutcomeSettlementPlan;
+    const parsed = JSON.parse(json) as Partial<OperationalOutcomeSettlementPlan>;
 
-    if (parsed.version !== 1 || typeof parsed.intentId !== "string") {
-      throw new Error("invalid version or intent ID");
+    if (typeof parsed.intentId !== "string") {
+      throw new Error("invalid intent ID");
     }
 
-    return parsed;
+    if (parsed.version === 1) {
+      return {
+        ...(parsed as Omit<OperationalOutcomeSettlementPlan, "ownership">),
+        // v1 plans predate ownership reliability. They may be rendered as
+        // historic settled facts but are never a proof to execute/reassign
+        // work under the v2 ownership gate.
+        ownership: {
+          status: "unresolved",
+          reason: "unsupported-semantics",
+          likelyOwnerPersonId: null
+        }
+      };
+    }
+
+    if (
+      parsed.version !== 2 ||
+      !parsed.ownership ||
+      typeof parsed.ownership !== "object" ||
+      typeof parsed.ownership.status !== "string"
+    ) {
+      throw new Error("missing ownership-bound settlement plan version");
+    }
+
+    return parsed as OperationalOutcomeSettlementPlan;
   } catch (error) {
     throw new Error(
       `Operational Outcome settlement plan is invalid: ${

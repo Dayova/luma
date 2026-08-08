@@ -239,6 +239,11 @@ function renderedOperationalOutcome() {
             type: "needs-clarification",
             rationale: "Needs a decision from the accountable owner."
           },
+          ownership: {
+            status: "unresolved",
+            reason: "no-owner-stated",
+            likelyOwnerPersonId: null
+          },
           workReferences: [],
           knowledgeReferences: [],
           githubReferences: [],

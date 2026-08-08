@@ -79,7 +79,11 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       meeting_id TEXT NOT NULL,
       utterance_id TEXT NOT NULL,
       version INTEGER NOT NULL,
-      speaker_id TEXT NOT NULL,
+      -- Legacy provider participant storage. New records use the explicit
+      -- attribution JSON below; old non-null values are never upgraded to
+      -- certainty automatically.
+      speaker_id TEXT,
+      speaker_attribution_json TEXT,
       started_at TEXT NOT NULL,
       ended_at TEXT NOT NULL,
       original_text TEXT NOT NULL,
@@ -446,5 +450,11 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
 
     ALTER TABLE follow_up_executions
       ADD COLUMN IF NOT EXISTS execution_lease_id TEXT;
+
+    ALTER TABLE utterance_versions
+      ADD COLUMN IF NOT EXISTS speaker_attribution_json TEXT;
+
+    ALTER TABLE utterance_versions
+      ALTER COLUMN speaker_id DROP NOT NULL;
   `);
 }

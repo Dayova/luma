@@ -156,7 +156,7 @@ class TestDiscordTransport implements DiscordTransport {
 }
 
 describe("Discord follow-up commands", () => {
-  it("preserves typed evidence and executes an explicitly approved Linear intent", async () => {
+  it("preserves typed evidence and fails closed for an unbound generic Linear intent", async () => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const meetingIntelligence = createMeetingIntelligence({
@@ -222,18 +222,9 @@ describe("Discord follow-up commands", () => {
     expect(noteResponse.content).toContain(
       "intent_linear_release: Prepare the release checklist"
     );
-    expect(approveResponse.content).toBe(
-      "Follow-up completed: https://linear.app/dayova/issue/DAY-301"
-    );
-    expect(workProvider.createCalls).toEqual([
-      expect.objectContaining({
-        assigneeProviderUserId: "67e00026-a426-4476-83bb-fe679fc5ca9c",
-        mentionProviderUserIds: [
-          "67e00026-a426-4476-83bb-fe679fc5ca9c",
-          "5213a22b-1699-499f-8901-e34204add045"
-        ]
-      })
-    ]);
+    expect(approveResponse.content).toContain("Follow-up failed");
+    expect(approveResponse.content).toContain("durable ownership confirmation");
+    expect(workProvider.createCalls).toEqual([]);
     await expect(
       database.query<{ original_text: string; language: string }>(
         `SELECT original_text, language FROM utterance_versions WHERE utterance_id = $1`,
@@ -247,24 +238,27 @@ describe("Discord follow-up commands", () => {
         }
       ]
     });
-    expect(transport.sentMessages.at(-1)).toEqual({
-      channelId: "thread_product",
-      content: [
-        "Follow-up completed",
-        "",
-        "create-work-item succeeded: https://linear.app/dayova/issue/DAY-301",
-        "Linear: https://linear.app/dayova/issue/DAY-301",
-        "",
-        "<@779381502311137301> <@726409024894926869>"
-      ].join("\n"),
-      allowedUserIds: ["779381502311137301", "726409024894926869"],
-      idempotencyKey: `${JSON.stringify([
+    const receiptMessage = transport.sentMessages.at(-1);
+
+    if (!receiptMessage) {
+      throw new Error("expected a Discord follow-up receipt");
+    }
+
+    expect(receiptMessage.channelId).toBe("thread_product");
+    expect(receiptMessage.content).toContain("Follow-up failed");
+    expect(receiptMessage.content).toContain("durable ownership confirmation");
+    expect(receiptMessage.allowedUserIds).toEqual([
+      "779381502311137301",
+      "726409024894926869"
+    ]);
+    expect(receiptMessage.idempotencyKey).toBe(
+      `${JSON.stringify([
         "workspace_dayova",
         "discord_start_product",
         "intent_linear_release",
         "execute"
-      ])}:follow-up-execution-succeeded`
-    });
+      ])}:follow-up-execution-failed`
+    );
   });
 
   it("rejects a suggested intent without mutating a provider", async () => {

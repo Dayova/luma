@@ -1,14 +1,20 @@
 # Linear WorkProvider
 
-Linear is Luma's canonical provider for executable work. A Meeting Action Item remains evidence-grounded domain state; only an explicitly approved `create-work-item` or `update-work-item` Follow-up Intent mutates Linear.
+Linear is Luma's sole canonical provider for executable work. A Meeting Action
+Item remains evidence-grounded domain state; a source-bound reconciliation
+settlement may mutate Linear only after its current source, reconciliation,
+authorization, and ownership state are valid. LUM-6, LUM-7, and LUM-8 remain
+incomplete, so this document describes their implemented safety foundation,
+not a completed production workflow.
 
 ## Setup
 
 1. Create a Linear API key for the development environment.
 2. Confirm that its user can access the Dayova team.
 3. Add `LINEAR_API_KEY` and `LINEAR_TEAM_ID` to `.env`.
-4. Start Luma and use `/meeting note` to produce a proposal.
-5. Use `/meeting approve intent:<id>` to execute it.
+4. Start Luma and use the current Meeting flow to produce a proposal.
+5. Use an approved, source-bound reconciliation settlement only when its
+   ownership gate is satisfied.
 
 ```dotenv
 LINEAR_API_KEY=
@@ -19,13 +25,31 @@ LUMA_LINEAR_PROVIDER_ID=linear
 
 Use separate credentials for development and production. A personal API key is acceptable for the current private development bot; production should use a dedicated integration identity so authorship and revocation are unambiguous.
 
+## Ownership Gate
+
+No accepted Action Item may become canonical Linear work with a silently
+guessed, accidentally missing, or falsely certain owner.
+
+- `confirmed` ownership maps its Person through the Identity Directory to a
+  Linear member UUID.
+- Only a Human-explicit `intentionally-unassigned` decision may create work
+  with a null assignee.
+- `proposed` and `unresolved` ownership never create, update, or assign
+  Linear work; Luma records the targeted clarification needed instead.
+- A confirmed owner without a current Linear identity mapping also blocks
+  creation rather than silently falling back to an unassigned issue.
+- Generic `create-work-item` Intents are intentionally non-executable until
+  they can carry this same durable attribution proof.
+
 ## Mapping
 
 - Follow-up title becomes the Linear issue title.
 - Description remains evidence-grounded Markdown.
-- `assigneeId` resolves through the Identity Directory to a Linear member UUID.
+- A permitted confirmed owner resolves through the Identity Directory to a
+  Linear member UUID; a Human-intentionally-unassigned item passes `null`.
 - `mentionPersonIds` resolve to Linear subscriber UUIDs.
-- Due date is written as Linear's issue due date.
+- Due date is written as Linear's issue due date only when the associated
+  source-bound operation is otherwise safe to execute.
 - Provider references store Linear's human issue identifier (for example `LUM-3`) as
   `externalId` and its human URL separately. The adapter keeps its provider lookup
   identifier internal.
@@ -43,7 +67,10 @@ Linear owns the task. GitHub #20 describes the migration and DAY-39 is the canon
 
 - `LINEAR_API_KEY is required`: one Linear variable is set but the credential is missing.
 - `LINEAR_TEAM_ID is required`: copy the Dayova team UUID, not its short key.
-- Assignee is empty: verify the internal Person has a `linearUserId` and that the user belongs to the workspace.
+- Confirmed owner has no Linear mapping: add or repair the internal Person's
+  `linearUserId`; Luma will not silently create the issue unassigned.
+- Ownership is proposed or unresolved: record a targeted Human ownership
+  decision before attempting a create, update, or assignee mutation.
 - Duplicate issue concern: do not remove the idempotency marker from generated descriptions.
 
 The SDK is contained behind Luma's owned `LinearApi` facade and `WorkProvider` Interface.
@@ -55,9 +82,12 @@ writer-capable `WorkProvider`. It can search and retrieve canonical Linear work
 to produce an evidence-backed reconciliation review, but it cannot create,
 update, or comment on an issue. The review is obtained through Luma's
 `action-item-reconciliation-review` Meeting query and remains a proposal until
-Human Judgment resolves it. A create/update resolution produces a **suggested**
-Follow-up Intent; its separate approval remains required before execution can
-mutate Linear. The immutable attempt history is available through
+Human Judgment resolves it. For an ownership-sensitive create or update,
+Human Judgment must also confirm the owner or explicitly leave the work
+unassigned. A safe create/update resolution produces a **suggested**
+source-bound Follow-up Intent; its separate approval remains required by the
+current implementation before execution can mutate Linear. The immutable
+attempt history is available through
 `action-item-reconciliation-history` for audit.
 
 When a read of the Linear catalog is retryable, Meeting Intelligence schedules

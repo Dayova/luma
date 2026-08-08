@@ -7,12 +7,15 @@ import type {
   ActionItemReconciliationSearchReceipt,
   ActionItemReconciliationHumanResolution,
   ActionItemReconciliationCreatedWorkMapping,
+  ActionItemOwnershipAttribution,
+  ActionItemOwnershipHumanResolution,
   CurrentActionItemReconciliationReview,
   ActionItem,
   Decision,
   EvidenceReference,
   ExternalReference,
   FollowUpIntent,
+  HumanJudgment,
   ImportedActionItemCandidate,
   ImportedActionItemSourceBlock,
   ImportedMeetingSource,
@@ -30,12 +33,18 @@ import type {
   Provenance,
   Risk,
   ReconciliationWorkItemSnapshot,
+  SpeakerAttribution,
+  SpeakerAttributionHumanResolution,
   UtteranceCommitted,
   UtteranceRevised,
   WorkspaceConfig,
   WorkspaceId
 } from "../domain/model.js";
 import { opaqueIdentifierSegment } from "../domain/opaque-id.js";
+import {
+  ownershipCanMutateCanonicalWork,
+  sameActionItemOwnership
+} from "../domain/action-item-ownership.js";
 import {
   importedSourceCandidateEvidence,
   importedSourceCandidateId,
@@ -44,10 +53,13 @@ import {
   importedSourceSectionEvidence
 } from "../domain/imported-source-provenance.js";
 import {
+  commitmentDispositionFor,
   importedActionItemDeadlineFor,
+  importedActionItemCompletionFor,
   importedActionItemLanguageFor,
   importedActionItemModalityFor,
-  importedActionItemOwnerFor,
+  importedActionItemOwnershipFor,
+  importedActionItemSourceOwnerFor,
   isOffsetBearingInstant,
   mentionedWorkItemExternalIdsFor
 } from "../domain/imported-action-item-semantics.js";
@@ -78,6 +90,7 @@ import type { LumaDatabase } from "../persistence/db.js";
 
 const ANALYSIS_VERSION = "meeting-analysis-v1";
 const PROMPT_VERSION = "meeting-intelligence-v1";
+const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v1";
 
 export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
@@ -126,9 +139,23 @@ type ConclusionRow = {
 };
 
 type UtteranceVersionRow = {
-  speaker_id: string;
+  speaker_id: string | null;
+  speaker_attribution_json: string | null;
   started_at: string;
   ended_at: string;
+};
+
+type ActiveUtteranceVersionRow = UtteranceVersionRow & {
+  utterance_id: string;
+  version: number;
+  evidence_id: string;
+  original_text: string;
+};
+
+type SpeakerAttributionProjection = {
+  state: MeetingState;
+  evidenceById: ReadonlyMap<string, EvidenceReference>;
+  activeTranscriptEvidence: EvidenceReference[];
 };
 
 type DatabaseQuery = Pick<LumaDatabase, "query">;
@@ -311,7 +338,8 @@ async function observeMeeting(
           continue;
         }
 
-        const validationError = validateObservationBeforeAcceptance(
+        const validationError = await validateObservationBeforeAcceptance(
+          transaction,
           state,
           workspace.timezone,
           observation
@@ -327,7 +355,8 @@ async function observeMeeting(
         continue;
       }
 
-      const validationError = validateObservationBeforeAcceptance(
+      const validationError = await validateObservationBeforeAcceptance(
+        transaction,
         state,
         workspace.timezone,
         observation
@@ -600,27 +629,41 @@ function candidatesNeedingReconciliationForObservations(
 
     const judgment = observation.judgment;
 
-    if (
-      judgment.kind !== "refresh-action-item-reconciliation" ||
-      !acceptedObservationIdSet.has(observation.observationId)
-    ) {
+    if (!acceptedObservationIdSet.has(observation.observationId)) {
       continue;
     }
 
-    const review = state.actionItemReconciliationReviews.find(
-      (candidate) => candidate.id === judgment.reviewId
-    );
-    const candidate = review
-      ? state.importedActionItemCandidates.find(
-          (imported) => imported.id === review.candidateId
-        )
-      : undefined;
+    if (judgment.kind === "refresh-action-item-reconciliation") {
+      const review = state.actionItemReconciliationReviews.find(
+        (candidate) => candidate.id === judgment.reviewId
+      );
+      const candidate = review
+        ? state.importedActionItemCandidates.find(
+            (imported) => imported.id === review.candidateId
+          )
+        : undefined;
 
-    if (candidate && currentCandidateIds.has(candidate.id)) {
-      requestsByCandidateId.set(candidate.id, {
-        candidate,
-        trigger: "human-refresh"
-      });
+      if (candidate && currentCandidateIds.has(candidate.id)) {
+        requestsByCandidateId.set(candidate.id, {
+          candidate,
+          trigger: "human-refresh"
+        });
+      }
+    }
+
+    if (judgment.kind === "resolve-action-item-ownership") {
+      const candidate = state.importedActionItemCandidates.find(
+        (imported) =>
+          currentCandidateIds.has(imported.id) &&
+          actionItemOwnershipClaimId(imported) === judgment.claimId
+      );
+
+      if (candidate) {
+        requestsByCandidateId.set(candidate.id, {
+          candidate,
+          trigger: "human-ownership-resolution"
+        });
+      }
     }
   }
 
@@ -743,6 +786,38 @@ function latestReconciliationReviewForCandidate(
   );
 }
 
+function actionItemOwnershipClaimId(candidate: ImportedActionItemCandidate): string {
+  return `attribution:ownership:${opaqueIdentifierSegment(candidate.lineageKey)}:${opaqueIdentifierSegment(JSON.stringify(candidate.sourceOwner))}`;
+}
+
+function acceptedOwnershipResolutionsForCandidate(
+  resolutions: ActionItemOwnershipHumanResolution[],
+  candidate: ImportedActionItemCandidate
+): ActionItemOwnershipHumanResolution | null {
+  const claimId = actionItemOwnershipClaimId(candidate);
+
+  return (
+    resolutions
+      .filter(
+        (resolution) =>
+          resolution.claimId === claimId &&
+          resolution.candidateLineageKey === candidate.lineageKey
+      )
+      .sort(
+        (left, right) =>
+          right.resolvedAt.localeCompare(left.resolvedAt) ||
+          right.id.localeCompare(left.id)
+      )[0] ?? null
+  );
+}
+
+function effectiveActionItemOwnershipForCandidate(
+  candidate: ImportedActionItemCandidate,
+  resolution: ActionItemOwnershipHumanResolution | null
+): ActionItemOwnershipAttribution {
+  return resolution?.ownership ?? candidate.ownership;
+}
+
 function compareReconciliationReviewsByRecency(
   left: ActionItemReconciliationReview,
   right: ActionItemReconciliationReview
@@ -779,6 +854,7 @@ async function reconcileAndPersistActionItemCandidates(
       requests,
       acceptedState.actionItemReconciliationReviews,
       acceptedState.actionItemReconciliationHumanResolutions,
+      acceptedState.actionItemOwnershipHumanResolutions,
       acceptedState.actionItemReconciliationCreatedWorkMappings,
       workspaceId,
       workCatalogs,
@@ -802,6 +878,7 @@ async function reconcileImportedActionItemCandidates(
   requests: ReconciliationCandidateRequest[],
   existingReviews: ActionItemReconciliationReview[],
   existingResolutions: ActionItemReconciliationHumanResolution[],
+  existingOwnershipResolutions: ActionItemOwnershipHumanResolution[],
   existingCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[],
   workspaceId: WorkspaceId,
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
@@ -811,6 +888,10 @@ async function reconcileImportedActionItemCandidates(
 
   for (const request of requests) {
     const candidate = request.candidate;
+    const ownership = effectiveActionItemOwnershipForCandidate(
+      candidate,
+      acceptedOwnershipResolutionsForCandidate(existingOwnershipResolutions, candidate)
+    );
     const review = await reconcileImportedActionItemCandidate(
       candidate,
       existingReviews,
@@ -822,6 +903,7 @@ async function reconcileImportedActionItemCandidates(
     );
     reviews.push({
       ...review,
+      ownership,
       trigger: request.trigger
     });
   }
@@ -868,16 +950,18 @@ async function persistActionItemReconciliationReviews(
             )
           : false;
 
-        const isHumanRefresh = review.trigger === "human-refresh";
+        const isHumanReview =
+          review.trigger === "human-refresh" ||
+          review.trigger === "human-ownership-resolution";
 
         if (!(
           currentCandidateIds.has(review.candidateId) &&
           currentCandidate !== undefined &&
           sameImportedCandidate(currentCandidate, review.candidate) &&
-          (!hasHumanResolution || isHumanRefresh) &&
-          (!latestReview || latestReview.retryable || isHumanRefresh) &&
+          (!hasHumanResolution || isHumanReview) &&
+          (!latestReview || latestReview.retryable || isHumanReview) &&
           (!latestReview ||
-            isHumanRefresh ||
+            isHumanReview ||
             automaticCatalogRetryIsDue(latestReview, persistedAt))
         )) {
           return [];
@@ -1003,23 +1087,6 @@ async function reconcileImportedActionItemCandidate(
           type: "needs-clarification",
           rationale:
             "The source wording does not make a clear work commitment or request."
-        },
-        workItems: []
-      },
-      now
-    );
-  }
-
-  if (candidate.owner.state === "ambiguous" || candidate.owner.state === "unspecified") {
-    return reconciliationReview(
-      candidate,
-      catalogSelection.providerId,
-      {
-        searches: [],
-        matchSignals: [],
-        outcome: {
-          type: "needs-clarification",
-          rationale: "The source does not identify a resolvable Action Item owner."
         },
         workItems: []
       },
@@ -1649,9 +1716,7 @@ function scoreWorkItem(
   }
 
   const ownerText =
-    candidate.owner.state === "known" || candidate.owner.state === "unmapped"
-      ? candidate.owner.sourceText
-      : null;
+    candidate.sourceOwner.state === "unmapped" ? candidate.sourceOwner.sourceText : null;
 
   if (
     ownerText &&
@@ -1838,6 +1903,7 @@ function reconciliationReview(
     candidateId: candidate.id,
     candidateLineageKey: candidate.lineageKey,
     candidate,
+    ownership: candidate.ownership,
     evidence: uniqueEvidence([
       ...candidate.evidence,
       ...uniqueWorkItemSnapshots(input.workItems).map((workItem) =>
@@ -1974,7 +2040,13 @@ async function queryMeeting(
     }
     case "freeform": {
       const matchingActionItems = query.participantId
-        ? state.actionItems.filter((item) => item.ownerId === query.participantId)
+        ? state.actionItems.filter((item) => {
+            const ownership = actionItemOwnership(item);
+            return (
+              ownership.status === "confirmed" &&
+              ownership.ownerPersonId === query.participantId
+            );
+          })
         : state.actionItems;
       const evidence = matchingActionItems.flatMap((item) => item.provenance.evidence);
       return {
@@ -2067,6 +2139,8 @@ function currentActionItemReconciliationReviews(
 
       return {
         proposal,
+        ownershipClaimId: actionItemOwnershipClaimId(proposal.candidate),
+        ownership: proposal.ownership,
         effectiveOutcome: humanResolution?.outcome ?? proposal.outcome,
         status: humanResolution ? "human-resolved" : "proposed",
         conflictingCandidateIds: [],
@@ -2263,7 +2337,10 @@ async function concludeMeeting(
 ): Promise<MeetingConclusion> {
   const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
   const outputLanguage = await resolveConclusionOutputLanguage(database, input);
-  const optionsHash = outputLanguage;
+  // Older conclusions may have cached a legacy `speaker_id` as if it were a
+  // verified attribution. Version this projection so a current read rebuilds
+  // from the safe attribution overlay rather than replaying that cache.
+  const optionsHash = `${outputLanguage}:${CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION}`;
   const existing = await database.query<ConclusionRow>(
     `SELECT conclusion_json FROM conclusions
      WHERE workspace_id = $1 AND meeting_id = $2 AND revision = $3 AND options_hash = $4`,
@@ -2776,6 +2853,7 @@ async function applyObservation(
             joinedAt: observation.startedAt,
             leftAt: null
           })),
+          speakerInferredParticipantIds: [],
           lastObservationAt: observation.observedAt
         },
         evidenceForAnalysis: [],
@@ -2799,6 +2877,10 @@ async function applyObservation(
             joinedAt: observation.occurredAt,
             leftAt: null
           }),
+          speakerInferredParticipantIds: withoutSpeakerInferredParticipantId(
+            state,
+            observation.participantId
+          ),
           lastObservationAt: observation.observedAt
         },
         evidenceForAnalysis: [],
@@ -2812,6 +2894,10 @@ async function applyObservation(
             joinedAt: null,
             leftAt: observation.occurredAt
           }),
+          speakerInferredParticipantIds: withoutSpeakerInferredParticipantId(
+            state,
+            observation.participantId
+          ),
           lastObservationAt: observation.observedAt
         },
         evidenceForAnalysis: [],
@@ -2845,16 +2931,17 @@ async function applyObservation(
         evidence,
         now
       );
+      const projected = await projectCurrentSpeakerAttribution(database, state, {
+        persistEvidence: true
+      });
       return {
         state: {
-          ...state,
-          participants: upsertParticipant(state.participants, observation.speakerId, {
-            joinedAt: null,
-            leftAt: null
-          }),
+          ...projected.state,
           lastObservationAt: observation.observedAt
         },
-        evidenceForAnalysis: [evidence],
+        evidenceForAnalysis: [
+          projected.evidenceById.get(evidence.evidenceId) ?? evidence
+        ],
         events: []
       };
     }
@@ -2890,19 +2977,33 @@ async function applyObservation(
       const committed: UtteranceCommitted = {
         ...observation,
         type: "utterance-committed",
-        speakerId: previous.speaker_id,
+        // A transcript revision inherits only the prior *source* claim. Any
+        // Human correction remains an append-only overlay that the current
+        // projection applies afterwards; it must never become purported
+        // provider evidence in the new immutable utterance row.
+        speaker: speakerAttributionFromStoredUtterance(previous),
         startedAt: previous.started_at,
         endedAt: previous.ended_at
       };
       const evidence = evidenceFromUtterance(committed);
       await insertUtteranceVersion(database, committed, evidence, now);
       await insertEvidence(database, state.workspaceId, state.meetingId, evidence, now);
-      return {
-        state: removeItemsUsingInactiveEvidence(
+      const projected = await projectCurrentSpeakerAttribution(
+        database,
+        removeItemsUsingInactiveEvidence(
           state,
           evidenceIdForUtterance(observation.utteranceId, observation.replacesVersion)
         ),
-        evidenceForAnalysis: [evidence],
+        { persistEvidence: true }
+      );
+      return {
+        state: {
+          ...projected.state,
+          lastObservationAt: observation.observedAt
+        },
+        evidenceForAnalysis: [
+          projected.evidenceById.get(evidence.evidenceId) ?? evidence
+        ],
         events: []
       };
     }
@@ -2914,6 +3015,12 @@ async function applyObservation(
           observation,
           now
         );
+      }
+      if (observation.judgment.kind === "resolve-action-item-ownership") {
+        return applyActionItemOwnershipHumanJudgment(database, state, observation, now);
+      }
+      if (observation.judgment.kind === "resolve-speaker-attribution") {
+        return applySpeakerAttributionHumanJudgment(database, state, observation, now);
       }
       if (observation.judgment.kind === "refresh-action-item-reconciliation") {
         return {
@@ -3065,7 +3172,7 @@ async function applyImportedMeetingSource(
       importedSources,
       importedActionItemCandidates,
       currentImportedActionItemCandidateIds,
-      followUpIntentions: invalidateSupersededSuggestedReconciliationIntents(
+      followUpIntentions: invalidateSupersededReconciliationIntents(
         state.followUpIntentions,
         currentImportedActionItemCandidateIds
       ),
@@ -3113,7 +3220,7 @@ async function activeExecutionWouldBeSuperseded(
   return affectedIntentIds.some((intentId) => activeIntentIds.has(intentId));
 }
 
-function invalidateSupersededSuggestedReconciliationIntents(
+function invalidateSupersededReconciliationIntents(
   intents: FollowUpIntent[],
   currentCandidateIds: string[]
 ): FollowUpIntent[] {
@@ -3122,17 +3229,43 @@ function invalidateSupersededSuggestedReconciliationIntents(
   return intents.map((intent) => {
     const binding = reconciliationBindingForIntent(intent);
 
-    return intent.status === "suggested" && binding && !current.has(binding.candidateId)
+    return (intent.status === "suggested" || intent.status === "approved") &&
+      binding &&
+      !current.has(binding.candidateId)
       ? { ...intent, status: "invalidated" }
       : intent;
   });
 }
 
-function validateObservationBeforeAcceptance(
+async function validateObservationBeforeAcceptance(
+  database: DatabaseQuery,
   state: MeetingState,
   workspaceTimezone: string,
   observation: MeetingObservation
-): MeetingIntelligenceError | null {
+): Promise<MeetingIntelligenceError | null> {
+  if (observation.type === "utterance-committed") {
+    if (observation.speaker.basis === "human-confirmation") {
+      return {
+        code: "invalid-observation",
+        observationId: observation.observationId,
+        message:
+          "Utterance speaker attribution may not claim Human confirmation; record a resolve-speaker-attribution Human Judgment instead",
+        retryable: false
+      };
+    }
+
+    const speakerError = speakerAttributionValidationError(observation.speaker);
+
+    return speakerError
+      ? {
+          code: "invalid-observation",
+          observationId: observation.observationId,
+          message: `Utterance speaker attribution ${speakerError}`,
+          retryable: false
+        }
+      : null;
+  }
+
   if (observation.type === "meeting-imported-from-source") {
     return (
       validateImportedMeetingSourceObservation(observation, workspaceTimezone) ??
@@ -3143,6 +3276,14 @@ function validateObservationBeforeAcceptance(
   if (observation.type === "human-judgment-recorded") {
     if (observation.judgment.kind === "resolve-action-item-reconciliation") {
       return validateActionItemReconciliationHumanJudgment(state, observation);
+    }
+
+    if (observation.judgment.kind === "resolve-action-item-ownership") {
+      return validateActionItemOwnershipHumanJudgment(database, state, observation);
+    }
+
+    if (observation.judgment.kind === "resolve-speaker-attribution") {
+      return validateSpeakerAttributionHumanJudgment(observation);
     }
 
     if (observation.judgment.kind === "refresh-action-item-reconciliation") {
@@ -3159,6 +3300,57 @@ function validateObservationBeforeAcceptance(
   }
 
   return null;
+}
+
+function speakerAttributionValidationError(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return "must be an explicit attribution object";
+  }
+
+  const status = value["status"];
+  const confidence = value["confidence"];
+  const basis = value["basis"];
+
+  if (status === "attributed") {
+    const personId = value["personId"];
+
+    if (typeof personId !== "string" || personId.trim().length === 0) {
+      return "must name a canonical Person when attributed";
+    }
+
+    if (confidence !== "deterministic" && confidence !== "high") {
+      return "may be attributed only with deterministic or high confidence";
+    }
+
+    return ["provider-identity", "human-confirmation"].includes(String(basis))
+      ? null
+      : "has an unsupported attributed basis";
+  }
+
+  if (status === "unresolved") {
+    const candidatePersonId = value["candidatePersonId"];
+
+    if (candidatePersonId !== null && typeof candidatePersonId !== "string") {
+      return "has an invalid unresolved candidate Person";
+    }
+
+    if (!["medium", "low", "unknown"].includes(String(confidence))) {
+      return "has an invalid unresolved confidence";
+    }
+
+    return [
+      "provider-speaker-label",
+      "calendar-context",
+      "audio-diarization",
+      "contextual-inference",
+      "human-confirmation",
+      "legacy-unverified"
+    ].includes(String(basis))
+      ? null
+      : "has an unsupported unresolved basis";
+  }
+
+  return "has an unsupported status";
 }
 
 function validateFollowUpIntentApproval(
@@ -3544,7 +3736,8 @@ function validateImportedMeetingSourceObservation(
     if (
       !sourceBlock ||
       sourceBlock.excerpt !== candidate.source.sourceExcerpt ||
-      sourceBlock.completion !== candidate.completion
+      importedActionItemCompletionFor(sourceBlock.excerpt, sourceBlock.completion) !==
+        candidate.completion
     ) {
       return invalidImportedSourceObservation(
         observation,
@@ -3678,6 +3871,19 @@ function validateActionItemReconciliationHumanJudgment(
     );
   }
 
+  if (
+    reconciliationResolutionMutatesCanonicalWork(
+      currentReview.proposal,
+      judgment.resolution
+    ) &&
+    !ownershipCanMutateCanonicalWork(currentReview.ownership)
+  ) {
+    return invalidHumanReconciliationJudgment(
+      observation,
+      "A proposed Action Item owner must be confirmed or explicitly left unassigned before Human Judgment can authorize a canonical work mutation"
+    );
+  }
+
   switch (judgment.resolution.type) {
     case "accept-proposal":
       if (currentReview.proposal.outcome.type === "needs-clarification") {
@@ -3749,6 +3955,152 @@ function validateActionItemReconciliationHumanJudgment(
         currentReview.proposal
       );
   }
+}
+
+function reconciliationResolutionMutatesCanonicalWork(
+  review: ActionItemReconciliationReview,
+  resolution: ActionItemReconciliationResolution
+): boolean {
+  switch (resolution.type) {
+    case "accept-proposal":
+      return (
+        review.outcome.type === "create-new" || review.outcome.type === "update-existing"
+      );
+    case "select-create-new":
+      return true;
+    case "select-existing":
+      return resolution.action === "update-existing";
+    case "reject-proposal":
+    case "select-needs-clarification":
+      return false;
+  }
+}
+
+async function validateActionItemOwnershipHumanJudgment(
+  database: DatabaseQuery,
+  state: MeetingState,
+  observation: Extract<MeetingObservation, { type: "human-judgment-recorded" }>
+): Promise<MeetingIntelligenceError | null> {
+  const judgment = observation.judgment;
+
+  if (judgment.kind !== "resolve-action-item-ownership") {
+    return null;
+  }
+
+  const candidate = state.importedActionItemCandidates.find(
+    (value) =>
+      value.id !== "" &&
+      state.currentImportedActionItemCandidateIds.includes(value.id) &&
+      actionItemOwnershipClaimId(value) === judgment.claimId
+  );
+
+  if (!candidate) {
+    return invalidHumanReconciliationJudgment(
+      observation,
+      "Human ownership Judgment must target one current source-backed ownership claim"
+    );
+  }
+
+  const activeSettlement = state.followUpIntentions.some((intent) => {
+    const binding = reconciliationBindingForIntent(intent);
+
+    return (
+      binding?.candidateId === candidate.id &&
+      (intent.status === "executing" || intent.status === "partially-succeeded")
+    );
+  });
+
+  if (activeSettlement) {
+    return invalidHumanReconciliationJudgment(
+      observation,
+      "Human ownership Judgment cannot supersede a candidate while its canonical settlement is executing"
+    );
+  }
+
+  // Meeting-state Intent status is only updated when Follow-up Execution
+  // records its receipt. The durable reservation is therefore the authority
+  // while a settlement is between canonical preflight and a provider call.
+  // This query follows the same Meeting-row → execution-row lock order as
+  // Follow-up Execution's claim, so a correction either sees the active
+  // reservation or commits before a future claim can use the old review.
+  const activeExecutions = await database.query<{ intent_id: string }>(
+    `SELECT intent_id
+       FROM follow_up_executions
+      WHERE workspace_id = $1
+        AND meeting_id = $2
+        AND operation = 'execute'
+        AND status IN ('executing', 'receipt-recorded')
+      FOR UPDATE`,
+    [state.workspaceId, state.meetingId]
+  );
+  const activeExecutionIntentIds = new Set(
+    activeExecutions.rows.map((execution) => execution.intent_id)
+  );
+  const activeReconciliationExecution = state.followUpIntentions.some((intent) => {
+    const binding = reconciliationBindingForIntent(intent);
+
+    return (
+      binding?.candidateId === candidate.id && activeExecutionIntentIds.has(intent.id)
+    );
+  });
+
+  if (activeReconciliationExecution) {
+    return invalidHumanReconciliationJudgment(
+      observation,
+      "Human ownership Judgment cannot supersede a candidate while its canonical settlement holds an active execution reservation"
+    );
+  }
+
+  if (
+    judgment.resolution.type === "confirm-owner" &&
+    judgment.resolution.ownerPersonId.trim().length === 0
+  ) {
+    return invalidHumanReconciliationJudgment(
+      observation,
+      "Human ownership confirmation must name one canonical Person"
+    );
+  }
+
+  return null;
+}
+
+function validateSpeakerAttributionHumanJudgment(
+  observation: Extract<MeetingObservation, { type: "human-judgment-recorded" }>
+): MeetingIntelligenceError | null {
+  const judgment = observation.judgment;
+
+  if (judgment.kind !== "resolve-speaker-attribution") {
+    return null;
+  }
+
+  if (
+    typeof judgment.utteranceId !== "string" ||
+    judgment.utteranceId.trim().length === 0 ||
+    !Number.isSafeInteger(judgment.version) ||
+    judgment.version < 1
+  ) {
+    return {
+      code: "invalid-observation",
+      observationId: observation.observationId,
+      message: "Human speaker attribution must target one versioned utterance",
+      retryable: false
+    };
+  }
+
+  if (
+    judgment.personId !== null &&
+    (typeof judgment.personId !== "string" || judgment.personId.trim().length === 0)
+  ) {
+    return {
+      code: "invalid-observation",
+      observationId: observation.observationId,
+      message:
+        "Human speaker attribution must name a canonical Person or explicitly remain unresolved",
+      retryable: false
+    };
+  }
+
+  return null;
 }
 
 function validateReconciliationIntentIdAvailability(
@@ -3940,7 +4292,8 @@ function validateImportedCandidateSourceSemantics(
   const excerpt = candidate.source.sourceExcerpt;
   const expectedLanguage = importedActionItemLanguageFor(excerpt);
   const expectedModality = importedActionItemModalityFor(excerpt);
-  const expectedOwner = importedActionItemOwnerFor(excerpt);
+  const expectedSourceOwner = importedActionItemSourceOwnerFor(excerpt);
+  const expectedOwnership = importedActionItemOwnershipFor(excerpt);
 
   if (candidate.language !== expectedLanguage) {
     return "has language metadata that does not match its source wording";
@@ -3953,15 +4306,15 @@ function validateImportedCandidateSourceSemantics(
     return "has modality metadata that does not match its source wording";
   }
 
-  if (candidate.owner.state === "known") {
-    return "has a resolved owner that is not grounded by source wording";
+  if (
+    candidate.sourceOwner.state !== expectedSourceOwner.state ||
+    candidate.sourceOwner.sourceText !== expectedSourceOwner.sourceText
+  ) {
+    return "has source owner wording that does not match its source wording";
   }
 
-  if (
-    candidate.owner.state !== expectedOwner.state ||
-    candidate.owner.sourceText !== expectedOwner.sourceText
-  ) {
-    return "has owner metadata that does not match its source wording";
+  if (!sameActionItemOwnership(candidate.ownership, expectedOwnership)) {
+    return "has ownership attribution that is more certain than its source wording";
   }
 
   return null;
@@ -4449,7 +4802,12 @@ async function loadMeetingStateForMutation(
     return createInitialMeetingState(workspaceId, meetingId);
   }
 
-  return normalizeMeetingState(parseJson<MeetingState>(row.state_json));
+  return (
+    await projectCurrentSpeakerAttribution(
+      database,
+      normalizeMeetingState(parseJson<MeetingState>(row.state_json))
+    )
+  ).state;
 }
 
 async function requireMeetingState(
@@ -4467,7 +4825,12 @@ async function requireMeetingState(
     throw new Error("meeting-not-found");
   }
 
-  return normalizeMeetingState(parseJson<MeetingState>(row.state_json));
+  return (
+    await projectCurrentSpeakerAttribution(
+      database,
+      normalizeMeetingState(parseJson<MeetingState>(row.state_json))
+    )
+  ).state;
 }
 
 async function saveMeetingState(
@@ -4534,6 +4897,9 @@ function createInitialMeetingState(
     currentImportedActionItemCandidateIds: [],
     actionItemReconciliationReviews: [],
     actionItemReconciliationHumanResolutions: [],
+    actionItemOwnershipHumanResolutions: [],
+    speakerAttributionHumanResolutions: [],
+    speakerInferredParticipantIds: [],
     actionItemReconciliationCreatedWorkMappings: [],
     lastObservationAt: "",
     lastAnalyzedAt: null
@@ -4554,6 +4920,7 @@ function normalizeMeetingState(state: MeetingState): MeetingState {
         sourceByRevision.get(importedSourceRevisionKey(candidate.source.source))
       )
   );
+  const actionItems = state.actionItems.map(normalizeActionItemOwnership);
 
   return {
     ...state,
@@ -4567,11 +4934,22 @@ function normalizeMeetingState(state: MeetingState): MeetingState {
     ),
     importedSources,
     importedActionItemCandidates,
+    actionItems,
     actionItemReconciliationReviews: normalizeActionItemReconciliationReviews(
       state.actionItemReconciliationReviews ?? []
     ),
     actionItemReconciliationHumanResolutions:
       state.actionItemReconciliationHumanResolutions ?? [],
+    actionItemOwnershipHumanResolutions: state.actionItemOwnershipHumanResolutions ?? [],
+    speakerAttributionHumanResolutions: state.speakerAttributionHumanResolutions ?? [],
+    speakerInferredParticipantIds: Array.from(
+      new Set(
+        (state.speakerInferredParticipantIds ?? []).filter(
+          (personId): personId is string =>
+            typeof personId === "string" && personId.length > 0
+        )
+      )
+    ),
     actionItemReconciliationCreatedWorkMappings:
       state.actionItemReconciliationCreatedWorkMappings ?? [],
     currentImportedActionItemCandidateIds:
@@ -4583,12 +4961,73 @@ function normalizeMeetingState(state: MeetingState): MeetingState {
   };
 }
 
+function normalizeActionItemOwnership(item: ActionItem): ActionItem {
+  const ownership = item.ownership ?? ownershipForLegacyActionItem(item.ownerId);
+
+  return {
+    ...item,
+    ownership,
+    ownerId: ownership.status === "confirmed" ? ownership.ownerPersonId : null
+  };
+}
+
+function ownershipForLegacyActionItem(
+  ownerId: string | null
+): ActionItemOwnershipAttribution {
+  return ownerId
+    ? {
+        status: "proposed",
+        proposedOwnerPersonId: ownerId,
+        confidence: "low",
+        basis: "inferred-assignment"
+      }
+    : {
+        status: "unresolved",
+        reason: "no-owner-stated",
+        likelyOwnerPersonId: null
+      };
+}
+
+function actionItemOwnership(item: ActionItem): ActionItemOwnershipAttribution {
+  return item.ownership ?? ownershipForLegacyActionItem(item.ownerId);
+}
+
+function ownershipForHumanActionItemCorrection(
+  current: ActionItemOwnershipAttribution,
+  correctedOwnerId: string | null | undefined
+): ActionItemOwnershipAttribution {
+  if (correctedOwnerId === undefined) {
+    return current;
+  }
+
+  return correctedOwnerId === null
+    ? {
+        status: "intentionally-unassigned",
+        basis: "human-confirmation"
+      }
+    : {
+        status: "confirmed",
+        ownerPersonId: correctedOwnerId,
+        confidence: "deterministic",
+        basis: "human-confirmation"
+      };
+}
+
+function ownerIdForHumanActionItemCorrection(
+  current: ActionItemOwnershipAttribution,
+  correctedOwnerId: string | null | undefined
+): string | null {
+  const ownership = ownershipForHumanActionItemCorrection(current, correctedOwnerId);
+  return ownership.status === "confirmed" ? ownership.ownerPersonId : null;
+}
+
 function normalizeActionItemReconciliationReviews(
   reviews: ActionItemReconciliationReview[]
 ): ActionItemReconciliationReview[] {
   const nextAttemptByCandidateAndCatalog = new Map<string, number>();
 
   return reviews.map((review) => {
+    const candidate = normalizeImportedActionItemCandidate(review.candidate, undefined);
     const catalogProviderId =
       review.catalogProviderId ??
       review.searches[0]?.providerId ??
@@ -4608,6 +5047,8 @@ function normalizeActionItemReconciliationReviews(
 
     return {
       ...review,
+      candidate,
+      ownership: review.ownership ?? candidate.ownership,
       policyVersion: review.policyVersion ?? RECONCILIATION_POLICY_VERSION,
       attempt,
       trigger: review.trigger ?? "initial-source-import",
@@ -4730,9 +5171,19 @@ function normalizeImportedActionItemCandidate(
         ? "completed"
         : "open";
 
+  const legacyOwner = (candidate as unknown as Record<string, unknown>)["owner"];
+  const sourceOwner =
+    candidate.sourceOwner ??
+    normalizeLegacyImportedActionItemSourceOwner(legacyOwner) ??
+    importedActionItemSourceOwnerFor(candidate.source.sourceExcerpt);
+
   return {
     ...candidate,
     completion,
+    sourceOwner,
+    ownership:
+      candidate.ownership ??
+      importedActionItemOwnershipFor(candidate.source.sourceExcerpt),
     projectHints: Array.isArray(candidate.projectHints) ? candidate.projectHints : [],
     componentHints: Array.isArray(candidate.componentHints)
       ? candidate.componentHints
@@ -4746,6 +5197,37 @@ function normalizeImportedActionItemCandidate(
       source: source ?? normalizeImportedMeetingSource(candidate.source.source)
     }
   };
+}
+
+function normalizeLegacyImportedActionItemSourceOwner(
+  value: unknown
+): ImportedActionItemCandidate["sourceOwner"] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const state = value["state"];
+  const sourceText = value["sourceText"];
+
+  if (state === "unmapped" && typeof sourceText === "string") {
+    return { state, sourceText };
+  }
+
+  if (state === "ambiguous" && typeof sourceText === "string") {
+    return { state, sourceText };
+  }
+
+  if (state === "unspecified" && sourceText === null) {
+    return { state, sourceText };
+  }
+
+  // Old persisted "known" values were source labels, not proof of a Person.
+  // Preserve their wording only as an unmapped source claim.
+  if (state === "known" && typeof sourceText === "string") {
+    return { state: "unmapped", sourceText };
+  }
+
+  return null;
 }
 
 function normalizeImportedWorkItemReferences(
@@ -4891,10 +5373,12 @@ function reconcileActionItems(
       proposal.confidence,
       analysis
     );
+    const ownership = ownershipForActionItemProposal(proposal, provenance.evidence);
     existingById.set(id, {
       id,
       description: proposal.description,
-      ownerId: proposal.ownerId,
+      ownership,
+      ownerId: ownership.status === "confirmed" ? ownership.ownerPersonId : null,
       dueDate: proposal.dueDate.normalizedDate,
       dueDateConfidence: proposal.dueDate.confidence,
       status: existing?.status === "cancelled" ? existing.status : proposal.status,
@@ -4905,6 +5389,125 @@ function reconcileActionItems(
   }
 
   return [...existingById.values()];
+}
+
+/**
+ * A model-supplied Person ID is a proposal, never a fact. The one automatic
+ * confirmation allowed here is a directly cited, deterministic speaker making
+ * a first-person commitment in the source itself.
+ */
+function ownershipForActionItemProposal(
+  proposal: ActionItemProposal,
+  evidence: EvidenceReference[]
+): ActionItemOwnershipAttribution {
+  const speakerOwnership = speakerSelfCommitmentOwnership(evidence);
+
+  if (speakerOwnership) {
+    return speakerOwnership;
+  }
+
+  return proposal.ownerId
+    ? {
+        status: "proposed",
+        proposedOwnerPersonId: proposal.ownerId,
+        confidence: "low",
+        basis: "inferred-assignment"
+      }
+    : {
+        status: "unresolved",
+        reason: "no-owner-stated",
+        likelyOwnerPersonId: null
+      };
+}
+
+function refreshedActionItemOwnership(
+  item: ActionItem,
+  evidence: EvidenceReference[]
+): ActionItemOwnershipAttribution {
+  const current = actionItemOwnership(item);
+
+  if (current.status === "confirmed" && current.basis === "human-confirmation") {
+    return current;
+  }
+
+  if (current.status === "intentionally-unassigned") {
+    return current;
+  }
+
+  const speakerOwnership = speakerSelfCommitmentOwnership(evidence);
+
+  if (speakerOwnership) {
+    return speakerOwnership;
+  }
+
+  if (current.status === "confirmed" && current.basis === "self-commitment") {
+    return {
+      status: "unresolved",
+      reason: "missing-speaker",
+      likelyOwnerPersonId: null
+    };
+  }
+
+  return current;
+}
+
+function speakerSelfCommitmentOwnership(
+  evidence: EvidenceReference[]
+): ActionItemOwnershipAttribution | null {
+  const selfCommittedSpeakers = Array.from(
+    new Set(
+      evidence.flatMap((reference) =>
+        reference.source === "transcript" &&
+        reference.participantId &&
+        isSpeakerSelfCommitment(reference.excerpt)
+          ? [reference.participantId]
+          : []
+      )
+    )
+  );
+
+  if (selfCommittedSpeakers.length === 1) {
+    const ownerPersonId = selfCommittedSpeakers[0];
+
+    return ownerPersonId
+      ? {
+          status: "confirmed",
+          ownerPersonId,
+          confidence: "deterministic",
+          basis: "self-commitment"
+        }
+      : null;
+  }
+
+  return selfCommittedSpeakers.length > 1
+    ? {
+        status: "unresolved",
+        reason: "conflicting-speaker",
+        likelyOwnerPersonId: null
+      }
+    : null;
+}
+
+function isSpeakerSelfCommitment(text: string | undefined): boolean {
+  if (!text) {
+    return false;
+  }
+
+  const normalized = text.trim();
+
+  // A question, refusal, or merely stated capability is not an accepted
+  // commitment. Failing closed here is preferable to turning one ambiguous
+  // sentence into a durable owner assertion.
+  if (
+    normalized.endsWith("?") ||
+    commitmentDispositionFor(normalized) !== "affirmative"
+  ) {
+    return false;
+  }
+
+  return /\b(?:ich\s+(?:mache|übernehme|kümmere\s+mich|bearbeite|werde\s+(?:das\s+)?(?:machen|übernehmen))|(?:das\s+)?(?:mache|übernehme)\s+ich|ja\s*,?\s*(?:mache|übernehme)\s+ich|i(?:\s+will|'ll)\s+(?:do|take|handle|own|prepare))\b/iu.test(
+    normalized
+  );
 }
 
 function reconcileDecisions(
@@ -5054,11 +5657,17 @@ function combineProvenance(state: MeetingState, revision: number): Provenance {
 }
 
 function evidenceFromUtterance(observation: UtteranceCommitted): EvidenceReference {
+  const deterministicSpeakerPersonId = deterministicallyAttributedSpeakerPersonId(
+    observation.speaker
+  );
+
   return {
     evidenceId: evidenceIdForUtterance(observation.utteranceId, observation.version),
     source: "transcript",
     sourceObjectId: observation.utteranceId,
-    participantId: observation.speakerId,
+    ...(deterministicSpeakerPersonId
+      ? { participantId: deterministicSpeakerPersonId }
+      : {}),
     sourceVersion: String(observation.version),
     excerpt: observation.originalText
   };
@@ -5066,6 +5675,289 @@ function evidenceFromUtterance(observation: UtteranceCommitted): EvidenceReferen
 
 function evidenceIdForUtterance(utteranceId: string, version: number): string {
   return `evidence:transcript:${utteranceId}:v${version}`;
+}
+
+function withoutSpeakerInferredParticipantId(
+  state: MeetingState,
+  personId: string
+): string[] {
+  return (state.speakerInferredParticipantIds ?? []).filter(
+    (candidate) => candidate !== personId
+  );
+}
+
+function legacyUnverifiedSpeakerAttribution(): SpeakerAttribution {
+  return {
+    status: "unresolved",
+    candidatePersonId: null,
+    confidence: "unknown",
+    basis: "legacy-unverified"
+  };
+}
+
+/**
+ * `EvidenceReference.participantId` is a factual projection used by
+ * participant queries and self-commitment ownership. Keep a high-confidence
+ * speaker claim in the immutable utterance record, but do not silently
+ * strengthen it into that deterministic projection.
+ */
+function deterministicallyAttributedSpeakerPersonId(
+  speaker: SpeakerAttribution
+): string | null {
+  return speaker.status === "attributed" && speaker.confidence === "deterministic"
+    ? speaker.personId
+    : null;
+}
+
+function speakerAttributionFromStoredUtterance(
+  row: UtteranceVersionRow
+): SpeakerAttribution {
+  if (!row.speaker_attribution_json) {
+    return legacyUnverifiedSpeakerAttribution();
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(row.speaker_attribution_json);
+    const error = speakerAttributionValidationError(parsed);
+
+    if (error) {
+      return legacyUnverifiedSpeakerAttribution();
+    }
+
+    return parsed as SpeakerAttribution;
+  } catch {
+    return legacyUnverifiedSpeakerAttribution();
+  }
+}
+
+/**
+ * Human speaker resolutions are append-only overlays. They never rewrite the
+ * captured source attribution, but a correction for an utterance carries
+ * forward when that same utterance receives a later transcript revision.
+ */
+function effectiveSpeakerAttributionForUtterance(
+  state: MeetingState,
+  utteranceId: string,
+  version: number,
+  sourceAttribution: SpeakerAttribution
+): SpeakerAttribution {
+  const resolution = state.speakerAttributionHumanResolutions
+    .filter(
+      (candidate) => candidate.utteranceId === utteranceId && candidate.version <= version
+    )
+    .sort(
+      (left, right) =>
+        right.version - left.version ||
+        right.resolvedAt.localeCompare(left.resolvedAt) ||
+        right.id.localeCompare(left.id)
+    )[0];
+
+  return resolution?.speaker ?? sourceAttribution;
+}
+
+/**
+ * Rebuild the current speaker-derived projection from immutable utterance
+ * records plus Human attribution overlays. Source utterance rows stay
+ * untouched; only the current derived Evidence and Meeting State view change.
+ *
+ * This is also the legacy safety boundary: a historic bare `speaker_id` is
+ * intentionally treated as unresolved rather than re-exposed as a Person.
+ */
+async function projectCurrentSpeakerAttribution(
+  database: DatabaseQuery,
+  state: MeetingState,
+  options: { persistEvidence?: boolean } = {}
+): Promise<SpeakerAttributionProjection> {
+  const rows = await database.query<ActiveUtteranceVersionRow>(
+    `SELECT utterance_id, version, speaker_id, speaker_attribution_json,
+            started_at, ended_at, evidence_id, original_text
+       FROM utterance_versions
+      WHERE workspace_id = $1
+        AND meeting_id = $2
+        AND superseded_by_version IS NULL
+      ORDER BY utterance_id ASC, version ASC`,
+    [state.workspaceId, state.meetingId]
+  );
+  const evidenceById = new Map<string, EvidenceReference>();
+  const activeTranscriptEvidence: EvidenceReference[] = [];
+  const activeSpeakerIds = new Set<string>();
+
+  for (const row of rows.rows) {
+    const speaker = effectiveSpeakerAttributionForUtterance(
+      state,
+      row.utterance_id,
+      row.version,
+      speakerAttributionFromStoredUtterance(row)
+    );
+    const deterministicSpeakerPersonId =
+      deterministicallyAttributedSpeakerPersonId(speaker);
+    const evidence: EvidenceReference = {
+      evidenceId: row.evidence_id,
+      source: "transcript",
+      sourceObjectId: row.utterance_id,
+      ...(deterministicSpeakerPersonId
+        ? { participantId: deterministicSpeakerPersonId }
+        : {}),
+      sourceVersion: String(row.version),
+      excerpt: row.original_text
+    };
+
+    evidenceById.set(evidence.evidenceId, evidence);
+    activeTranscriptEvidence.push(evidence);
+
+    if (deterministicSpeakerPersonId) {
+      activeSpeakerIds.add(deterministicSpeakerPersonId);
+    }
+
+    if (options.persistEvidence) {
+      // Deliberately do not upsert here: a re-projection must never reactivate
+      // superseded transcript Evidence. This only refreshes a known active row.
+      await database.query(
+        `UPDATE evidence
+            SET source = $4,
+                source_object_id = $5,
+                source_version = $6,
+                excerpt = $7,
+                reference_json = $8
+          WHERE workspace_id = $1
+            AND meeting_id = $2
+            AND evidence_id = $3
+            AND active = TRUE`,
+        [
+          state.workspaceId,
+          state.meetingId,
+          evidence.evidenceId,
+          evidence.source,
+          evidence.sourceObjectId,
+          evidence.sourceVersion ?? null,
+          evidence.excerpt ?? null,
+          JSON.stringify(evidence)
+        ]
+      );
+    }
+  }
+
+  const directlyObservedParticipantIds = new Set(
+    state.participants
+      .filter(
+        (participant) => participant.joinedAt !== null || participant.leftAt !== null
+      )
+      .map((participant) => participant.personId)
+  );
+  const retainedParticipants = state.participants.filter(
+    (participant) =>
+      directlyObservedParticipantIds.has(participant.personId) ||
+      activeSpeakerIds.has(participant.personId)
+  );
+  const participants = [...retainedParticipants];
+
+  for (const personId of activeSpeakerIds) {
+    if (!participants.some((participant) => participant.personId === personId)) {
+      participants.push({ personId, joinedAt: null, leftAt: null });
+    }
+  }
+
+  return {
+    state: replaceEvidenceReferencesInState(
+      {
+        ...state,
+        participants,
+        speakerInferredParticipantIds: [...activeSpeakerIds].filter(
+          (personId) => !directlyObservedParticipantIds.has(personId)
+        )
+      },
+      evidenceById
+    ),
+    evidenceById,
+    activeTranscriptEvidence
+  };
+}
+
+function replaceEvidenceReferencesInState(
+  state: MeetingState,
+  replacements: ReadonlyMap<string, EvidenceReference>
+): MeetingState {
+  if (replacements.size === 0) {
+    return state;
+  }
+
+  const replaceReference = (reference: EvidenceReference): EvidenceReference =>
+    replacements.get(reference.evidenceId) ?? reference;
+  const replaceProvenance = (provenance: Provenance): Provenance => ({
+    ...provenance,
+    evidence: provenance.evidence.map(replaceReference)
+  });
+  const replaceCandidate = (
+    candidate: ImportedActionItemCandidate
+  ): ImportedActionItemCandidate => ({
+    ...candidate,
+    evidence: candidate.evidence.map(replaceReference)
+  });
+
+  return {
+    ...state,
+    topics: state.topics.map((topic) => ({
+      ...topic,
+      provenance: replaceProvenance(topic.provenance)
+    })),
+    proposals: state.proposals.map((proposal) => ({
+      ...proposal,
+      provenance: replaceProvenance(proposal.provenance)
+    })),
+    decisions: state.decisions.map((decision) => ({
+      ...decision,
+      provenance: replaceProvenance(decision.provenance)
+    })),
+    actionItems: state.actionItems.map((item) => {
+      const provenance = replaceProvenance(item.provenance);
+      const ownership = refreshedActionItemOwnership(item, provenance.evidence);
+
+      return {
+        ...item,
+        ownership,
+        ownerId: ownership.status === "confirmed" ? ownership.ownerPersonId : null,
+        provenance
+      };
+    }),
+    openQuestions: state.openQuestions.map((question) => ({
+      ...question,
+      provenance: replaceProvenance(question.provenance)
+    })),
+    risks: state.risks.map((risk) => ({
+      ...risk,
+      provenance: replaceProvenance(risk.provenance)
+    })),
+    followUpIntentions: state.followUpIntentions.map((intent) => ({
+      ...intent,
+      provenance: replaceProvenance(intent.provenance)
+    })),
+    importedActionItemCandidates:
+      state.importedActionItemCandidates.map(replaceCandidate),
+    actionItemReconciliationReviews: state.actionItemReconciliationReviews.map(
+      (review) => ({
+        ...review,
+        candidate: replaceCandidate(review.candidate),
+        evidence: review.evidence.map(replaceReference)
+      })
+    ),
+    actionItemReconciliationHumanResolutions:
+      state.actionItemReconciliationHumanResolutions.map((resolution) => ({
+        ...resolution,
+        evidence: replaceReference(resolution.evidence)
+      })),
+    actionItemOwnershipHumanResolutions: state.actionItemOwnershipHumanResolutions.map(
+      (resolution) => ({
+        ...resolution,
+        evidence: replaceReference(resolution.evidence)
+      })
+    ),
+    speakerAttributionHumanResolutions: state.speakerAttributionHumanResolutions.map(
+      (resolution) => ({
+        ...resolution,
+        evidence: replaceReference(resolution.evidence)
+      })
+    )
+  };
 }
 
 async function insertEvidence(
@@ -5104,16 +5996,18 @@ async function insertUtteranceVersion(
 ): Promise<void> {
   await database.query(
     `INSERT INTO utterance_versions (
-      workspace_id, meeting_id, utterance_id, version, speaker_id, started_at,
-      ended_at, original_text, language, evidence_id, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      workspace_id, meeting_id, utterance_id, version, speaker_id,
+      speaker_attribution_json, started_at, ended_at, original_text, language,
+      evidence_id, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     ON CONFLICT (workspace_id, meeting_id, utterance_id, version) DO NOTHING`,
     [
       observation.workspaceId,
       observation.meetingId,
       observation.utteranceId,
       observation.version,
-      observation.speakerId,
+      observation.speaker.status === "attributed" ? observation.speaker.personId : null,
+      JSON.stringify(observation.speaker),
       observation.startedAt,
       observation.endedAt,
       observation.originalText,
@@ -5131,7 +6025,7 @@ async function loadUtteranceVersion(
   version: number
 ): Promise<UtteranceVersionRow | null> {
   const result = await database.query<UtteranceVersionRow>(
-    `SELECT speaker_id, started_at, ended_at
+    `SELECT speaker_id, speaker_attribution_json, started_at, ended_at
      FROM utterance_versions
      WHERE workspace_id = $1 AND meeting_id = $2 AND utterance_id = $3 AND version = $4`,
     [state.workspaceId, state.meetingId, utteranceId, version]
@@ -5308,8 +6202,14 @@ function applyHumanJudgment(
             ? {
                 ...item,
                 description: correction.statement ?? item.description,
-                ownerId:
-                  correction.ownerId === undefined ? item.ownerId : correction.ownerId,
+                ownership: ownershipForHumanActionItemCorrection(
+                  actionItemOwnership(item),
+                  correction.ownerId
+                ),
+                ownerId: ownerIdForHumanActionItemCorrection(
+                  actionItemOwnership(item),
+                  correction.ownerId
+                ),
                 dueDate:
                   correction.dueDate === undefined ? item.dueDate : correction.dueDate,
                 status: isActionItemStatus(correction.status)
@@ -5324,6 +6224,8 @@ function applyHumanJudgment(
     case "merge":
     case "split":
     case "resolve-action-item-reconciliation":
+    case "resolve-action-item-ownership":
+    case "resolve-speaker-attribution":
     case "refresh-action-item-reconciliation":
       return state;
   }
@@ -5444,6 +6346,221 @@ async function applyActionItemReconciliationHumanJudgment(
     events: intent
       ? [{ type: "follow-up-awaiting-approval", intentIds: [intent.id] }]
       : []
+  };
+}
+
+async function applyActionItemOwnershipHumanJudgment(
+  database: DatabaseQuery,
+  state: MeetingState,
+  observation: Extract<MeetingObservation, { type: "human-judgment-recorded" }>,
+  now: () => Date
+): Promise<{
+  state: MeetingState;
+  evidenceForAnalysis: EvidenceReference[];
+  events: MeetingIntelligenceEvent[];
+}> {
+  const judgment = observation.judgment;
+
+  if (judgment.kind !== "resolve-action-item-ownership") {
+    throw new Error("expected an Action Item ownership Human Judgment");
+  }
+
+  const candidate = state.importedActionItemCandidates.find(
+    (value) =>
+      state.currentImportedActionItemCandidateIds.includes(value.id) &&
+      actionItemOwnershipClaimId(value) === judgment.claimId
+  );
+
+  if (!candidate) {
+    throw new Error("validated ownership claim disappeared before application");
+  }
+
+  const evidence: EvidenceReference = {
+    evidenceId: `evidence:human-judgment:ownership:${opaqueIdentifierSegment(observation.observationId)}`,
+    source: "human-judgment",
+    sourceObjectId: judgment.claimId,
+    participantId: observation.participantId,
+    sourceVersion: observation.observationId,
+    excerpt: `Human Judgment resolved Action Item ownership claim ${judgment.claimId}.`
+  };
+  const ownership = ownershipFromHumanJudgment(judgment);
+  const resolution: ActionItemOwnershipHumanResolution = {
+    id: `ownership-resolution:${opaqueIdentifierSegment(observation.observationId)}`,
+    claimId: judgment.claimId,
+    candidateId: candidate.id,
+    candidateLineageKey: candidate.lineageKey,
+    participantId: observation.participantId,
+    ownership,
+    evidence,
+    resolvedAt: observation.observedAt
+  };
+
+  await insertEvidence(
+    database,
+    observation.workspaceId,
+    observation.meetingId,
+    evidence,
+    now
+  );
+
+  return {
+    state: {
+      ...state,
+      actionItemOwnershipHumanResolutions: [
+        ...state.actionItemOwnershipHumanResolutions,
+        resolution
+      ],
+      followUpIntentions: invalidateSupersededOwnershipReconciliationIntents(
+        state.followUpIntentions,
+        candidate.lineageKey
+      ),
+      lastObservationAt: observation.observedAt
+    },
+    evidenceForAnalysis: [],
+    events: []
+  };
+}
+
+function ownershipFromHumanJudgment(
+  judgment: Extract<HumanJudgment, { kind: "resolve-action-item-ownership" }>
+): ActionItemOwnershipAttribution {
+  switch (judgment.resolution.type) {
+    case "confirm-owner":
+      return {
+        status: "confirmed",
+        ownerPersonId: judgment.resolution.ownerPersonId,
+        confidence: "deterministic",
+        basis: "human-confirmation"
+      };
+    case "intentionally-unassigned":
+      return {
+        status: "intentionally-unassigned",
+        basis: "human-confirmation"
+      };
+    case "keep-unresolved":
+      return {
+        status: "unresolved",
+        reason: judgment.resolution.reason ?? "insufficient-acceptance",
+        likelyOwnerPersonId: null
+      };
+  }
+}
+
+function invalidateSupersededOwnershipReconciliationIntents(
+  intents: FollowUpIntent[],
+  candidateLineageKey: string
+): FollowUpIntent[] {
+  return intents.map((intent) => {
+    const binding = reconciliationBindingForIntent(intent);
+
+    return binding?.candidateLineageKey === candidateLineageKey &&
+      (intent.status === "suggested" || intent.status === "approved")
+      ? { ...intent, status: "invalidated" }
+      : intent;
+  });
+}
+
+async function applySpeakerAttributionHumanJudgment(
+  database: DatabaseQuery,
+  state: MeetingState,
+  observation: Extract<MeetingObservation, { type: "human-judgment-recorded" }>,
+  now: () => Date
+): Promise<{
+  state: MeetingState;
+  evidenceForAnalysis: EvidenceReference[];
+  events: MeetingIntelligenceEvent[];
+  error?: MeetingIntelligenceError;
+}> {
+  const judgment = observation.judgment;
+
+  if (judgment.kind !== "resolve-speaker-attribution") {
+    throw new Error("expected a speaker attribution Human Judgment");
+  }
+
+  const utterance = await loadUtteranceVersion(
+    database,
+    state,
+    judgment.utteranceId,
+    judgment.version
+  );
+
+  if (!utterance) {
+    return {
+      state,
+      evidenceForAnalysis: [],
+      events: [],
+      error: {
+        code: "invalid-observation",
+        observationId: observation.observationId,
+        message: "Human speaker attribution must target an existing versioned utterance",
+        retryable: false
+      }
+    };
+  }
+
+  const speaker: SpeakerAttribution = judgment.personId
+    ? {
+        status: "attributed",
+        personId: judgment.personId,
+        confidence: "deterministic",
+        basis: "human-confirmation"
+      }
+    : {
+        status: "unresolved",
+        candidatePersonId: null,
+        confidence: "unknown",
+        basis: "human-confirmation"
+      };
+  const evidence: EvidenceReference = {
+    evidenceId: `evidence:human-judgment:speaker:${opaqueIdentifierSegment(observation.observationId)}`,
+    source: "human-judgment",
+    sourceObjectId: `${judgment.utteranceId}:v${judgment.version}`,
+    participantId: observation.participantId,
+    sourceVersion: observation.observationId,
+    excerpt: `Human Judgment resolved speaker attribution for utterance ${judgment.utteranceId} version ${judgment.version}.`
+  };
+  const resolution: SpeakerAttributionHumanResolution = {
+    id: `speaker-attribution-resolution:${opaqueIdentifierSegment(observation.observationId)}`,
+    utteranceId: judgment.utteranceId,
+    version: judgment.version,
+    participantId: observation.participantId,
+    speaker,
+    evidence,
+    resolvedAt: observation.observedAt
+  };
+
+  await insertEvidence(
+    database,
+    observation.workspaceId,
+    observation.meetingId,
+    evidence,
+    now
+  );
+
+  const projected = await projectCurrentSpeakerAttribution(
+    database,
+    {
+      ...state,
+      speakerAttributionHumanResolutions: [
+        ...state.speakerAttributionHumanResolutions,
+        resolution
+      ]
+    },
+    { persistEvidence: true }
+  );
+  const correctedTranscriptEvidence = projected.activeTranscriptEvidence.filter(
+    (reference) =>
+      reference.sourceObjectId === judgment.utteranceId &&
+      Number(reference.sourceVersion) >= judgment.version
+  );
+
+  return {
+    state: {
+      ...projected.state,
+      lastObservationAt: observation.observedAt
+    },
+    evidenceForAnalysis: uniqueEvidence([evidence, ...correctedTranscriptEvidence]),
+    events: []
   };
 }
 
@@ -5878,7 +6995,10 @@ function reconcileFollowUpIntentions(
 function deriveInterventions(state: MeetingState): MeetingIntervention[] {
   return [
     ...state.actionItems
-      .filter((item) => item.ownerId === null)
+      .filter((item) => {
+        const ownership = actionItemOwnership(item);
+        return ownership.status === "proposed" || ownership.status === "unresolved";
+      })
       .map((item): MeetingIntervention => ({
         type: "missing-action-owner",
         actionItemId: item.id
@@ -5937,7 +7057,12 @@ function buildParticipantBrief(
 ): ParticipantBrief {
   return {
     participantId,
-    commitments: state.actionItems.filter((item) => item.ownerId === participantId),
+    commitments: state.actionItems.filter((item) => {
+      const ownership = actionItemOwnership(item);
+      return (
+        ownership.status === "confirmed" && ownership.ownerPersonId === participantId
+      );
+    }),
     decisionsAffectingWork: state.decisions.filter(
       (decision) => decision.status === "confirmed"
     ),
@@ -5952,7 +7077,17 @@ function formatActionAnswer(item: ActionItem, queryText: string): string {
   const prefix = /warum|wieso|why/i.test(queryText)
     ? "Grounded Action Item"
     : "Action Item";
-  const owner = item.ownerId ? `owner ${item.ownerId}` : "no confirmed owner";
+  const ownership = actionItemOwnership(item);
+  const owner =
+    ownership.status === "confirmed"
+      ? `confirmed owner ${ownership.ownerPersonId}`
+      : ownership.status === "proposed"
+        ? ownership.proposedOwnerPersonId
+          ? `proposed owner ${ownership.proposedOwnerPersonId}`
+          : "proposed owner requires confirmation"
+        : ownership.status === "intentionally-unassigned"
+          ? "explicitly unassigned by Human Judgment"
+          : "no confirmed owner";
   const due = item.dueDate ? `due ${item.dueDate}` : "no confirmed deadline";
   return `${prefix}: ${item.description}; ${owner}; ${due}.`;
 }
@@ -6026,5 +7161,23 @@ export async function loadActiveEvidenceForMeeting(
   workspaceId: WorkspaceId,
   meetingId: MeetingId
 ): Promise<EvidenceReference[]> {
-  return loadEvidenceReferences(database, workspaceId, meetingId);
+  const rows = await database.query<MeetingRow>(
+    `SELECT state_json FROM meetings WHERE workspace_id = $1 AND meeting_id = $2`,
+    [workspaceId, meetingId]
+  );
+  const row = rows.rows[0];
+
+  if (!row) {
+    return [];
+  }
+
+  const projection = await projectCurrentSpeakerAttribution(
+    database,
+    normalizeMeetingState(parseJson<MeetingState>(row.state_json))
+  );
+  const evidence = await loadEvidenceReferences(database, workspaceId, meetingId);
+
+  return evidence.map(
+    (reference) => projection.evidenceById.get(reference.evidenceId) ?? reference
+  );
 }

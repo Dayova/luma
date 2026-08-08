@@ -2,7 +2,15 @@
 
 ## Current Capability
 
-Discord is Luma's primary meeting surface. The Discord Module translates Discord interactions into provider-independent calls to Meeting Intelligence and renders Meeting Intelligence events back into persistent Discord threads.
+Discord is a first-class Luma conversation source and interaction surface in
+the product direction. The current implementation is deliberately narrower:
+it provides a persistent Meeting bot and a bounded read-only Context Ask
+slice. It does not yet implement the complete Discord Ask → Verify →
+Reconcile → Execute interaction model.
+
+The Discord Module translates current Meeting interactions into
+provider-independent calls to Meeting Intelligence and renders Meeting
+Intelligence events back into persistent Discord threads.
 
 Implemented now:
 
@@ -13,7 +21,9 @@ Implemented now:
 - versioned Conclusion summary on Meeting stop
 - provider-independent Follow-up lifecycle receipts
 - typed German, English, or mixed-language notes as canonical Evidence
-- explicit approval before Linear or Notion mutation
+- deterministic provider-identity speaker attribution for typed Discord notes;
+  speaker attribution remains distinct from Action Item ownership
+- explicit approval before the currently implemented Meeting settlement path
 - explicit Discord user mentions for Jakob, Fabius, Julius, Philipp, and configured additional People
 - bot-authored messages with restricted allowed mentions
 - graceful Gateway shutdown
@@ -24,6 +34,9 @@ Not implemented in this slice:
 
 - Discord voice connection and per-user audio capture
 - voice transcription, utterance revision, and correction UI
+- bounded Discord Verify, Reconcile, and risk-authorized Execute interactions
+- Discord voice identity/audio evidence spike; voiceprints and biometric
+  recognition are not a default path
 
 With OpenAI configured, typed notes are analyzed through the production ReasoningModel Adapter. Without it, Luma still persists the original note and reports that analysis is deferred rather than producing unsupported claims.
 
@@ -138,7 +151,13 @@ Only one active Meeting is allowed per parent channel. Retrying start while a Me
 /meeting note text:"Ich übernehme die release checklist bis Montag." language:"German and English"
 ```
 
-Stores the exact typed text as an `utterance-committed` Observation attributed to the Discord actor. It preserves German, English, and mixed language and returns any evidence-grounded Follow-up Intent IDs proposed by the ReasoningModel.
+Stores the exact typed text as an `utterance-committed` Observation with a
+deterministic provider-identity speaker attribution for the Discord actor. It
+preserves German, English, and mixed language and returns any evidence-grounded
+Follow-up Intent IDs proposed by the ReasoningModel. Speaker attribution does
+not by itself confirm who owns resulting work; a generic model-proposed
+`create-work-item` Intent is intentionally non-executable until it carries the
+same durable ownership proof as the source-bound reconciliation path.
 
 ### Approve
 
@@ -146,7 +165,13 @@ Stores the exact typed text as an `utterance-committed` Observation attributed t
 /meeting approve intent_id:"intent_create_release_checklist"
 ```
 
-Records explicit Human approval and executes exactly that Intent. Executable work goes to Linear; Meeting records and knowledge updates go to Notion. The bot posts an idempotent receipt and tags only the relevant mapped People.
+Records explicit Human approval and attempts exactly that Intent. The current
+source-bound settlement may mutate Linear only for confirmed mapped ownership,
+or for a Human-explicit intentionally-unassigned decision with a null
+assignee. Proposed or unresolved ownership never mutates Linear. Generic
+model-created work Intents are deliberately rejected until they carry durable
+ownership attribution. The bot posts an idempotent receipt and tags only the
+relevant mapped People.
 
 ### Reject
 
@@ -183,7 +208,10 @@ ignored without capture.
 The first slice does not retain later Discord edit/delete events. It does not
 answer from a truncated boundary or one containing unreadable/non-text or
 bot/webhook/system evidence. It never creates a Meeting, proposal, Intent,
-Linear issue, Notion page, or any other Follow-up mutation.
+Linear issue, Notion page, or any other Follow-up mutation. This is an
+implemented bounded limitation, not a permanent statement that Discord
+conversations cannot later feed the shared Evidence, reconciliation,
+authorization, and execution core.
 
 Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
 
@@ -247,11 +275,13 @@ meetingIntelligence.conclude(...);
 
 Voice transport will later produce transcription Observations through a separate transcription Module. It must not add audio or Discord SDK types to the Meeting Intelligence Interface.
 
-Context Ask calls only:
+Within the current bounded slice, Context Ask calls only:
 
 ```ts
 contextIntelligence.inquire(...);
 ```
 
 It has no path to Meeting Intelligence, Follow-up Execution, WorkProvider, or
-KnowledgeProvider operations.
+KnowledgeProvider operations. A later Discord Verify, Reconcile, or Execute
+capability must reuse the shared Luma core rather than bypassing it from the
+Discord Adapter.

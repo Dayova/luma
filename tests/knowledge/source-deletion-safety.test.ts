@@ -5,7 +5,6 @@ import type {
   StructuredReasoningResult
 } from "../../src/ai/reasoning-model.js";
 import type { ExternalReference, WorkspaceConfig } from "../../src/domain/model.js";
-import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
 import { createLedgerBackedImportedSourceVerifier } from "../../src/knowledge/ledger-backed-imported-source-verifier.js";
 import { createMeetingNotesIngestion } from "../../src/knowledge/meeting-notes-ingestion.js";
 import {
@@ -194,10 +193,65 @@ async function createReviewedSource() {
     throw new Error("expected a reconciliation review");
   }
 
-  const review = reviews.reviews[0]?.proposal;
+  let review = reviews.reviews[0]?.proposal;
 
   if (!review || review.outcome.type !== "update-existing") {
     throw new Error("expected a conditional source-derived work update proposal");
+  }
+
+  const candidateId = review.candidateId;
+  const initialReview = reviews.reviews[0];
+
+  if (
+    initialReview &&
+    initialReview.ownership.status !== "confirmed" &&
+    initialReview.ownership.status !== "intentionally-unassigned"
+  ) {
+    const ownershipResolution = await meetingIntelligence.observe({
+      workspace,
+      observations: [
+        {
+          type: "human-judgment-recorded",
+          observationId: "human:source-deletion:confirm-ownership",
+          workspaceId: workspace.workspaceId,
+          meetingId,
+          occurredAt: "2026-08-07T09:10:30.000Z",
+          observedAt: "2026-08-07T09:10:30.000Z",
+          participantId: "person:jakob",
+          judgment: {
+            kind: "resolve-action-item-ownership",
+            claimId: initialReview.ownershipClaimId,
+            resolution: { type: "confirm-owner", ownerPersonId: "person_jakob" }
+          }
+        }
+      ]
+    });
+
+    if (ownershipResolution.errors.length > 0) {
+      throw new Error(
+        `failed to confirm source action ownership: ${ownershipResolution.errors[0]?.code}`
+      );
+    }
+
+    const refreshedReviews = await meetingIntelligence.query({
+      workspaceId: workspace.workspaceId,
+      meetingId,
+      query: { type: "action-item-reconciliation-review" }
+    });
+
+    if (refreshedReviews.type !== "action-item-reconciliation-review") {
+      throw new Error("expected a refreshed reconciliation review");
+    }
+
+    const refreshedReview = refreshedReviews.reviews.find(
+      (candidate) => candidate.proposal.candidateId === candidateId
+    )?.proposal;
+
+    if (!refreshedReview) {
+      throw new Error("expected an ownership-confirmed reconciliation review");
+    }
+
+    review = refreshedReview;
   }
 
   const resolution = await meetingIntelligence.observe({
@@ -310,7 +364,7 @@ describe("source deletion safety", () => {
     }
   });
 
-  it("records a stale-source receipt without writing to Linear when an approved Intent loses its root", async () => {
+  it("invalidates an approved reconciliation Intent without writing to Linear when its root is removed", async () => {
     const setup = await createReviewedSource();
 
     try {
@@ -333,23 +387,21 @@ describe("source deletion safety", () => {
       expect(approval.errors).toEqual([]);
       await ingestTombstone(setup);
 
-      const execution = createFollowUpExecution({
-        database: setup.database,
-        meetingIntelligence: setup.meetingIntelligence,
-        workProvider: setup.workProvider,
-        now: () => new Date("2026-08-07T09:25:00.000Z")
-      });
-      const result = await execution.execute({
-        workspace,
+      const snapshot = await setup.meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
         meetingId: setup.meetingId,
-        intentId: setup.intent.id
+        query: { type: "snapshot" }
       });
 
-      expect(result.observation.outcome).toMatchObject({
-        status: "failed",
-        errorCode: "source-superseded-before-execution",
-        retryable: false
-      });
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected a Meeting snapshot");
+      }
+
+      expect(
+        snapshot.state.followUpIntentions.find(
+          (candidate) => candidate.id === setup.intent.id
+        )
+      ).toMatchObject({ status: "invalidated" });
       expect(setup.workProvider.updateCalls).toEqual([]);
     } finally {
       await setup.database.close();

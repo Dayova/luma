@@ -18,7 +18,13 @@ import {
   resolveProviderUserId,
   resolveProviderUserIds
 } from "../identity/static-identity-directory.js";
+import {
+  ownershipCanMutateCanonicalWork,
+  sameActionItemOwnership
+} from "../domain/action-item-ownership.js";
 import type {
+  ActionItem,
+  ActionItemOwnershipAttribution,
   ExternalReference,
   FollowUpExecutionRecorded,
   FollowUpIntent,
@@ -50,6 +56,7 @@ import {
   recordOperationalOutcomeKnownNotApplied,
   resetProvenNotAppliedExecutingOperationalOutcomeAndReleasePageLease,
   resetProvenNotAppliedManualOperationalOutcomeAndReleasePageLease,
+  type NewOperationalOutcomeSettlementPlan,
   type OperationalOutcomeSettlement,
   type OperationalOutcomeSettlementPlan
 } from "./operational-outcome-settlement.js";
@@ -78,6 +85,7 @@ class NonRetryableExecutionError extends Error {
       | "operational-outcome-settlement-not-supported"
       | "operational-outcome-writer-not-configured"
       | "operational-outcome-source-ledger-superseded"
+      | "action-item-ownership-not-executable"
       | "code-comment-write-not-supported",
     message: string
   ) {
@@ -532,41 +540,10 @@ async function runProviderMutation(
       return [reference];
     }
     case "create-work-item": {
-      if (!dependencies.workProvider) {
-        throw new Error("WorkProvider is not configured");
-      }
-
-      assertCreateWorkProvider(intent, dependencies.workProvider);
-
-      const assigneeProviderUserId = await resolveProviderUserId({
-        identityDirectory: dependencies.identityDirectory,
-        workspaceId: input.workspace.workspaceId,
-        providerId:
-          dependencies.workProvider.identityProviderId ??
-          dependencies.workProvider.providerId,
-        personId: intent.assigneeId
-      });
-      const mentionProviderUserIds = await resolveMentionProviderUserIds(
-        dependencies.identityDirectory,
-        input.workspace.workspaceId,
-        dependencies.workProvider.identityProviderId ??
-          dependencies.workProvider.providerId,
-        intent
+      throw new NonRetryableExecutionError(
+        "action-item-ownership-not-executable",
+        "Generic create-work-item Intents do not carry a durable ownership confirmation. Use the source-bound reconciliation settlement, where a Human confirms an owner or explicitly records intentionally-unassigned work."
       );
-      const reference = await createWorkItemWithPositiveRecovery(
-        dependencies.workProvider,
-        {
-          title: intent.title,
-          description: intent.description,
-          assigneeProviderUserId,
-          mentionProviderUserIds,
-          dueDate: intent.dueDate,
-          labels: [],
-          idempotencyKey
-        },
-        input.recoveryIdempotencyKeys
-      );
-      return [reference];
     }
     case "update-work-item": {
       if (!dependencies.workProvider) {
@@ -1888,6 +1865,7 @@ function operationalOutcomeEntryForSettlement(
       sourceRevision: plan.target.sourceRevision,
       sourceContentHash: plan.target.sourceContentHash
     },
+    ownership: plan.ownership,
     resolution: plan.resolution.outcome,
     workReferences,
     knowledgeReferences: [],
@@ -1904,13 +1882,14 @@ function operationalOutcomeEntryForSettlement(
 function operationalOutcomeSettlementPlan(
   intent: Extract<FollowUpIntent, { type: "settle-operational-outcome" }>,
   settlement: CanonicalOperationalOutcomeSettlement
-): OperationalOutcomeSettlementPlan {
+): NewOperationalOutcomeSettlementPlan {
   return {
-    version: 1,
+    version: 2,
     intentId: intent.id,
     binding: intent.reconciliation,
     target: settlement.target,
     candidate: settlement.review.candidate,
+    ownership: settlement.review.ownership,
     resolution: settlement.resolution
   };
 }
@@ -1929,6 +1908,7 @@ function sameOperationalOutcomeSettlementPlan(
     plan.target.sourceObjectId === settlement.target.sourceObjectId &&
     plan.target.sourceRevision === settlement.target.sourceRevision &&
     plan.target.sourceContentHash === settlement.target.sourceContentHash &&
+    sameActionItemOwnership(plan.ownership, settlement.review.ownership) &&
     plan.resolution.id === settlement.resolution.id
   );
 }
@@ -1966,6 +1946,23 @@ function settlementFromCanonicalState(
       candidate.candidateId === binding.candidateId &&
       candidate.candidateLineageKey === binding.candidateLineageKey
   );
+
+  const currentReview = state.actionItemReconciliationReviews
+    .filter(
+      (candidate) =>
+        candidate.candidateId === binding.candidateId &&
+        candidate.policyVersion === review?.policyVersion
+    )
+    .sort(
+      (left, right) =>
+        right.attempt - left.attempt ||
+        right.reviewedAt.localeCompare(left.reviewedAt) ||
+        right.id.localeCompare(left.id)
+    )[0];
+
+  if (!review || currentReview?.id !== review.id) {
+    return null;
+  }
   const resolution = review
     ? state.actionItemReconciliationHumanResolutions.find(
         (candidate) => candidate.reviewId === review.id
@@ -2194,19 +2191,23 @@ async function executeOperationalOutcomeWorkStage(
         };
       }
 
-      const assigneeProviderUserId = await resolveProviderUserId({
-        identityDirectory: dependencies.identityDirectory,
-        workspaceId: input.workspace.workspaceId,
-        providerId: provider.identityProviderId ?? provider.providerId,
-        personId:
-          plan.candidate.owner.state === "known" ? plan.candidate.owner.personId : null
-      });
+      const assignee = await assigneeProviderUserIdForOperationalOutcomeOwnership(
+        dependencies,
+        input,
+        provider,
+        plan.ownership
+      );
+
+      if ("unresolved" in assignee) {
+        return { externalReferences: [], unresolved: assignee.unresolved };
+      }
+
       const reference = await createWorkItemWithPositiveRecovery(
         provider,
         {
           title: plan.candidate.description,
           description: plan.candidate.originalText,
-          assigneeProviderUserId,
+          assigneeProviderUserId: assignee.assigneeProviderUserId,
           mentionProviderUserIds: [],
           dueDate: plan.candidate.deadline.normalizedDate,
           labels: [],
@@ -2222,6 +2223,17 @@ async function executeOperationalOutcomeWorkStage(
       const canonicalReference = externalReferenceForReconciliationWorkItem(
         outcome.workItem
       );
+
+      if (!ownershipCanMutateCanonicalWork(plan.ownership)) {
+        return {
+          externalReferences: [canonicalReference],
+          unresolved: {
+            code: "action-item-ownership-not-executable",
+            message:
+              "Action Item ownership is proposed or unresolved; Luma will not mutate canonical work until a targeted Human ownership decision is recorded."
+          }
+        };
+      }
 
       if (!provider) {
         return {
@@ -2298,6 +2310,48 @@ async function executeOperationalOutcomeWorkStage(
       return { externalReferences: [reference], unresolved: null };
     }
   }
+}
+
+async function assigneeProviderUserIdForOperationalOutcomeOwnership(
+  dependencies: CreateFollowUpExecutionInput,
+  input: CanonicalExecutionInput,
+  provider: WorkProvider,
+  ownership: ActionItemOwnershipAttribution
+): Promise<
+  | { assigneeProviderUserId: string | null }
+  | { unresolved: { code: string; message: string } }
+> {
+  if (ownership.status === "intentionally-unassigned") {
+    return { assigneeProviderUserId: null };
+  }
+
+  if (ownership.status !== "confirmed") {
+    return {
+      unresolved: {
+        code: "action-item-ownership-not-executable",
+        message:
+          "Action Item ownership is proposed or unresolved; Luma will not create canonical work with a guessed or accidental unassigned assignee."
+      }
+    };
+  }
+
+  const assigneeProviderUserId = await resolveProviderUserId({
+    identityDirectory: dependencies.identityDirectory,
+    workspaceId: input.workspace.workspaceId,
+    providerId: provider.identityProviderId ?? provider.providerId,
+    personId: ownership.ownerPersonId
+  });
+
+  if (!assigneeProviderUserId) {
+    return {
+      unresolved: {
+        code: "action-item-owner-provider-identity-unavailable",
+        message: `Confirmed Action Item owner ${ownership.ownerPersonId} has no current ${provider.providerId} identity mapping; Luma will not create it unassigned.`
+      }
+    };
+  }
+
+  return { assigneeProviderUserId };
 }
 
 function externalReferenceForReconciliationWorkItem(
@@ -3339,17 +3393,6 @@ async function recoverCreatedReferences(
   }
 }
 
-function assertCreateWorkProvider(
-  intent: Extract<FollowUpIntent, { type: "create-work-item" }>,
-  workProvider: WorkProvider
-): void {
-  if (intent.providerId && intent.providerId !== workProvider.providerId) {
-    throw new Error(
-      `Follow-up Intent ${intent.id} targets WorkProvider ${intent.providerId}, not configured provider ${workProvider.providerId}`
-    );
-  }
-}
-
 function assertUpdateWorkProvider(
   intent: Extract<FollowUpIntent, { type: "update-work-item" }>,
   workProvider: WorkProvider
@@ -3444,7 +3487,7 @@ function renderMeetingRecord(
       conclusion.actionItems.map((item) =>
         [
           `- **${item.status}**: ${item.description}`,
-          item.ownerId ? `owner ${item.ownerId}` : "owner unconfirmed",
+          renderActionItemOwnership(item),
           item.dueDate ? `due ${item.dueDate}` : "due date unconfirmed"
         ].join("; ")
       )
@@ -3468,6 +3511,26 @@ function renderMeetingRecord(
     .join("\n\n");
 }
 
+function renderActionItemOwnership(item: ActionItem): string {
+  const ownership = item.ownership;
+
+  if (ownership?.status === "confirmed") {
+    return `confirmed owner ${ownership.ownerPersonId}`;
+  }
+
+  if (ownership?.status === "proposed") {
+    return ownership.proposedOwnerPersonId
+      ? `proposed owner ${ownership.proposedOwnerPersonId}`
+      : "proposed owner requires confirmation";
+  }
+
+  if (ownership?.status === "intentionally-unassigned") {
+    return "explicitly unassigned by Human Judgment";
+  }
+
+  return "owner unconfirmed";
+}
+
 function renderMeetingRecordSection(title: string, lines: string[]): string {
   return lines.length > 0 ? `## ${title}\n\n${lines.join("\n")}` : "";
 }
@@ -3484,23 +3547,6 @@ export function renderDiscordReceiptEvents(
   result: ExecuteFollowUpResult
 ): MeetingIntelligenceEvent[] {
   return result.events;
-}
-
-async function resolveMentionProviderUserIds(
-  identityDirectory: IdentityDirectory | undefined,
-  workspaceId: string,
-  providerId: string,
-  intent: Extract<FollowUpIntent, { type: "create-work-item" }>
-): Promise<string[]> {
-  const personIds = [intent.assigneeId, ...(intent.mentionPersonIds ?? [])].filter(
-    (personId): personId is string => Boolean(personId)
-  );
-  return resolveProviderUserIds({
-    identityDirectory,
-    workspaceId,
-    providerId,
-    personIds
-  });
 }
 
 type CanonicalExecutionInput = ExecuteFollowUpInput & {

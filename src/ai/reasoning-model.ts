@@ -52,6 +52,11 @@ export type ProposedDueDate = {
 export type ActionItemProposal = {
   stableKey: string;
   description: string;
+  /**
+   * A model-suggested Person only. Meeting Intelligence turns this into an
+   * explicit proposed/unresolved Ownership Attribution; it is never a
+   * confirmed assignee on its own.
+   */
   ownerId: PersonId | null;
   dueDate: ProposedDueDate;
   status: ActionItemStatus;

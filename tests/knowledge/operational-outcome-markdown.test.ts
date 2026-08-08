@@ -41,6 +41,11 @@ const outcome: OperationalOutcome = {
           parentId: null
         }
       },
+      ownership: {
+        status: "unresolved",
+        reason: "no-owner-stated",
+        likelyOwnerPersonId: null
+      },
       workReferences: [
         {
           providerId: "linear",

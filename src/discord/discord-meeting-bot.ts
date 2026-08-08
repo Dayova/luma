@@ -328,7 +328,12 @@ async function recordMeetingNote(
         observedAt: now().toISOString(),
         utteranceId: `discord_${command.interactionId}`,
         version: 1,
-        speakerId: context.actor.personId,
+        speaker: {
+          status: "attributed",
+          personId: context.actor.personId,
+          confidence: "deterministic",
+          basis: "provider-identity"
+        },
         startedAt: command.occurredAt,
         endedAt: command.occurredAt,
         originalText: command.text,

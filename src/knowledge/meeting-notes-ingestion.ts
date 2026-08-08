@@ -19,10 +19,12 @@ import {
 } from "../domain/imported-source-provenance.js";
 import {
   importedActionItemDeadlineFor,
+  importedActionItemCompletionFor,
   importedActionItemDeadlineReferenceAt,
   importedActionItemLanguageFor,
   importedActionItemModalityFor,
-  importedActionItemOwnerFor,
+  importedActionItemOwnershipFor,
+  importedActionItemSourceOwnerFor,
   mentionedWorkItemExternalIdsFor
 } from "../domain/imported-action-item-semantics.js";
 import type {
@@ -306,8 +308,9 @@ function actionItemCandidates(
         description: originalText,
         language: importedActionItemLanguageFor(originalText),
         modality: importedActionItemModalityFor(originalText),
-        completion: block.completion,
-        owner: importedActionItemOwnerFor(originalText),
+        completion: importedActionItemCompletionFor(originalText, block.completion),
+        sourceOwner: importedActionItemSourceOwnerFor(originalText),
+        ownership: importedActionItemOwnershipFor(originalText),
         deadline: importedActionItemDeadlineFor(originalText, timezone, referenceAt),
         mentionedWorkItemReferences: mentionedWorkItemReferences(
           originalText,

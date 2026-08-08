@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
-import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
 import type {
   MeetingAnalysisProposalBatch,
@@ -222,6 +221,59 @@ async function createHarness(model: ReasoningModel): Promise<MeetingIntelligence
   });
 }
 
+function noMeetingAnalysisProposals(): MeetingAnalysisProposalBatch {
+  return {
+    actionItems: [],
+    decisions: [],
+    openQuestions: [],
+    risks: [],
+    followUpIntentions: []
+  };
+}
+
+/**
+ * Preserves the existing action during a Human speaker correction so the test
+ * proves projection remaps its provenance rather than a fresh model proposal.
+ */
+function actionItemFromTranscriptUnlessHumanCorrection(
+  request: StructuredReasoningRequest<MeetingAnalysisProposalBatch>
+): MeetingAnalysisProposalBatch {
+  const transcript = request.evidence.find(
+    (evidence) => evidence.source === "transcript"
+  );
+
+  if (
+    !transcript ||
+    request.evidence.some((evidence) => evidence.source === "human-judgment")
+  ) {
+    return noMeetingAnalysisProposals();
+  }
+
+  return {
+    actionItems: [
+      {
+        stableKey: "speaker-attribution-provenance",
+        description: "Prepare the release checklist.",
+        ownerId: null,
+        dueDate: {
+          originalPhrase: null,
+          normalizedDate: null,
+          confidence: "unknown",
+          timezone: "Europe/Berlin"
+        },
+        status: "candidate",
+        relatedDecisionIds: [],
+        evidenceIds: [transcript.evidenceId],
+        confidence: "high"
+      }
+    ],
+    decisions: [],
+    openQuestions: [],
+    risks: [],
+    followUpIntentions: []
+  };
+}
+
 describe("MeetingIntelligence observe/query", () => {
   it("returns a validation error for malformed public source input and rejects unknown query kinds", async () => {
     const database = await createPgliteDatabase();
@@ -338,7 +390,12 @@ describe("MeetingIntelligence observe/query", () => {
             observedAt: "2026-08-08T09:05:01.000Z",
             utteranceId: "analysis-rebase:utt",
             version: 1,
-            speakerId: "person_jakob",
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
             startedAt: "2026-08-08T09:04:58.000Z",
             endedAt: "2026-08-08T09:05:02.000Z",
             originalText: "I will keep the Meeting state current.",
@@ -409,7 +466,12 @@ describe("MeetingIntelligence observe/query", () => {
             observedAt: "2026-08-08T09:00:01.000Z",
             utteranceId: "analysis-human:first",
             version: 1,
-            speakerId: "person_jakob",
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
             startedAt: "2026-08-08T08:59:58.000Z",
             endedAt: "2026-08-08T09:00:02.000Z",
             originalText: "I will prepare the release checklist.",
@@ -430,7 +492,12 @@ describe("MeetingIntelligence observe/query", () => {
             observedAt: "2026-08-08T09:05:01.000Z",
             utteranceId: "analysis-human:second",
             version: 1,
-            speakerId: "person_jakob",
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
             startedAt: "2026-08-08T09:04:58.000Z",
             endedAt: "2026-08-08T09:05:02.000Z",
             originalText: "The checklist should include the deployment runbook.",
@@ -566,7 +633,12 @@ describe("MeetingIntelligence observe/query", () => {
             observedAt: "2026-08-08T09:00:01.000Z",
             utteranceId: "fresh-human:first",
             version: 1,
-            speakerId: "person_jakob",
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
             startedAt: "2026-08-08T08:59:58.000Z",
             endedAt: "2026-08-08T09:00:02.000Z",
             originalText: "I will prepare the release checklist.",
@@ -976,7 +1048,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_catchup",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "I will prepare the release checklist.",
@@ -1086,7 +1163,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_1",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das GitHub Issue bis Montag.",
@@ -1113,7 +1195,13 @@ describe("MeetingIntelligence observe/query", () => {
     expect(snapshot.state.actionItems).toEqual([
       expect.objectContaining({
         description: "Handle the GitHub Issue",
-        ownerId: "person_jakob",
+        ownership: {
+          status: "proposed",
+          proposedOwnerPersonId: "person_jakob",
+          confidence: "low",
+          basis: "inferred-assignment"
+        },
+        ownerId: null,
         dueDate: "2026-06-29",
         dueDateConfidence: "normalized",
         status: "confirmed",
@@ -1128,6 +1216,444 @@ describe("MeetingIntelligence observe/query", () => {
         excerpt: "Jakob übernimmt das GitHub Issue bis Montag."
       })
     ]);
+  });
+
+  it("confirms a deterministic German speaker self-commitment for a general Action Item", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_general_self_commitment",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_general_self_commitment";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        const evidence = request.evidence[0];
+
+        if (!evidence) {
+          throw new Error("expected transcript Evidence");
+        }
+
+        return {
+          actionItems: [
+            {
+              stableKey: "german-self-commitment",
+              description: "Complete the release checklist.",
+              ownerId: "person_jakob",
+              dueDate: {
+                originalPhrase: null,
+                normalizedDate: null,
+                confidence: "unknown",
+                timezone: "Europe/Berlin"
+              },
+              status: "candidate",
+              relatedDecisionIds: [],
+              evidenceIds: [evidence.evidenceId],
+              confidence: "high"
+            }
+          ],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      }),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "general-self-commitment:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "general-self-commitment:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const participantAnswer = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: {
+          type: "freeform",
+          text: "What does Jakob own?",
+          participantId: "person_jakob"
+        }
+      });
+
+      if (snapshot.type !== "snapshot" || participantAnswer.type !== "freeform") {
+        throw new Error("expected Meeting snapshot and freeform answer");
+      }
+
+      expect(snapshot.state.actionItems).toEqual([
+        expect.objectContaining({
+          id: "action:german-self-commitment",
+          ownerId: "person_jakob",
+          ownership: {
+            status: "confirmed",
+            ownerPersonId: "person_jakob",
+            confidence: "deterministic",
+            basis: "self-commitment"
+          }
+        })
+      ]);
+      expect(participantAnswer.answer.text).toContain("confirmed owner person_jakob");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("does not turn a refusal, question, or capability statement into confirmed self-ownership", async () => {
+    const cases = [
+      { text: "Ich mache das nicht.", language: "de" as const },
+      { text: "Das mache ich nicht.", language: "de" as const },
+      { text: "Ich übernehme das nie.", language: "de" as const },
+      { text: "Das mache ich keinesfalls.", language: "de" as const },
+      { text: "Ich übernehme keinerlei Verantwortung.", language: "de" as const },
+      { text: "Ich mache das vielleicht.", language: "de" as const },
+      { text: "Wenn ihr das wollt, mache ich das.", language: "de" as const },
+      { text: "Ich mache das nur im Notfall.", language: "de" as const },
+      { text: "Ich übernehme das bei Bedarf.", language: "de" as const },
+      { text: "I can take that.", language: "en" as const },
+      { text: "I will take no ownership of this.", language: "en" as const },
+      { text: "Ich mache das?", language: "de" as const }
+    ];
+
+    for (const [index, scenario] of cases.entries()) {
+      const database = await createPgliteDatabase();
+      const workspace = {
+        workspaceId: `workspace_non_commitment_owner_${index}`,
+        timezone: "Europe/Berlin"
+      };
+      const meetingId = `meeting_non_commitment_owner_${index}`;
+      const meetingIntelligence = createMeetingIntelligence({
+        database,
+        reasoningModel: new ProgrammableReasoningModel((request) => {
+          const evidence = request.evidence[0];
+
+          if (!evidence) {
+            throw new Error("expected transcript Evidence");
+          }
+
+          return {
+            actionItems: [
+              {
+                stableKey: `non-commitment-owner-${index}`,
+                description: "Handle the release checklist.",
+                ownerId: "person_jakob",
+                dueDate: {
+                  originalPhrase: null,
+                  normalizedDate: null,
+                  confidence: "unknown",
+                  timezone: "Europe/Berlin"
+                },
+                status: "candidate",
+                relatedDecisionIds: [],
+                evidenceIds: [evidence.evidenceId],
+                confidence: "high"
+              }
+            ],
+            decisions: [],
+            openQuestions: [],
+            risks: [],
+            followUpIntentions: []
+          };
+        }),
+        now: () => new Date("2026-08-08T10:00:00.000Z")
+      });
+
+      try {
+        await meetingIntelligence.observe({
+          workspace,
+          observations: [
+            {
+              type: "utterance-committed",
+              observationId: `non-commitment-owner:${index}`,
+              workspaceId: workspace.workspaceId,
+              meetingId,
+              occurredAt: "2026-08-08T09:05:00.000Z",
+              observedAt: "2026-08-08T09:05:01.000Z",
+              utteranceId: `non-commitment-owner:utt:${index}`,
+              version: 1,
+              speaker: {
+                status: "attributed",
+                personId: "person_jakob",
+                confidence: "deterministic",
+                basis: "provider-identity"
+              },
+              startedAt: "2026-08-08T09:04:58.000Z",
+              endedAt: "2026-08-08T09:05:02.000Z",
+              originalText: scenario.text,
+              language: scenario.language
+            }
+          ]
+        });
+        const snapshot = await meetingIntelligence.query({
+          workspaceId: workspace.workspaceId,
+          meetingId,
+          query: { type: "snapshot" }
+        });
+
+        if (snapshot.type !== "snapshot") {
+          throw new Error("expected Meeting snapshot");
+        }
+
+        expect(snapshot.state.actionItems[0]).toMatchObject({
+          ownerId: null,
+          ownership: {
+            status: "proposed",
+            proposedOwnerPersonId: "person_jakob"
+          }
+        });
+      } finally {
+        await database.close();
+      }
+    }
+  }, 40_000);
+
+  it("does not strengthen a high-confidence speaker claim into deterministic self-ownership", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_high_confidence_speaker",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_high_confidence_speaker";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        const evidence = request.evidence[0];
+
+        if (!evidence) {
+          throw new Error("expected transcript Evidence");
+        }
+
+        return {
+          actionItems: [
+            {
+              stableKey: "high-confidence-speaker-owner",
+              description: "Complete the release checklist.",
+              ownerId: "person_jakob",
+              dueDate: {
+                originalPhrase: null,
+                normalizedDate: null,
+                confidence: "unknown",
+                timezone: "Europe/Berlin"
+              },
+              status: "candidate",
+              relatedDecisionIds: [],
+              evidenceIds: [evidence.evidenceId],
+              confidence: "high"
+            }
+          ],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      }),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "high-confidence-speaker:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "high-confidence-speaker:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "high",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(snapshot.state.actionItems[0]).toMatchObject({
+        ownerId: null,
+        ownership: {
+          status: "proposed",
+          proposedOwnerPersonId: "person_jakob"
+        }
+      });
+      expect(snapshot.state.participants).not.toContainEqual(
+        expect.objectContaining({ personId: "person_jakob" })
+      );
+      expect(snapshot.state.actionItems[0]?.provenance.evidence).toEqual([
+        expect.not.objectContaining({ participantId: "person_jakob" })
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a model owner proposal out of a low-confidence speaker's participant view", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_general_proposed_owner",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_general_proposed_owner";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        const evidence = request.evidence[0];
+
+        if (!evidence) {
+          throw new Error("expected transcript Evidence");
+        }
+
+        return {
+          actionItems: [
+            {
+              stableKey: "low-confidence-owner-proposal",
+              description: "Complete the release checklist.",
+              ownerId: "person_jakob",
+              dueDate: {
+                originalPhrase: null,
+                normalizedDate: null,
+                confidence: "unknown",
+                timezone: "Europe/Berlin"
+              },
+              status: "candidate",
+              relatedDecisionIds: [],
+              evidenceIds: [evidence.evidenceId],
+              confidence: "high"
+            }
+          ],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      }),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "general-proposed-owner:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "general-proposed-owner:utt",
+            version: 1,
+            speaker: {
+              status: "unresolved",
+              candidatePersonId: "person_jakob",
+              confidence: "low",
+              basis: "provider-speaker-label"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const generalAnswer = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "freeform", text: "What is the release checklist Action Item?" }
+      });
+      const participantAnswer = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: {
+          type: "freeform",
+          text: "What does Jakob own?",
+          participantId: "person_jakob"
+        }
+      });
+
+      if (
+        snapshot.type !== "snapshot" ||
+        generalAnswer.type !== "freeform" ||
+        participantAnswer.type !== "freeform"
+      ) {
+        throw new Error("expected Meeting snapshot and freeform answers");
+      }
+
+      expect(snapshot.state.participants).toEqual([]);
+      expect(snapshot.state.actionItems).toEqual([
+        expect.objectContaining({
+          id: "action:low-confidence-owner-proposal",
+          ownerId: null,
+          ownership: {
+            status: "proposed",
+            proposedOwnerPersonId: "person_jakob",
+            confidence: "low",
+            basis: "inferred-assignment"
+          }
+        })
+      ]);
+      expect(generalAnswer.answer.text).toContain("proposed owner person_jakob");
+      expect(generalAnswer.answer.text).not.toContain("confirmed owner person_jakob");
+      expect(participantAnswer).toEqual({
+        type: "freeform",
+        answer: {
+          text: "I do not have enough evidence to answer that factually.",
+          evidence: [],
+          uncertainty: "insufficient-evidence"
+        }
+      });
+    } finally {
+      await database.close();
+    }
   });
 
   it("does not duplicate Evidence or Meeting Items when an Observation is retried", async () => {
@@ -1176,12 +1702,17 @@ describe("MeetingIntelligence observe/query", () => {
       observedAt: "2026-06-26T10:05:01.000Z",
       utteranceId: "utt_1",
       version: 1,
-      speakerId: "person_jakob",
+      speaker: {
+        status: "attributed",
+        personId: "person_jakob",
+        confidence: "deterministic",
+        basis: "provider-identity"
+      } as const,
       startedAt: "2026-06-26T10:04:58.000Z",
       endedAt: "2026-06-26T10:05:02.000Z",
       originalText: "Jakob übernimmt das GitHub Issue bis Montag.",
       language: "mixed" as const
-    };
+    } satisfies Extract<MeetingObservation, { type: "utterance-committed" }>;
 
     await meetingIntelligence.observe({
       workspace: {
@@ -1272,6 +1803,1036 @@ describe("MeetingIntelligence observe/query", () => {
     }
   });
 
+  it("keeps an unresolved speaker out of Meeting participants and transcript Evidence", async () => {
+    const database = await createPgliteDatabase();
+    let evidenceForAnalysis: StructuredReasoningRequest<MeetingAnalysisProposalBatch>["evidence"] =
+      [];
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        evidenceForAnalysis = request.evidence;
+
+        return {
+          actionItems: [],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      }),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_unresolved_speaker",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_unresolved_speaker";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "unresolved-speaker:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:00:00.000Z",
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Unresolved speaker",
+            startedAt: "2026-08-08T09:00:00.000Z",
+            languageMode: "de",
+            participantIds: []
+          },
+          {
+            type: "utterance-committed",
+            observationId: "unresolved-speaker:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "unresolved-speaker:utt",
+            version: 1,
+            speaker: {
+              status: "unresolved",
+              candidatePersonId: "person_jakob",
+              confidence: "low",
+              basis: "provider-speaker-label"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      expect(snapshot.state.participants).toEqual([]);
+      expect(evidenceForAnalysis).toEqual([
+        expect.objectContaining({
+          evidenceId: "evidence:transcript:unresolved-speaker:utt:v1",
+          source: "transcript",
+          sourceObjectId: "unresolved-speaker:utt",
+          sourceVersion: "1",
+          excerpt: "Ich mache das."
+        })
+      ]);
+      expect(evidenceForAnalysis[0]).not.toHaveProperty("participantId");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects a high-confidence provider speaker label as a confirmed speaker", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      })),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_unverified_speaker_label",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_unverified_speaker_label";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "unverified-speaker-label:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:00:00.000Z",
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Unverified speaker label",
+            startedAt: "2026-08-08T09:00:00.000Z",
+            languageMode: "de",
+            participantIds: []
+          }
+        ]
+      });
+      const rejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "unverified-speaker-label:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "unverified-speaker-label:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "high",
+              basis: "provider-speaker-label"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          } as unknown as Extract<MeetingObservation, { type: "utterance-committed" }>
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      expect(rejected.acceptedObservationIds).toEqual([]);
+      expect(rejected.errors).toHaveLength(1);
+      expect(rejected.errors[0]).toMatchObject({
+        code: "invalid-observation",
+        observationId: "unverified-speaker-label:utterance"
+      });
+      const rejectedSpeakerLabel = rejected.errors[0];
+
+      if (!rejectedSpeakerLabel || rejectedSpeakerLabel.code !== "invalid-observation") {
+        throw new Error("expected invalid speaker-label observation");
+      }
+
+      expect(rejectedSpeakerLabel.message).toContain("unsupported attributed basis");
+      expect(snapshot.state.participants).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("requires a durable Human Judgment instead of accepting a caller-claimed Human speaker confirmation", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      })),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_forged_human_speaker_confirmation",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_forged_human_speaker_confirmation";
+
+    try {
+      const rejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "forged-human-speaker-confirmation:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "forged-human-speaker-confirmation:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "human-confirmation"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+
+      expect(rejected.acceptedObservationIds).toEqual([]);
+      expect(rejected.errors).toHaveLength(1);
+      const rejectedError = rejected.errors[0];
+
+      if (!rejectedError || rejectedError.code !== "invalid-observation") {
+        throw new Error("expected an invalid caller-claimed Human attribution");
+      }
+
+      expect(rejectedError.observationId).toBe(
+        "forged-human-speaker-confirmation:utterance"
+      );
+      expect(rejectedError.message).toContain("resolve-speaker-attribution");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("revises a legacy speaker id as unresolved rather than upgrading it to a participant", async () => {
+    const database = await createPgliteDatabase();
+    let evidenceForAnalysis: StructuredReasoningRequest<MeetingAnalysisProposalBatch>["evidence"] =
+      [];
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        evidenceForAnalysis = request.evidence;
+
+        return {
+          actionItems: [],
+          decisions: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+      }),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_legacy_speaker",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_legacy_speaker";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "legacy-speaker:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:00:00.000Z",
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Legacy speaker attribution",
+            startedAt: "2026-08-08T09:00:00.000Z",
+            languageMode: "de",
+            participantIds: []
+          }
+        ]
+      });
+      await database.query(
+        `INSERT INTO utterance_versions (
+          workspace_id, meeting_id, utterance_id, version, speaker_id,
+          speaker_attribution_json, started_at, ended_at, original_text, language,
+          evidence_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          workspace.workspaceId,
+          meetingId,
+          "legacy-speaker:utt",
+          1,
+          "person_jakob",
+          null,
+          "2026-08-08T09:04:58.000Z",
+          "2026-08-08T09:05:02.000Z",
+          "Ich mache das.",
+          "de",
+          "evidence:transcript:legacy-speaker:utt:v1",
+          "2026-08-08T09:05:01.000Z"
+        ]
+      );
+
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-revised",
+            observationId: "legacy-speaker:revision",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:06:00.000Z",
+            observedAt: "2026-08-08T09:06:01.000Z",
+            utteranceId: "legacy-speaker:utt",
+            replacesVersion: 1,
+            version: 2,
+            originalText: "Ich mache das morgen.",
+            language: "de"
+          }
+        ]
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const revisedUtterance = await database.query<{
+        speaker_id: string | null;
+        speaker_attribution_json: string | null;
+      }>(
+        `SELECT speaker_id, speaker_attribution_json
+           FROM utterance_versions
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND utterance_id = $3 AND version = $4`,
+        [workspace.workspaceId, meetingId, "legacy-speaker:utt", 2]
+      );
+      const persistedEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1 AND meeting_id = $2 AND evidence_id = $3`,
+        [workspace.workspaceId, meetingId, "evidence:transcript:legacy-speaker:utt:v2"]
+      );
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      expect(snapshot.state.participants).toEqual([]);
+      expect(evidenceForAnalysis[0]).not.toHaveProperty("participantId");
+      expect(revisedUtterance.rows).toEqual([
+        {
+          speaker_id: null,
+          speaker_attribution_json: JSON.stringify({
+            status: "unresolved",
+            candidatePersonId: null,
+            confidence: "unknown",
+            basis: "legacy-unverified"
+          })
+        }
+      ]);
+      const persistedEvidenceReference: unknown = JSON.parse(
+        persistedEvidence.rows[0]?.reference_json ?? "{}"
+      );
+      expect(persistedEvidenceReference).not.toHaveProperty("participantId");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects a Human speaker correction for a nonexistent utterance version", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      })),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_detached_speaker_correction",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_detached_speaker_correction";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "detached-speaker-correction:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:00:00.000Z",
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Detached speaker correction",
+            startedAt: "2026-08-08T09:00:00.000Z",
+            languageMode: "de",
+            participantIds: []
+          }
+        ]
+      });
+      const rejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "detached-speaker-correction:resolve",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            participantId: "person_jakob",
+            judgment: {
+              kind: "resolve-speaker-attribution",
+              utteranceId: "missing-utterance",
+              version: 1,
+              personId: "person_philipp"
+            }
+          }
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      expect(rejected.acceptedObservationIds).toEqual([]);
+      expect(rejected.errors).toHaveLength(1);
+      expect(rejected.errors[0]).toMatchObject({
+        code: "invalid-observation",
+        observationId: "detached-speaker-correction:resolve"
+      });
+      const rejectedSpeakerCorrection = rejected.errors[0];
+
+      if (
+        !rejectedSpeakerCorrection ||
+        rejectedSpeakerCorrection.code !== "invalid-observation"
+      ) {
+        throw new Error("expected invalid speaker correction observation");
+      }
+
+      expect(rejectedSpeakerCorrection.message).toContain(
+        "must target an existing versioned utterance"
+      );
+      expect(snapshot.state.speakerAttributionHumanResolutions).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a Human speaker correction as an overlay when the transcript later revises", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_speaker_correction_revision_overlay",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_speaker_correction_revision_overlay";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(() => ({
+        actionItems: [],
+        decisions: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: []
+      })),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "speaker-overlay:v1",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "speaker-overlay:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          },
+          {
+            type: "human-judgment-recorded",
+            observationId: "speaker-overlay:correct-v1",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:06:00.000Z",
+            observedAt: "2026-08-08T09:06:01.000Z",
+            participantId: "person_philipp",
+            judgment: {
+              kind: "resolve-speaker-attribution",
+              utteranceId: "speaker-overlay:utt",
+              version: 1,
+              personId: "person_philipp"
+            }
+          },
+          {
+            type: "utterance-revised",
+            observationId: "speaker-overlay:v2",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:07:00.000Z",
+            observedAt: "2026-08-08T09:07:01.000Z",
+            utteranceId: "speaker-overlay:utt",
+            replacesVersion: 1,
+            version: 2,
+            originalText: "Ich mache das bis Freitag.",
+            language: "de"
+          }
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const stored = await database.query<{ speaker_attribution_json: string }>(
+        `SELECT speaker_attribution_json
+           FROM utterance_versions
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND utterance_id = $3 AND version = 2`,
+        [workspace.workspaceId, meetingId, "speaker-overlay:utt"]
+      );
+      const activeEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND evidence_id = $3 AND active = TRUE`,
+        [workspace.workspaceId, meetingId, "evidence:transcript:speaker-overlay:utt:v2"]
+      );
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(stored.rows[0]?.speaker_attribution_json).toBe(
+        JSON.stringify({
+          status: "attributed",
+          personId: "person_jakob",
+          confidence: "deterministic",
+          basis: "provider-identity"
+        })
+      );
+      expect(snapshot.state.participants).toEqual([
+        { personId: "person_philipp", joinedAt: null, leftAt: null }
+      ]);
+      const activeEvidenceReference: unknown = JSON.parse(
+        activeEvidence.rows[0]?.reference_json ?? "{}"
+      );
+
+      expect(activeEvidenceReference).toMatchObject({
+        source: "transcript",
+        sourceObjectId: "speaker-overlay:utt",
+        sourceVersion: "2",
+        participantId: "person_philipp"
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("reprojects active revised speaker Evidence and Action Item provenance after a Human correction", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(
+        actionItemFromTranscriptUnlessHumanCorrection
+      ),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_speaker_reprojection",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_speaker_reprojection";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "speaker-reprojection:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:00:00.000Z",
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Speaker reprojection",
+            startedAt: "2026-08-08T09:00:00.000Z",
+            languageMode: "de",
+            participantIds: []
+          },
+          {
+            type: "utterance-committed",
+            observationId: "speaker-reprojection:source-v1",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "speaker-reprojection:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-revised",
+            observationId: "speaker-reprojection:source-v2",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:06:00.000Z",
+            observedAt: "2026-08-08T09:06:01.000Z",
+            utteranceId: "speaker-reprojection:utt",
+            replacesVersion: 1,
+            version: 2,
+            originalText: "Ich mache das morgen.",
+            language: "de"
+          }
+        ]
+      });
+      const correction = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "speaker-reprojection:correct-v1",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:07:00.000Z",
+            observedAt: "2026-08-08T09:07:01.000Z",
+            participantId: "person_jakob",
+            judgment: {
+              kind: "resolve-speaker-attribution",
+              utteranceId: "speaker-reprojection:utt",
+              version: 1,
+              personId: "person_philipp"
+            }
+          }
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const sourceVersion = await database.query<{
+        speaker_id: string | null;
+        speaker_attribution_json: string | null;
+      }>(
+        `SELECT speaker_id, speaker_attribution_json
+           FROM utterance_versions
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND utterance_id = $3 AND version = $4`,
+        [workspace.workspaceId, meetingId, "speaker-reprojection:utt", 1]
+      );
+      const activeEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1 AND meeting_id = $2 AND evidence_id = $3`,
+        [
+          workspace.workspaceId,
+          meetingId,
+          "evidence:transcript:speaker-reprojection:utt:v2"
+        ]
+      );
+      const humanCorrectionEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1
+            AND meeting_id = $2
+            AND source = 'human-judgment'
+            AND source_object_id = $3
+            AND source_version = $4`,
+        [
+          workspace.workspaceId,
+          meetingId,
+          "speaker-reprojection:utt:v1",
+          "speaker-reprojection:correct-v1"
+        ]
+      );
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      const actionItem = snapshot.state.actionItems.find(
+        (candidate) => candidate.id === "action:speaker-attribution-provenance"
+      );
+
+      if (!actionItem) {
+        throw new Error("expected Action Item derived from the revised transcript");
+      }
+
+      const activeEvidenceReference: unknown = JSON.parse(
+        activeEvidence.rows[0]?.reference_json ?? "{}"
+      );
+      const humanCorrectionEvidenceReference: unknown = JSON.parse(
+        humanCorrectionEvidence.rows[0]?.reference_json ?? "{}"
+      );
+
+      expect(correction.acceptedObservationIds).toEqual([
+        "speaker-reprojection:correct-v1"
+      ]);
+      expect(snapshot.state.participants).toEqual([
+        { personId: "person_philipp", joinedAt: null, leftAt: null }
+      ]);
+      expect(sourceVersion.rows).toEqual([
+        {
+          speaker_id: "person_jakob",
+          speaker_attribution_json: JSON.stringify({
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          })
+        }
+      ]);
+      expect(activeEvidenceReference).toMatchObject({
+        source: "transcript",
+        sourceObjectId: "speaker-reprojection:utt",
+        sourceVersion: "2",
+        participantId: "person_philipp"
+      });
+      expect(humanCorrectionEvidenceReference).toMatchObject({
+        source: "human-judgment",
+        participantId: "person_jakob"
+      });
+      expect(actionItem.provenance.evidence).toEqual([
+        expect.objectContaining({
+          evidenceId: "evidence:transcript:speaker-reprojection:utt:v2",
+          participantId: "person_philipp"
+        })
+      ]);
+      expect(actionItem.provenance.evidence).not.toContainEqual(
+        expect.objectContaining({ participantId: "person_jakob" })
+      );
+      expect(actionItem).toMatchObject({
+        ownership: {
+          status: "confirmed",
+          ownerPersonId: "person_philipp",
+          confidence: "deterministic",
+          basis: "self-commitment"
+        },
+        ownerId: "person_philipp"
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a directly observed attendee when Human Judgment makes their speaker attribution unresolved", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(
+        actionItemFromTranscriptUnlessHumanCorrection
+      ),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const workspace = {
+      workspaceId: "workspace_direct_attendee_speaker_correction",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_direct_attendee_speaker_correction";
+    const startedAt = "2026-08-08T09:00:00.000Z";
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "direct-attendee-correction:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: startedAt,
+            observedAt: "2026-08-08T09:00:01.000Z",
+            title: "Direct attendee speaker correction",
+            startedAt,
+            languageMode: "de",
+            participantIds: ["person_jakob"]
+          },
+          {
+            type: "utterance-committed",
+            observationId: "direct-attendee-correction:source",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "direct-attendee-correction:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "direct-attendee-correction:unresolved",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:06:00.000Z",
+            observedAt: "2026-08-08T09:06:01.000Z",
+            participantId: "person_philipp",
+            judgment: {
+              kind: "resolve-speaker-attribution",
+              utteranceId: "direct-attendee-correction:utt",
+              version: 1,
+              personId: null
+            }
+          }
+        ]
+      });
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const activeEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1 AND meeting_id = $2 AND evidence_id = $3`,
+        [
+          workspace.workspaceId,
+          meetingId,
+          "evidence:transcript:direct-attendee-correction:utt:v1"
+        ]
+      );
+      const humanCorrectionEvidence = await database.query<{ reference_json: string }>(
+        `SELECT reference_json
+           FROM evidence
+          WHERE workspace_id = $1
+            AND meeting_id = $2
+            AND source = 'human-judgment'
+            AND source_object_id = $3
+            AND source_version = $4`,
+        [
+          workspace.workspaceId,
+          meetingId,
+          "direct-attendee-correction:utt:v1",
+          "direct-attendee-correction:unresolved"
+        ]
+      );
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      const actionItem = snapshot.state.actionItems.find(
+        (candidate) => candidate.id === "action:speaker-attribution-provenance"
+      );
+
+      if (!actionItem) {
+        throw new Error("expected Action Item derived from the transcript");
+      }
+
+      const activeEvidenceReference: unknown = JSON.parse(
+        activeEvidence.rows[0]?.reference_json ?? "{}"
+      );
+      const humanCorrectionEvidenceReference: unknown = JSON.parse(
+        humanCorrectionEvidence.rows[0]?.reference_json ?? "{}"
+      );
+
+      expect(snapshot.state.participants).toEqual([
+        { personId: "person_jakob", joinedAt: startedAt, leftAt: null }
+      ]);
+      expect(snapshot.state.speakerInferredParticipantIds).toEqual([]);
+      expect(activeEvidenceReference).not.toHaveProperty("participantId");
+      expect(humanCorrectionEvidenceReference).toMatchObject({
+        source: "human-judgment",
+        participantId: "person_philipp"
+      });
+      expect(actionItem.provenance.evidence[0]).not.toHaveProperty("participantId");
+      expect(actionItem).toMatchObject({
+        ownership: {
+          status: "unresolved",
+          reason: "missing-speaker",
+          likelyOwnerPersonId: null
+        },
+        ownerId: null
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails closed when reopening legacy speaker rows without attribution JSON", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_legacy_speaker_reopen",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_legacy_speaker_reopen";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel(
+        actionItemFromTranscriptUnlessHumanCorrection
+      ),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "legacy-speaker-reopen:source",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "legacy-speaker-reopen:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: "Ich mache das.",
+            language: "de"
+          }
+        ]
+      });
+      await database.query(
+        `UPDATE utterance_versions
+            SET speaker_attribution_json = NULL
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND utterance_id = $3 AND version = $4`,
+        [workspace.workspaceId, meetingId, "legacy-speaker-reopen:utt", 1]
+      );
+      const reopenedMeetingIntelligence = createMeetingIntelligence({
+        database,
+        reasoningModel: new ProgrammableReasoningModel(noMeetingAnalysisProposals),
+        now: () => new Date("2026-08-08T10:00:00.000Z")
+      });
+      const snapshot = await reopenedMeetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+      const legacyRow = await database.query<{
+        speaker_id: string | null;
+        speaker_attribution_json: string | null;
+      }>(
+        `SELECT speaker_id, speaker_attribution_json
+           FROM utterance_versions
+          WHERE workspace_id = $1 AND meeting_id = $2
+            AND utterance_id = $3 AND version = $4`,
+        [workspace.workspaceId, meetingId, "legacy-speaker-reopen:utt", 1]
+      );
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected snapshot result");
+      }
+
+      const actionItem = snapshot.state.actionItems.find(
+        (candidate) => candidate.id === "action:speaker-attribution-provenance"
+      );
+
+      if (!actionItem) {
+        throw new Error("expected Action Item derived from the legacy transcript");
+      }
+
+      expect(legacyRow.rows).toEqual([
+        { speaker_id: "person_jakob", speaker_attribution_json: null }
+      ]);
+      expect(snapshot.state.participants).toEqual([]);
+      expect(snapshot.state.speakerInferredParticipantIds).toEqual([]);
+      expect(actionItem.provenance.evidence[0]).not.toHaveProperty("participantId");
+    } finally {
+      await database.close();
+    }
+  });
+
   it("reconsiders Meeting Items when a transcript utterance is revised", async () => {
     const meetingIntelligence = await createHarness(
       new ProgrammableReasoningModel((request) => {
@@ -1326,7 +2887,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_1",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das Issue.",
@@ -1373,7 +2939,13 @@ describe("MeetingIntelligence observe/query", () => {
     expect(snapshot.state.actionItems).toHaveLength(1);
     expect(snapshot.state.actionItems[0]).toEqual(
       expect.objectContaining({
-        ownerId: "person_philipp"
+        ownerId: null,
+        ownership: {
+          status: "proposed",
+          proposedOwnerPersonId: "person_philipp",
+          confidence: "low",
+          basis: "inferred-assignment"
+        }
       })
     );
     expect(snapshot.state.actionItems[0]?.provenance.evidence).toEqual([
@@ -1431,7 +3003,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_decision",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Wir könnten vielleicht Linear verwenden.",
@@ -1500,7 +3077,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_1",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das GitHub Issue bis Montag.",
@@ -1573,7 +3155,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_german",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Wir veröffentlichen die neue Version am Montag.",
@@ -1684,7 +3271,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_1",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das Issue.",
@@ -1705,7 +3297,7 @@ describe("MeetingIntelligence observe/query", () => {
     expect(second).toEqual(first);
   });
 
-  it("executes an approved provider-independent create-work-item intent and records a Discord receipt event", async () => {
+  it("does not let approval turn a model-supplied generic owner into a Linear assignee", async () => {
     const database = await createPgliteDatabase();
     const meetingIntelligence = createMeetingIntelligence({
       database,
@@ -1772,7 +3364,12 @@ describe("MeetingIntelligence observe/query", () => {
           observedAt: "2026-06-26T10:05:01.000Z",
           utteranceId: "utt_1",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-06-26T10:04:58.000Z",
           endedAt: "2026-06-26T10:05:02.000Z",
           originalText: "Jakob übernimmt das GitHub Issue bis Montag.",
@@ -1818,24 +3415,11 @@ describe("MeetingIntelligence observe/query", () => {
     const followUpExecution = createFollowUpExecution({
       database,
       meetingIntelligence,
-      identityDirectory: createLumaTeamIdentityDirectory(),
       workProvider,
       now: () => new Date("2026-06-26T10:20:00.000Z")
     });
 
     const result = await followUpExecution.execute({
-      workspace,
-      meetingId: "meeting_product",
-      intentId: approvedIntent.id
-    });
-    const restartedFollowUpExecution = createFollowUpExecution({
-      database,
-      meetingIntelligence,
-      identityDirectory: createLumaTeamIdentityDirectory(),
-      workProvider,
-      now: () => new Date("2026-06-26T10:21:00.000Z")
-    });
-    const retry = await restartedFollowUpExecution.execute({
       workspace,
       meetingId: "meeting_product",
       intentId: approvedIntent.id
@@ -1856,34 +3440,19 @@ describe("MeetingIntelligence observe/query", () => {
         "execute"
       ])
     );
-    expect(workProvider.createCalls).toHaveLength(1);
-    expect(workProvider.createCalls[0]).toEqual(
-      expect.objectContaining({
-        assigneeProviderUserId: "67e00026-a426-4476-83bb-fe679fc5ca9c",
-        mentionProviderUserIds: [
-          "67e00026-a426-4476-83bb-fe679fc5ca9c",
-          "5213a22b-1699-499f-8901-e34204add045",
-          "cfca93a4-7a23-4d8a-a5c9-56dd9b4b84c8",
-          "810f1e3b-321b-4e74-bb7b-92cf1608e3ba"
-        ]
-      })
-    );
-    expect(retry).toEqual(result);
-    expect(result.events).toEqual([
-      {
-        type: "follow-up-execution-succeeded",
-        intentId: "intent_create_issue",
-        externalReferences: [
-          {
-            providerId: "linear",
-            objectType: "work-item",
-            externalId: "312",
-            url: "https://linear.example/DAY-312"
-          }
-        ],
-        summary: "create-work-item succeeded: https://linear.example/DAY-312"
-      }
-    ]);
+    expect(workProvider.createCalls).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    const failureEvent = result.events[0];
+
+    if (!failureEvent || failureEvent.type !== "follow-up-execution-failed") {
+      throw new Error("expected a failed generic work-item receipt event");
+    }
+
+    expect(failureEvent).toMatchObject({
+      intentId: "intent_create_issue",
+      retryable: false
+    });
+    expect(failureEvent.message).toContain("durable ownership confirmation");
     expect(afterExecution.type).toBe("snapshot");
 
     if (afterExecution.type !== "snapshot") {
@@ -1893,17 +3462,10 @@ describe("MeetingIntelligence observe/query", () => {
     expect(afterExecution.state.followUpIntentions[0]).toEqual(
       expect.objectContaining({
         id: "intent_create_issue",
-        status: "succeeded"
+        status: "failed"
       })
     );
-    expect(afterExecution.state.actionItems[0]?.externalReferences).toEqual([
-      {
-        providerId: "linear",
-        objectType: "work-item",
-        externalId: "312",
-        url: "https://linear.example/DAY-312"
-      }
-    ]);
+    expect(afterExecution.state.actionItems[0]?.externalReferences).toEqual([]);
   });
 
   it("does not record a false success for an unimplemented code-comment Intent", async () => {
@@ -1952,7 +3514,12 @@ describe("MeetingIntelligence observe/query", () => {
             observedAt: "2026-08-08T10:00:01.000Z",
             utteranceId: "code-comment:utt",
             version: 1,
-            speakerId: "person_jakob",
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
             startedAt: "2026-08-08T09:59:58.000Z",
             endedAt: "2026-08-08T10:00:02.000Z",
             originalText: "Please add the source integrity comment to the pull request.",

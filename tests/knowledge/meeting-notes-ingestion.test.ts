@@ -8,6 +8,10 @@ import type {
   EvidenceReference,
   MeetingImportedFromSource
 } from "../../src/domain/model.js";
+import {
+  importedActionItemOwnershipFor,
+  importedActionItemSourceOwnerFor
+} from "../../src/domain/imported-action-item-semantics.js";
 import { createMeetingNotesIngestion } from "../../src/knowledge/meeting-notes-ingestion.js";
 import { createMeetingIntelligence as createProductionMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import type { ImportedSourceObservationVerifier } from "../../src/meeting-intelligence/imported-source-observation-verifier.js";
@@ -282,7 +286,8 @@ function directImportedMeetingObservation(input?: {
     language: "en",
     modality: { kind: "commitment", sourceForm: "will" },
     completion: "open",
-    owner: { state: "unmapped", sourceText: "Jakob" },
+    sourceOwner: importedActionItemSourceOwnerFor(candidateExcerpt),
+    ownership: importedActionItemOwnershipFor(candidateExcerpt),
     deadline: {
       originalPhrase: "by Friday",
       normalizedDate: "2026-08-07",
@@ -376,7 +381,13 @@ describe("Meeting Notes ingestion", () => {
         lineageKey: "candidate:notion:meeting-notes-root:block:action-commitment",
         originalText: "Jakob will finish the Luma source import by Friday.",
         modality: { kind: "commitment", sourceForm: "will" },
-        owner: { state: "unmapped", sourceText: "Jakob" },
+        sourceOwner: { state: "unmapped", sourceText: "Jakob" },
+        ownership: {
+          status: "proposed",
+          proposedOwnerPersonId: null,
+          confidence: "low",
+          basis: "inferred-assignment"
+        },
         deadline: {
           originalPhrase: "by Friday",
           normalizedDate: "2026-08-07",
@@ -394,7 +405,7 @@ describe("Meeting Notes ingestion", () => {
           }
         ]
       });
-      expect(request?.modality).toEqual({ kind: "question", sourceForm: "Could" });
+      expect(request?.modality).toEqual({ kind: "question", sourceForm: null });
       expect(request?.mentionedWorkItemReferences).toEqual([
         {
           providerId: "linear",
@@ -403,11 +414,16 @@ describe("Meeting Notes ingestion", () => {
         }
       ]);
       expect(completed?.completion).toBe("completed");
-      expect(completed?.modality).toEqual({ kind: "unknown", sourceForm: null });
+      expect(completed?.modality).toEqual({ kind: "completed-work", sourceForm: null });
       expect(germanCommitment).toMatchObject({
         language: "de",
         modality: { kind: "commitment", sourceForm: "werde" },
-        owner: { state: "ambiguous", sourceText: "Ich" },
+        sourceOwner: { state: "ambiguous", sourceText: "Ich" },
+        ownership: {
+          status: "unresolved",
+          reason: "missing-speaker",
+          likelyOwnerPersonId: null
+        },
         deadline: {
           originalPhrase: "bis Freitag",
           normalizedDate: "2026-08-07",
@@ -508,31 +524,446 @@ describe("Meeting Notes ingestion", () => {
       ] = snapshot.state.importedActionItemCandidates;
 
       expect(nonPersonSubject).toMatchObject({
-        owner: { state: "unspecified", sourceText: null },
+        sourceOwner: { state: "unspecified", sourceText: null },
         modality: { kind: "commitment", sourceForm: "wird" }
       });
       expect(reviewSubject).toMatchObject({
-        owner: { state: "unspecified", sourceText: null },
+        sourceOwner: { state: "unspecified", sourceText: null },
         modality: { kind: "request", sourceForm: "should" }
       });
       expect(germanModalFirst).toMatchObject({
-        owner: { state: "unmapped", sourceText: "Groß" },
-        modality: { kind: "question", sourceForm: "Könnte" }
+        sourceOwner: { state: "unmapped", sourceText: "Groß" },
+        modality: { kind: "question", sourceForm: null }
       });
       expect(englishPronoun).toMatchObject({
-        owner: { state: "ambiguous", sourceText: "We" },
+        sourceOwner: { state: "ambiguous", sourceText: "We" },
         modality: { kind: "commitment", sourceForm: "will" }
       });
       expect(germanPronoun).toMatchObject({
         language: "de",
-        owner: { state: "ambiguous", sourceText: "Sie" },
+        sourceOwner: { state: "ambiguous", sourceText: "Sie" },
         modality: { kind: "commitment", sourceForm: "werden" }
       });
       expect(germanModalPronoun).toMatchObject({
         language: "de",
-        owner: { state: "ambiguous", sourceText: "Wir" },
-        modality: { kind: "question", sourceForm: "könnten" }
+        sourceOwner: { state: "ambiguous", sourceText: "Wir" },
+        modality: { kind: "question", sourceForm: null }
       });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("preserves German Action Item wording while keeping speaker-dependent ownership unresolved", async () => {
+    const database = await createPgliteDatabase();
+    const reasoningModel = new NoAnalysisReasoningModel();
+    const meetingIntelligence = createMeetingIntelligence({ database, reasoningModel });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const source = observedMeetingNote({
+      contentHash: "sha256:german-ownership-safety-v1"
+    });
+    const actionItems = source.snapshot.sections.actionItemsAndNotes;
+
+    if (actionItems.state !== "available") {
+      throw new Error("expected available source Action Items");
+    }
+
+    actionItems.blocks = [
+      {
+        id: "german-self-commitment-mache",
+        type: "to-do",
+        text: "Ich mache das.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-self-commitment-uebernehme",
+        type: "to-do",
+        text: "Das übernehme ich.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-question",
+        type: "to-do",
+        text: "Kannst du das übernehmen?",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-acknowledgement",
+        type: "to-do",
+        text: "Ja, mache ich.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-proposal",
+        type: "to-do",
+        text: "Fabius könnte sich das anschauen.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-team-request",
+        type: "to-do",
+        text: "Wir sollten das noch testen.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-completed-work",
+        type: "to-do",
+        text: "Das habe ich gestern schon erledigt.",
+        checked: false,
+        children: []
+      },
+      {
+        id: "german-speaker-correction",
+        type: "to-do",
+        text: "Nein, ich meinte Philipp.",
+        checked: false,
+        children: []
+      }
+    ];
+    const ingestion = createMeetingNotesIngestion({ meetingIntelligence });
+
+    try {
+      const update = await ingestion.ingest({ workspace, source });
+
+      expect(update.acceptedObservationIds).toEqual([
+        "meeting-note-import:notion:meeting-notes-root:r1"
+      ]);
+      expect(reasoningModel.requests).toEqual([]);
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(
+        snapshot.state.importedActionItemCandidates.map((candidate) => ({
+          originalText: candidate.originalText,
+          language: candidate.language,
+          modality: candidate.modality.kind,
+          completion: candidate.completion,
+          sourceOwner: candidate.sourceOwner,
+          ownership: candidate.ownership
+        }))
+      ).toEqual([
+        {
+          originalText: "Ich mache das.",
+          language: "de",
+          modality: "commitment",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "Ich" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Das übernehme ich.",
+          language: "de",
+          modality: "commitment",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "ich" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Kannst du das übernehmen?",
+          language: "de",
+          modality: "question",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "du" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Ja, mache ich.",
+          language: "de",
+          modality: "commitment",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "ich" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Fabius könnte sich das anschauen.",
+          language: "de",
+          modality: "proposal",
+          completion: "open",
+          sourceOwner: { state: "unmapped", sourceText: "Fabius" },
+          ownership: {
+            status: "proposed",
+            proposedOwnerPersonId: null,
+            confidence: "low",
+            basis: "inferred-assignment"
+          }
+        },
+        {
+          originalText: "Wir sollten das noch testen.",
+          language: "de",
+          modality: "request",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "Wir" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Das habe ich gestern schon erledigt.",
+          language: "de",
+          modality: "completed-work",
+          completion: "completed",
+          sourceOwner: { state: "ambiguous", sourceText: "ich" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        },
+        {
+          originalText: "Nein, ich meinte Philipp.",
+          language: "de",
+          modality: "unknown",
+          completion: "open",
+          sourceOwner: { state: "ambiguous", sourceText: "ich" },
+          ownership: {
+            status: "unresolved",
+            reason: "missing-speaker",
+            likelyOwnerPersonId: null
+          }
+        }
+      ]);
+      expect(
+        snapshot.state.importedActionItemCandidates.every(
+          (candidate) =>
+            candidate.ownership.status !== "confirmed" &&
+            candidate.ownership.status !== "intentionally-unassigned"
+        )
+      ).toBe(true);
+
+      const reviews = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "action-item-reconciliation-review" }
+      });
+
+      if (reviews.type !== "action-item-reconciliation-review") {
+        throw new Error("expected Action Item Reconciliation reviews");
+      }
+
+      expect(
+        reviews.reviews.find(
+          (review) =>
+            review.proposal.candidate.originalText ===
+            "Das habe ich gestern schon erledigt."
+        )?.effectiveOutcome
+      ).toEqual({
+        type: "reject-not-work",
+        rationale: "The source marks this Action Item as already completed."
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps German refusals and contingencies out of commitment and create-new reconciliation", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new NoAnalysisReasoningModel()
+    });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const source = observedMeetingNote({
+      contentHash: "sha256:german-refusal-and-contingency-v1"
+    });
+    const actionItems = source.snapshot.sections.actionItemsAndNotes;
+
+    if (actionItems.state !== "available") {
+      throw new Error("expected available source Action Items");
+    }
+
+    const refusals = [
+      "Ich mache das nicht.",
+      "Ich übernehme das nie.",
+      "Das mache ich keinesfalls.",
+      "Ich übernehme keinerlei Verantwortung."
+    ];
+    const contingencies = [
+      "Ich mache das vielleicht.",
+      "Wenn ihr das wollt, mache ich das.",
+      "Ich mache das nur im Notfall.",
+      "Ich übernehme das bei Bedarf."
+    ];
+    actionItems.blocks = [...refusals, ...contingencies].map((text, index) => ({
+      id: `german-disposition-${index + 1}`,
+      type: "to-do",
+      text,
+      checked: false,
+      children: []
+    }));
+    const ingestion = createMeetingNotesIngestion({ meetingIntelligence });
+
+    try {
+      const update = await ingestion.ingest({ workspace, source });
+
+      expect(update.errors).toEqual([]);
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      for (const originalText of refusals) {
+        expect(
+          snapshot.state.importedActionItemCandidates.find(
+            (candidate) => candidate.originalText === originalText
+          )
+        ).toMatchObject({
+          language: "de",
+          modality: { kind: "unknown", sourceForm: null }
+        });
+      }
+
+      for (const originalText of contingencies) {
+        const candidate = snapshot.state.importedActionItemCandidates.find(
+          (item) => item.originalText === originalText
+        );
+
+        expect(candidate?.language).toBe("de");
+        expect(candidate?.modality.kind).toBe("proposal");
+      }
+
+      expect(
+        snapshot.state.importedActionItemCandidates.some(
+          (candidate) => candidate.modality.kind === "commitment"
+        )
+      ).toBe(false);
+
+      const reviews = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "action-item-reconciliation-review" }
+      });
+
+      if (reviews.type !== "action-item-reconciliation-review") {
+        throw new Error("expected Action Item Reconciliation reviews");
+      }
+
+      for (const originalText of [...refusals, ...contingencies]) {
+        expect(
+          reviews.reviews.find(
+            (review) => review.proposal.candidate.originalText === originalText
+          )?.effectiveOutcome
+        ).toEqual({
+          type: "needs-clarification",
+          rationale:
+            "The source wording does not make a clear work commitment or request."
+        });
+      }
+
+      expect(
+        reviews.reviews.some((review) => review.effectiveOutcome.type === "create-new")
+      ).toBe(false);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a named German source commitment proposed until a Human resolves ownership", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new NoAnalysisReasoningModel()
+    });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const source = observedMeetingNote({
+      contentHash: "sha256:jakob-macht-proposed-owner-v1"
+    });
+    const actionItems = source.snapshot.sections.actionItemsAndNotes;
+
+    if (actionItems.state !== "available") {
+      throw new Error("expected available source Action Items");
+    }
+
+    actionItems.blocks = [
+      {
+        id: "jakob-macht-action",
+        type: "to-do",
+        text: "Jakob macht das bis Freitag.",
+        checked: false,
+        children: []
+      }
+    ];
+    const ingestion = createMeetingNotesIngestion({ meetingIntelligence });
+
+    try {
+      await ingestion.ingest({ workspace, source });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(snapshot.state.importedActionItemCandidates).toEqual([
+        expect.objectContaining({
+          originalText: "Jakob macht das bis Freitag.",
+          modality: { kind: "commitment", sourceForm: "Jakob macht" },
+          sourceOwner: { state: "unmapped", sourceText: "Jakob" },
+          ownership: {
+            status: "proposed",
+            proposedOwnerPersonId: null,
+            confidence: "low",
+            basis: "inferred-assignment"
+          }
+        })
+      ]);
+      expect(
+        snapshot.state.importedActionItemCandidates.some(
+          (candidate) =>
+            candidate.ownership.status === "confirmed" ||
+            candidate.ownership.status === "intentionally-unassigned"
+        )
+      ).toBe(false);
     } finally {
       await database.close();
     }
@@ -1877,15 +2308,28 @@ describe("Meeting Notes ingestion", () => {
       ...observation,
       candidates: [{ ...candidate, projectHints: ["private-project"] }]
     } satisfies MeetingImportedFromSource;
-    const forgedKnownOwner = {
+    const forgedConfirmedOwnership = {
       ...observation,
       candidates: [
         {
           ...candidate,
-          owner: {
-            state: "known" as const,
-            personId: "person:forged",
-            sourceText: "Jakob"
+          ownership: {
+            status: "confirmed" as const,
+            ownerPersonId: "person:forged",
+            confidence: "deterministic" as const,
+            basis: "human-confirmation" as const
+          }
+        }
+      ]
+    } satisfies MeetingImportedFromSource;
+    const forgedUnassignedOwnership = {
+      ...observation,
+      candidates: [
+        {
+          ...candidate,
+          ownership: {
+            status: "intentionally-unassigned" as const,
+            basis: "human-confirmation" as const
           }
         }
       ]
@@ -1900,9 +2344,13 @@ describe("Meeting Notes ingestion", () => {
         workspace,
         observations: [forgedHint]
       });
-      const knownOwnerRejected = await meetingIntelligence.observe({
+      const confirmedOwnershipRejected = await meetingIntelligence.observe({
         workspace,
-        observations: [forgedKnownOwner]
+        observations: [forgedConfirmedOwnership]
+      });
+      const unassignedOwnershipRejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [forgedUnassignedOwnership]
       });
       const modalityError = modalityRejected.errors[0];
       const hintError = hintRejected.errors[0];
@@ -1915,14 +2363,22 @@ describe("Meeting Notes ingestion", () => {
       expect(
         hintError?.code === "invalid-observation" ? hintError.message : ""
       ).toContain("project hint that does not occur");
-      expect(knownOwnerRejected.errors[0]).toMatchObject({
+      expect(confirmedOwnershipRejected.errors[0]).toMatchObject({
         code: "invalid-observation"
       });
       expect(
-        knownOwnerRejected.errors[0]?.code === "invalid-observation"
-          ? knownOwnerRejected.errors[0].message
+        confirmedOwnershipRejected.errors[0]?.code === "invalid-observation"
+          ? confirmedOwnershipRejected.errors[0].message
           : ""
-      ).toContain("resolved owner");
+      ).toContain("ownership attribution");
+      expect(unassignedOwnershipRejected.errors[0]).toMatchObject({
+        code: "invalid-observation"
+      });
+      expect(
+        unassignedOwnershipRejected.errors[0]?.code === "invalid-observation"
+          ? unassignedOwnershipRejected.errors[0].message
+          : ""
+      ).toContain("ownership attribution");
 
       const corrected = await meetingIntelligence.observe({
         workspace,

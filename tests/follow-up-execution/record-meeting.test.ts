@@ -342,7 +342,12 @@ async function createApprovedMeetingRecordIntent(input: {
         observedAt: "2026-07-16T09:05:01.000Z",
         utteranceId: `${input.meetingId}:utterance`,
         version: 1,
-        speakerId: "person_jakob",
+        speaker: {
+          status: "attributed",
+          personId: "person_jakob",
+          confidence: "deterministic",
+          basis: "provider-identity"
+        },
         startedAt: "2026-07-16T09:04:58.000Z",
         endedAt: "2026-07-16T09:05:02.000Z",
         originalText: "Ich bereite die release checklist bis Montag vor.",
@@ -581,7 +586,12 @@ describe("Follow-up execution meeting records", () => {
           observedAt: "2026-07-16T09:05:01.000Z",
           utteranceId: "utt_product_note",
           version: 1,
-          speakerId: "person_jakob",
+          speaker: {
+            status: "attributed",
+            personId: "person_jakob",
+            confidence: "deterministic",
+            basis: "provider-identity"
+          },
           startedAt: "2026-07-16T09:04:58.000Z",
           endedAt: "2026-07-16T09:05:02.000Z",
           originalText: "Ich bereite die release checklist bis Montag vor.",

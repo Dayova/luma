@@ -127,16 +127,23 @@ export type ImportedActionItemSourceBlock = {
 };
 
 export type ImportedActionItemModality = {
-  kind: "commitment" | "request" | "suggestion" | "conditional" | "question" | "unknown";
+  kind:
+    | "commitment"
+    | "request"
+    | "proposal"
+    | "suggestion"
+    | "conditional"
+    | "question"
+    | "completed-work"
+    | "unknown";
   sourceForm: string | null;
 };
 
-export type ImportedActionItemCandidateOwner =
-  | {
-      state: "known";
-      personId: PersonId;
-      sourceText: string;
-    }
+/**
+ * Exact owner-like wording from an imported source. This is not an identity
+ * and must never be used directly as a canonical work assignee.
+ */
+export type ImportedActionItemSourceOwner =
   | {
       state: "unmapped";
       sourceText: string;
@@ -148,6 +155,43 @@ export type ImportedActionItemCandidateOwner =
   | {
       state: "ambiguous";
       sourceText: string;
+    };
+
+/**
+ * Luma's effective responsibility assessment. It is deliberately distinct
+ * from source wording: a named person, speaker label, attendee, or model
+ * proposal is never a confirmed owner on its own.
+ */
+export type ActionItemOwnershipAttribution =
+  | {
+      status: "confirmed";
+      ownerPersonId: PersonId;
+      confidence: "deterministic" | "high";
+      basis:
+        | "self-commitment"
+        | "explicit-assignment"
+        | "assignment-accepted"
+        | "human-confirmation";
+    }
+  | {
+      status: "proposed";
+      proposedOwnerPersonId: PersonId | null;
+      confidence: "medium" | "low";
+      basis: "proposed-assignment" | "inferred-assignment";
+    }
+  | {
+      status: "intentionally-unassigned";
+      basis: "team-decision" | "human-confirmation";
+    }
+  | {
+      status: "unresolved";
+      reason:
+        | "missing-speaker"
+        | "conflicting-speaker"
+        | "no-owner-stated"
+        | "insufficient-acceptance"
+        | "unsupported-semantics";
+      likelyOwnerPersonId: PersonId | null;
     };
 
 export type ImportedWorkItemReference = {
@@ -164,7 +208,10 @@ export type ImportedActionItemCandidate = {
   language: UtteranceLanguage;
   modality: ImportedActionItemModality;
   completion: "open" | "completed";
-  owner: ImportedActionItemCandidateOwner;
+  /** Immutable source wording; use `ownership` for a responsibility decision. */
+  sourceOwner: ImportedActionItemSourceOwner;
+  /** Source-derived initial state. Only Human Judgment may confirm/unassign it. */
+  ownership: ActionItemOwnershipAttribution;
   deadline: {
     originalPhrase: string | null;
     normalizedDate: string | null;
@@ -280,7 +327,11 @@ export type ActionItemReconciliationReview = {
   id: string;
   policyVersion: string;
   attempt: number;
-  trigger: "initial-source-import" | "catalog-retry" | "human-refresh";
+  trigger:
+    | "initial-source-import"
+    | "catalog-retry"
+    | "human-refresh"
+    | "human-ownership-resolution";
   /** A retry is safe only when the catalog was unavailable or failed to read. */
   retryable: boolean;
   /**
@@ -293,6 +344,8 @@ export type ActionItemReconciliationReview = {
   candidateId: string;
   candidateLineageKey: string;
   candidate: ImportedActionItemCandidate;
+  /** Immutable effective ownership snapshot used for this exact review. */
+  ownership: ActionItemOwnershipAttribution;
   /** Source and hydrated canonical-work Evidence that grounds this proposal. */
   evidence: EvidenceReference[];
   searches: ActionItemReconciliationSearchReceipt[];
@@ -314,6 +367,22 @@ export type ActionItemReconciliationHumanResolution = {
   resolvedAt: string;
 };
 
+/**
+ * An append-only Human correction over the immutable candidate ownership
+ * claim. Later corrections supersede earlier ones; they never rewrite source
+ * text or turn a speaker/name guess into source fact.
+ */
+export type ActionItemOwnershipHumanResolution = {
+  id: string;
+  claimId: string;
+  candidateId: string;
+  candidateLineageKey: string;
+  participantId: PersonId;
+  ownership: ActionItemOwnershipAttribution;
+  evidence: EvidenceReference;
+  resolvedAt: string;
+};
+
 /** Immutable receipt linking a successful new work item to its source lineage. */
 export type ActionItemReconciliationCreatedWorkMapping = {
   id: string;
@@ -327,10 +396,52 @@ export type ActionItemReconciliationCreatedWorkMapping = {
 /** The reconciliation query's current projection; it never mutates its proposal. */
 export type CurrentActionItemReconciliationReview = {
   proposal: ActionItemReconciliationReview;
+  /** Stable immutable source claim a caller may resolve through Human Judgment. */
+  ownershipClaimId: string;
+  ownership: ActionItemOwnershipAttribution;
   effectiveOutcome: ActionItemReconciliationOutcome;
   status: "proposed" | "blocked-by-conflict" | "human-resolved";
   conflictingCandidateIds: string[];
   humanResolution: ActionItemReconciliationHumanResolution | null;
+};
+
+export type SpeakerAttributionConfidence =
+  "deterministic" | "high" | "medium" | "low" | "unknown";
+
+/**
+ * Evidence-backed identity for an utterance speaker. It is intentionally
+ * independent from responsibility for a resulting Action Item.
+ */
+export type SpeakerAttribution =
+  | {
+      status: "attributed";
+      personId: PersonId;
+      confidence: "deterministic" | "high";
+      /** Only identity proof or durable Human Judgment may establish a speaker. */
+      basis: "provider-identity" | "human-confirmation";
+    }
+  | {
+      status: "unresolved";
+      candidatePersonId: PersonId | null;
+      confidence: "medium" | "low" | "unknown";
+      basis:
+        | "provider-speaker-label"
+        | "calendar-context"
+        | "audio-diarization"
+        | "contextual-inference"
+        | "human-confirmation"
+        | "legacy-unverified";
+    };
+
+/** Immutable Human correction over a versioned utterance speaker claim. */
+export type SpeakerAttributionHumanResolution = {
+  id: string;
+  utteranceId: UtteranceId;
+  version: number;
+  participantId: PersonId;
+  speaker: SpeakerAttribution;
+  evidence: EvidenceReference;
+  resolvedAt: string;
 };
 
 export type ObservationBase = {
@@ -358,7 +469,8 @@ export type UtteranceCommitted = ObservationBase & {
   type: "utterance-committed";
   utteranceId: UtteranceId;
   version: number;
-  speakerId: PersonId;
+  /** Speaker attribution is not Action Item ownership. */
+  speaker: SpeakerAttribution;
   startedAt: string;
   endedAt: string;
   originalText: string;
@@ -439,6 +551,28 @@ export type HumanJudgment =
       kind: "resolve-action-item-reconciliation";
       reviewId: string;
       resolution: ActionItemReconciliationResolution;
+    }
+  | {
+      /** Resolve the immutable ownership claim for one current source candidate. */
+      kind: "resolve-action-item-ownership";
+      claimId: string;
+      resolution:
+        | { type: "confirm-owner"; ownerPersonId: PersonId }
+        | { type: "intentionally-unassigned" }
+        | {
+            type: "keep-unresolved";
+            reason?: Extract<
+              ActionItemOwnershipAttribution,
+              { status: "unresolved" }
+            >["reason"];
+          };
+    }
+  | {
+      /** Correct a speaker claim without rewriting the original utterance. */
+      kind: "resolve-speaker-attribution";
+      utteranceId: UtteranceId;
+      version: number;
+      personId: PersonId | null;
     }
   | {
       /** Ask Luma to re-read canonical work after a Human-reviewed stale target. */
@@ -592,6 +726,12 @@ export type Decision = {
 export type ActionItem = {
   id: ActionItemId;
   description: string;
+  /**
+   * Effective responsibility state. A legacy/raw model `ownerId` is never a
+   * confirmation on its own; `ownerId` below is only the confirmed projection
+   * retained for existing caller compatibility.
+   */
+  ownership?: ActionItemOwnershipAttribution;
   ownerId: PersonId | null;
   dueDate: string | null;
   dueDateConfidence: DueDateConfidence;
@@ -751,6 +891,16 @@ export type MeetingState = {
   currentImportedActionItemCandidateIds: string[];
   actionItemReconciliationReviews: ActionItemReconciliationReview[];
   actionItemReconciliationHumanResolutions: ActionItemReconciliationHumanResolution[];
+  actionItemOwnershipHumanResolutions: ActionItemOwnershipHumanResolution[];
+  speakerAttributionHumanResolutions: SpeakerAttributionHumanResolution[];
+  /**
+   * Participants whose current presence was derived only from a trusted
+   * transcript speaker attribution. Direct attendance observations remain
+   * independent of this projection and must survive a later correction.
+   *
+   * Optional while existing persisted Meeting State is upgraded lazily.
+   */
+  speakerInferredParticipantIds?: PersonId[];
   actionItemReconciliationCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[];
   lastObservationAt: string;
   lastAnalyzedAt: string | null;

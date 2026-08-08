@@ -15,14 +15,35 @@ pnpm dev
 
 The Discord variables are required to start the executable bot. Linear, Notion, and OpenAI are optional capability groups: omitting a whole group leaves that capability unavailable. Setting only part of a group fails startup with the missing variable name.
 
-## Ownership Rule
+## System Ownership And Current Write Gate
 
-- **Linear** owns executable work. Approved `create-work-item` Follow-up Intents create Linear issues.
-- **Notion** owns Meeting records, decisions, and organizational knowledge. Approved `record-meeting` Follow-up Intents create pages in the Meetings data source.
-- **GitHub** owns code, pull requests, reviews, and CI. The Linear integration may expose synced GitHub Issues as a compatibility surface; Luma does not create a second task independently.
-- **Discord** owns the live Meeting interaction and receipt surface.
+- **Linear** is the sole canonical system for executable work.
+- **Notion** is canonical knowledge and holds the raw Meeting Note source
+  record. Luma preserves that source and adds only a compact, marker-owned
+  Operational Outcome during an authorized source-bound settlement.
+- **GitHub** is canonical implementation evidence: code, pull requests,
+  reviews, and CI. Synced GitHub Issues are compatibility mirrors, not a
+  second task system.
+- **Discord** is live collaboration, a first-class conversation source, and a
+  Luma interaction surface.
+- **Luma** owns context, Evidence, attribution, reconciliation,
+  authorization, idempotent execution, identity mapping, auditability, and
+  lifecycle.
 
-This implements the task-pipeline decisions in DAY-39, GitHub #20, and DAY-175.
+The current source-bound Linear settlement gate is deliberately strict:
+
+- `confirmed` ownership may map its Person through the Identity Directory to a
+  Linear assignee;
+- only a Human-explicit `intentionally-unassigned` ownership decision may
+  create work with a `null` assignee;
+- `proposed` and `unresolved` ownership never create, update, or assign
+  canonical work, and require targeted clarification instead;
+- generic `create-work-item` Intents are currently rejected until they carry
+  the same durable ownership proof.
+
+LUM-6, LUM-7, and LUM-8 remain incomplete; this gate describes the safety
+contract for their current foundation, not a claim that the full settlement
+wedge is finished.
 
 ## Linear Setup
 
@@ -34,7 +55,13 @@ LINEAR_TEAM_ID=63c160e7-ab70-4ef9-9822-0f85590ebb7f
 LUMA_LINEAR_PROVIDER_ID=linear
 ```
 
-The key's Linear user must be able to read and create issues in the Dayova team. Follow-up Execution resolves internal assignee and mention IDs to Linear member UUIDs. The Adapter adds mentioned People as subscribers and stores an idempotency marker in the issue description.
+The key's Linear user must be able to read and create issues in the Dayova
+team. For a permitted source-bound settlement, Follow-up Execution resolves a
+**confirmed** internal owner to a Linear member UUID. It never falls back to an
+unassigned issue when that mapping is missing; only a Human-explicit
+intentionally-unassigned decision permits a null assignee. The Adapter adds
+mentioned People as subscribers and stores an idempotency marker in the issue
+description.
 
 Use a development key for the development bot and a production integration identity for production. Do not put the key in Discord, Linear issues, Notion pages, logs, or commits.
 
@@ -51,7 +78,12 @@ LUMA_NOTION_PROVIDER_ID=notion
 LUMA_NOTION_MEETING_SYNC_INTERVAL_MS=60000
 ```
 
-`Name` must be the title property. `Attendees` must be a People property. Follow-up Execution maps Meeting participants to Notion user IDs before creating a Meeting record. The page contains the Conclusion summary, decisions, Action Items, open questions, risks, provenance revision, and an idempotency marker.
+`Name` must be the title property. `Attendees` must be a People property. The
+configured source is used to discover and read raw Notion Meeting Notes, not
+to replace them with a second final Meeting record. The in-progress
+Notion-to-Linear settlement wedge writes its compact Luma-owned Operational
+Outcome to the original source note; it does not rewrite transcript, summary,
+or source Action Items.
 
 If Notion returns `object_not_found`, reconnect the integration to the Meetings data source and verify that the data-source ID, rather than a page URL fragment from another database, is configured.
 
@@ -79,9 +111,12 @@ See `docs/integrations/discord.md` for Application creation, installation permis
 
 ### Optional bounded Context Ask
 
-Discord Context Ask is deliberately off by default. It is a read-only
-`@Luma question` surface in specifically reviewed **public threads**, not a
-Meeting command and not a server-wide listener. Enable it only after the
+Discord Context Ask is deliberately off by default. It is the currently
+implemented, read-only `@Luma question` slice in specifically reviewed
+**public threads**, not a Meeting command and not a server-wide listener. It
+is a bounded implementation limitation, not Luma's permanent product
+boundary: Verify, Reconcile, and Execute remain future shared-core work.
+Enable it only after the
 Application's **Message Content** privileged Gateway intent has been enabled
 (and approved if Discord requires it for the Application):
 
@@ -136,7 +171,7 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `LINEAR_API_URL`                                    | No               | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                              |
 | `LUMA_LINEAR_PROVIDER_ID`                           | No               | Linear WorkProvider      | External reference namespace; defaults to `linear`.                        |
 | `NOTION_API_TOKEN`                                  | With Notion      | Notion KnowledgeProvider | Internal integration secret.                                               |
-| `NOTION_MEETINGS_DATA_SOURCE_ID`                    | With Notion      | Notion KnowledgeProvider | Parent data source for approved Meeting records.                           |
+| `NOTION_MEETINGS_DATA_SOURCE_ID`                    | With Notion      | Notion KnowledgeProvider | Parent data source for raw Notion Meeting Notes.                           |
 | `NOTION_MEETINGS_TITLE_PROPERTY`                    | No               | Notion KnowledgeProvider | Defaults to `Name`.                                                        |
 | `NOTION_MEETINGS_ATTENDEES_PROPERTY`                | No               | Notion KnowledgeProvider | Defaults to `Attendees`.                                                   |
 | `LUMA_NOTION_PROVIDER_ID`                           | No               | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.                        |
@@ -173,6 +208,10 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 - Keep development and production credentials separate.
 - Grant only the provider access documented for the active capability.
 - Keep SDKs, MCP tools, CLIs, and provider IDs out of Meeting Intelligence domain state.
-- External mutations require an approved Follow-up Intent and use a durable idempotency key.
+- The current Meeting settlement implementation requires an approved,
+  source-bound Follow-up Intent and a durable idempotency key. Product policy
+  may later allow an authorized explicit write instruction for safe,
+  unambiguous operations; that broader authorization path is not implemented
+  by the bounded Context Ask slice.
 
 See `docs/configuration/identity.md` for the built-in Person mappings.

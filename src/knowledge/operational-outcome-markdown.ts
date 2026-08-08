@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import type { ExternalReference } from "../domain/model.js";
+import type {
+  ActionItemOwnershipAttribution,
+  ExternalReference
+} from "../domain/model.js";
 import type {
   OperationalOutcome,
   OperationalOutcomeEntry
@@ -230,6 +233,9 @@ function renderOperationalOutcomeEntry(entry: OperationalOutcomeEntry): string[]
     "#### Resolution",
     `- **${renderInlineText(resolution.type)}**: ${renderInlineText(resolution.rationale)}`,
     "",
+    "#### Ownership",
+    ...renderOwnership(entry.ownership),
+    "",
     "#### Work"
   ];
 
@@ -252,6 +258,33 @@ function renderOperationalOutcomeEntry(entry: OperationalOutcomeEntry): string[]
   lines.push(`- Settlement Intent: ${renderInlineCode(entry.settlementIntentId)}`);
 
   return lines;
+}
+
+function renderOwnership(ownership: ActionItemOwnershipAttribution): string[] {
+  switch (ownership.status) {
+    case "confirmed":
+      return [
+        `- Confirmed: ${renderInlineCode(ownership.ownerPersonId)} (${renderInlineText(ownership.basis)}, ${renderInlineText(ownership.confidence)})`
+      ];
+    case "proposed":
+      return [
+        `- Proposed: ${
+          ownership.proposedOwnerPersonId
+            ? renderInlineCode(ownership.proposedOwnerPersonId)
+            : "no canonical Person"
+        } (${renderInlineText(ownership.basis)}, ${renderInlineText(ownership.confidence)})`
+      ];
+    case "intentionally-unassigned":
+      return [`- Intentionally unassigned (${renderInlineText(ownership.basis)})`];
+    case "unresolved":
+      return [
+        `- Unresolved: ${renderInlineText(ownership.reason)}${
+          ownership.likelyOwnerPersonId
+            ? ` (${renderInlineCode(ownership.likelyOwnerPersonId)})`
+            : ""
+        }`
+      ];
+  }
 }
 
 function renderReferences(references: ExternalReference[]): string[] {

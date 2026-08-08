@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import type {
   ActionItemReconciliationResolution,
   ExternalReference,
+  HumanJudgment,
   MeetingImportedFromSource,
   WorkspaceConfig
 } from "../../src/domain/model.js";
+import {
+  importedActionItemOwnershipFor,
+  importedActionItemSourceOwnerFor
+} from "../../src/domain/imported-action-item-semantics.js";
+import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
 import type {
   OperationalOutcome,
@@ -240,6 +246,33 @@ class RecordingCreateWorkProvider implements WorkProvider {
     void _id;
     void _body;
     return Promise.resolve();
+  }
+}
+
+class BlockingCreateWorkProvider extends RecordingCreateWorkProvider {
+  private releaseCreateSignal: (() => void) | null = null;
+  private signalCreateStarted: (() => void) | null = null;
+  private readonly createReleased = new Promise<void>((resolve) => {
+    this.releaseCreateSignal = resolve;
+  });
+  private readonly createStarted = new Promise<void>((resolve) => {
+    this.signalCreateStarted = resolve;
+  });
+
+  override async createWorkItem(input: CreateWorkItemInput): Promise<ExternalReference> {
+    this.signalCreateStarted?.();
+    this.signalCreateStarted = null;
+    await this.createReleased;
+    return super.createWorkItem(input);
+  }
+
+  waitForCreate(): Promise<void> {
+    return this.createStarted;
+  }
+
+  releaseCreate(): void {
+    this.releaseCreateSignal?.();
+    this.releaseCreateSignal = null;
   }
 }
 
@@ -561,7 +594,8 @@ function sourceObservation(
     description?: string;
     completeness?: MeetingImportedFromSource["source"]["completeness"];
     modality?: MeetingImportedFromSource["candidates"][number]["modality"];
-    owner?: MeetingImportedFromSource["candidates"][number]["owner"];
+    sourceOwner?: MeetingImportedFromSource["candidates"][number]["sourceOwner"];
+    ownership?: MeetingImportedFromSource["candidates"][number]["ownership"];
     deadline?: MeetingImportedFromSource["candidates"][number]["deadline"];
     mentionedWorkItemReferences?: MeetingImportedFromSource["candidates"][number]["mentionedWorkItemReferences"];
     projectHints?: string[];
@@ -633,7 +667,8 @@ function sourceObservation(
     language: "en",
     modality: input.modality ?? { kind: "commitment", sourceForm: "will" },
     completion,
-    owner: input.owner ?? { state: "unmapped", sourceText: "Jakob" },
+    sourceOwner: input.sourceOwner ?? importedActionItemSourceOwnerFor(description),
+    ownership: input.ownership ?? importedActionItemOwnershipFor(description),
     deadline: input.deadline ?? {
       originalPhrase: "by Friday",
       normalizedDate: "2026-08-07",
@@ -720,6 +755,13 @@ async function observeAndReview(
     workspace,
     observations: [observation]
   });
+
+  if (update.errors.length > 0) {
+    throw new Error(
+      `expected imported source observation: ${update.errors[0]?.code ?? "unknown error"}`
+    );
+  }
+
   const result = await meetingIntelligence.query({
     workspaceId: workspace.workspaceId,
     meetingId: observation.meetingId,
@@ -740,6 +782,71 @@ async function resolveAndApproveOperationalOutcome(input: {
   observationSuffix: string;
   resolution?: ActionItemReconciliationResolution;
 }) {
+  let reviewId = input.reviewId;
+  const reviewQuery = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+  const currentReview =
+    reviewQuery.type === "action-item-reconciliation-review"
+      ? reviewQuery.reviews.find((review) => review.proposal.id === reviewId)
+      : undefined;
+
+  if (
+    currentReview &&
+    (currentReview.effectiveOutcome.type === "create-new" ||
+      currentReview.effectiveOutcome.type === "update-existing") &&
+    currentReview.ownership.status !== "confirmed" &&
+    currentReview.ownership.status !== "intentionally-unassigned"
+  ) {
+    const ownershipResolution = await input.meetingIntelligence.observe({
+      workspace,
+      observations: [
+        {
+          type: "human-judgment-recorded",
+          observationId: `human-ownership:${input.observationSuffix}`,
+          workspaceId: workspace.workspaceId,
+          meetingId: input.meetingId,
+          occurredAt: "2026-08-08T09:59:00.000Z",
+          observedAt: "2026-08-08T09:59:00.000Z",
+          participantId: "person:jakob",
+          judgment: {
+            kind: "resolve-action-item-ownership",
+            claimId: currentReview.ownershipClaimId,
+            resolution: { type: "confirm-owner", ownerPersonId: "person_jakob" }
+          }
+        }
+      ]
+    });
+
+    if (ownershipResolution.errors.length > 0) {
+      throw new Error(
+        `expected ownership resolution: ${ownershipResolution.errors[0]?.code ?? "unknown error"}`
+      );
+    }
+
+    const refreshed = await input.meetingIntelligence.query({
+      workspaceId: workspace.workspaceId,
+      meetingId: input.meetingId,
+      query: { type: "action-item-reconciliation-review" }
+    });
+
+    if (refreshed.type !== "action-item-reconciliation-review") {
+      throw new Error("expected refreshed reconciliation review");
+    }
+
+    const replacement = refreshed.reviews.find(
+      (review) => review.proposal.candidateId === currentReview.proposal.candidateId
+    );
+
+    if (!replacement) {
+      throw new Error("expected ownership-resolved reconciliation review");
+    }
+
+    reviewId = replacement.proposal.id;
+  }
+
   const resolution = await input.meetingIntelligence.observe({
     workspace,
     observations: [
@@ -753,7 +860,7 @@ async function resolveAndApproveOperationalOutcome(input: {
         participantId: "person:jakob",
         judgment: {
           kind: "resolve-action-item-reconciliation",
-          reviewId: input.reviewId,
+          reviewId,
           resolution: input.resolution ?? { type: "accept-proposal" }
         }
       }
@@ -779,7 +886,7 @@ async function resolveAndApproveOperationalOutcome(input: {
   const intent = snapshot.state.followUpIntentions.find(
     (candidate) =>
       candidate.type === "settle-operational-outcome" &&
-      candidate.reconciliation.reviewId === input.reviewId
+      candidate.reconciliation.reviewId === reviewId
   );
 
   if (!intent) {
@@ -807,6 +914,163 @@ async function resolveAndApproveOperationalOutcome(input: {
   }
 
   return intent;
+}
+
+async function confirmOwnershipForReview(input: {
+  meetingIntelligence: Awaited<ReturnType<typeof createHarness>>["meetingIntelligence"];
+  meetingId: string;
+  reviewId: string;
+  observationSuffix: string;
+  ownerPersonId?: string;
+}) {
+  const before = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+
+  if (before.type !== "action-item-reconciliation-review") {
+    throw new Error("expected reconciliation review before ownership confirmation");
+  }
+
+  const review = before.reviews.find((value) => value.proposal.id === input.reviewId);
+
+  if (!review) {
+    throw new Error(
+      "expected current reconciliation review before ownership confirmation"
+    );
+  }
+
+  const update = await input.meetingIntelligence.observe({
+    workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: `human-ownership:${input.observationSuffix}`,
+        workspaceId: workspace.workspaceId,
+        meetingId: input.meetingId,
+        occurredAt: "2026-08-08T09:59:00.000Z",
+        observedAt: "2026-08-08T09:59:00.000Z",
+        participantId: "person:jakob",
+        judgment: {
+          kind: "resolve-action-item-ownership",
+          claimId: review.ownershipClaimId,
+          resolution: {
+            type: "confirm-owner",
+            ownerPersonId: input.ownerPersonId ?? "person_jakob"
+          }
+        }
+      }
+    ]
+  });
+
+  if (update.errors.length > 0) {
+    throw new Error(
+      `expected ownership confirmation: ${update.errors[0]?.code ?? "unknown error"}`
+    );
+  }
+
+  const after = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+
+  if (after.type !== "action-item-reconciliation-review") {
+    throw new Error("expected reconciliation review after ownership confirmation");
+  }
+
+  const replacement = after.reviews.find(
+    (value) => value.proposal.candidateId === review.proposal.candidateId
+  );
+
+  if (!replacement) {
+    throw new Error("expected ownership-confirmed replacement review");
+  }
+
+  return replacement.proposal;
+}
+
+/**
+ * Applies one targeted ownership decision and returns the fresh reconciliation
+ * projection it causes. Ownership corrections deliberately generate a new
+ * review from the immutable source candidate; callers must never reuse the
+ * review that preceded the correction.
+ */
+async function resolveOwnershipForReview(input: {
+  meetingIntelligence: Awaited<ReturnType<typeof createHarness>>["meetingIntelligence"];
+  meetingId: string;
+  reviewId: string;
+  observationSuffix: string;
+  observedAt?: string;
+  resolution: Extract<
+    HumanJudgment,
+    { kind: "resolve-action-item-ownership" }
+  >["resolution"];
+}) {
+  const before = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+
+  if (before.type !== "action-item-reconciliation-review") {
+    throw new Error("expected reconciliation review before ownership resolution");
+  }
+
+  const review = before.reviews.find((value) => value.proposal.id === input.reviewId);
+
+  if (!review) {
+    throw new Error("expected current reconciliation review before ownership resolution");
+  }
+
+  const observedAt = input.observedAt ?? "2026-08-08T09:59:00.000Z";
+
+  const update = await input.meetingIntelligence.observe({
+    workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: `human-ownership:${input.observationSuffix}`,
+        workspaceId: workspace.workspaceId,
+        meetingId: input.meetingId,
+        occurredAt: observedAt,
+        observedAt,
+        participantId: "person:jakob",
+        judgment: {
+          kind: "resolve-action-item-ownership",
+          claimId: review.ownershipClaimId,
+          resolution: input.resolution
+        }
+      }
+    ]
+  });
+
+  if (update.errors.length > 0) {
+    throw new Error(
+      `expected ownership resolution: ${update.errors[0]?.code ?? "unknown error"}`
+    );
+  }
+
+  const after = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+
+  if (after.type !== "action-item-reconciliation-review") {
+    throw new Error("expected reconciliation review after ownership resolution");
+  }
+
+  const replacement = after.reviews.find(
+    (value) => value.proposal.candidateId === review.proposal.candidateId
+  );
+
+  if (!replacement) {
+    throw new Error("expected ownership-resolved replacement review");
+  }
+
+  return replacement;
 }
 
 async function followUpIntentStatus(input: {
@@ -941,7 +1205,7 @@ describe("Action Item reconciliation", () => {
           candidateId: observation.candidates[0]?.id,
           candidate: {
             modality: { kind: "commitment", sourceForm: "will" },
-            owner: { state: "unmapped", sourceText: "Jakob" },
+            sourceOwner: { state: "unmapped", sourceText: "Jakob" },
             deadline: { originalPhrase: "by Friday", normalizedDate: "2026-08-07" },
             source: { sourceBlockId: "source-action" }
           },
@@ -1623,9 +1887,16 @@ describe("Action Item reconciliation", () => {
       const reviewed = await observeAndReview(meetingIntelligence, observation);
       const review = reviewed.reviews[0]?.proposal;
 
-      if (!review || review.outcome.type !== "create-new") {
-        throw new Error("expected a create-new reconciliation proposal");
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
       }
+
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "recover-create-outcome"
+      });
 
       await meetingIntelligence.observe({
         workspace,
@@ -1640,7 +1911,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "resolve-action-item-reconciliation",
-              reviewId: review.id,
+              reviewId: ownershipConfirmedReview.id,
               resolution: { type: "accept-proposal" }
             }
           }
@@ -1681,6 +1952,7 @@ describe("Action Item reconciliation", () => {
       const firstExecutor = createFollowUpExecution({
         database,
         meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
         workProvider,
         operationalOutcomeWriter: writer,
         now: () => new Date("2026-08-08T10:02:00.000Z")
@@ -1718,12 +1990,13 @@ describe("Action Item reconciliation", () => {
           ? partialSnapshot.state.actionItemReconciliationCreatedWorkMappings[0]
           : undefined;
 
-      expect(createdMapping?.reviewId).toBe(review.id);
+      expect(createdMapping?.reviewId).toBe(ownershipConfirmedReview.id);
       expect(createdMapping?.externalReference.externalId).toBe("LUM-99");
 
       const secondExecutor = createFollowUpExecution({
         database,
         meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
         workProvider,
         operationalOutcomeWriter: writer,
         now: () => new Date("2026-08-08T10:03:00.000Z")
@@ -2020,6 +2293,197 @@ describe("Action Item reconciliation", () => {
     }
   });
 
+  it("keeps a completed v1 settlement in a v2 page aggregate with explicit unresolved ownership", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-root-v2-after-legacy",
+      description: "Jakob will finish LUM-3 ownership-safe source import by Friday.",
+      mentionedWorkItemReferences: [
+        { providerId: "linear", objectType: "work-item", externalId: "LUM-3" }
+      ]
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected current source candidate description");
+    }
+
+    const currentWorkItem = workItem();
+    const legacyWorkItem = workItem({
+      id: "linear-issue-legacy",
+      externalId: "LUM-1",
+      title: "Historic Luma work",
+      url: "https://linear.app/dayova/issue/LUM-1"
+    });
+    catalog.respondToSearch("LUM-3", [currentWorkItem]);
+    catalog.respondToSearch(description, [currentWorkItem]);
+    catalog.respondToGet(currentWorkItem.id, currentWorkItem);
+
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const legacyCandidate = observation.candidates[0];
+
+      if (!legacyCandidate) {
+        throw new Error("expected a legacy source candidate");
+      }
+
+      const legacyTarget: OperationalOutcomeTarget = {
+        workspaceId: workspace.workspaceId,
+        providerId: "notion",
+        page: {
+          providerId: "notion",
+          objectType: "document",
+          externalId: "notion-page-product-sync",
+          url: "https://notion.so/product-sync",
+          version: "2026-08-01T09:00:00.000Z"
+        },
+        sourceObjectId: "notion-root-v1-legacy",
+        sourceRevision: 1,
+        sourceContentHash: "sha256:legacy-v1"
+      };
+      const legacyPlan = {
+        version: 1,
+        intentId: "intent:legacy-v1",
+        binding: {
+          reviewId: "review:legacy-v1",
+          candidateId: "candidate:legacy-v1",
+          candidateLineageKey: "candidate:legacy-v1"
+        },
+        target: legacyTarget,
+        candidate: legacyCandidate,
+        resolution: {
+          id: "resolution:legacy-v1",
+          reviewId: "review:legacy-v1",
+          candidateId: "candidate:legacy-v1",
+          participantId: "person:jakob",
+          resolution: { type: "accept-proposal" },
+          outcome: {
+            type: "link-existing",
+            workItem: {
+              providerId: legacyWorkItem.providerId,
+              lookupId: legacyWorkItem.id,
+              externalId: legacyWorkItem.externalId,
+              title: legacyWorkItem.title,
+              description: legacyWorkItem.description,
+              status: legacyWorkItem.status,
+              assignees: legacyWorkItem.assignees,
+              dueDate: legacyWorkItem.dueDate,
+              labels: legacyWorkItem.labels,
+              projectId: legacyWorkItem.projectId,
+              parentId: legacyWorkItem.parentId,
+              url: legacyWorkItem.url,
+              updatedAt: legacyWorkItem.updatedAt
+            },
+            rationale: "Historic source review linked the known work item."
+          },
+          evidence: {
+            evidenceId: "evidence:human-judgment:legacy-v1",
+            source: "human-judgment",
+            sourceObjectId: "review:legacy-v1",
+            participantId: "person:jakob",
+            sourceVersion: "human:legacy-v1",
+            excerpt: "Historic reconciliation resolution."
+          },
+          resolvedAt: "2026-08-01T10:00:00.000Z"
+        }
+      };
+      const legacyMeetingId = "meeting:source:notion:legacy-v1";
+      const timestamp = "2026-08-01T10:00:00.000Z";
+
+      await database.transaction(async (transaction) => {
+        await transaction.query(
+          `INSERT INTO operational_outcome_settlements (
+             workspace_id, meeting_id, intent_id, review_id, candidate_id,
+             candidate_lineage_key, source_provider_id, source_document_id,
+             source_object_id, source_revision, source_content_hash, plan_json,
+             created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+          [
+            workspace.workspaceId,
+            legacyMeetingId,
+            legacyPlan.intentId,
+            legacyPlan.binding.reviewId,
+            legacyPlan.binding.candidateId,
+            legacyPlan.binding.candidateLineageKey,
+            legacyTarget.providerId,
+            legacyTarget.page.externalId,
+            legacyTarget.sourceObjectId,
+            legacyTarget.sourceRevision,
+            legacyTarget.sourceContentHash,
+            JSON.stringify(legacyPlan),
+            timestamp
+          ]
+        );
+
+        for (const [stage, status] of [
+          ["work", "not-required"],
+          ["outcome", "succeeded"]
+        ] as const) {
+          await transaction.query(
+            `INSERT INTO operational_outcome_settlement_stages (
+               workspace_id, meeting_id, intent_id, stage, status,
+               idempotency_key, attempts, created_at, updated_at, completed_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $7, $7)`,
+            [
+              workspace.workspaceId,
+              legacyMeetingId,
+              legacyPlan.intentId,
+              stage,
+              status,
+              `legacy-v1:${stage}`,
+              timestamp
+            ]
+          );
+        }
+      });
+
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a current reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "v2-after-legacy"
+      });
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const execution = await executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.writes[0]?.outcome.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            settlementIntentId: "intent:legacy-v1",
+            ownership: {
+              status: "unresolved",
+              reason: "unsupported-semantics",
+              likelyOwnerPersonId: null
+            }
+          }),
+          expect.objectContaining({ settlementIntentId: intent.id })
+        ])
+      );
+    } finally {
+      await database.close();
+    }
+  });
+
   it("recovers a durable create after receipt persistence stops before the outcome write", async () => {
     const catalog = new ProgrammableWorkCatalog();
     const observation = sourceObservation({
@@ -2058,6 +2522,7 @@ describe("Action Item reconciliation", () => {
       const interruptedExecutor = createFollowUpExecution({
         database,
         meetingIntelligence: rejectOneExecutionReceipt(meetingIntelligence),
+        identityDirectory: createLumaTeamIdentityDirectory(),
         workProvider,
         operationalOutcomeWriter: writer,
         now: () => new Date("2026-08-08T10:02:00.000Z")
@@ -2077,6 +2542,7 @@ describe("Action Item reconciliation", () => {
       const recovered = await createFollowUpExecution({
         database,
         meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
         workProvider,
         operationalOutcomeWriter: writer,
         now: () => new Date("2026-08-08T10:03:00.000Z")
@@ -2093,6 +2559,7 @@ describe("Action Item reconciliation", () => {
       const completed = await createFollowUpExecution({
         database,
         meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
         workProvider,
         operationalOutcomeWriter: writer,
         now: () => new Date("2026-08-08T10:04:00.000Z")
@@ -2870,6 +3337,14 @@ describe("Action Item reconciliation", () => {
         throw new Error("expected a create-work proposal");
       }
 
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "accept-create-proposal"
+      });
+      const ownershipConfirmedReviewId = ownershipConfirmedReview.id;
+
       const resolution = await meetingIntelligence.observe({
         workspace,
         observations: [
@@ -2883,7 +3358,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "resolve-action-item-reconciliation",
-              reviewId,
+              reviewId: ownershipConfirmedReviewId,
               resolution: { type: "accept-proposal" }
             }
           }
@@ -2894,7 +3369,7 @@ describe("Action Item reconciliation", () => {
         {
           type: "follow-up-awaiting-approval",
           intentIds: [
-            `follow-up-intent:reconciliation:${encodeURIComponent(reviewId)}:settle`
+            `follow-up-intent:reconciliation:${encodeURIComponent(ownershipConfirmedReviewId)}:settle`
           ]
         }
       ]);
@@ -2912,13 +3387,16 @@ describe("Action Item reconciliation", () => {
           type: "settle-operational-outcome",
           status: "suggested",
           reconciliation: {
-            reviewId,
+            reviewId: ownershipConfirmedReviewId,
             candidateId: observation.candidates[0]?.id,
             candidateLineageKey: observation.candidates[0]?.lineageKey
           }
         })
       ]);
-      expect(catalog.searchCalls).toHaveLength(1);
+      // The ownership correction creates a fresh review attempt from the same
+      // immutable source evidence, so reconciliation repeats its read-only
+      // catalog search before a Human can resolve the create proposal.
+      expect(catalog.searchCalls).toHaveLength(2);
       expect(catalog.getCalls).toEqual([]);
     } finally {
       await database.close();
@@ -3767,6 +4245,14 @@ describe("Action Item reconciliation", () => {
         throw new Error("expected a conflicted proposal");
       }
 
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: competing.meetingId,
+        reviewId: selectedReviewId,
+        observationSuffix: "resolve-conflicted-proposal"
+      });
+      const ownershipConfirmedReviewId = ownershipConfirmedReview.id;
+
       const judgment = await meetingIntelligence.observe({
         workspace,
         observations: [
@@ -3780,7 +4266,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "resolve-action-item-reconciliation",
-              reviewId: selectedReviewId,
+              reviewId: ownershipConfirmedReviewId,
               resolution: { type: "accept-proposal" }
             }
           }
@@ -3803,10 +4289,10 @@ describe("Action Item reconciliation", () => {
       const resolved = { reviews: query.reviews };
 
       const selected = resolved.reviews.find(
-        (review) => review.proposal.id === selectedReviewId
+        (review) => review.proposal.id === ownershipConfirmedReviewId
       );
       const remaining = resolved.reviews.find(
-        (review) => review.proposal.id !== selectedReviewId
+        (review) => review.proposal.id !== ownershipConfirmedReviewId
       );
 
       expect(selected).toMatchObject({
@@ -3874,7 +4360,7 @@ describe("Action Item reconciliation", () => {
         snapshot.type === "snapshot" ? snapshot.state.followUpIntentions : []
       ).toHaveLength(1);
       expect(updateIntent.status).toBe("suggested");
-      expect(updateIntent.reconciliation.reviewId).toBe(selectedReviewId);
+      expect(updateIntent.reconciliation.reviewId).toBe(ownershipConfirmedReviewId);
       expect(updateIntent).not.toHaveProperty("description");
 
       const approval = await meetingIntelligence.observe({
@@ -4012,6 +4498,13 @@ describe("Action Item reconciliation", () => {
         throw new Error("expected a reconciliation proposal");
       }
 
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId,
+        reviewId,
+        observationSuffix: "stale-intent"
+      });
+
       const resolution = await meetingIntelligence.observe({
         workspace,
         observations: [
@@ -4025,7 +4518,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "resolve-action-item-reconciliation",
-              reviewId,
+              reviewId: ownershipConfirmedReview.id,
               resolution: { type: "accept-proposal" }
             }
           }
@@ -4050,17 +4543,6 @@ describe("Action Item reconciliation", () => {
         throw new Error("expected a suggested reconciliation settlement Intent");
       }
 
-      await observeAndReview(
-        meetingIntelligence,
-        sourceObservation({
-          sourceObjectId: "notion-stale-intent",
-          meetingId,
-          revision: 2,
-          contentHash: "sha256:notion-stale-intent-r2-empty",
-          emptyActionItems: true
-        })
-      );
-
       const approval = await meetingIntelligence.observe({
         workspace,
         observations: [
@@ -4077,8 +4559,34 @@ describe("Action Item reconciliation", () => {
         ]
       });
 
-      expect(approval.acceptedObservationIds).toEqual([]);
-      expect(approval.errors[0]).toMatchObject({ code: "invalid-observation" });
+      expect(approval.acceptedObservationIds).toEqual(["approval:stale-intent"]);
+
+      await observeAndReview(
+        meetingIntelligence,
+        sourceObservation({
+          sourceObjectId: "notion-stale-intent",
+          meetingId,
+          revision: 2,
+          contentHash: "sha256:notion-stale-intent-r2-empty",
+          emptyActionItems: true
+        })
+      );
+
+      const superseded = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (superseded.type !== "snapshot") {
+        throw new Error("expected a Meeting snapshot after source supersession");
+      }
+
+      expect(
+        superseded.state.followUpIntentions.find(
+          (candidate) => candidate.id === intent.id
+        )?.status
+      ).toBe("invalidated");
 
       const workProvider = new RecordingWorkProvider(item);
       await expect(
@@ -4119,6 +4627,13 @@ describe("Action Item reconciliation", () => {
         throw new Error("expected an update reconciliation proposal");
       }
 
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "manual-recovery-refresh"
+      });
+
       await meetingIntelligence.observe({
         workspace,
         observations: [
@@ -4132,7 +4647,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "resolve-action-item-reconciliation",
-              reviewId: review.id,
+              reviewId: ownershipConfirmedReview.id,
               resolution: { type: "accept-proposal" }
             }
           }
@@ -4222,7 +4737,7 @@ describe("Action Item reconciliation", () => {
             participantId: "person:jakob",
             judgment: {
               kind: "refresh-action-item-reconciliation",
-              reviewId: review.id
+              reviewId: ownershipConfirmedReview.id
             }
           }
         ]
@@ -4231,7 +4746,9 @@ describe("Action Item reconciliation", () => {
       expect(refresh.acceptedObservationIds).toEqual([
         "human-judgment:manual-recovery-refresh:refresh"
       ]);
-      expect(catalog.searchCalls).toHaveLength(4);
+      // Initial reconciliation, the ownership-correction re-review, and the
+      // explicit refresh each re-run the provider-qualified catalog reads.
+      expect(catalog.searchCalls).toHaveLength(6);
       const history = await meetingIntelligence.query({
         workspaceId: workspace.workspaceId,
         meetingId: observation.meetingId,
@@ -4240,7 +4757,7 @@ describe("Action Item reconciliation", () => {
 
       expect(
         history.type === "action-item-reconciliation-history" ? history.reviews : []
-      ).toHaveLength(2);
+      ).toHaveLength(3);
     } finally {
       await database.close();
     }
@@ -4514,6 +5031,512 @@ describe("Action Item reconciliation", () => {
           intentId: intent.id
         })
       ).toBe("succeeded");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a read-only catalog proposal visible while requiring a targeted ownership decision before work", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-owner-clarification-after-catalog-read",
+      description: "Jakob will prepare the ownership clarification brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review || review.outcome.type !== "create-new") {
+        throw new Error("expected a catalog-backed new-work reconciliation proposal");
+      }
+
+      expect(catalog.searchCalls).toEqual([
+        expect.objectContaining({ text: description })
+      ]);
+      expect(review.searches).toEqual([
+        expect.objectContaining({ status: "completed", query: description })
+      ]);
+      expect(review.ownership).toMatchObject({
+        status: "proposed",
+        proposedOwnerPersonId: null
+      });
+
+      const blocked = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "human-judgment:owner-clarification-after-catalog-read",
+            workspaceId: workspace.workspaceId,
+            meetingId: observation.meetingId,
+            occurredAt: "2026-08-08T10:00:00.000Z",
+            observedAt: "2026-08-08T10:00:00.000Z",
+            participantId: "person:jakob",
+            judgment: {
+              kind: "resolve-action-item-reconciliation",
+              reviewId: review.id,
+              resolution: { type: "accept-proposal" }
+            }
+          }
+        ]
+      });
+
+      expect(blocked.acceptedObservationIds).toEqual([]);
+      expect(blocked.errors).toHaveLength(1);
+      const blockedError = blocked.errors[0];
+
+      if (!blockedError || blockedError.code !== "invalid-observation") {
+        throw new Error("expected a targeted ownership validation error");
+      }
+
+      expect(blockedError.message).toContain("owner must be confirmed");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("creates Linear work with the confirmed owner's mapped identity", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ownership-confirmed-linear-create",
+      description: "Jakob will prepare the ownership-safe Linear brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
+      }
+
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "confirmed-linear-create"
+      });
+
+      expect(ownershipConfirmedReview.ownership).toEqual({
+        status: "confirmed",
+        ownerPersonId: "person_jakob",
+        confidence: "deterministic",
+        basis: "human-confirmation"
+      });
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: ownershipConfirmedReview.id,
+        observationSuffix: "confirmed-linear-create"
+      });
+      const execution = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toEqual([
+        expect.objectContaining({
+          assigneeProviderUserId: "67e00026-a426-4476-83bb-fe679fc5ca9c"
+        })
+      ]);
+      expect(writer.writes[0]?.outcome.entries[0]?.ownership).toEqual(
+        ownershipConfirmedReview.ownership
+      );
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("creates unassigned Linear work only after Human Judgment explicitly leaves ownership unassigned", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ownership-intentionally-unassigned",
+      description: "Jakob will prepare the intentionally unassigned brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
+      }
+
+      const unassignedReview = await resolveOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "intentionally-unassigned",
+        resolution: { type: "intentionally-unassigned" }
+      });
+
+      expect(unassignedReview.ownership).toEqual({
+        status: "intentionally-unassigned",
+        basis: "human-confirmation"
+      });
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: unassignedReview.proposal.id,
+        observationSuffix: "intentionally-unassigned"
+      });
+      const execution = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toEqual([
+        expect.objectContaining({ assigneeProviderUserId: null })
+      ]);
+      expect(writer.writes[0]?.outcome.entries[0]?.ownership).toEqual(
+        unassignedReview.ownership
+      );
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("records confirmed ownership without creating unassigned work when the provider identity is unavailable", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ownership-missing-provider-identity",
+      description: "Jakob will prepare the unmapped owner brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
+      }
+
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "missing-provider-identity",
+        ownerPersonId: "person_without_linear_identity"
+      });
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: ownershipConfirmedReview.id,
+        observationSuffix: "missing-provider-identity"
+      });
+      const execution = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-work-unresolved"
+      });
+      expect(workProvider.createCalls).toEqual([]);
+      expect(writer.writes[0]?.outcome.entries[0]).toMatchObject({
+        ownership: {
+          status: "confirmed",
+          ownerPersonId: "person_without_linear_identity"
+        },
+        workReferences: [],
+        unresolved: [
+          expect.stringContaining(
+            "person_without_linear_identity has no current linear identity mapping"
+          )
+        ]
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("invalidates an approved settlement when a later ownership correction supersedes it before execution", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ownership-correction-invalidates-settlement",
+      description: "Jakob will prepare the corrected ownership brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
+      }
+
+      const approvedIntent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "correction-invalidates-settlement"
+      });
+
+      if (approvedIntent.type !== "settle-operational-outcome") {
+        throw new Error("expected an approved Operational Outcome settlement Intent");
+      }
+
+      const correctedReview = await resolveOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: approvedIntent.reconciliation.reviewId,
+        observationSuffix: "correction-intentionally-unassigned",
+        observedAt: "2026-08-08T10:02:00.000Z",
+        resolution: { type: "intentionally-unassigned" }
+      });
+
+      expect(correctedReview.ownership).toEqual({
+        status: "intentionally-unassigned",
+        basis: "human-confirmation"
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected a Meeting snapshot");
+      }
+
+      expect(
+        snapshot.state.followUpIntentions.find(
+          (candidate) => candidate.id === approvedIntent.id
+        )?.status
+      ).toBe("invalidated");
+
+      await expect(
+        createFollowUpExecution({
+          database,
+          meetingIntelligence,
+          identityDirectory: createLumaTeamIdentityDirectory(),
+          workProvider,
+          operationalOutcomeWriter: writer,
+          now: () => new Date("2026-08-08T10:03:00.000Z")
+        }).execute({
+          workspace,
+          meetingId: observation.meetingId,
+          intentId: approvedIntent.id
+        })
+      ).rejects.toThrow("must be canonically approved");
+      expect(workProvider.createCalls).toEqual([]);
+      expect(writer.writes).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects an ownership correction while its approved settlement holds the create execution reservation", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ownership-correction-during-create",
+      description: "Jakob will prepare the execution-reserved ownership brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new BlockingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an initial source reconciliation proposal");
+      }
+
+      const ownershipConfirmedReview = await confirmOwnershipForReview({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "correction-during-create"
+      });
+
+      const approvedIntent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: ownershipConfirmedReview.id,
+        observationSuffix: "correction-during-create"
+      });
+
+      if (approvedIntent.type !== "settle-operational-outcome") {
+        throw new Error("expected an approved Operational Outcome settlement Intent");
+      }
+
+      const currentReviews = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "action-item-reconciliation-review" }
+      });
+      const currentReview =
+        currentReviews.type === "action-item-reconciliation-review"
+          ? currentReviews.reviews.find(
+              (candidate) =>
+                candidate.proposal.id === approvedIntent.reconciliation.reviewId
+            )
+          : undefined;
+
+      if (!currentReview) {
+        throw new Error("expected the approved reconciliation review");
+      }
+
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        identityDirectory: createLumaTeamIdentityDirectory(),
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const execution = executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: approvedIntent.id
+      });
+
+      try {
+        await workProvider.waitForCreate();
+
+        const correction = await meetingIntelligence.observe({
+          workspace,
+          observations: [
+            {
+              type: "human-judgment-recorded",
+              observationId: "human-ownership:correction-during-create",
+              workspaceId: workspace.workspaceId,
+              meetingId: observation.meetingId,
+              occurredAt: "2026-08-08T10:02:01.000Z",
+              observedAt: "2026-08-08T10:02:01.000Z",
+              participantId: "person:jakob",
+              judgment: {
+                kind: "resolve-action-item-ownership",
+                claimId: currentReview.ownershipClaimId,
+                resolution: { type: "intentionally-unassigned" }
+              }
+            }
+          ]
+        });
+
+        workProvider.releaseCreate();
+        const result = await execution;
+
+        expect(correction.acceptedObservationIds).toEqual([]);
+        expect(correction.errors).toHaveLength(1);
+        const correctionError = correction.errors[0];
+
+        if (!correctionError || correctionError.code !== "invalid-observation") {
+          throw new Error("expected an invalid concurrent ownership correction");
+        }
+
+        expect(correctionError).toMatchObject({
+          observationId: "human-ownership:correction-during-create",
+          retryable: false
+        });
+        expect(correctionError.message).toContain("active execution reservation");
+        expect(result.observation.outcome.status).toBe("succeeded");
+        expect(workProvider.createCalls).toHaveLength(1);
+        expect(writer.writes).toHaveLength(1);
+        expect(
+          await followUpIntentStatus({
+            meetingIntelligence,
+            meetingId: observation.meetingId,
+            intentId: approvedIntent.id
+          })
+        ).toBe("succeeded");
+      } finally {
+        workProvider.releaseCreate();
+        await execution.catch(() => undefined);
+      }
     } finally {
       await database.close();
     }

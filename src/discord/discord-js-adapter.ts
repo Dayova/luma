@@ -6,17 +6,40 @@ import {
   Events,
   GatewayIntentBits,
   MessageFlags,
+  MessageType,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
   ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
+  type Message,
   type SendableChannels,
-  type TextChannel
+  type TextChannel,
+  type ThreadChannel
 } from "discord.js";
+import type {
+  CapturedConversationEvidence,
+  ConversationEvidenceSource
+} from "../context-intelligence/conversation-evidence-source.js";
+import {
+  createDiscordConversationEvidenceSource,
+  type DiscordConversationMessage,
+  type DiscordConversationReader,
+  type DiscordConversationThread
+} from "./discord-conversation-evidence-source.js";
+import {
+  createDiscordContextAskRateLimiter,
+  discordContextAskConfigFromEnv,
+  discordContextAskMentionFromCandidate,
+  type DiscordContextAskConfig,
+  type DiscordContextAskMessageCandidate,
+  type DiscordContextAskMention
+} from "./discord-context-ask-runtime.js";
 import type {
   DiscordCommand,
   DiscordCommandResponse,
+  DiscordContextAskResponse,
   DiscordThread,
   DiscordTransport
 } from "./discord-meeting-bot.js";
@@ -27,7 +50,11 @@ export type DiscordJsTransportConfig = {
   token: string;
   clientId: string;
   guildId: string;
+  contextAsk?: DiscordContextAskConfig;
 };
+
+/** One shared Gateway client backs command, mention, and evidence paths. */
+export type DiscordJsTransport = DiscordTransport & ConversationEvidenceSource;
 
 export class DiscordJsAdapterError extends Error {
   readonly code: string;
@@ -41,12 +68,28 @@ export class DiscordJsAdapterError extends Error {
 
 export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
-): DiscordTransport {
+): DiscordJsTransport {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
+    intents: discordGatewayIntentsForContextAsk(config.contextAsk)
   });
   let commandHandler:
     ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null = null;
+  let contextAskHandler:
+    | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
+    | null = null;
+  const contextAskRateLimiter = config.contextAsk
+    ? createDiscordContextAskRateLimiter({
+        minIntervalMs: config.contextAsk.minIntervalMs
+      })
+    : null;
+  const conversationEvidenceSource = config.contextAsk
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client),
+        guildId: config.guildId,
+        config: config.contextAsk,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
 
   client.on(Events.InteractionCreate, (interaction) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== "meeting") {
@@ -73,9 +116,37 @@ export function createDiscordJsTransport(
     );
   });
 
+  client.on(Events.MessageCreate, (message) => {
+    const handler = contextAskHandler;
+    const contextAsk = config.contextAsk;
+    const botUserId = client.user?.id;
+
+    if (!handler || !contextAsk || !botUserId || !contextAskRateLimiter) {
+      return;
+    }
+
+    const ask = discordContextAskMentionFromCandidate({
+      candidate: discordContextAskMessageCandidate(message),
+      botUserId,
+      guildId: config.guildId,
+      config: contextAsk
+    });
+
+    if (!ask || !contextAskRateLimiter.tryAcquire(ask)) {
+      return;
+    }
+
+    void handleContextAskMention({
+      message,
+      handler,
+      ask
+    }).catch(() => undefined);
+  });
+
   return {
-    async connect(handler) {
+    async connect(handler, contextHandler) {
       commandHandler = handler;
+      contextAskHandler = contextHandler ?? null;
       await registerMeetingCommand(config);
       const ready = once(client, Events.ClientReady);
       await client.login(config.token);
@@ -84,6 +155,7 @@ export function createDiscordJsTransport(
     async disconnect() {
       await client.destroy();
       commandHandler = null;
+      contextAskHandler = null;
     },
     async createThread(input): Promise<DiscordThread> {
       const channel = await client.channels.fetch(input.parentChannelId);
@@ -156,13 +228,24 @@ export function createDiscordJsTransport(
             }
           : {})
       });
+    },
+    async capture(input): Promise<CapturedConversationEvidence> {
+      if (!conversationEvidenceSource) {
+        throw new DiscordJsAdapterError(
+          "discord-context-ask-not-configured",
+          "Discord Context Ask is not enabled for this transport"
+        );
+      }
+
+      return conversationEvidenceSource.capture(input);
     }
   };
 }
 
 export function createDiscordJsTransportFromEnv(
-  env: NodeJS.ProcessEnv = process.env
-): DiscordTransport {
+  env: NodeJS.ProcessEnv = process.env,
+  contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env)
+): DiscordJsTransport {
   const token = nonBlankEnvValue(env["DISCORD_TOKEN"]);
   const clientId = nonBlankEnvValue(env["DISCORD_CLIENT_ID"]);
   const guildId = nonBlankEnvValue(env["DISCORD_GUILD_ID"]);
@@ -177,8 +260,21 @@ export function createDiscordJsTransportFromEnv(
   return createDiscordJsTransport({
     token,
     clientId,
-    guildId
+    guildId,
+    ...(contextAsk ? { contextAsk } : {})
   });
+}
+
+export function discordGatewayIntentsForContextAsk(
+  contextAsk: DiscordContextAskConfig | undefined
+): GatewayIntentBits[] {
+  return contextAsk
+    ? [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+      ]
+    : [GatewayIntentBits.Guilds];
 }
 
 async function registerMeetingCommand(config: DiscordJsTransportConfig): Promise<void> {
@@ -216,6 +312,221 @@ async function handleInteraction(
   await interaction.editReply({
     content: truncateDiscordMessage(response.content)
   });
+}
+
+async function handleContextAskMention(input: {
+  message: Message;
+  handler: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>;
+  ask: DiscordContextAskMention;
+}): Promise<void> {
+  try {
+    const response = await input.handler(input.ask);
+
+    if (response) {
+      await replyToContextAskMessage(input.message, response);
+    }
+  } catch {
+    await replyToContextAskMessage(input.message, {
+      content: "Luma could not answer this thread right now. Please try again later.",
+      idempotencyKey: `discord:${input.message.id}:context-ask:reply`
+    });
+  }
+}
+
+function discordContextAskMessageCandidate(
+  message: Message
+): DiscordContextAskMessageCandidate {
+  const thread = message.channel.isThread() ? message.channel : null;
+
+  return {
+    messageId: message.id,
+    guildId: message.guildId,
+    channelId: message.channelId,
+    parentChannelId: thread?.parentId ?? null,
+    channelKind:
+      thread && thread.type !== ChannelType.PrivateThread ? "public-thread" : "other",
+    authorKind: discordAuthorKind(message),
+    actorDiscordUserId: message.author.id,
+    mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    content: message.content,
+    occurredAt: message.createdAt.toISOString()
+  };
+}
+
+function discordAuthorKind(message: Message): "human" | "bot" | "webhook" | "system" {
+  if (message.system) {
+    return "system";
+  }
+
+  if (message.webhookId) {
+    return "webhook";
+  }
+
+  return message.author.bot ? "bot" : "human";
+}
+
+async function replyToContextAskMessage(
+  message: Message,
+  response: DiscordContextAskResponse
+): Promise<void> {
+  const channel = message.channel;
+
+  if (!channel.isSendable()) {
+    throw new DiscordJsAdapterError(
+      "discord-context-ask-reply-not-sendable",
+      "Luma cannot reply in this Discord conversation"
+    );
+  }
+
+  const nonce = discordNonce(response.idempotencyKey);
+
+  // Discord deduplicates an enforced nonce for the same author within its
+  // bounded deduplication window. Do not scan later thread history merely to
+  // discover an earlier Context reply.
+  await message.reply({
+    content: renderDiscordMessage(response.content, discordMessageMarker(nonce)),
+    allowedMentions: {
+      parse: [],
+      repliedUser: false
+    },
+    flags: MessageFlags.SuppressEmbeds,
+    nonce,
+    enforceNonce: true
+  });
+}
+
+function createDiscordJsConversationReader(client: Client): DiscordConversationReader {
+  return {
+    async readThread({
+      conversationObjectId
+    }): Promise<DiscordConversationThread | null> {
+      const thread = await discordThreadById(client, conversationObjectId);
+
+      if (!thread) {
+        return null;
+      }
+
+      return discordConversationThread(thread);
+    },
+    async readMessage({
+      conversationObjectId,
+      messageId
+    }): Promise<DiscordConversationMessage | null> {
+      const thread = await discordThreadById(client, conversationObjectId);
+
+      if (!thread) {
+        return null;
+      }
+
+      try {
+        const message = await thread.messages.fetch(messageId);
+        return discordConversationMessage(message);
+      } catch (error: unknown) {
+        if (discordApiErrorCode(error) === 10_008) {
+          return null;
+        }
+
+        throw error;
+      }
+    },
+    async listMessagesBefore({ conversationObjectId, beforeMessageId, limit }) {
+      const thread = await discordThreadById(client, conversationObjectId);
+
+      if (!thread) {
+        throw new DiscordJsAdapterError(
+          "discord-conversation-thread-unavailable",
+          "Discord Context Ask thread is no longer readable"
+        );
+      }
+
+      const messages = await thread.messages.fetch({
+        before: beforeMessageId,
+        limit
+      });
+
+      return {
+        messages: [...messages.values()].map(discordConversationMessage),
+        hasMore: messages.size === limit
+      };
+    }
+  };
+}
+
+async function discordThreadById(
+  client: Client,
+  conversationObjectId: string
+): Promise<ThreadChannel | null> {
+  const channel = await client.channels.fetch(conversationObjectId);
+
+  if (!channel?.isThread()) {
+    return null;
+  }
+
+  const permissions = client.user ? channel.permissionsFor(client.user) : null;
+
+  if (
+    !permissions?.has(PermissionFlagsBits.ViewChannel) ||
+    !permissions.has(PermissionFlagsBits.ReadMessageHistory)
+  ) {
+    return null;
+  }
+
+  return channel;
+}
+
+function discordConversationThread(thread: ThreadChannel): DiscordConversationThread {
+  return {
+    id: thread.id,
+    guildId: thread.guildId,
+    parentChannelId: thread.parentId,
+    visibility: thread.type === ChannelType.PrivateThread ? "private" : "public",
+    title: thread.name,
+    url: thread.url
+  };
+}
+
+function discordConversationMessage(message: Message): DiscordConversationMessage {
+  return {
+    id: message.id,
+    channelId: message.channelId,
+    kind:
+      message.type === MessageType.ThreadStarterMessage ? "thread-starter" : "message",
+    hasUnsupportedContent:
+      message.attachments.size > 0 ||
+      message.embeds.length > 0 ||
+      message.stickers.size > 0 ||
+      message.components.length > 0 ||
+      message.poll !== null ||
+      message.messageSnapshots.size > 0 ||
+      message.flags.has(MessageFlags.IsVoiceMessage),
+    author: {
+      providerUserId: message.author.id,
+      displayName:
+        message.member?.displayName ??
+        message.author.globalName ??
+        message.author.username
+    },
+    authorKind: discordAuthorKind(message),
+    mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    content: message.content,
+    createdAt: message.createdAt.toISOString(),
+    editedAt: message.editedAt?.toISOString() ?? null,
+    replyToMessageId: message.reference?.messageId ?? null,
+    url: message.url
+  };
+}
+
+function discordApiErrorCode(error: unknown): number | null {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "number"
+  ) {
+    return error.code;
+  }
+
+  return null;
 }
 
 function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordCommand {

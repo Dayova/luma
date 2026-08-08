@@ -17,6 +17,8 @@ Implemented now:
 - explicit Discord user mentions for Jakob, Fabius, Julius, Philipp, and configured additional People
 - bot-authored messages with restricted allowed mentions
 - graceful Gateway shutdown
+- optional, disabled-by-default bounded `@Luma` Context Ask in reviewed public
+  threads
 
 Not implemented in this slice:
 
@@ -39,7 +41,12 @@ In the [Discord Developer Portal](https://discord.com/developers/applications):
 3. Put the token in the matching environment as `DISCORD_TOKEN`.
 4. Copy the Application ID from **General Information** into `DISCORD_CLIENT_ID`.
 5. Enable Discord Developer Mode, copy the target server ID, and set `DISCORD_GUILD_ID`.
-6. Do not enable privileged Gateway intents. The current Adapter requests only `Guilds`.
+6. Leave privileged Gateway intents disabled for the standard Meeting bot. Only
+   if the optional Context Ask configuration is deliberately enabled, turn on
+   **Message Content Intent** under **Bot > Privileged Gateway Intents** (and
+   obtain any Discord-required approval first). Context Ask then requests only
+   `Guilds`, `GuildMessages`, and `MessageContent`; it does not request member,
+   presence, reaction, or DM intents.
 
 The bot registers `/meeting` as a guild command at startup. Guild commands update immediately and are appropriate for the current private Dayova deployment. Discord documents command registration and guild scoping in its [Application Commands reference](https://docs.discord.com/developers/interactions/application-commands).
 
@@ -58,9 +65,17 @@ Grant only these bot permissions:
 - Send Messages in Threads
 - Read Message History
 
-The resulting permission integer is `309237713920`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. Luma does not ingest member message content in this slice. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
+The resulting permission integer is `309237713920`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. The standard Meeting bot does not ingest member message content. The optional Context Ask capability below is separately opt-in and bounded. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
 
-Do not grant Administrator, Manage Server, Manage Roles, Manage Webhooks, Manage Messages, or privileged intents for this slice.
+Do not grant Administrator, Manage Server, Manage Roles, Manage Webhooks, or
+Manage Messages. The standard Meeting bot slice uses no privileged intents.
+
+For the optional Context Ask slice, `Message Content` is the one exception:
+Discord applies it to both Gateway events and message-history reads. The bot
+still needs only View Channels, Read Message History, and Send Messages in
+Threads in the explicitly allowlisted channels. Do not enable Context Ask until
+the Application's Message Content setting is active and its reviewed channel
+and user scopes are configured.
 
 ## Environment
 
@@ -71,6 +86,20 @@ DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
 ```
+
+Optional bounded Context Ask (off unless the exact `1` flag is set):
+
+```dotenv
+LUMA_DISCORD_CONTEXT_ASK_ENABLED=0
+LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS=
+LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS=
+LUMA_DISCORD_CONTEXT_ASK_MAX_MESSAGES=50
+LUMA_DISCORD_CONTEXT_ASK_MAX_EVIDENCE_CHARS=32000
+LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS=60000
+```
+
+An enabled Context Ask configuration needs an OpenAI key and every allowlist
+variable. Invalid or incomplete values fail startup before the bot connects.
 
 Recommended local settings:
 
@@ -135,6 +164,29 @@ Records Human rejection and performs no provider mutation. Rejected Intents cann
 
 Resolves the active Meeting from the current thread or its parent channel and returns a private, evidence-aware answer. Known Discord user IDs are resolved to internal People so participant-specific Action Items can be selected.
 
+### Context Ask (opt-in)
+
+In an allowlisted **public thread**, an allowlisted person can write:
+
+```text
+@Luma What did we decide about the release?
+```
+
+Luma captures current thread history from its beginning through the mention,
+stores an immutable human-text conversation-evidence revision, and replies in
+the same thread with a cited, read-only answer only when that boundary is
+complete. The user mention
+must be leading and exact; nonleading mentions, bots, webhooks, system
+messages, private threads, DMs, and channels outside the reviewed scope are
+ignored without capture.
+
+The first slice does not retain later Discord edit/delete events. It does not
+answer from a truncated boundary or one containing unreadable/non-text or
+bot/webhook/system evidence. It never creates a Meeting, proposal, Intent,
+Linear issue, Notion page, or any other Follow-up mutation.
+
+Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
+
 ### Catch Up
 
 ```text
@@ -183,7 +235,7 @@ After the development Application is installed and `.env` is populated:
 
 ## Architecture
 
-`DiscordTransport` is an owned Interface. The `discord.js` production Adapter and programmable test Adapter sit behind it. Discord SDK types do not enter Meeting Intelligence, domain models, Follow-up Execution, or provider capability Interfaces.
+`DiscordTransport` is an owned Interface. The `discord.js` production Adapter and programmable test Adapter sit behind it. A separate Discord-owned conversation reader implements the provider-neutral `ConversationEvidenceSource` port for optional Context Ask. Discord SDK types do not enter Context Intelligence, Meeting Intelligence, domain models, Follow-up Execution, or provider capability Interfaces.
 
 The Discord Module calls only:
 
@@ -194,3 +246,12 @@ meetingIntelligence.conclude(...);
 ```
 
 Voice transport will later produce transcription Observations through a separate transcription Module. It must not add audio or Discord SDK types to the Meeting Intelligence Interface.
+
+Context Ask calls only:
+
+```ts
+contextIntelligence.inquire(...);
+```
+
+It has no path to Meeting Intelligence, Follow-up Execution, WorkProvider, or
+KnowledgeProvider operations.

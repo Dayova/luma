@@ -6,6 +6,9 @@ import type {
 import { createOpenAIReasoningModelFromEnv } from "../ai/openai-reasoning-model.js";
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
+import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
+import { createOpenAIContextAnswerer } from "../context-intelligence/openai-context-answerer.js";
+import { createContextIntelligence } from "../context-intelligence/context-intelligence.js";
 import { createFollowUpExecution } from "../follow-up-execution/follow-up-execution.js";
 import { createOperationalOutcomeMarkerVerifier } from "../follow-up-execution/operational-outcome-marker-verifier.js";
 import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
@@ -33,6 +36,12 @@ export async function startServer(
 ): Promise<RunningLumaApp> {
   const config = loadAppConfigFromEnv(env);
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
+  const discordContextAskConfig = discordContextAskConfigFromEnv(env);
+
+  if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
+    throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
+  }
+
   const database = await createPgliteDatabase(
     env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite"
   );
@@ -43,6 +52,7 @@ export async function startServer(
     database
   });
   const workItemProviderId = workProvider?.providerId ?? "linear";
+  const discordTransport = createDiscordJsTransportFromEnv(env, discordContextAskConfig);
   const workspace = {
     workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
     timezone: config.defaultWorkspaceTimezone,
@@ -110,14 +120,32 @@ export async function startServer(
         }
       : {})
   });
+  const contextIntelligence = discordContextAskConfig
+    ? createContextIntelligence({
+        database,
+        ledger: observedSourceLedger,
+        conversationEvidenceSource: discordTransport,
+        answerer: createOpenAIContextAnswerer({
+          apiKey: requireEnv(env, "OPENAI_API_KEY")
+        })
+      })
+    : undefined;
   const bot = createDiscordMeetingBot({
     database,
     meetingIntelligence,
     followUpExecution,
     identityDirectory,
-    transport: createDiscordJsTransportFromEnv(env),
+    transport: discordTransport,
     workspace,
-    guildId
+    guildId,
+    ...(discordContextAskConfig && contextIntelligence
+      ? {
+          contextAsk: {
+            contextIntelligence,
+            config: discordContextAskConfig
+          }
+        }
+      : {})
   });
 
   await bot.start();

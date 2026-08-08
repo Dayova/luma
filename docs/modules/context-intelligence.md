@@ -43,11 +43,20 @@ asking its owned `ContextAnswerer` port.
 
 ## Current Boundary
 
-The core exposes no Discord gateway listener and captures no server-wide
-history. A production Discord adapter must be explicitly configured with a
-reviewed channel/role and message-content policy before it can supply
-conversation evidence. Capturing a current snapshot does not promise future
-edit/deletion event retention; that needs its own consent and retention slice.
+The optional Discord runtime is disabled unless an operator explicitly enables
+it with an allowlisted parent-channel set and Discord-user set. It listens only
+for a leading `@Luma` mention from those users in public threads below those
+parents; it never captures server-wide history, DMs, private threads, or a
+thread after the triggering mention.
+
+The runtime needs Discord's privileged Message Content intent because the
+mention-only exception does not expose surrounding history. It bounds both
+message count and captured text, and marks the result incomplete rather than
+calling the answerer when history is truncated, unreadable, non-text, or
+contains bot, webhook, or system messages. Capturing a current snapshot does
+not promise future edit/deletion event retention; that needs its own consent
+and retention slice. The OpenAI adapter requests `store: false`; that does not
+replace channel consent or change Luma's own durable evidence retention.
 
 ## Dependencies
 

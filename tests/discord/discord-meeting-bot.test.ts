@@ -9,9 +9,16 @@ import {
   createDiscordMeetingBot,
   type DiscordCommand,
   type DiscordCommandResponse,
+  type DiscordContextAskResponse,
   type DiscordThread,
   type DiscordTransport
 } from "../../src/discord/discord-meeting-bot.js";
+import type { ContextIntelligence } from "../../src/context-intelligence/interface.js";
+import type {
+  ContextInquiry,
+  ContextInquiryResult
+} from "../../src/context-intelligence/interface.js";
+import type { DiscordContextAskMention } from "../../src/discord/discord-context-ask-runtime.js";
 import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
@@ -40,6 +47,22 @@ class EmptyReasoningModel implements ReasoningModel {
   }
 }
 
+class RecordingContextIntelligence implements ContextIntelligence {
+  readonly inquiries: ContextInquiry[] = [];
+
+  constructor(
+    private readonly result: ContextInquiryResult | Error = contextInquiryResult()
+  ) {}
+
+  inquire(input: ContextInquiry): Promise<ContextInquiryResult> {
+    this.inquiries.push(input);
+
+    return this.result instanceof Error
+      ? Promise.reject(this.result)
+      : Promise.resolve(this.result);
+  }
+}
+
 class ProgrammableDiscordTransport implements DiscordTransport {
   createdThreads: Array<{ parentChannelId: string; name: string }> = [];
   sentMessages: Array<{
@@ -50,13 +73,20 @@ class ProgrammableDiscordTransport implements DiscordTransport {
   }> = [];
   private commandHandler:
     ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null = null;
+  private contextAskHandler:
+    | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
+    | null = null;
   private readonly threads = new Map<string, DiscordThread>();
   private readonly deliveredMessageKeys = new Set<string>();
 
   connect(
-    commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>
+    commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>,
+    contextAskHandler?: (
+      ask: DiscordContextAskMention
+    ) => Promise<DiscordContextAskResponse | null>
   ): Promise<void> {
     this.commandHandler = commandHandler;
+    this.contextAskHandler = contextAskHandler ?? null;
     return Promise.resolve();
   }
 
@@ -116,6 +146,16 @@ class ProgrammableDiscordTransport implements DiscordTransport {
     }
 
     return this.commandHandler(command);
+  }
+
+  executeContextAsk(
+    ask: DiscordContextAskMention
+  ): Promise<DiscordContextAskResponse | null> {
+    if (!this.contextAskHandler) {
+      throw new Error("Discord Context Ask handler is not connected");
+    }
+
+    return this.contextAskHandler(ask);
   }
 
   private threadKey(input: { parentChannelId: string; name: string }): string {
@@ -530,6 +570,164 @@ describe("Discord meeting bot", () => {
     });
   });
 
+  it("routes an allowlisted thread mention through Context Intelligence without creating a Meeting or Follow-up", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new EmptyReasoningModel(),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const transport = new ProgrammableDiscordTransport();
+    const contextIntelligence = new RecordingContextIntelligence();
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      transport,
+      workspace: {
+        workspaceId: "workspace_dayova",
+        timezone: "Europe/Berlin"
+      },
+      guildId: "guild_dayova",
+      contextAsk: {
+        contextIntelligence,
+        config: {
+          parentChannelIds: ["channel_context"],
+          allowedDiscordUserIds: ["user_jakob"],
+          maxMessages: 50,
+          maxEvidenceChars: 32_000,
+          minIntervalMs: 60_000
+        }
+      }
+    });
+
+    await bot.start();
+    const response = await transport.executeContextAsk({
+      messageId: "message_context_ask",
+      guildId: "guild_dayova",
+      channelId: "thread_context",
+      parentChannelId: "channel_context",
+      actorDiscordUserId: "user_jakob",
+      question: "What did we decide about the release?",
+      occurredAt: "2026-08-08T10:00:00.000Z"
+    });
+
+    expect(contextIntelligence.inquiries).toEqual([
+      {
+        type: "ask",
+        workspaceId: "workspace_dayova",
+        inquiryId: "discord:message_context_ask:context-ask",
+        question: "What did we decide about the release?",
+        subject: {
+          type: "conversation-thread",
+          providerId: "discord",
+          conversationObjectId: "thread_context",
+          anchorMessageId: "message_context_ask"
+        }
+      }
+    ]);
+    expect(response?.content).toContain("Luma Ask");
+    expect(response?.idempotencyKey).toBe(
+      "discord:message_context_ask:context-ask:reply"
+    );
+    expect(transport.createdThreads).toEqual([]);
+    expect(transport.sentMessages).toEqual([]);
+    await expect(
+      database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM meetings")
+    ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+  });
+
+  it("does not send a Context inquiry outside its reviewed parent/user scope", async () => {
+    const database = await createPgliteDatabase();
+    const transport = new ProgrammableDiscordTransport();
+    const contextIntelligence = new RecordingContextIntelligence();
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence: createMeetingIntelligence({
+        database,
+        reasoningModel: new EmptyReasoningModel()
+      }),
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      transport,
+      workspace: {
+        workspaceId: "workspace_dayova",
+        timezone: "Europe/Berlin"
+      },
+      guildId: "guild_dayova",
+      contextAsk: {
+        contextIntelligence,
+        config: {
+          parentChannelIds: ["channel_context"],
+          allowedDiscordUserIds: ["user_jakob"],
+          maxMessages: 50,
+          maxEvidenceChars: 32_000,
+          minIntervalMs: 60_000
+        }
+      }
+    });
+
+    await bot.start();
+    await expect(
+      transport.executeContextAsk({
+        messageId: "message_outside_scope",
+        guildId: "guild_dayova",
+        channelId: "thread_elsewhere",
+        parentChannelId: "channel_elsewhere",
+        actorDiscordUserId: "user_jakob",
+        question: "What did we decide?",
+        occurredAt: "2026-08-08T10:00:00.000Z"
+      })
+    ).resolves.toBeNull();
+    expect(contextIntelligence.inquiries).toEqual([]);
+  });
+
+  it("does not disclose Context provider errors in a public thread reply", async () => {
+    const database = await createPgliteDatabase();
+    const transport = new ProgrammableDiscordTransport();
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence: createMeetingIntelligence({
+        database,
+        reasoningModel: new EmptyReasoningModel()
+      }),
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      transport,
+      workspace: {
+        workspaceId: "workspace_dayova",
+        timezone: "Europe/Berlin"
+      },
+      guildId: "guild_dayova",
+      contextAsk: {
+        contextIntelligence: new RecordingContextIntelligence(
+          new Error("provider secret: should not escape")
+        ),
+        config: {
+          parentChannelIds: ["channel_context"],
+          allowedDiscordUserIds: ["user_jakob"],
+          maxMessages: 50,
+          maxEvidenceChars: 32_000,
+          minIntervalMs: 60_000
+        }
+      }
+    });
+
+    await bot.start();
+    const response = await transport.executeContextAsk({
+      messageId: "message_provider_failure",
+      guildId: "guild_dayova",
+      channelId: "thread_context",
+      parentChannelId: "channel_context",
+      actorDiscordUserId: "user_jakob",
+      question: "What did we decide?",
+      occurredAt: "2026-08-08T10:00:00.000Z"
+    });
+
+    expect(response).toEqual({
+      content: "Luma could not answer this thread right now. Please try again later.",
+      idempotencyKey: "discord:message_provider_failure:context-ask:reply"
+    });
+  });
+
   it("returns a grounded catch-up from the active Discord thread", async () => {
     const database = await createPgliteDatabase();
     const meetingIntelligence = createMeetingIntelligence({
@@ -823,3 +1021,58 @@ describe("Discord meeting bot", () => {
     ]);
   });
 });
+
+function contextInquiryResult(): ContextInquiryResult {
+  const evidence = {
+    evidenceId: "discord:message_release",
+    providerId: "discord",
+    conversationObjectId: "thread_context",
+    anchorMessageId: "message_context_ask",
+    sourceRevision: 1,
+    messageId: "message_release",
+    ordinal: 0,
+    author: {
+      providerUserId: "user_jakob",
+      displayName: "Jakob",
+      personId: null
+    },
+    createdAt: "2026-08-08T09:00:00.000Z",
+    editedAt: null,
+    replyToMessageId: null,
+    url: "https://discord.com/channels/1/2/3",
+    state: "available" as const,
+    text: "We might ship on Friday."
+  };
+
+  return {
+    type: "answer",
+    inquiryId: "discord:message_context_ask:context-ask",
+    question: "What did we decide about the release?",
+    subject: {
+      type: "conversation-thread",
+      providerId: "discord",
+      conversationObjectId: "thread_context",
+      anchorMessageId: "message_context_ask"
+    },
+    boundary: {
+      mode: "thread",
+      anchorMessageId: "message_context_ask",
+      firstMessageId: "message_release",
+      lastMessageId: "message_context_ask",
+      messageIds: ["message_release", "message_context_ask"],
+      sourceRevision: 1,
+      contentHash: "a".repeat(64),
+      completeness: "complete"
+    },
+    answer: {
+      text: "The release might ship on Friday.",
+      evidence: [evidence]
+    },
+    facts: [],
+    inferences: [],
+    unresolved: [],
+    evidence: [evidence],
+    uncertainty: "none",
+    warnings: []
+  };
+}

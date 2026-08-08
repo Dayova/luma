@@ -15,6 +15,12 @@ import type { IdentityDirectory } from "../identity/interface.js";
 import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
+import type { ContextIntelligence } from "../context-intelligence/interface.js";
+import {
+  renderDiscordContextAskResult,
+  type DiscordContextAskConfig,
+  type DiscordContextAskMention
+} from "./discord-context-ask-runtime.js";
 
 type DiscordCommandBase = {
   interactionId: string;
@@ -64,6 +70,12 @@ export type DiscordCommandResponse = {
   content: string;
 };
 
+export type DiscordContextAskResponse = {
+  content: string;
+  /** Stable message-derived delivery identity for Gateway replay safety. */
+  idempotencyKey: string;
+};
+
 export type DiscordThread = {
   id: string;
   url: string;
@@ -71,7 +83,10 @@ export type DiscordThread = {
 
 export interface DiscordTransport {
   connect(
-    commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>
+    commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>,
+    contextAskHandler?: (
+      ask: DiscordContextAskMention
+    ) => Promise<DiscordContextAskResponse | null>
   ): Promise<void>;
   disconnect(): Promise<void>;
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
@@ -103,6 +118,14 @@ export type CreateDiscordMeetingBotInput = {
   transport: DiscordTransport;
   workspace: WorkspaceConfig;
   guildId: string;
+  /**
+   * A separate, opt-in read-only conversation surface. It intentionally has
+   * no Meeting ID, Follow-up operation, or Meeting Intelligence dependency.
+   */
+  contextAsk?: {
+    contextIntelligence: ContextIntelligence;
+    config: DiscordContextAskConfig;
+  };
   now?: () => Date;
 };
 
@@ -114,18 +137,64 @@ export function createDiscordMeetingBot(
 
   return {
     start: () =>
-      input.transport.connect((command) => {
-        if (command.type !== "start") {
-          return handleCommand(input, command, now);
-        }
+      input.transport.connect(
+        (command) => {
+          if (command.type !== "start") {
+            return handleCommand(input, command, now);
+          }
 
-        return withStartLock(startLocks, `${command.guildId}:${command.channelId}`, () =>
-          handleCommand(input, command, now)
-        );
-      }),
+          return withStartLock(
+            startLocks,
+            `${command.guildId}:${command.channelId}`,
+            () => handleCommand(input, command, now)
+          );
+        },
+        input.contextAsk ? (ask) => answerConversationThread(input, ask) : undefined
+      ),
     stop: () => input.transport.disconnect(),
     publishMeetingEvents: (publishInput) => publishMeetingEvents(input, publishInput)
   };
+}
+
+async function answerConversationThread(
+  input: CreateDiscordMeetingBotInput,
+  ask: DiscordContextAskMention
+): Promise<DiscordContextAskResponse | null> {
+  const contextAsk = input.contextAsk;
+
+  if (
+    !contextAsk ||
+    ask.guildId !== input.guildId ||
+    !contextAsk.config.parentChannelIds.includes(ask.parentChannelId) ||
+    !contextAsk.config.allowedDiscordUserIds.includes(ask.actorDiscordUserId)
+  ) {
+    return null;
+  }
+
+  try {
+    const result = await contextAsk.contextIntelligence.inquire({
+      type: "ask",
+      workspaceId: input.workspace.workspaceId,
+      inquiryId: `discord:${ask.messageId}:context-ask`,
+      question: ask.question,
+      subject: {
+        type: "conversation-thread",
+        providerId: "discord",
+        conversationObjectId: ask.channelId,
+        anchorMessageId: ask.messageId
+      }
+    });
+
+    return {
+      content: renderDiscordContextAskResult(result),
+      idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
+    };
+  } catch {
+    return {
+      content: "Luma could not answer this thread right now. Please try again later.",
+      idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
+    };
+  }
 }
 
 async function withStartLock(

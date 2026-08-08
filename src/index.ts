@@ -137,14 +137,42 @@ export type {
 export {
   DiscordJsAdapterError,
   createDiscordJsTransport,
-  createDiscordJsTransportFromEnv
+  createDiscordJsTransportFromEnv,
+  discordGatewayIntentsForContextAsk
 } from "./discord/discord-js-adapter.js";
-export type { DiscordJsTransportConfig } from "./discord/discord-js-adapter.js";
+export type {
+  DiscordJsTransport,
+  DiscordJsTransportConfig
+} from "./discord/discord-js-adapter.js";
+export {
+  DiscordContextAskConfigError,
+  createDiscordContextAskRateLimiter,
+  discordContextAskConfigFromEnv,
+  discordContextAskMentionFromCandidate,
+  renderDiscordContextAskResult
+} from "./discord/discord-context-ask-runtime.js";
+export type {
+  DiscordContextAskConfig,
+  DiscordContextAskMention,
+  DiscordContextAskMessageCandidate
+} from "./discord/discord-context-ask-runtime.js";
+export {
+  DiscordConversationEvidenceError,
+  createDiscordConversationEvidenceSource
+} from "./discord/discord-conversation-evidence-source.js";
+export type {
+  CreateDiscordConversationEvidenceSourceInput,
+  DiscordConversationMessage,
+  DiscordConversationMessagePage,
+  DiscordConversationReader,
+  DiscordConversationThread
+} from "./discord/discord-conversation-evidence-source.js";
 export { createDiscordMeetingBot } from "./discord/discord-meeting-bot.js";
 export type {
   CreateDiscordMeetingBotInput,
   DiscordCommand,
   DiscordCommandResponse,
+  DiscordContextAskResponse,
   DiscordMeetingBot,
   DiscordThread,
   DiscordTransport

@@ -265,6 +265,11 @@ export type ActionItemReconciliationResolution =
     }
   | {
       type: "select-create-new";
+    }
+  | {
+      /** Preserve a reviewable source outcome without inventing Linear work. */
+      type: "select-needs-clarification";
+      reason?: string;
     };
 
 /**
@@ -482,6 +487,17 @@ export type FollowUpExecutionRecorded = ObservationBase & {
         errorCode: string;
         message: string;
         retryable: boolean;
+        /**
+         * The executor could not safely release or verify an external
+         * capability. This is intentionally distinct from a normal failed
+         * mutation so callers must surface manual recovery rather than retry.
+         */
+        requiresManualRecovery?: boolean;
+        /**
+         * A safely established earlier stage (for example Linear create) may
+         * still be auditable even when a later stage requires manual recovery.
+         */
+        externalReferences?: ExternalReference[];
       };
 };
 
@@ -637,11 +653,25 @@ export type UpdateKnowledgeIntent = {
   provenance: Provenance;
 };
 
-/** Links a write-capable follow-up intent to the Human-resolved source proposal it owns. */
+/** Links a follow-up intent to the Human-resolved source proposal it owns. */
 export type ActionItemReconciliationIntentBinding = {
   reviewId: string;
   candidateId: string;
   candidateLineageKey: string;
+};
+
+/**
+ * Authorizes settlement of one Human-resolved source reconciliation. Provider
+ * targets, source pages, and rendered Markdown are deliberately absent: the
+ * executor derives them from canonical Meeting state immediately before use.
+ */
+export type SettleOperationalOutcomeIntent = {
+  id: FollowUpIntentId;
+  type: "settle-operational-outcome";
+  reconciliation: ActionItemReconciliationIntentBinding;
+  relatedMeetingItemIds: MeetingItemId[];
+  status: FollowUpIntentStatus;
+  provenance: Provenance;
 };
 
 export type CreateWorkItemIntent = {
@@ -689,6 +719,7 @@ export type CommentOnCodeChangeIntent = {
 export type FollowUpIntent =
   | RecordMeetingIntent
   | UpdateKnowledgeIntent
+  | SettleOperationalOutcomeIntent
   | CreateWorkItemIntent
   | UpdateWorkItemIntent
   | CommentOnCodeChangeIntent;

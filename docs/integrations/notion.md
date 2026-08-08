@@ -81,8 +81,11 @@ before relying on a complete reconciliation.
 
 The source stores **Luma-observed** source revisions. It cannot reconstruct
 Notion UI history or every intermediate edit that happened before a fetch. A
-metadata-only change (such as `last_edited_time`) does not create a revision;
-an A → B → A content sequence does create three chronological revisions.
+metadata-only change (such as `last_edited_time` or a URL refresh) does not
+create a revision; an A → B → A content sequence does create three
+chronological revisions. An unchanged source root moving to a different parent
+page also creates a revision: that parent page is the external Operational
+Outcome target and must remain immutably bound to the source revision.
 
 `MeetingNotesIngestion` consumes a persisted observed source revision and
 submits a provider-neutral `meeting-imported-from-source` Observation through
@@ -136,10 +139,61 @@ permission error, or an unreadable Meeting Note never implies deletion: those
 remain unavailable/partial source states and preserve the last readable
 candidates.
 
+An active source-bound Operational Outcome settlement also holds a durable
+fence on its exact ledger head. A scan that encounters that fence reports the
+retryable `source-execution-fenced` partial reason and neither records a newer
+revision nor tombstones the root. Follow-up Execution releases the fence only
+when Meeting Intelligence has accepted and durably completed its terminal
+receipt; recovery rechecks and reacquires the current head before a resumed
+provider mutation.
+
+If a fenced scan does read a different upstream root, it records that durable
+supersession on the held execution fence while retaining the immutable ledger
+head. Follow-up Execution sees the signal before each Work/page mutation and
+stops the stale settlement; source ingestion retries after terminal cleanup.
+The boundary is intentionally local to observed source state: Notion does not
+offer the source-version compare-and-swap that would fence an edit made after
+the final verification read.
+
 This remains mutation-free. Source import does not create Linear work or mutate
 a Notion page. The reconciliation slice may only produce reviewable proposals
 until Human Judgment and an approved Follow-up Intent authorize a later
 execution.
+
+## Operational Outcome writeback
+
+After an approved reconciliation settlement, Luma records its compact
+Operational Outcome aggregate on the canonical Meeting Notes page. This is a
+narrow, page-owned writeback: Luma appends its section when absent or replaces
+only the exact Luma-owned section. It never replaces the whole page or treats
+ordinary source content as writable.
+
+Before materializing an aggregate, the executor confirms that the page belongs
+to the settlement workspace and takes a durable page lease. This prevents two
+workspaces from claiming the same Notion page and serializes concurrent
+aggregate updates. The write uses a complete Markdown read and a durable
+receipt. A known-safe, retryable Notion non-write leaves the settlement
+`partially-succeeded` and recoverable. A known non-retryable no-write fails
+without retaining the page lease, so a fresh Human-reviewed outcome can be
+proposed. An indeterminate response retains its lease and requires a manual,
+read-only exact-marker proof rather than an automatic replay or generic
+unlock. The only no-probe release is a durable executor record made before
+the Notion writer boundary or the adapter's explicit no-write receipt, each
+of which proves that no page mutation started.
+
+Every Luma outcome section carries an ownership marker whose payload, content,
+and operation digests are verified against a successful durable settlement for
+the same workspace, provider, and page. The Meeting Notes source strips a
+section only after that proof. A missing verifier, malformed, duplicate,
+edited, or merely checksum-valid but unverified marker makes the scan partial:
+Luma records no source snapshot for that page and withholds complete-scan
+tombstoning. This prevents Luma's own writeback from producing a synthetic
+source revision and prevents an untrusted marker from being silently discarded.
+
+If a later complete source scan tombstones the Meeting Notes root, the
+corresponding reconciliation outcomes are stale. Luma invalidates their pending
+or resumable settlements and does not write their aggregate during execution
+or recovery.
 
 ## Non-mutating Live Test
 

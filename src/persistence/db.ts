@@ -153,6 +153,93 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       PRIMARY KEY (idempotency_key)
     );
 
+    -- A source-bound reconciliation settlement is a two-stage saga: work
+    -- resolution may succeed before Luma can safely publish the compact
+    -- Notion Operational Outcome. Keep immutable intent-derived plans and
+    -- stage receipts separate from the outer Follow-up Execution receipt so
+    -- recovery never creates Linear work a second time.
+    CREATE TABLE IF NOT EXISTS operational_outcome_settlements (
+      workspace_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      intent_id TEXT NOT NULL,
+      review_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      candidate_lineage_key TEXT NOT NULL,
+      source_provider_id TEXT NOT NULL,
+      source_document_id TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL,
+      source_content_hash TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, meeting_id, intent_id),
+      UNIQUE (workspace_id, meeting_id, review_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS operational_outcome_settlements_source_idx
+      ON operational_outcome_settlements (source_provider_id, source_document_id);
+
+    CREATE TABLE IF NOT EXISTS operational_outcome_settlement_stages (
+      workspace_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      intent_id TEXT NOT NULL,
+      stage TEXT NOT NULL CHECK (stage IN ('work', 'outcome')),
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'not-required', 'pending', 'executing', 'succeeded',
+          'unresolved', 'requires-manual-recovery'
+        )
+      ),
+      idempotency_key TEXT NOT NULL UNIQUE,
+      reference_json TEXT,
+      -- The exact aggregate Luma intends to publish is stored before the
+      -- provider call. A crash can therefore only complete a positively
+      -- re-read identical write; it can never reconstruct and overwrite a
+      -- newer aggregate optimistically.
+      prepared_outcome_json TEXT,
+      prepared_operation_token TEXT,
+      payload_digest TEXT,
+      content_digest TEXT,
+      operation_digest TEXT,
+      last_error_code TEXT,
+      last_error_message TEXT,
+      execution_lease_id TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      PRIMARY KEY (workspace_id, meeting_id, intent_id, stage),
+      FOREIGN KEY (workspace_id, meeting_id, intent_id)
+        REFERENCES operational_outcome_settlements (workspace_id, meeting_id, intent_id)
+    );
+
+    -- A durable ownership record makes the one Luma-owned outcome section on
+    -- a source page serializable across executions. A future adapter may add
+    -- provider-specific recovery while retaining this opaque boundary.
+    CREATE TABLE IF NOT EXISTS operational_outcome_page_leases (
+      source_provider_id TEXT NOT NULL,
+      source_document_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      intent_id TEXT NOT NULL,
+      execution_lease_id TEXT NOT NULL,
+      acquired_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (source_provider_id, source_document_id)
+    );
+
+    -- One physical document has one Luma-owned Operational Outcome section.
+    -- Do not let two opaque workspaces take turns replacing that section just
+    -- because their provider-local page IDs collide.
+    CREATE TABLE IF NOT EXISTS operational_outcome_pages (
+      source_provider_id TEXT NOT NULL,
+      source_document_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (source_provider_id, source_document_id)
+    );
+
     CREATE TABLE IF NOT EXISTS observed_sources (
       workspace_id TEXT NOT NULL,
       provider_id TEXT NOT NULL,
@@ -201,6 +288,37 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         content_hash
       );
 
+    -- An in-flight source-bound provider mutation holds this fence after it
+    -- has atomically proved the exact ledger head it will act on. Source
+    -- ingestion must not advance that root (or infer its removal) until the
+    -- execution records a canonical terminal receipt and releases the fence.
+    CREATE TABLE IF NOT EXISTS observed_source_execution_fences (
+      workspace_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      source_content_hash TEXT NOT NULL,
+      -- A later source scan may prove this held head is no longer safe to
+      -- mutate externally. Preserve that proof here without promoting the
+      -- newer material to the mutable source head until release.
+      supersession_kind TEXT CHECK (supersession_kind IN ('changed', 'removed')),
+      superseding_content_hash TEXT,
+      superseded_at TEXT,
+      meeting_id TEXT NOT NULL,
+      intent_id TEXT NOT NULL,
+      execution_lease_id TEXT NOT NULL,
+      acquired_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, provider_id, source_kind, source_object_id),
+      FOREIGN KEY (workspace_id, provider_id, source_kind, source_object_id)
+        REFERENCES observed_sources (workspace_id, provider_id, source_kind, source_object_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS observed_source_execution_fences_owner_idx
+      ON observed_source_execution_fences (
+        workspace_id, meeting_id, intent_id, execution_lease_id
+      );
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS meeting_title TEXT;
 
@@ -218,6 +336,38 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
 
     ALTER TABLE observed_sources
       ADD COLUMN IF NOT EXISTS current_observation_generation INTEGER NOT NULL DEFAULT 0;
+
+    ALTER TABLE observed_source_execution_fences
+      ADD COLUMN IF NOT EXISTS supersession_kind TEXT;
+
+    ALTER TABLE observed_source_execution_fences
+      ADD COLUMN IF NOT EXISTS superseding_content_hash TEXT;
+
+    ALTER TABLE observed_source_execution_fences
+      ADD COLUMN IF NOT EXISTS superseded_at TEXT;
+
+    ALTER TABLE operational_outcome_settlements
+      ADD COLUMN IF NOT EXISTS source_object_id TEXT;
+
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS payload_digest TEXT;
+
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS prepared_outcome_json TEXT;
+
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS prepared_operation_token TEXT;
+
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS content_digest TEXT;
+
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS operation_digest TEXT;
+
+    CREATE INDEX IF NOT EXISTS operational_outcome_settlements_source_root_idx
+      ON operational_outcome_settlements (
+        source_provider_id, source_document_id, source_object_id
+      );
 
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS start_message_sent_at TEXT;

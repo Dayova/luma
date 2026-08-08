@@ -15,7 +15,12 @@ import {
   createObservedSourceLedger,
   type ObservedSourceLedger
 } from "../../src/knowledge/observed-source-ledger.js";
+import { renderOperationalOutcomeMarkdown } from "../../src/knowledge/operational-outcome-markdown.js";
+import type { OperationalOutcomeMarkerVerifier } from "../../src/knowledge/operational-outcome-writer.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
+
+const baseMeetingMarkdown =
+  "# Product sync\n\nWir prüfen die Quelle before we create work.";
 
 function block(
   overrides: Partial<NotionMeetingNotesBlock> &
@@ -179,11 +184,69 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
   }): Promise<{ content: string; truncated: boolean; unknownBlockIds: string[] }> {
     this.markdownCalls.push(input);
     return Promise.resolve({
-      content: "# Product sync\n\nWir prüfen die Quelle before we create work.",
+      content: baseMeetingMarkdown,
       truncated: false,
       unknownBlockIds: []
     });
   }
+}
+
+type OperationalOutcomeMarkerVerificationInput = Parameters<
+  OperationalOutcomeMarkerVerifier["isOwned"]
+>[0];
+
+class FakeOperationalOutcomeMarkerVerifier implements OperationalOutcomeMarkerVerifier {
+  readonly calls: OperationalOutcomeMarkerVerificationInput[] = [];
+
+  constructor(
+    private readonly behavior:
+      boolean | Error | ((input: OperationalOutcomeMarkerVerificationInput) => boolean)
+  ) {}
+
+  isOwned(input: OperationalOutcomeMarkerVerificationInput): Promise<boolean> {
+    this.calls.push(input);
+
+    if (this.behavior instanceof Error) {
+      return Promise.reject(this.behavior);
+    }
+
+    return Promise.resolve(
+      typeof this.behavior === "function" ? this.behavior(input) : this.behavior
+    );
+  }
+}
+
+function renderedOperationalOutcome() {
+  return renderOperationalOutcomeMarkdown({
+    idempotencyKey: "workspace_dayova:meeting-1:settlement-1:outcome",
+    outcome: {
+      formatVersion: 1,
+      operationToken: "test-operation-token:meeting-1:settlement-1",
+      scope: {
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        pageExternalId: "meeting-page-1"
+      },
+      entries: [
+        {
+          settlementIntentId: "settlement-1",
+          source: {
+            sourceObjectId: "meeting-notes-block-1",
+            sourceRevision: 1,
+            sourceContentHash: "sha256:meeting-note-source"
+          },
+          resolution: {
+            type: "needs-clarification",
+            rationale: "Needs a decision from the accountable owner."
+          },
+          workReferences: [],
+          knowledgeReferences: [],
+          githubReferences: [],
+          unresolved: ["Confirm the delivery owner."]
+        }
+      ]
+    }
+  });
 }
 
 function emptyPaginatedApi(): NotionMeetingNotesApi {
@@ -201,12 +264,14 @@ function emptyPaginatedApi(): NotionMeetingNotesApi {
 }
 
 const emptyObservedSourceLedger: ObservedSourceLedger = {
-  record: async () => {
-    throw new Error("The empty paginated API never records a source");
-  },
-  get: async () => null,
-  listCurrent: async () => [],
-  recordTombstone: async () => null
+  record: () =>
+    Promise.reject(new Error("The empty paginated API never records a source")),
+  acquireExecutionFence: () => Promise.resolve({ status: "superseded", current: null }),
+  verifyExecutionFenceHeldCurrent: () => Promise.resolve({ status: "not-held" }),
+  releaseExecutionFence: () => Promise.resolve(),
+  get: () => Promise.resolve(null),
+  listCurrent: () => Promise.resolve([]),
+  recordTombstone: () => Promise.resolve(null)
 };
 
 function wait(milliseconds: number): Promise<void> {
@@ -358,6 +423,270 @@ describe("Notion Meeting Notes source", () => {
     }
   });
 
+  it("does not mint a source revision when a valid Luma Operational Outcome section is written back", async () => {
+    const database = await createPgliteDatabase();
+    const baseApi = new FakeNotionMeetingNotesApi();
+    const ledger = createObservedSourceLedger({ database });
+    const rendered = renderedOperationalOutcome();
+    const verifier = new FakeOperationalOutcomeMarkerVerifier(
+      (input) =>
+        input.workspaceId === "workspace_dayova" &&
+        input.providerId === "notion" &&
+        input.pageExternalId === "meeting-page-1" &&
+        input.payloadDigest === rendered.payloadDigest &&
+        input.contentDigest === rendered.contentDigest &&
+        input.operationDigest === rendered.operationDigest
+    );
+    let markdown = baseMeetingMarkdown;
+    const api: NotionMeetingNotesApi = {
+      async listDataSourcePages(input) {
+        return { ...(await baseApi.listDataSourcePages(input)), nextCursor: null };
+      },
+      listBlockChildren: (input) => baseApi.listBlockChildren(input),
+      async retrievePageMarkdown(input) {
+        return { ...(await baseApi.retrievePageMarkdown(input)), content: markdown };
+      }
+    };
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: "dayova-meetings",
+      operationalOutcomeMarkerVerifier: verifier
+    });
+
+    try {
+      const first = await source.scan({ workspaceId: "workspace_dayova" });
+      const original = first.records[0];
+
+      if (!original) {
+        throw new Error("expected an initial Meeting Note source revision");
+      }
+
+      markdown = `${baseMeetingMarkdown}\n\n${rendered.section}`;
+
+      const afterOutcome = await source.scan({ workspaceId: "workspace_dayova" });
+      const current = afterOutcome.records[0];
+
+      expect(current).toMatchObject({
+        change: "unchanged",
+        revision: 1,
+        contentHash: original.contentHash,
+        snapshot: {
+          markdown: { content: baseMeetingMarkdown },
+          completeness: { state: "complete" }
+        }
+      });
+      expect(current?.contentHash).toBe(original.contentHash);
+      expect(verifier.calls).toEqual([
+        {
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          pageExternalId: "meeting-page-1",
+          payloadDigest: rendered.payloadDigest,
+          contentDigest: rendered.contentDigest,
+          operationDigest: rendered.operationDigest
+        }
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails closed for malformed, duplicate, or edited Luma Operational Outcome sections", async () => {
+    const validSection = renderedOperationalOutcome().section;
+    const unsafeMarkdownCases = [
+      {
+        label: "malformed marker",
+        markdown: `${baseMeetingMarkdown}\n\n## Luma — Operational Outcome\n\n\`luma-operational-outcome:start:v1\``
+      },
+      {
+        label: "duplicate owned section",
+        markdown: `${baseMeetingMarkdown}\n\n${validSection}\n\n${validSection}`
+      },
+      {
+        label: "edited owned section",
+        markdown: `${baseMeetingMarkdown}\n\n${validSection.replace(
+          "Needs a decision from the accountable owner.",
+          "Tampered after Luma wrote it."
+        )}`
+      }
+    ];
+
+    for (const unsafeCase of unsafeMarkdownCases) {
+      const database = await createPgliteDatabase();
+      const baseApi = new FakeNotionMeetingNotesApi();
+      const ledger = createObservedSourceLedger({ database });
+      let markdown = baseMeetingMarkdown;
+      const api: NotionMeetingNotesApi = {
+        async listDataSourcePages(input) {
+          return { ...(await baseApi.listDataSourcePages(input)), nextCursor: null };
+        },
+        listBlockChildren: (input) => baseApi.listBlockChildren(input),
+        async retrievePageMarkdown(input) {
+          return { ...(await baseApi.retrievePageMarkdown(input)), content: markdown };
+        }
+      };
+      const source = createNotionMeetingNotesSource({
+        api,
+        ledger,
+        meetingsDataSourceId: "dayova-meetings"
+      });
+
+      try {
+        const seeded = await source.scan({ workspaceId: "workspace_dayova" });
+        const original = seeded.records[0];
+
+        if (!original) {
+          throw new Error(`expected a seeded source for ${unsafeCase.label}`);
+        }
+
+        markdown = unsafeCase.markdown;
+
+        const unsafeScan = await source.scan({ workspaceId: "workspace_dayova" });
+
+        expect(unsafeScan.records).toEqual([]);
+        expect(unsafeScan.completeness).toBe("partial");
+        expect(unsafeScan.completeScan).toBeUndefined();
+        expect(unsafeScan.partialReasons).toContainEqual(
+          expect.objectContaining({
+            code: "unreadable-meeting-note",
+            sourceObjectId: original.source.sourceObjectId,
+            retryable: false
+          })
+        );
+        await expect(
+          ledger.get({ workspaceId: "workspace_dayova", source: original.source })
+        ).resolves.toMatchObject({ revision: 1, contentHash: original.contentHash });
+      } finally {
+        await database.close();
+      }
+    }
+  });
+
+  it("requires a matching durable ownership proof before stripping a valid Luma Operational Outcome section", async () => {
+    const rendered = renderedOperationalOutcome();
+    const expectedMarker: OperationalOutcomeMarkerVerificationInput = {
+      workspaceId: "workspace_dayova",
+      providerId: "notion",
+      pageExternalId: "meeting-page-1",
+      payloadDigest: rendered.payloadDigest,
+      contentDigest: rendered.contentDigest,
+      operationDigest: rendered.operationDigest
+    };
+    const unverifiedCases: Array<{
+      label: string;
+      verifier?: FakeOperationalOutcomeMarkerVerifier;
+      retryable: boolean;
+    }> = [
+      { label: "no configured verifier", retryable: false },
+      {
+        label: "wrong workspace binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.workspaceId === "workspace_other"
+        ),
+        retryable: false
+      },
+      {
+        label: "wrong provider binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.providerId === "linear"
+        ),
+        retryable: false
+      },
+      {
+        label: "wrong page binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.pageExternalId === "another-page"
+        ),
+        retryable: false
+      },
+      {
+        label: "wrong payload binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.payloadDigest === "f".repeat(64)
+        ),
+        retryable: false
+      },
+      {
+        label: "wrong content binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.contentDigest === "e".repeat(64)
+        ),
+        retryable: false
+      },
+      {
+        label: "wrong operation binding",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          (input) => input.operationDigest === "d".repeat(64)
+        ),
+        retryable: false
+      },
+      {
+        label: "verification dependency rejection",
+        verifier: new FakeOperationalOutcomeMarkerVerifier(
+          new Error("durable verifier unavailable")
+        ),
+        retryable: true
+      }
+    ];
+
+    for (const unverifiedCase of unverifiedCases) {
+      const database = await createPgliteDatabase();
+      const baseApi = new FakeNotionMeetingNotesApi();
+      const ledger = createObservedSourceLedger({ database });
+      let markdown = baseMeetingMarkdown;
+      const api: NotionMeetingNotesApi = {
+        async listDataSourcePages(input) {
+          return { ...(await baseApi.listDataSourcePages(input)), nextCursor: null };
+        },
+        listBlockChildren: (input) => baseApi.listBlockChildren(input),
+        async retrievePageMarkdown(input) {
+          return { ...(await baseApi.retrievePageMarkdown(input)), content: markdown };
+        }
+      };
+      const source = createNotionMeetingNotesSource({
+        api,
+        ledger,
+        meetingsDataSourceId: "dayova-meetings",
+        ...(unverifiedCase.verifier
+          ? { operationalOutcomeMarkerVerifier: unverifiedCase.verifier }
+          : {})
+      });
+
+      try {
+        const seeded = await source.scan({ workspaceId: "workspace_dayova" });
+        const original = seeded.records[0];
+
+        if (!original) {
+          throw new Error(`expected a seeded source for ${unverifiedCase.label}`);
+        }
+
+        markdown = `${baseMeetingMarkdown}\n\n${rendered.section}`;
+
+        const unverifiedScan = await source.scan({ workspaceId: "workspace_dayova" });
+
+        expect(unverifiedScan.records).toEqual([]);
+        expect(unverifiedScan.completeness).toBe("partial");
+        expect(unverifiedScan.completeScan).toBeUndefined();
+        expect(unverifiedScan.partialReasons).toContainEqual(
+          expect.objectContaining({
+            code: "unreadable-meeting-note",
+            sourceObjectId: original.source.sourceObjectId,
+            retryable: unverifiedCase.retryable
+          })
+        );
+        if (unverifiedCase.verifier) {
+          expect(unverifiedCase.verifier.calls).toEqual([expectedMarker]);
+        }
+        await expect(
+          ledger.get({ workspaceId: "workspace_dayova", source: original.source })
+        ).resolves.toMatchObject({ revision: 1, contentHash: original.contentHash });
+      } finally {
+        await database.close();
+      }
+    }
+  });
+
   it("turns a root absent from a completed canonical scan into an immutable tombstone", async () => {
     const database = await createPgliteDatabase();
     const baseApi = new FakeNotionMeetingNotesApi();
@@ -397,20 +726,23 @@ describe("Notion Meeting Notes source", () => {
 
       const removed = await absent.completeScan.reconcileAbsent();
 
-      expect(removed).toMatchObject([
-        {
-          change: "revised",
-          revision: 2,
-          source: { sourceObjectId: "meeting-notes-block-1" },
-          snapshot: {
-            lifecycle: "removed",
-            completeness: { state: "removed" },
-            sections: {
-              actionItemsAndNotes: { state: "unavailable" }
+      expect(removed).toMatchObject({
+        tombstones: [
+          {
+            change: "revised",
+            revision: 2,
+            source: { sourceObjectId: "meeting-notes-block-1" },
+            snapshot: {
+              lifecycle: "removed",
+              completeness: { state: "removed" },
+              sections: {
+                actionItemsAndNotes: { state: "unavailable" }
+              }
             }
           }
-        }
-      ]);
+        ],
+        partialReasons: []
+      });
       await expect(absent.completeScan.reconcileAbsent()).rejects.toThrow("only once");
 
       const replay = await source.scan({ workspaceId: "workspace_dayova" });
@@ -419,9 +751,149 @@ describe("Notion Meeting Notes source", () => {
         throw new Error("expected a replay scan capability");
       }
 
-      await expect(replay.completeScan.reconcileAbsent()).resolves.toMatchObject([
-        { change: "unchanged", revision: 2 }
-      ]);
+      await expect(replay.completeScan.reconcileAbsent()).resolves.toMatchObject({
+        tombstones: [{ change: "unchanged", revision: 2 }],
+        partialReasons: []
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("reports retryable partial coverage and withholds absence authority while an execution fences a source root", async () => {
+    const database = await createPgliteDatabase();
+    const baseApi = new FakeNotionMeetingNotesApi();
+    const api: NotionMeetingNotesApi = {
+      async listDataSourcePages(input) {
+        return { ...(await baseApi.listDataSourcePages(input)), nextCursor: null };
+      },
+      listBlockChildren: (input) => baseApi.listBlockChildren(input),
+      retrievePageMarkdown: (input) => baseApi.retrievePageMarkdown(input)
+    };
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: "dayova-meetings",
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      const seeded = await source.scan({ workspaceId: "workspace_dayova" });
+      const record = seeded.records[0];
+
+      if (!record) {
+        throw new Error("expected a source record before fencing");
+      }
+
+      await expect(
+        ledger.acquireExecutionFence({
+          workspaceId: "workspace_dayova",
+          source: record.source,
+          expected: {
+            revision: record.revision,
+            contentHash: record.contentHash
+          },
+          owner: {
+            meetingId: "meeting-product-sync",
+            intentId: "settlement-product-sync",
+            executionLeaseId: "lease-product-sync"
+          },
+          now: new Date("2026-08-08T10:01:00.000Z")
+        })
+      ).resolves.toEqual({ status: "acquired" });
+
+      const fenced = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(fenced.records).toEqual([]);
+      expect(fenced.completeness).toBe("partial");
+      expect(fenced.completeScan).toBeUndefined();
+      expect(fenced.partialReasons).toContainEqual(
+        expect.objectContaining({
+          code: "source-execution-fenced",
+          sourceObjectId: record.source.sourceObjectId,
+          retryable: true
+        })
+      );
+      await expect(
+        ledger.get({ workspaceId: "workspace_dayova", source: record.source })
+      ).resolves.toMatchObject({
+        revision: record.revision,
+        contentHash: record.contentHash
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("reports partial absence reconciliation instead of tombstoning an execution-fenced root", async () => {
+    const database = await createPgliteDatabase();
+    const baseApi = new FakeNotionMeetingNotesApi();
+    let sourceIsVisible = true;
+    const api: NotionMeetingNotesApi = {
+      async listDataSourcePages(input) {
+        return sourceIsVisible
+          ? { ...(await baseApi.listDataSourcePages(input)), nextCursor: null }
+          : { pages: [], nextCursor: null, incomplete: false };
+      },
+      listBlockChildren: (input) => baseApi.listBlockChildren(input),
+      retrievePageMarkdown: (input) => baseApi.retrievePageMarkdown(input)
+    };
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: "dayova-meetings",
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    try {
+      const seeded = await source.scan({ workspaceId: "workspace_dayova" });
+      const record = seeded.records[0];
+
+      if (!record) {
+        throw new Error("expected a source record before fencing");
+      }
+
+      await ledger.acquireExecutionFence({
+        workspaceId: "workspace_dayova",
+        source: record.source,
+        expected: {
+          revision: record.revision,
+          contentHash: record.contentHash
+        },
+        owner: {
+          meetingId: "meeting-product-sync",
+          intentId: "settlement-product-sync",
+          executionLeaseId: "lease-product-sync"
+        },
+        now: new Date("2026-08-08T10:01:00.000Z")
+      });
+      sourceIsVisible = false;
+
+      const absent = await source.scan({ workspaceId: "workspace_dayova" });
+
+      if (!absent.completeScan) {
+        throw new Error("expected a complete source scan before absence reconciliation");
+      }
+
+      await expect(absent.completeScan.reconcileAbsent()).resolves.toMatchObject({
+        tombstones: [],
+        partialReasons: [
+          expect.objectContaining({
+            code: "source-execution-fenced",
+            sourceObjectId: record.source.sourceObjectId,
+            retryable: true
+          })
+        ]
+      });
+      await expect(
+        ledger.get({ workspaceId: "workspace_dayova", source: record.source })
+      ).resolves.toMatchObject({
+        revision: record.revision,
+        contentHash: record.contentHash,
+        snapshot: { lifecycle: "ready" }
+      });
     } finally {
       await database.close();
     }
@@ -468,9 +940,12 @@ describe("Notion Meeting Notes source", () => {
         throw new Error("expected a completed pagination scan capability");
       }
 
-      await expect(finalPage.completeScan.reconcileAbsent()).resolves.toMatchObject([
-        { change: "revised", source: { sourceObjectId: "meeting-notes-block-1" } }
-      ]);
+      await expect(finalPage.completeScan.reconcileAbsent()).resolves.toMatchObject({
+        tombstones: [
+          { change: "revised", source: { sourceObjectId: "meeting-notes-block-1" } }
+        ],
+        partialReasons: []
+      });
     } finally {
       await database.close();
     }

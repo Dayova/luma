@@ -200,12 +200,15 @@ describe("Meeting Notes sync", () => {
                 completeScan: {
                   reconcileAbsent: () => {
                     reconciliationRuns += 1;
-                    return Promise.resolve([
-                      tombstoneRevision(
-                        "absent-root",
-                        reconciliationRuns === 1 ? "revised" : "unchanged"
-                      )
-                    ]);
+                    return Promise.resolve({
+                      tombstones: [
+                        tombstoneRevision(
+                          "absent-root",
+                          reconciliationRuns === 1 ? "revised" : "unchanged"
+                        )
+                      ],
+                      partialReasons: []
+                    });
                   }
                 }
               }
@@ -277,7 +280,7 @@ describe("Meeting Notes sync", () => {
             completeScan: {
               reconcileAbsent: () => {
                 reconcileCalls += 1;
-                return Promise.resolve([]);
+                return Promise.resolve({ tombstones: [], partialReasons: [] });
               }
             }
           })
@@ -296,6 +299,52 @@ describe("Meeting Notes sync", () => {
     });
   });
 
+  it("reports partial coverage when a late execution fence blocks absence reconciliation", async () => {
+    const sync = createMeetingNotesSync({
+      workspace,
+      source: {
+        scan: () =>
+          Promise.resolve({
+            records: [],
+            nextCursor: null,
+            completeness: "complete" as const,
+            partialReasons: [],
+            completeScan: {
+              reconcileAbsent: () =>
+                Promise.resolve({
+                  tombstones: [],
+                  partialReasons: [
+                    {
+                      code: "source-execution-fenced" as const,
+                      message:
+                        "A source-bound Luma execution still owns the absent root.",
+                      sourceObjectId: "fenced-absent-root",
+                      retryable: true
+                    }
+                  ]
+                })
+            }
+          })
+      },
+      ingestion: new RecordingIngestion(),
+      logger: quietLogger
+    });
+
+    const result = await sync.syncOnce();
+
+    expect(result).toMatchObject({
+      tombstonedRecords: 0,
+      completeness: "partial",
+      partialReasons: [
+        expect.objectContaining({
+          code: "source-execution-fenced",
+          sourceObjectId: "fenced-absent-root",
+          retryable: true
+        })
+      ]
+    });
+  });
+
   it("reports unexplained partial coverage and never grants it absence authority", async () => {
     let reconcileCalls = 0;
     const sync = createMeetingNotesSync({
@@ -310,7 +359,7 @@ describe("Meeting Notes sync", () => {
             completeScan: {
               reconcileAbsent: () => {
                 reconcileCalls += 1;
-                return Promise.resolve([]);
+                return Promise.resolve({ tombstones: [], partialReasons: [] });
               }
             }
           })
@@ -343,7 +392,7 @@ describe("Meeting Notes sync", () => {
                   completeScan: {
                     reconcileAbsent: () => {
                       reconcileCalls += 1;
-                      return Promise.resolve([]);
+                      return Promise.resolve({ tombstones: [], partialReasons: [] });
                     }
                   }
                 }

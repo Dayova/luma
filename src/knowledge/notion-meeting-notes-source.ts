@@ -14,15 +14,21 @@ import type {
   MeetingNotesScanPartialReason,
   MeetingNotesSource
 } from "./meeting-notes-source.js";
-import type {
-  CapturedMeetingNoteBlock,
-  ObservedSourceHead,
-  ObservedSourceLedger,
-  ObservedSourceRevision,
-  RawMeetingNoteSection,
-  RawMeetingNoteSnapshot,
-  SourcePartialReason
+import {
+  ObservedSourceExecutionFenceConflictError,
+  type CapturedMeetingNoteBlock,
+  type ObservedSourceHead,
+  type ObservedSourceLedger,
+  type ObservedSourceRevision,
+  type RawMeetingNoteSection,
+  type RawMeetingNoteSnapshot,
+  type SourcePartialReason
 } from "./observed-source-ledger.js";
+import type { OperationalOutcomeMarkerVerifier } from "./operational-outcome-writer.js";
+import {
+  parseOperationalOutcomeSection,
+  stripOperationalOutcomeSection
+} from "./operational-outcome-markdown.js";
 
 const NOTION_MEETING_NOTES_API_VERSION = "2026-03-11";
 const DEFAULT_PAGE_SIZE = 100;
@@ -86,6 +92,11 @@ export type NotionMeetingNotesSourceConfig = {
   ledger: ObservedSourceLedger;
   token?: string;
   providerId?: string;
+  /**
+   * Required to ignore a Luma outcome marker. Without a durable proof, a
+   * checksum-valid section remains untrusted canonical source material.
+   */
+  operationalOutcomeMarkerVerifier?: OperationalOutcomeMarkerVerifier;
   api?: NotionMeetingNotesApi;
   now?: () => Date;
 };
@@ -94,6 +105,7 @@ export type CreateNotionMeetingNotesSourceFromEnvInput = {
   ledger: ObservedSourceLedger;
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
+  operationalOutcomeMarkerVerifier?: OperationalOutcomeMarkerVerifier;
 };
 
 export class NotionMeetingNotesSourceError extends Error {
@@ -107,7 +119,13 @@ export class NotionMeetingNotesSourceError extends Error {
 }
 
 export type NotionMeetingNotesReadErrorCode =
-  "source-not-found" | "source-restricted" | "transient";
+  | "source-not-found"
+  | "source-restricted"
+  | "transient"
+  /** A Luma-owned writeback exists, but it cannot be proven safe to ignore. */
+  | "unsafe-operational-outcome-markdown"
+  | "unverified-operational-outcome-markdown"
+  | "operational-outcome-marker-verification-unavailable";
 
 export class NotionMeetingNotesReadError extends Error {
   readonly code: NotionMeetingNotesReadErrorCode;
@@ -125,6 +143,12 @@ type NotionMeetingNotesScanSession = {
   observedSourceObjectIds: Set<string>;
   fullyReadable: boolean;
   createdAtMs: number;
+};
+
+type OperationalOutcomeOwnershipContext = {
+  workspaceId: string;
+  providerId: string;
+  operationalOutcomeMarkerVerifier?: OperationalOutcomeMarkerVerifier;
 };
 
 export function createNotionMeetingNotesSource(
@@ -222,24 +246,41 @@ export function createNotionMeetingNotesSource(
         }
 
         const tombstones: ObservedSourceRevision[] = [];
+        const partialReasons: MeetingNotesScanPartialReason[] = [];
 
         for (const previous of session.initialHeads) {
           if (session.observedSourceObjectIds.has(previous.source.sourceObjectId)) {
             continue;
           }
 
-          const tombstone = await config.ledger.recordTombstone({
-            workspaceId: session.workspaceId,
-            previous,
-            observedAt: now().toISOString()
-          });
+          let tombstone: ObservedSourceRevision | null;
+
+          try {
+            tombstone = await config.ledger.recordTombstone({
+              workspaceId: session.workspaceId,
+              previous,
+              observedAt: now().toISOString()
+            });
+          } catch (error) {
+            if (error instanceof ObservedSourceExecutionFenceConflictError) {
+              partialReasons.push(
+                sourceExecutionFenceReason(
+                  previous.source.parentObjectId,
+                  previous.source.sourceObjectId
+                )
+              );
+              continue;
+            }
+
+            throw error;
+          }
 
           if (tombstone) {
             tombstones.push(tombstone);
           }
         }
 
-        return tombstones;
+        return { tombstones, partialReasons };
       }
     };
   };
@@ -304,7 +345,16 @@ export function createNotionMeetingNotesSource(
           let snapshot: RawMeetingNoteSnapshot;
 
           try {
-            snapshot = await captureMeetingNote(api, meetingPage, sourceBlock);
+            snapshot = await captureMeetingNote(api, meetingPage, sourceBlock, {
+              workspaceId: input.workspaceId,
+              providerId,
+              ...(config.operationalOutcomeMarkerVerifier
+                ? {
+                    operationalOutcomeMarkerVerifier:
+                      config.operationalOutcomeMarkerVerifier
+                  }
+                : {})
+            });
           } catch (error) {
             partialReasons.push(
               meetingNoteReadFailureReason(meetingPage.id, sourceBlock.id, error)
@@ -312,21 +362,32 @@ export function createNotionMeetingNotesSource(
             continue;
           }
 
-          records.push(
-            await config.ledger.record({
-              workspaceId: input.workspaceId,
-              source: {
-                providerId,
-                sourceKind: "meeting-note",
-                sourceObjectId: sourceBlock.id,
-                parentObjectId: meetingPage.id,
-                url: meetingPage.url
-              },
-              providerVersion: meetingPage.lastEditedAt,
-              snapshot,
-              observedAt: now().toISOString()
-            })
-          );
+          try {
+            records.push(
+              await config.ledger.record({
+                workspaceId: input.workspaceId,
+                source: {
+                  providerId,
+                  sourceKind: "meeting-note",
+                  sourceObjectId: sourceBlock.id,
+                  parentObjectId: meetingPage.id,
+                  url: meetingPage.url
+                },
+                providerVersion: meetingPage.lastEditedAt,
+                snapshot,
+                observedAt: now().toISOString()
+              })
+            );
+          } catch (error) {
+            if (error instanceof ObservedSourceExecutionFenceConflictError) {
+              partialReasons.push(
+                sourceExecutionFenceReason(meetingPage.id, sourceBlock.id)
+              );
+              continue;
+            }
+
+            throw error;
+          }
         }
       }
 
@@ -416,6 +477,10 @@ export function createNotionMeetingNotesSourceFromEnv(
 
   if (input.now) {
     config.now = input.now;
+  }
+
+  if (input.operationalOutcomeMarkerVerifier) {
+    config.operationalOutcomeMarkerVerifier = input.operationalOutcomeMarkerVerifier;
   }
 
   return createNotionMeetingNotesSource(config);
@@ -508,7 +573,8 @@ class NotionSdkMeetingNotesApi implements NotionMeetingNotesApi {
 async function captureMeetingNote(
   api: NotionMeetingNotesApi,
   page: NotionMeetingNotesPage,
-  sourceBlock: NotionMeetingNotesBlock
+  sourceBlock: NotionMeetingNotesBlock,
+  ownership: OperationalOutcomeOwnershipContext
 ): Promise<RawMeetingNoteSnapshot> {
   const details = sourceBlock.meetingNotes;
 
@@ -542,7 +608,11 @@ async function captureMeetingNote(
   }
 
   const markdownRead = await readMarkdown(api, page.id);
-  const markdown = markdownRead.markdown;
+  const markdown = await canonicalMeetingNoteMarkdown(
+    markdownRead.markdown,
+    page.id,
+    ownership
+  );
   const [summaryResult, actionItemsAndNotesResult, transcriptResult] = await Promise.all([
     readSection(api, details.summaryBlockId, "summary"),
     readSection(api, details.notesBlockId, "notes"),
@@ -631,6 +701,73 @@ async function readMarkdown(
       unreadable: true
     };
   }
+}
+
+async function canonicalMeetingNoteMarkdown(
+  markdown: { content: string; truncated: boolean; unknownBlockIds: string[] },
+  pageExternalId: string,
+  ownership: OperationalOutcomeOwnershipContext
+): Promise<{ content: string; truncated: boolean; unknownBlockIds: string[] }> {
+  const parsed = parseOperationalOutcomeSection(markdown.content);
+
+  if (parsed.status === "invalid") {
+    // A malformed, duplicated, or externally edited ownership marker means
+    // we cannot distinguish canonical source text from Luma's writeback. Do
+    // not persist a synthetic revision or grant source-absence authority.
+    throw new NotionMeetingNotesReadError(
+      "unsafe-operational-outcome-markdown",
+      `Luma Operational Outcome Markdown cannot be safely excluded from source ingestion: ${parsed.message}`
+    );
+  }
+
+  if (parsed.status === "valid") {
+    const verifier = ownership.operationalOutcomeMarkerVerifier;
+
+    if (!verifier) {
+      throw new NotionMeetingNotesReadError(
+        "unverified-operational-outcome-markdown",
+        "Luma Operational Outcome Markdown cannot be safely excluded without a durable ownership verifier"
+      );
+    }
+
+    let isOwned: boolean;
+
+    try {
+      isOwned = await verifier.isOwned({
+        workspaceId: ownership.workspaceId,
+        providerId: ownership.providerId,
+        pageExternalId,
+        payloadDigest: parsed.payloadDigest,
+        contentDigest: parsed.contentDigest,
+        operationDigest: parsed.operationDigest
+      });
+    } catch {
+      throw new NotionMeetingNotesReadError(
+        "operational-outcome-marker-verification-unavailable",
+        "Luma could not verify Operational Outcome Markdown ownership"
+      );
+    }
+
+    if (!isOwned) {
+      throw new NotionMeetingNotesReadError(
+        "unverified-operational-outcome-markdown",
+        "Luma Operational Outcome Markdown does not match a durable successful settlement"
+      );
+    }
+  }
+
+  const stripped = stripOperationalOutcomeSection(markdown.content);
+
+  if (stripped.status === "invalid") {
+    // The parser above and the shared stripping helper must agree. If they
+    // ever do not, retain the original source rather than guessing ownership.
+    throw new NotionMeetingNotesReadError(
+      "unsafe-operational-outcome-markdown",
+      `Luma Operational Outcome Markdown cannot be safely excluded from source ingestion: ${stripped.message}`
+    );
+  }
+
+  return { ...markdown, content: stripped.markdown };
 }
 
 async function readSection(
@@ -746,11 +883,67 @@ function pageReadFailureReason(
   };
 }
 
+function sourceExecutionFenceReason(
+  pageId: string | null,
+  sourceObjectId: string
+): MeetingNotesScanPartialReason {
+  return {
+    code: "source-execution-fenced",
+    message:
+      "Luma is completing an approved source-bound execution for this Meeting Notes root; retry after its canonical receipt is recorded.",
+    ...(pageId ? { pageId } : {}),
+    sourceObjectId,
+    retryable: true
+  };
+}
+
 function meetingNoteReadFailureReason(
   pageId: string,
   sourceObjectId: string,
   error: unknown
 ): MeetingNotesScanPartialReason {
+  if (
+    error instanceof NotionMeetingNotesReadError &&
+    error.code === "unsafe-operational-outcome-markdown"
+  ) {
+    return {
+      code: "unreadable-meeting-note",
+      message:
+        "Luma Operational Outcome Markdown is malformed, duplicated, or edited; the Meeting Note was skipped to prevent a synthetic source revision",
+      pageId,
+      sourceObjectId,
+      retryable: false
+    };
+  }
+
+  if (
+    error instanceof NotionMeetingNotesReadError &&
+    error.code === "unverified-operational-outcome-markdown"
+  ) {
+    return {
+      code: "unreadable-meeting-note",
+      message:
+        "Luma Operational Outcome Markdown could not be proven against a durable successful settlement; the Meeting Note was skipped to preserve canonical source evidence",
+      pageId,
+      sourceObjectId,
+      retryable: false
+    };
+  }
+
+  if (
+    error instanceof NotionMeetingNotesReadError &&
+    error.code === "operational-outcome-marker-verification-unavailable"
+  ) {
+    return {
+      code: "unreadable-meeting-note",
+      message:
+        "Luma could not verify Operational Outcome Markdown ownership; the Meeting Note was skipped until the verification dependency recovers",
+      pageId,
+      sourceObjectId,
+      retryable: true
+    };
+  }
+
   return {
     code: "unreadable-meeting-note",
     message:
@@ -769,7 +962,11 @@ function isUnavailableSourceError(error: unknown): error is NotionMeetingNotesRe
 }
 
 function isRetryableReadError(error: unknown): boolean {
-  return !(error instanceof NotionMeetingNotesReadError) || error.code === "transient";
+  return (
+    !(error instanceof NotionMeetingNotesReadError) ||
+    error.code === "transient" ||
+    error.code === "operational-outcome-marker-verification-unavailable"
+  );
 }
 
 function normalizeLifecycle(status: string | null): RawMeetingNoteSnapshot["lifecycle"] {

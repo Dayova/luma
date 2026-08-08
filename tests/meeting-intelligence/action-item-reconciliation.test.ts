@@ -5,7 +5,24 @@ import type {
   WorkspaceConfig
 } from "../../src/domain/model.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
+import type {
+  OperationalOutcome,
+  OperationalOutcomeReceipt,
+  OperationalOutcomeTarget,
+  OperationalOutcomeWriter
+} from "../../src/knowledge/operational-outcome-writer.js";
+import { OperationalOutcomeWriteNotAppliedError } from "../../src/knowledge/operational-outcome-writer.js";
+import { renderOperationalOutcomeMarkdown } from "../../src/knowledge/operational-outcome-markdown.js";
+import {
+  createLedgerBackedOperationalOutcomeSourceExecutionFence,
+  type OperationalOutcomeSourceExecutionFence
+} from "../../src/knowledge/ledger-backed-operational-outcome-source-execution-fence.js";
+import {
+  createObservedSourceLedger,
+  type RawMeetingNoteSnapshot
+} from "../../src/knowledge/observed-source-ledger.js";
 import { createMeetingIntelligence as createProductionMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
+import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
 import type { ImportedSourceObservationVerifier } from "../../src/meeting-intelligence/imported-source-observation-verifier.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import type {
@@ -39,6 +56,30 @@ function createMeetingIntelligence(
     ...input,
     importedSourceObservationVerifier: acceptingImportedSourceVerifier
   });
+}
+
+function meetingIntelligenceWithSecondSnapshotFailure(
+  delegate: MeetingIntelligence
+): MeetingIntelligence {
+  let snapshotQueries = 0;
+
+  return {
+    observe: (input) => delegate.observe(input),
+    query: (input) => {
+      if (input.query.type === "snapshot") {
+        snapshotQueries += 1;
+
+        if (snapshotQueries === 2) {
+          return Promise.reject(
+            new Error("simulated canonical source reread interruption")
+          );
+        }
+      }
+
+      return delegate.query(input);
+    },
+    conclude: (input) => delegate.conclude(input)
+  };
 }
 
 class NoAnalysisReasoningModel implements ReasoningModel {
@@ -151,6 +192,299 @@ class RecordingWorkProvider implements WorkProvider {
     void _id;
     void _body;
     return Promise.resolve();
+  }
+}
+
+class RecordingCreateWorkProvider implements WorkProvider {
+  readonly providerId = "linear";
+  readonly createCalls: CreateWorkItemInput[] = [];
+  private readonly createdByMarker = new Map<string, ExternalReference>();
+
+  searchWorkItems(_query: WorkQuery): Promise<WorkItem[]> {
+    void _query;
+    return Promise.resolve([]);
+  }
+
+  getWorkItem(_id: string): Promise<WorkItem> {
+    void _id;
+    return Promise.reject(new Error("not needed"));
+  }
+
+  createWorkItem(input: CreateWorkItemInput): Promise<ExternalReference> {
+    this.createCalls.push(input);
+    const reference: ExternalReference = {
+      providerId: this.providerId,
+      objectType: "work-item",
+      externalId: "LUM-99",
+      url: "https://linear.app/dayova/issue/LUM-99",
+      version: "2026-08-08T10:02:00.000Z"
+    };
+    this.createdByMarker.set(input.idempotencyKey, reference);
+    return Promise.resolve(reference);
+  }
+
+  findCreatedWorkItemByIdempotencyKey(
+    idempotencyKey: string
+  ): Promise<ExternalReference | null> {
+    return Promise.resolve(this.createdByMarker.get(idempotencyKey) ?? null);
+  }
+
+  updateWorkItem(_id: string, _input: UpdateWorkItemInput): Promise<ExternalReference> {
+    void _id;
+    void _input;
+    return Promise.reject(new Error("not needed"));
+  }
+
+  addComment(_id: string, _body: string): Promise<void> {
+    void _id;
+    void _body;
+    return Promise.resolve();
+  }
+}
+
+class RecordingOperationalOutcomeWriter implements OperationalOutcomeWriter {
+  readonly providerId = "notion";
+  readonly writes: Array<{
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }> = [];
+  private readonly receipts = new Map<string, OperationalOutcomeReceipt>();
+
+  constructor(private remainingSafeFailures = 0) {}
+
+  upsert(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt> {
+    if (this.remainingSafeFailures > 0) {
+      this.remainingSafeFailures -= 1;
+      return Promise.reject(
+        new OperationalOutcomeWriteNotAppliedError(
+          "Notion rejected the outcome before applying it"
+        )
+      );
+    }
+
+    this.writes.push(input);
+    const rendered = renderOperationalOutcomeMarkdown({
+      outcome: input.outcome,
+      idempotencyKey: input.idempotencyKey
+    });
+    const receipt: OperationalOutcomeReceipt = {
+      externalReference: input.target.page,
+      status: "inserted",
+      payloadDigest: rendered.payloadDigest,
+      contentDigest: rendered.contentDigest,
+      operationDigest: rendered.operationDigest
+    };
+    this.receipts.set(input.idempotencyKey, receipt);
+    return Promise.resolve(receipt);
+  }
+
+  findWrittenOutcome(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt | null> {
+    void input.target;
+    void input.outcome;
+    return Promise.resolve(this.receipts.get(input.idempotencyKey) ?? null);
+  }
+}
+
+class BlockingOperationalOutcomeWriter implements OperationalOutcomeWriter {
+  readonly providerId = "notion";
+  readonly writes: Array<{
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }> = [];
+  private releaseWriteSignal: (() => void) | null = null;
+  private signalWriteStarted: (() => void) | null = null;
+  private readonly writeReleased = new Promise<void>((resolve) => {
+    this.releaseWriteSignal = resolve;
+  });
+  private readonly writeStarted = new Promise<void>((resolve) => {
+    this.signalWriteStarted = resolve;
+  });
+
+  async upsert(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt> {
+    this.writes.push(input);
+    this.signalWriteStarted?.();
+    this.signalWriteStarted = null;
+    await this.writeReleased;
+    const rendered = renderOperationalOutcomeMarkdown({
+      outcome: input.outcome,
+      idempotencyKey: input.idempotencyKey
+    });
+
+    return {
+      externalReference: input.target.page,
+      status: "inserted",
+      payloadDigest: rendered.payloadDigest,
+      contentDigest: rendered.contentDigest,
+      operationDigest: rendered.operationDigest
+    };
+  }
+
+  findWrittenOutcome(_input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt | null> {
+    void _input;
+    return Promise.resolve(null);
+  }
+
+  waitForWrite(): Promise<void> {
+    return this.writeStarted;
+  }
+
+  releaseWrite(): void {
+    this.releaseWriteSignal?.();
+    this.releaseWriteSignal = null;
+  }
+}
+
+class ManualFailureOperationalOutcomeWriter implements OperationalOutcomeWriter {
+  readonly providerId = "notion";
+
+  upsert(_input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt> {
+    void _input;
+    return Promise.reject(
+      new OperationalOutcomeWriteNotAppliedError(
+        "The source page contains an untrusted Operational Outcome marker.",
+        false
+      )
+    );
+  }
+
+  findWrittenOutcome(_input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt | null> {
+    void _input;
+    return Promise.resolve(null);
+  }
+}
+
+class DelayedPositiveRecoveryOperationalOutcomeWriter implements OperationalOutcomeWriter {
+  readonly providerId = "notion";
+  readonly writes: string[] = [];
+  readonly probes: string[] = [];
+  private readonly receipts = new Map<string, OperationalOutcomeReceipt>();
+
+  upsert(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt> {
+    this.writes.push(input.idempotencyKey);
+    const rendered = renderOperationalOutcomeMarkdown({
+      outcome: input.outcome,
+      idempotencyKey: input.idempotencyKey
+    });
+    this.receipts.set(input.idempotencyKey, {
+      externalReference: input.target.page,
+      status: "inserted",
+      payloadDigest: rendered.payloadDigest,
+      contentDigest: rendered.contentDigest,
+      operationDigest: rendered.operationDigest
+    });
+    return Promise.reject(new Error("simulated lost Notion write response"));
+  }
+
+  findWrittenOutcome(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt | null> {
+    void input.target;
+    void input.outcome;
+    this.probes.push(input.idempotencyKey);
+
+    // The first immediate probe cannot prove the write. A later explicit
+    // recovery observes the exact prepared marker and can release the lease.
+    return Promise.resolve(
+      this.probes.filter((idempotencyKey) => idempotencyKey === input.idempotencyKey)
+        .length > 1
+        ? (this.receipts.get(input.idempotencyKey) ?? null)
+        : null
+    );
+  }
+}
+
+class BlockingManualRecoveryOperationalOutcomeWriter implements OperationalOutcomeWriter {
+  readonly providerId = "notion";
+  readonly writes: string[] = [];
+  private readonly receipts = new Map<string, OperationalOutcomeReceipt>();
+  private releaseManualProbeSignal: (() => void) | null = null;
+  private signalManualProbe: (() => void) | null = null;
+  private readonly manualProbeReleased = new Promise<void>((resolve) => {
+    this.releaseManualProbeSignal = resolve;
+  });
+  private readonly manualProbeStarted = new Promise<void>((resolve) => {
+    this.signalManualProbe = resolve;
+  });
+  private probes = 0;
+
+  upsert(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt> {
+    this.writes.push(input.idempotencyKey);
+    const rendered = renderOperationalOutcomeMarkdown({
+      outcome: input.outcome,
+      idempotencyKey: input.idempotencyKey
+    });
+    this.receipts.set(input.idempotencyKey, {
+      externalReference: input.target.page,
+      status: "inserted",
+      payloadDigest: rendered.payloadDigest,
+      contentDigest: rendered.contentDigest,
+      operationDigest: rendered.operationDigest
+    });
+    return Promise.reject(new Error("simulated lost Notion write response"));
+  }
+
+  async findWrittenOutcome(input: {
+    target: OperationalOutcomeTarget;
+    outcome: OperationalOutcome;
+    idempotencyKey: string;
+  }): Promise<OperationalOutcomeReceipt | null> {
+    void input.target;
+    void input.outcome;
+    this.probes += 1;
+
+    if (this.probes === 1) {
+      return null;
+    }
+
+    this.signalManualProbe?.();
+    this.signalManualProbe = null;
+    await this.manualProbeReleased;
+    return this.receipts.get(input.idempotencyKey) ?? null;
+  }
+
+  waitForManualProbe(): Promise<void> {
+    return this.manualProbeStarted;
+  }
+
+  releaseManualProbe(): void {
+    this.releaseManualProbeSignal?.();
+    this.releaseManualProbeSignal = null;
   }
 }
 
@@ -398,6 +732,102 @@ async function observeAndReview(
   return { update, reviews: result.reviews };
 }
 
+async function resolveAndApproveOperationalOutcome(input: {
+  meetingIntelligence: Awaited<ReturnType<typeof createHarness>>["meetingIntelligence"];
+  meetingId: string;
+  reviewId: string;
+  observationSuffix: string;
+}) {
+  const resolution = await input.meetingIntelligence.observe({
+    workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: `human-judgment:${input.observationSuffix}`,
+        workspaceId: workspace.workspaceId,
+        meetingId: input.meetingId,
+        occurredAt: "2026-08-08T10:00:00.000Z",
+        observedAt: "2026-08-08T10:00:00.000Z",
+        participantId: "person:jakob",
+        judgment: {
+          kind: "resolve-action-item-reconciliation",
+          reviewId: input.reviewId,
+          resolution: { type: "accept-proposal" }
+        }
+      }
+    ]
+  });
+
+  if (resolution.errors.length > 0) {
+    throw new Error(
+      `expected Human resolution: ${resolution.errors[0]?.code ?? "unknown error"}`
+    );
+  }
+
+  const snapshot = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "snapshot" }
+  });
+
+  if (snapshot.type !== "snapshot") {
+    throw new Error("expected Meeting snapshot");
+  }
+
+  const intent = snapshot.state.followUpIntentions.find(
+    (candidate) =>
+      candidate.type === "settle-operational-outcome" &&
+      candidate.reconciliation.reviewId === input.reviewId
+  );
+
+  if (!intent) {
+    throw new Error("expected an Operational Outcome settlement Intent");
+  }
+
+  const approval = await input.meetingIntelligence.observe({
+    workspace,
+    observations: [
+      {
+        type: "follow-up-intent-approved",
+        observationId: `approval:${input.observationSuffix}`,
+        workspaceId: workspace.workspaceId,
+        meetingId: input.meetingId,
+        occurredAt: "2026-08-08T10:01:00.000Z",
+        observedAt: "2026-08-08T10:01:00.000Z",
+        intentId: intent.id,
+        approvedBy: "person:jakob"
+      }
+    ]
+  });
+
+  if (approval.errors.length > 0) {
+    throw new Error(`expected approval: ${approval.errors[0]?.code ?? "unknown error"}`);
+  }
+
+  return intent;
+}
+
+function rejectOneExecutionReceipt(delegate: MeetingIntelligence): MeetingIntelligence {
+  let rejectsRemaining = 1;
+
+  return {
+    observe: (input) => {
+      const includesExecutionReceipt = input.observations.some(
+        (observation) => observation.type === "follow-up-execution-recorded"
+      );
+
+      if (rejectsRemaining > 0 && includesExecutionReceipt) {
+        rejectsRemaining -= 1;
+        return Promise.reject(new Error("simulated receipt persistence interruption"));
+      }
+
+      return delegate.observe(input);
+    },
+    query: (input) => delegate.query(input),
+    conclude: (input) => delegate.conclude(input)
+  };
+}
+
 describe("Action Item reconciliation", () => {
   it("keeps a required update manual when the configured catalog has no conditional update capability", async () => {
     const catalog = new ProgrammableWorkCatalog("linear", false);
@@ -541,6 +971,1773 @@ describe("Action Item reconciliation", () => {
     }
   });
 
+  it("settles an approved link-existing reconciliation into its canonical Meeting Note without mutating Linear", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const item = workItem();
+    const observation = sourceObservation();
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source candidate");
+    }
+
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+    const fenceReleases: Array<{
+      workspaceId: string;
+      meetingId: string;
+      intentId: string;
+    }> = [];
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review) {
+        throw new Error("expected an exact-link reconciliation proposal");
+      }
+
+      const resolution = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "human-judgment:settle-link-existing",
+            workspaceId: workspace.workspaceId,
+            meetingId: observation.meetingId,
+            occurredAt: "2026-08-08T10:00:00.000Z",
+            observedAt: "2026-08-08T10:00:00.000Z",
+            participantId: "person:jakob",
+            judgment: {
+              kind: "resolve-action-item-reconciliation",
+              reviewId: review.id,
+              resolution: { type: "accept-proposal" }
+            }
+          }
+        ]
+      });
+
+      expect(resolution.errors).toEqual([]);
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      const intent =
+        snapshot.type === "snapshot"
+          ? snapshot.state.followUpIntentions.find(
+              (candidate) => candidate.type === "settle-operational-outcome"
+            )
+          : undefined;
+
+      if (!intent) {
+        throw new Error("expected an operational settlement Intent");
+      }
+
+      expect(intent.reconciliation).toEqual({
+        reviewId: review.id,
+        candidateId: review.candidateId,
+        candidateLineageKey: review.candidateLineageKey
+      });
+      expect(intent).not.toHaveProperty("externalReference");
+      expect(intent).not.toHaveProperty("bodyMarkdown");
+
+      const approval = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "follow-up-intent-approved",
+            observationId: "approval:settle-link-existing",
+            workspaceId: workspace.workspaceId,
+            meetingId: observation.meetingId,
+            occurredAt: "2026-08-08T10:01:00.000Z",
+            observedAt: "2026-08-08T10:01:00.000Z",
+            intentId: intent.id,
+            approvedBy: "person:jakob"
+          }
+        ]
+      });
+
+      expect(approval.errors).toEqual([]);
+
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceExecutionFence: {
+          acquire: () => Promise.resolve({ status: "acquired" }),
+          verifyHeldCurrent: () => Promise.resolve({ status: "current" }),
+          releaseAfterReceipt: ({ workspaceId, meetingId, intentId }) => {
+            fenceReleases.push({ workspaceId, meetingId, intentId });
+            return Promise.resolve();
+          }
+        },
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome.status).toBe("succeeded");
+      if (first.observation.outcome.status !== "succeeded") {
+        throw new Error("expected a successful link settlement");
+      }
+      expect(first.observation.outcome.externalReferences).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ objectType: "work-item", externalId: "LUM-3" }),
+          expect.objectContaining({
+            objectType: "document",
+            externalId: "notion-page-product-sync"
+          })
+        ])
+      );
+      expect(writer.writes).toHaveLength(1);
+      expect(fenceReleases).toEqual([
+        {
+          workspaceId: workspace.workspaceId,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        }
+      ]);
+      expect(writer.writes[0]?.target).toMatchObject({
+        providerId: "notion",
+        page: { externalId: "notion-page-product-sync" },
+        sourceObjectId: "notion-meeting-note",
+        sourceRevision: 1
+      });
+      expect(writer.writes[0]?.outcome.entries[0]).toMatchObject({
+        resolution: { type: "link-existing" },
+        workReferences: [{ externalId: "LUM-3", objectType: "work-item" }],
+        knowledgeReferences: [],
+        githubReferences: [],
+        unresolved: []
+      });
+
+      const second = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(second).toEqual(first);
+      expect(writer.writes).toHaveLength(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("releases a held source fence when receipt-recorded recovery finishes its terminal receipt", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const item = workItem();
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+    const sourceObjectId = "notion-receipt-recorded-fence-release";
+    const ledger = createObservedSourceLedger({ database });
+    let failRelease = true;
+    let releaseAttempts = 0;
+
+    try {
+      const recorded = await ledger.record({
+        workspaceId: workspace.workspaceId,
+        source: {
+          providerId: "notion",
+          sourceKind: "meeting-note",
+          sourceObjectId,
+          parentObjectId: "notion-page-product-sync",
+          url: "https://notion.so/product-sync"
+        },
+        providerVersion: "2026-08-08T10:00:00.000Z",
+        snapshot: {
+          schemaVersion: 1,
+          title: "Product sync",
+          lifecycle: "ready",
+          calendar: null,
+          recording: null,
+          sections: {
+            summary: {
+              state: "unavailable",
+              sourceBlockId: null,
+              reasons: []
+            },
+            actionItemsAndNotes: {
+              state: "unavailable",
+              sourceBlockId: null,
+              reasons: []
+            },
+            transcript: {
+              state: "unavailable",
+              sourceBlockId: null,
+              reasons: []
+            }
+          },
+          markdown: {
+            content: "Approved source revision for receipt recovery.",
+            truncated: false,
+            unknownBlockIds: []
+          },
+          completeness: { state: "complete" }
+        } satisfies RawMeetingNoteSnapshot,
+        observedAt: "2026-08-08T10:00:00.000Z"
+      });
+      const observation = sourceObservation({
+        sourceObjectId,
+        revision: recorded.revision,
+        contentHash: recorded.contentHash
+      });
+      const description = observation.candidates[0]?.description;
+
+      if (!description) {
+        throw new Error("expected a source candidate");
+      }
+
+      catalog.respondToSearch("LUM-3", [item]);
+      catalog.respondToSearch(description, [item]);
+      catalog.respondToGet(item.id, item);
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "receipt-recorded-fence-release"
+      });
+      const ledgerFence = createLedgerBackedOperationalOutcomeSourceExecutionFence({
+        ledger
+      });
+      const fence: OperationalOutcomeSourceExecutionFence = {
+        acquire: (input) => ledgerFence.acquire(input),
+        verifyHeldCurrent: (input) => ledgerFence.verifyHeldCurrent(input),
+        async releaseAfterReceipt(input) {
+          releaseAttempts += 1;
+          await ledgerFence.releaseAfterReceipt(input);
+
+          if (failRelease) {
+            throw new Error("source fence cleanup acknowledgement lost");
+          }
+        }
+      };
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceExecutionFence: fence,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+
+      await expect(
+        execution.execute({
+          workspace,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        })
+      ).rejects.toThrow("source fence cleanup acknowledgement lost");
+      expect(writer.writes).toHaveLength(1);
+      await expect(
+        database.query<{
+          source_revision: number;
+          source_content_hash: string;
+          meeting_id: string;
+          intent_id: string;
+        }>(
+          `SELECT source_revision, source_content_hash, meeting_id, intent_id
+             FROM observed_source_execution_fences
+            WHERE workspace_id = $1
+              AND provider_id = $2
+              AND source_kind = $3
+              AND source_object_id = $4`,
+          [workspace.workspaceId, "notion", "meeting-note", sourceObjectId]
+        )
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            source_revision: recorded.revision,
+            source_content_hash: recorded.contentHash,
+            meeting_id: observation.meetingId,
+            intent_id: intent.id
+          }
+        ]
+      });
+
+      failRelease = false;
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      expect(releaseAttempts).toBe(2);
+      await expect(
+        database.query<{ status: string }>(
+          `SELECT status
+             FROM follow_up_executions
+            WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3`,
+          [workspace.workspaceId, observation.meetingId, intent.id]
+        )
+      ).resolves.toMatchObject({ rows: [{ status: "completed" }] });
+      await expect(
+        database.query(
+          `SELECT 1
+             FROM observed_source_execution_fences
+            WHERE workspace_id = $1
+              AND provider_id = $2
+              AND source_kind = $3
+              AND source_object_id = $4`,
+          [workspace.workspaceId, "notion", "meeting-note", sourceObjectId]
+        )
+      ).resolves.toMatchObject({ rows: [] });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("refuses a ledger-superseded source before settling work or writing its outcome", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-ledger-superseded-before-settlement"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "ledger-superseded-before-settlement"
+      });
+      const result = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceCurrentnessVerifier: {
+          verifyCurrent: () =>
+            Promise.resolve({
+              status: "superseded",
+              message: "The observed-source ledger records a newer Meeting Note head."
+            })
+        },
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(result.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-source-ledger-superseded",
+        retryable: false
+      });
+      expect(writer.writes).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("acquires the current ledger head as a fence before settling a source-bound outcome", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-source-fence-before-settlement"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+    const fencedTargets: Array<{
+      revision: number;
+      contentHash: string;
+      sourceObjectId: string;
+    }> = [];
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "source-fence-before-settlement"
+      });
+      const result = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceExecutionFence: {
+          acquire: ({ target }) => {
+            fencedTargets.push({
+              revision: target.sourceRevision,
+              contentHash: target.sourceContentHash,
+              sourceObjectId: target.sourceObjectId
+            });
+            return Promise.resolve({ status: "superseded", current: null });
+          },
+          verifyHeldCurrent: () => Promise.resolve({ status: "current" }),
+          releaseAfterReceipt: () => Promise.resolve()
+        },
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(result.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-source-ledger-superseded",
+        retryable: false
+      });
+      expect(fencedTargets).toEqual([
+        {
+          revision: observation.source.sourceRevision,
+          contentHash: observation.source.contentHash,
+          sourceObjectId: observation.source.sourceObjectId
+        }
+      ]);
+      expect(writer.writes).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a source-fenced settlement resumable without mutating work or its page", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-source-fence-busy-before-settlement"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "source-fence-busy-before-settlement"
+      });
+      const result = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceExecutionFence: {
+          acquire: () =>
+            Promise.resolve({
+              status: "busy" as const,
+              owner: {
+                meetingId: "meeting:other",
+                intentId: "follow-up:other:settle",
+                executionLeaseId: "lease:other"
+              }
+            }),
+          verifyHeldCurrent: () => Promise.resolve({ status: "current" }),
+          releaseAfterReceipt: () => Promise.resolve()
+        },
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(result.observation.outcome).toMatchObject({
+        status: "partially-succeeded",
+        errorCode: "operational-outcome-source-execution-fenced"
+      });
+      expect(writer.writes).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("does not write an outcome after a blocked source scan invalidates its held fence", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-source-fence-invalidated-after-work"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+    let heldCurrentChecks = 0;
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "source-fence-invalidated-after-work"
+      });
+      const result = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        operationalOutcomeSourceExecutionFence: {
+          acquire: () => Promise.resolve({ status: "acquired" }),
+          verifyHeldCurrent: () => {
+            heldCurrentChecks += 1;
+            return Promise.resolve(
+              heldCurrentChecks === 1
+                ? { status: "current" as const }
+                : {
+                    status: "superseded" as const,
+                    message: "A blocked source scan observed a newer Meeting Notes root."
+                  }
+            );
+          },
+          releaseAfterReceipt: () => Promise.resolve()
+        },
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(result.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-source-ledger-superseded-after-work",
+        retryable: false
+      });
+      expect(heldCurrentChecks).toBe(2);
+      expect(writer.writes).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("recovers a partial create settlement by writing only the pending Operational Outcome", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-create-outcome-recovery",
+      description: "Jakob will prepare the durable Luma outcome brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source candidate");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RecordingOperationalOutcomeWriter(1);
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review || review.outcome.type !== "create-new") {
+        throw new Error("expected a create-new reconciliation proposal");
+      }
+
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "human-judgment-recorded",
+            observationId: "human-judgment:recover-create-outcome",
+            workspaceId: workspace.workspaceId,
+            meetingId: observation.meetingId,
+            occurredAt: "2026-08-08T10:00:00.000Z",
+            observedAt: "2026-08-08T10:00:00.000Z",
+            participantId: "person:jakob",
+            judgment: {
+              kind: "resolve-action-item-reconciliation",
+              reviewId: review.id,
+              resolution: { type: "accept-proposal" }
+            }
+          }
+        ]
+      });
+      const resolved = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      const intent =
+        resolved.type === "snapshot"
+          ? resolved.state.followUpIntentions.find(
+              (candidate) => candidate.type === "settle-operational-outcome"
+            )
+          : undefined;
+
+      if (!intent) {
+        throw new Error("expected a create settlement Intent");
+      }
+
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "follow-up-intent-approved",
+            observationId: "approval:recover-create-outcome",
+            workspaceId: workspace.workspaceId,
+            meetingId: observation.meetingId,
+            occurredAt: "2026-08-08T10:01:00.000Z",
+            observedAt: "2026-08-08T10:01:00.000Z",
+            intentId: intent.id,
+            approvedBy: "person:jakob"
+          }
+        ]
+      });
+
+      const firstExecutor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await firstExecutor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "partially-succeeded",
+        errorCode: "operational-outcome-not-written",
+        externalReferences: [
+          expect.objectContaining({ objectType: "work-item", externalId: "LUM-99" })
+        ]
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(0);
+
+      const partialSnapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      expect(
+        partialSnapshot.type === "snapshot"
+          ? partialSnapshot.state.followUpIntentions.find(
+              (candidate) => candidate.id === intent.id
+            )?.status
+          : null
+      ).toBe("partially-succeeded");
+      const createdMapping =
+        partialSnapshot.type === "snapshot"
+          ? partialSnapshot.state.actionItemReconciliationCreatedWorkMappings[0]
+          : undefined;
+
+      expect(createdMapping?.reviewId).toBe(review.id);
+      expect(createdMapping?.externalReference.externalId).toBe("LUM-99");
+
+      const secondExecutor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:03:00.000Z")
+      });
+      const recovered = await secondExecutor.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.writes[0]?.outcome.entries[0]?.workReferences).toEqual([
+        expect.objectContaining({ externalId: "LUM-99", objectType: "work-item" })
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects a concurrent recovery from another executor facade before it can write the same outcome", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-concurrent-outcome-recovery"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const safeFailureWriter = new RecordingOperationalOutcomeWriter(1);
+    const blockingWriter = new BlockingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "concurrent-outcome-recovery"
+      });
+      const partial = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: safeFailureWriter,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(partial.observation.outcome.status).toBe("partially-succeeded");
+
+      const firstRecoverer = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: blockingWriter,
+        now: () => new Date("2026-08-08T10:03:00.000Z")
+      });
+      const secondRecoverer = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: blockingWriter,
+        now: () => new Date("2026-08-08T10:03:00.000Z")
+      });
+      const firstRecovery = firstRecoverer.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      await blockingWriter.waitForWrite();
+
+      await expect(
+        secondRecoverer.recover({
+          workspace,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        })
+      ).rejects.toThrow("already has an execution in progress");
+      expect(blockingWriter.writes).toHaveLength(1);
+
+      blockingWriter.releaseWrite();
+      const recovered = await firstRecovery;
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(blockingWriter.writes).toHaveLength(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a post-work source reread interruption resumable without writing an outcome", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-post-work-source-reread"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "post-work-source-reread"
+      });
+      const interrupted = createFollowUpExecution({
+        database,
+        meetingIntelligence:
+          meetingIntelligenceWithSecondSnapshotFailure(meetingIntelligence),
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+
+      const first = await interrupted.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "partially-succeeded",
+        errorCode: "operational-outcome-source-check-failed"
+      });
+      expect(writer.writes).toEqual([]);
+
+      const recovered = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:03:00.000Z")
+      }).recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("merges a recovered settlement with a later outcome on the same source page", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const meetingId = "meeting:source:notion:aggregate-outcomes";
+    const first = sourceObservation({
+      sourceObjectId: "notion-root-outcome-a",
+      meetingId,
+      description: "Jakob will finish LUM-3 source import by Friday.",
+      mentionedWorkItemReferences: [
+        { providerId: "linear", objectType: "work-item", externalId: "LUM-3" }
+      ]
+    });
+    const second = sourceObservation({
+      sourceObjectId: "notion-root-outcome-b",
+      meetingId,
+      blockId: "source-action-b",
+      description: "Jakob will prepare LUM-4 outcome documentation by Friday.",
+      mentionedWorkItemReferences: [
+        { providerId: "linear", objectType: "work-item", externalId: "LUM-4" }
+      ]
+    });
+    const firstDescription = first.candidates[0]?.description;
+    const secondDescription = second.candidates[0]?.description;
+
+    if (!firstDescription || !secondDescription) {
+      throw new Error("expected source Action Item descriptions");
+    }
+
+    const firstItem = workItem();
+    const secondItem = workItem({
+      id: "linear-issue-lum-4",
+      externalId: "LUM-4",
+      title: "Prepare Luma outcome documentation",
+      description: "Prepare the durable Luma outcome documentation.",
+      url: "https://linear.app/dayova/issue/LUM-4"
+    });
+    catalog.respondToSearch("LUM-3", [firstItem]);
+    catalog.respondToSearch(firstDescription, [firstItem]);
+    catalog.respondToGet(firstItem.id, firstItem);
+    catalog.respondToSearch("LUM-4", [secondItem]);
+    catalog.respondToSearch(secondDescription, [secondItem]);
+    catalog.respondToGet(secondItem.id, secondItem);
+
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter(1);
+
+    try {
+      const firstReview = await observeAndReview(meetingIntelligence, first);
+      const firstReviewId = firstReview.reviews[0]?.proposal.id;
+
+      if (!firstReviewId) {
+        throw new Error("expected the first reconciliation review");
+      }
+
+      const firstIntent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId,
+        reviewId: firstReviewId,
+        observationSuffix: "aggregate-outcome-a"
+      });
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const firstExecution = await executor.execute({
+        workspace,
+        meetingId,
+        intentId: firstIntent.id
+      });
+
+      expect(firstExecution.observation.outcome.status).toBe("partially-succeeded");
+      expect(writer.writes).toHaveLength(0);
+
+      const secondReview = await observeAndReview(meetingIntelligence, second);
+      const secondCandidateId = second.candidates[0]?.id;
+      const secondReviewId = secondReview.reviews.find(
+        (review) => review.proposal.candidateId === secondCandidateId
+      )?.proposal.id;
+
+      if (!secondReviewId) {
+        throw new Error("expected the second reconciliation review");
+      }
+
+      const secondIntent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId,
+        reviewId: secondReviewId,
+        observationSuffix: "aggregate-outcome-b"
+      });
+      const secondExecution = await executor.execute({
+        workspace,
+        meetingId,
+        intentId: secondIntent.id
+      });
+
+      expect(secondExecution.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.writes[0]?.outcome.entries).toHaveLength(1);
+      expect(writer.writes[0]?.outcome.entries[0]?.settlementIntentId).toBe(
+        secondIntent.id
+      );
+
+      const recovered = await executor.recover({
+        workspace,
+        meetingId,
+        intentId: firstIntent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(2);
+      expect(
+        writer.writes[1]?.outcome.entries.map((entry) => entry.settlementIntentId)
+      ).toEqual([firstIntent.id, secondIntent.id].sort());
+      expect(writer.writes[1]?.outcome.entries).toHaveLength(2);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("recovers a durable create after receipt persistence stops before the outcome write", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-durable-create-recovery",
+      description: "Jakob will prepare the crash-safe Luma outcome brief by Friday.",
+      mentionedWorkItemReferences: []
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    catalog.respondToSearch(description, []);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const workProvider = new RecordingCreateWorkProvider();
+    // The first write is positively known not to have reached Notion. The
+    // following receipt interruption therefore leaves only a durable work
+    // stage, which recovery must continue without creating work again.
+    const writer = new RecordingOperationalOutcomeWriter(1);
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a create reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "durable-create-recovery"
+      });
+      const interruptedExecutor = createFollowUpExecution({
+        database,
+        meetingIntelligence: rejectOneExecutionReceipt(meetingIntelligence),
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+
+      await expect(
+        interruptedExecutor.execute({
+          workspace,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        })
+      ).rejects.toThrow("simulated receipt persistence interruption");
+
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(0);
+
+      const recovered = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:03:00.000Z")
+      }).recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("partially-succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(0);
+
+      const completed = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        workProvider,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:04:00.000Z")
+      }).recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(completed.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.writes[0]?.outcome.entries[0]?.workReferences).toEqual([
+        expect.objectContaining({ externalId: "LUM-99", objectType: "work-item" })
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails a proven-not-applied nonretryable outcome write without retaining its page lease", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-manual-outcome-recovery"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "manual-outcome-recovery"
+      });
+      const execution = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: new ManualFailureOperationalOutcomeWriter(),
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-not-writable",
+        retryable: false
+      });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      const currentIntent =
+        snapshot.type === "snapshot"
+          ? snapshot.state.followUpIntentions.find(
+              (candidate) => candidate.id === intent.id
+            )
+          : undefined;
+
+      expect(currentIntent?.status).toBe("failed");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("releases an orphaned prewrite stage only when its durable no-write proof is present", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-orphaned-prewrite-no-write"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new DelayedPositiveRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "orphaned-prewrite-no-write"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+
+      // Model a real cleanup failure after the runner durably recorded that
+      // no provider call had started. The original manual receipt establishes
+      // that this old stage lease is orphaned; the exact provider-confirmed
+      // code is the only fact that permits automatic release.
+      const oldStageLeaseId = "orphaned-prewrite-no-write-stage";
+      await database.query(
+        `UPDATE operational_outcome_settlement_stages
+            SET status = 'executing', execution_lease_id = $4,
+                prepared_outcome_json = NULL, prepared_operation_token = NULL,
+                payload_digest = NULL, content_digest = NULL, operation_digest = NULL,
+                last_error_code = $5,
+                last_error_message = $6
+          WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3
+            AND stage = 'outcome'`,
+        [
+          workspace.workspaceId,
+          observation.meetingId,
+          intent.id,
+          oldStageLeaseId,
+          "operational-outcome-prewrite-provider-not-started",
+          "outcome rendering stopped before writer.upsert"
+        ]
+      );
+      await database.query(
+        `UPDATE operational_outcome_page_leases
+            SET execution_lease_id = $4
+          WHERE source_provider_id = $1 AND source_document_id = $2
+            AND workspace_id = $3`,
+        [
+          "notion",
+          observation.source.externalReference.externalId,
+          workspace.workspaceId,
+          oldStageLeaseId
+        ]
+      );
+      writer.writes.length = 0;
+      writer.probes.length = 0;
+
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("partially-succeeded");
+      if (recovered.observation.outcome.status !== "partially-succeeded") {
+        throw new Error("expected the proven prewrite interruption to be resumable");
+      }
+      expect(recovered.observation.outcome.errorCode).toBe(
+        "operational-outcome-prewrite-failed"
+      );
+      expect(writer.writes).toEqual([]);
+      expect(writer.probes).toEqual([]);
+      const releasedLease = await database.query(
+        `SELECT 1
+           FROM operational_outcome_page_leases
+          WHERE source_provider_id = 'notion'
+            AND source_document_id = $1`,
+        [observation.source.externalReference.externalId]
+      );
+      expect(releasedLease.rows).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("abandons a prepared manual prewrite stage without probing or rewriting its page", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-prepared-prewrite-abandon"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new DelayedPositiveRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "prepared-prewrite-abandon"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+
+      // Simulate a lost acknowledgement after aggregate preparation followed
+      // by a local cleanup failure. `writer.upsert` was not reached in this
+      // modeled state, so this exact durable code—not the visible prepared
+      // payload—authorizes clearing it and releasing the old lease.
+      await database.query(
+        `UPDATE operational_outcome_settlement_stages
+            SET status = 'requires-manual-recovery', execution_lease_id = NULL,
+                last_error_code = $4, last_error_message = $5
+          WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3
+            AND stage = 'outcome'`,
+        [
+          workspace.workspaceId,
+          observation.meetingId,
+          intent.id,
+          "operational-outcome-prewrite-cleanup-unknown",
+          "aggregate preparation stopped before writer.upsert and cleanup acknowledgement failed"
+        ]
+      );
+      writer.writes.length = 0;
+      writer.probes.length = 0;
+
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "operational-outcome-prewrite-abandoned",
+        retryable: false
+      });
+      expect(writer.writes).toEqual([]);
+      expect(writer.probes).toEqual([]);
+      const releasedLease = await database.query(
+        `SELECT 1
+           FROM operational_outcome_page_leases
+          WHERE source_provider_id = 'notion'
+            AND source_document_id = $1`,
+        [observation.source.externalReference.externalId]
+      );
+      expect(releasedLease.rows).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("uses explicit recovery only to positively confirm and release an unknown prepared page write after source supersession", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const sourceObjectId = "notion-positive-manual-outcome-recovery";
+    const observation = sourceObservation({
+      sourceObjectId
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new DelayedPositiveRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "positive-manual-outcome-recovery"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "provider-outcome-unknown",
+        requiresManualRecovery: true
+      });
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.probes).toHaveLength(1);
+
+      const beforeRecovery = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      expect(
+        beforeRecovery.type === "snapshot"
+          ? beforeRecovery.state.followUpIntentions.find(
+              (candidate) => candidate.id === intent.id
+            )?.status
+          : null
+      ).toBe("requires-manual-recovery");
+
+      const superseding = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          sourceObservation({
+            sourceObjectId,
+            meetingId: observation.meetingId,
+            revision: 2,
+            contentHash: "sha256:positive-manual-outcome-recovery-r2",
+            emptyActionItems: true
+          })
+        ]
+      });
+
+      expect(superseding.errors).toEqual([]);
+
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "source-superseded-during-recovery",
+        retryable: false
+      });
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.probes).toHaveLength(2);
+      const releasedLease = await database.query(
+        `SELECT 1
+           FROM operational_outcome_page_leases
+          WHERE source_provider_id = 'notion'
+            AND source_document_id = $1`,
+        [observation.source.externalReference.externalId]
+      );
+      expect(releasedLease.rows).toEqual([]);
+      const afterRecovery = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+      expect(
+        afterRecovery.type === "snapshot"
+          ? afterRecovery.state.followUpIntentions.find(
+              (candidate) => candidate.id === intent.id
+            )?.status
+          : null
+      ).toBe("failed");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("does not supersede a source while a manual settlement recovery is probing its output", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const sourceObjectId = "notion-manual-recovery-supersession-fence";
+    const observation = sourceObservation({ sourceObjectId });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new BlockingManualRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "manual-recovery-supersession-fence"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+
+      const recovering = execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+      await writer.waitForManualProbe();
+
+      const superseding = await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          sourceObservation({
+            sourceObjectId,
+            meetingId: observation.meetingId,
+            revision: 2,
+            contentHash: "sha256:manual-recovery-supersession-fence-r2",
+            emptyActionItems: true
+          })
+        ]
+      });
+
+      expect(superseding.acceptedObservationIds).toEqual([]);
+      expect(superseding.errors[0]).toMatchObject({
+        code: "concurrent-update",
+        retryable: true
+      });
+
+      writer.releaseManualProbe();
+      const recovered = await recovering;
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("uses only an exact marker probe to recover an orphaned prepared output stage", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-orphaned-prepared-output"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new DelayedPositiveRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "orphaned-prepared-output"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+
+      // Simulate a crash after the provider call where durable terminalization
+      // did not receive its acknowledgement. The previous outer receipt is
+      // already manual, so this lease is demonstrably orphaned—not live.
+      await database.query(
+        `UPDATE operational_outcome_settlement_stages
+            SET status = 'executing', execution_lease_id = $4
+          WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3
+            AND stage = 'outcome'`,
+        [
+          workspace.workspaceId,
+          observation.meetingId,
+          intent.id,
+          "orphaned-output-stage-lease"
+        ]
+      );
+
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.probes).toHaveLength(2);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("records a receipt for a durably completed manual output without replaying its marker probe", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-manual-output-receipt-recovery"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new DelayedPositiveRecoveryOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "manual-output-receipt-recovery"
+      });
+      const execution = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await execution.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+
+      // Simulate a process stop after the manual exact proof committed its
+      // stage/lease transaction but before Meeting Intelligence accepted the
+      // corresponding receipt.
+      await database.query(
+        `UPDATE operational_outcome_settlement_stages
+            SET status = 'succeeded', execution_lease_id = NULL,
+                reference_json = $4
+          WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3
+            AND stage = 'outcome'`,
+        [
+          workspace.workspaceId,
+          observation.meetingId,
+          intent.id,
+          JSON.stringify([observation.source.externalReference])
+        ]
+      );
+      await database.query(
+        `UPDATE follow_up_executions
+            SET status = 'executing', result_json = NULL,
+                execution_lease_id = 'manual-output-receipt-interrupted'
+          WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3
+            AND operation = 'execute'`,
+        [workspace.workspaceId, observation.meetingId, intent.id]
+      );
+
+      const recovered = await execution.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      expect(writer.probes).toHaveLength(1);
+    } finally {
+      await database.close();
+    }
+  });
+
   it("proposes new work only after a completed zero-result canonical search", async () => {
     const catalog = new ProgrammableWorkCatalog();
     const observation = sourceObservation({
@@ -628,7 +2825,7 @@ describe("Action Item reconciliation", () => {
     }
   });
 
-  it("turns Human Judgment on a create proposal into a suggested Follow-up Intent, not a provider write", async () => {
+  it("turns Human Judgment on a create proposal into one opaque operational settlement Intent, not a provider write", async () => {
     const catalog = new ProgrammableWorkCatalog();
     const observation = sourceObservation({
       description: "Jakob will prepare the Luma Human Judgment brief by Friday.",
@@ -675,7 +2872,7 @@ describe("Action Item reconciliation", () => {
         {
           type: "follow-up-awaiting-approval",
           intentIds: [
-            `follow-up-intent:reconciliation:${encodeURIComponent(reviewId)}:create`
+            `follow-up-intent:reconciliation:${encodeURIComponent(reviewId)}:settle`
           ]
         }
       ]);
@@ -690,9 +2887,13 @@ describe("Action Item reconciliation", () => {
         snapshot.type === "snapshot" ? snapshot.state.followUpIntentions : []
       ).toEqual([
         expect.objectContaining({
-          type: "create-work-item",
+          type: "settle-operational-outcome",
           status: "suggested",
-          dueDate: "2026-08-07"
+          reconciliation: {
+            reviewId,
+            candidateId: observation.candidates[0]?.id,
+            candidateLineageKey: observation.candidates[0]?.lineageKey
+          }
         })
       ]);
       expect(catalog.searchCalls).toHaveLength(1);
@@ -1636,28 +3837,22 @@ describe("Action Item reconciliation", () => {
           ? snapshot.state.actionItemReconciliationHumanResolutions
           : []
       ).toHaveLength(1);
-      expect(
-        snapshot.type === "snapshot" ? snapshot.state.followUpIntentions : []
-      ).toEqual([
-        expect.objectContaining({
-          type: "update-work-item",
-          status: "suggested",
-          dueDate: "2026-08-07",
-          providerObjectId: item.id
-        })
-      ]);
-
       const updateIntent =
         snapshot.type === "snapshot"
           ? snapshot.state.followUpIntentions.find(
-              (intent) => intent.type === "update-work-item"
+              (intent) => intent.type === "settle-operational-outcome"
             )
           : undefined;
 
       if (!updateIntent) {
-        throw new Error("expected a Human-resolved update Intent");
+        throw new Error("expected a Human-resolved operational settlement Intent");
       }
 
+      expect(
+        snapshot.type === "snapshot" ? snapshot.state.followUpIntentions : []
+      ).toHaveLength(1);
+      expect(updateIntent.status).toBe("suggested");
+      expect(updateIntent.reconciliation.reviewId).toBe(selectedReviewId);
       expect(updateIntent).not.toHaveProperty("description");
 
       const approval = await meetingIntelligence.observe({
@@ -1705,10 +3900,12 @@ describe("Action Item reconciliation", () => {
       });
 
       const workProvider = new RecordingWorkProvider(item);
+      const operationalOutcomeWriter = new RecordingOperationalOutcomeWriter();
       const execution = await createFollowUpExecution({
         database,
         meetingIntelligence,
         workProvider,
+        operationalOutcomeWriter,
         now: () => new Date("2026-08-07T10:03:00.000Z")
       }).execute({
         workspace,
@@ -1723,9 +3920,22 @@ describe("Action Item reconciliation", () => {
           input: {
             dueDate: "2026-08-07",
             expectedUpdatedAt: item.updatedAt,
-            idempotencyKey: execution.idempotencyKey
+            idempotencyKey: JSON.stringify([
+              workspace.workspaceId,
+              competing.meetingId,
+              updateIntent.id,
+              "operational-outcome-work"
+            ])
           }
         }
+      ]);
+      const writtenOutcome = operationalOutcomeWriter.writes[0];
+
+      expect(operationalOutcomeWriter.writes).toHaveLength(1);
+      expect(writtenOutcome?.target.page.externalId).toBe("notion-page-product-sync");
+      expect(writtenOutcome?.outcome.entries[0]?.resolution.type).toBe("update-existing");
+      expect(writtenOutcome?.outcome.entries[0]?.workReferences).toEqual([
+        expect.objectContaining({ externalId: "LUM-3", objectType: "work-item" })
       ]);
 
       const terminalRejection = await meetingIntelligence.observe({
@@ -1810,12 +4020,12 @@ describe("Action Item reconciliation", () => {
       const intent =
         beforeSupersession.type === "snapshot"
           ? beforeSupersession.state.followUpIntentions.find(
-              (candidate) => candidate.type === "update-work-item"
+              (candidate) => candidate.type === "settle-operational-outcome"
             )
           : undefined;
 
       if (!intent) {
-        throw new Error("expected a suggested reconciliation update Intent");
+        throw new Error("expected a suggested reconciliation settlement Intent");
       }
 
       await observeAndReview(
@@ -1862,7 +4072,7 @@ describe("Action Item reconciliation", () => {
     }
   });
 
-  it("lets Human Judgment refresh a manually recoverable reconciliation Intent", async () => {
+  it("lets Human Judgment refresh a failed reconciliation Intent after writer configuration is restored", async () => {
     const catalog = new ProgrammableWorkCatalog();
     const observation = sourceObservation({
       sourceObjectId: "notion-manual-recovery-refresh"
@@ -1915,12 +4125,12 @@ describe("Action Item reconciliation", () => {
       const intent =
         resolved.type === "snapshot"
           ? resolved.state.followUpIntentions.find(
-              (candidate) => candidate.type === "update-work-item"
+              (candidate) => candidate.type === "settle-operational-outcome"
             )
           : undefined;
 
       if (!intent) {
-        throw new Error("expected a reconciliation update Intent");
+        throw new Error("expected a reconciliation settlement Intent");
       }
 
       await meetingIntelligence.observe({
@@ -1973,7 +4183,7 @@ describe("Action Item reconciliation", () => {
 
       expect(recovery.observation.outcome).toMatchObject({
         status: "failed",
-        errorCode: "provider-outcome-unknown",
+        errorCode: "operational-outcome-writer-not-configured",
         retryable: false
       });
 

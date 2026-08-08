@@ -25,16 +25,28 @@ export type MeetingNotesScanPartialReason = {
     | "pagination-pending"
     | "unreadable-page"
     | "unreadable-meeting-note"
-    | "source-record-incomplete";
+    | "source-record-incomplete"
+    /** A source-bound Luma execution is still settling this immutable root. */
+    | "source-execution-fenced";
   message: string;
   pageId?: string;
   sourceObjectId?: string;
   retryable: boolean;
 };
 
+/**
+ * A completed scan may discover a late source-execution fence while it is
+ * reconciling roots absent from its manifest. It may still return safe
+ * tombstones for other roots, but the overall scan has only partial coverage.
+ */
+export type MeetingNotesAbsentReconciliation = {
+  tombstones: ObservedSourceRevision[];
+  partialReasons: MeetingNotesScanPartialReason[];
+};
+
 export interface MeetingNotesCompleteScan {
   /** Appends replayable tombstones for roots absent from this exact scan. */
-  reconcileAbsent(): Promise<ObservedSourceRevision[]>;
+  reconcileAbsent(): Promise<MeetingNotesAbsentReconciliation>;
 }
 
 export interface MeetingNotesSource {

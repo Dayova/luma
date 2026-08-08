@@ -3085,7 +3085,12 @@ async function activeExecutionWouldBeSuperseded(
   const affectedIntentIds = state.followUpIntentions.flatMap((intent) => {
     const binding = reconciliationBindingForIntent(intent);
 
-    return intent.status === "approved" && binding && !current.has(binding.candidateId)
+    return (intent.status === "approved" ||
+      (intent.type === "settle-operational-outcome" &&
+        (intent.status === "partially-succeeded" ||
+          intent.status === "requires-manual-recovery"))) &&
+      binding &&
+      !current.has(binding.candidateId)
       ? [intent.id]
       : [];
   });
@@ -3222,7 +3227,9 @@ function validateFollowUpIntentApproval(
 function reconciliationBindingForIntent(
   intent: FollowUpIntent
 ): ActionItemReconciliationIntentBinding | null {
-  return intent.type === "create-work-item" || intent.type === "update-work-item"
+  return intent.type === "settle-operational-outcome" ||
+    intent.type === "create-work-item" ||
+    intent.type === "update-work-item"
     ? (intent.reconciliation ?? null)
     : null;
 }
@@ -3231,6 +3238,10 @@ function sameReconciliationIntentOutcome(
   intent: FollowUpIntent,
   outcome: ActionItemReconciliationOutcome
 ): boolean {
+  if (intent.type === "settle-operational-outcome") {
+    return true;
+  }
+
   if (intent.type === "create-work-item") {
     return outcome.type === "create-new";
   }
@@ -3679,11 +3690,14 @@ function validateActionItemReconciliationHumanJudgment(
       return validateReconciliationIntentIdAvailability(
         state,
         observation,
-        currentReview.proposal,
-        currentReview.proposal.outcome.type
+        currentReview.proposal
       );
     case "reject-proposal":
-      return null;
+      return validateReconciliationIntentIdAvailability(
+        state,
+        observation,
+        currentReview.proposal
+      );
     case "select-existing": {
       const selected = reconciliationWorkItemFromReview(
         currentReview.proposal,
@@ -3711,8 +3725,7 @@ function validateActionItemReconciliationHumanJudgment(
       return validateReconciliationIntentIdAvailability(
         state,
         observation,
-        currentReview.proposal,
-        judgment.resolution.action
+        currentReview.proposal
       );
     }
     case "select-create-new": {
@@ -3726,31 +3739,24 @@ function validateActionItemReconciliationHumanJudgment(
       return validateReconciliationIntentIdAvailability(
         state,
         observation,
-        currentReview.proposal,
-        "create-new"
+        currentReview.proposal
       );
     }
+    case "select-needs-clarification":
+      return validateReconciliationIntentIdAvailability(
+        state,
+        observation,
+        currentReview.proposal
+      );
   }
 }
 
 function validateReconciliationIntentIdAvailability(
   state: MeetingState,
   observation: Extract<MeetingObservation, { type: "human-judgment-recorded" }>,
-  review: ActionItemReconciliationReview,
-  outcomeType: ActionItemReconciliationOutcome["type"]
+  review: ActionItemReconciliationReview
 ): MeetingIntelligenceError | null {
-  const suffix =
-    outcomeType === "create-new"
-      ? "create"
-      : outcomeType === "update-existing"
-        ? "update"
-        : null;
-
-  if (!suffix) {
-    return null;
-  }
-
-  const intentId = `follow-up-intent:reconciliation:${opaqueIdentifierSegment(review.id)}:${suffix}`;
+  const intentId = `follow-up-intent:reconciliation:${opaqueIdentifierSegment(review.id)}:settle`;
 
   return state.followUpIntentions.some((intent) => intent.id === intentId)
     ? invalidHumanReconciliationJudgment(
@@ -5476,6 +5482,13 @@ function humanResolutionOutcome(
         type: "create-new",
         rationale: "Human Judgment selected a new canonical work item."
       };
+    case "select-needs-clarification":
+      return {
+        type: "needs-clarification",
+        rationale:
+          resolution.reason ??
+          "Human Judgment kept this reconciliation open for clarification."
+      };
   }
 }
 
@@ -5497,7 +5510,7 @@ function followUpIntentForHumanResolution(
   state: MeetingState,
   review: ActionItemReconciliationReview,
   resolution: ActionItemReconciliationHumanResolution
-): FollowUpIntent | null {
+): FollowUpIntent {
   const provenance: Provenance = {
     evidence: uniqueEvidence([...review.evidence, resolution.evidence]),
     confidence: "high",
@@ -5505,59 +5518,17 @@ function followUpIntentForHumanResolution(
     analysisVersion: "human-reconciliation-v1"
   };
 
-  switch (resolution.outcome.type) {
-    case "create-new":
-      return {
-        id: `follow-up-intent:reconciliation:${opaqueIdentifierSegment(review.id)}:create`,
-        type: "create-work-item",
-        title: review.candidate.description,
-        description: review.candidate.originalText,
-        assigneeId: null,
-        dueDate: review.candidate.deadline.normalizedDate,
-        providerId: review.catalogProviderId,
-        reconciliation: {
-          reviewId: review.id,
-          candidateId: review.candidateId,
-          candidateLineageKey: review.candidateLineageKey
-        },
-        relatedMeetingItemIds: [],
-        status: "suggested",
-        provenance
-      };
-    case "update-existing":
-      return {
-        id: `follow-up-intent:reconciliation:${opaqueIdentifierSegment(review.id)}:update`,
-        type: "update-work-item",
-        externalReference: workItemExternalReference(resolution.outcome.workItem),
-        providerObjectId: resolution.outcome.workItem.lookupId,
-        ...(review.candidate.deadline.normalizedDate !== null
-          ? { dueDate: review.candidate.deadline.normalizedDate }
-          : {}),
-        reconciliation: {
-          reviewId: review.id,
-          candidateId: review.candidateId,
-          candidateLineageKey: review.candidateLineageKey
-        },
-        relatedMeetingItemIds: [],
-        status: "suggested",
-        provenance
-      };
-    case "link-existing":
-    case "reject-not-work":
-    case "needs-clarification":
-      return null;
-  }
-}
-
-function workItemExternalReference(
-  workItem: ReconciliationWorkItemSnapshot
-): ExternalReference {
   return {
-    providerId: workItem.providerId,
-    objectType: "work-item",
-    externalId: workItem.externalId,
-    url: workItem.url,
-    version: workItem.updatedAt
+    id: `follow-up-intent:reconciliation:${opaqueIdentifierSegment(review.id)}:settle`,
+    type: "settle-operational-outcome",
+    reconciliation: {
+      reviewId: review.id,
+      candidateId: review.candidateId,
+      candidateLineageKey: review.candidateLineageKey
+    },
+    relatedMeetingItemIds: [],
+    status: "suggested",
+    provenance
   };
 }
 
@@ -5578,10 +5549,22 @@ async function validateFollowUpExecutionReceipt(
     (candidate) => candidate.id === observation.intentId
   );
 
-  if (!intent || intent.status !== "approved") {
+  const canResumePartialSettlement =
+    intent?.type === "settle-operational-outcome" &&
+    intent.status === "partially-succeeded";
+  const canProbeManualOperationalOutcome =
+    intent?.type === "settle-operational-outcome" &&
+    intent.status === "requires-manual-recovery";
+
+  if (
+    !intent ||
+    (intent.status !== "approved" &&
+      !canResumePartialSettlement &&
+      !canProbeManualOperationalOutcome)
+  ) {
     return invalidFollowUpExecutionReceipt(
       observation,
-      "Follow-up execution receipt must target a canonically approved Intent"
+      "Follow-up execution receipt must target a canonically approved, resumable partial, or manual-probe settlement Intent"
     );
   }
 
@@ -5641,16 +5624,23 @@ function applyFollowUpExecutionRecorded(
   events: MeetingIntelligenceEvent[];
 } {
   const outcome = observation.outcome;
+  const requiresManualRecovery =
+    outcome.status === "failed" &&
+    (outcome.requiresManualRecovery === true ||
+      outcome.errorCode === "provider-outcome-unknown" ||
+      outcome.errorCode === "operational-outcome-invalid-receipt");
   const nextStatus =
     outcome.status === "succeeded"
       ? "succeeded"
       : outcome.status === "partially-succeeded"
         ? "partially-succeeded"
-        : outcome.errorCode === "provider-outcome-unknown"
+        : requiresManualRecovery
           ? "requires-manual-recovery"
           : "failed";
   const externalReferences =
-    outcome.status === "failed" ? [] : outcome.externalReferences;
+    outcome.status === "failed"
+      ? (outcome.externalReferences ?? [])
+      : outcome.externalReferences;
   const nextState = updateFollowUpIntentStatus(state, observation.intentId, nextStatus);
   const executedIntent = state.followUpIntentions.find(
     (intent) => intent.id === observation.intentId
@@ -5658,6 +5648,7 @@ function applyFollowUpExecutionRecorded(
   const actionItemReconciliationCreatedWorkMappings =
     appendCreatedWorkMappingsFromExecution(
       nextState.actionItemReconciliationCreatedWorkMappings,
+      nextState,
       executedIntent,
       externalReferences,
       observation.observedAt
@@ -5714,11 +5705,27 @@ function applyFollowUpExecutionRecorded(
 
 function appendCreatedWorkMappingsFromExecution(
   current: ActionItemReconciliationCreatedWorkMapping[],
+  state: MeetingState,
   intent: FollowUpIntent | undefined,
   externalReferences: ExternalReference[],
   recordedAt: string
 ): ActionItemReconciliationCreatedWorkMapping[] {
-  if (intent?.type !== "create-work-item" || !intent.reconciliation) {
+  const reconciliation = intent ? reconciliationBindingForIntent(intent) : null;
+
+  if (!intent || !reconciliation) {
+    return current;
+  }
+
+  const createsWork =
+    intent.type === "create-work-item" ||
+    (intent.type === "settle-operational-outcome" &&
+      state.actionItemReconciliationHumanResolutions.some(
+        (resolution) =>
+          resolution.reviewId === reconciliation.reviewId &&
+          resolution.outcome.type === "create-new"
+      ));
+
+  if (!createsWork) {
     return current;
   }
 
@@ -5726,13 +5733,15 @@ function appendCreatedWorkMappingsFromExecution(
     .filter(
       (reference) =>
         reference.objectType === "work-item" &&
-        (!intent.providerId || reference.providerId === intent.providerId)
+        (intent.type !== "create-work-item" ||
+          !intent.providerId ||
+          reference.providerId === intent.providerId)
     )
     .map((externalReference) => ({
       id: `reconciliation-created-work:${opaqueIdentifierSegment(intent.id)}:${opaqueIdentifierSegment(externalReference.providerId)}:${opaqueIdentifierSegment(externalReference.externalId)}`,
-      reviewId: intent.reconciliation!.reviewId,
-      candidateId: intent.reconciliation!.candidateId,
-      candidateLineageKey: intent.reconciliation!.candidateLineageKey,
+      reviewId: reconciliation.reviewId,
+      candidateId: reconciliation.candidateId,
+      candidateLineageKey: reconciliation.candidateLineageKey,
       externalReference,
       recordedAt
     }));

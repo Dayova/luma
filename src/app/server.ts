@@ -7,12 +7,16 @@ import { createOpenAIReasoningModelFromEnv } from "../ai/openai-reasoning-model.
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
 import { createFollowUpExecution } from "../follow-up-execution/follow-up-execution.js";
+import { createOperationalOutcomeMarkerVerifier } from "../follow-up-execution/operational-outcome-marker-verifier.js";
 import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
 import { createMeetingNotesIngestion } from "../knowledge/meeting-notes-ingestion.js";
 import { createMeetingNotesSync } from "../knowledge/meeting-notes-sync.js";
 import { createLedgerBackedImportedSourceVerifier } from "../knowledge/ledger-backed-imported-source-verifier.js";
+import { createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
+import { createLedgerBackedOperationalOutcomeSourceExecutionFence } from "../knowledge/ledger-backed-operational-outcome-source-execution-fence.js";
 import { createNotionKnowledgeProviderFromEnv } from "../knowledge/notion-knowledge-provider.js";
 import { createNotionMeetingNotesSourceFromEnv } from "../knowledge/notion-meeting-notes-source.js";
+import { createNotionOperationalOutcomeWriter } from "../knowledge/notion-operational-outcome-writer.js";
 import { createObservedSourceLedger } from "../knowledge/observed-source-ledger.js";
 import { createMeetingIntelligence } from "../meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../persistence/db.js";
@@ -35,6 +39,9 @@ export async function startServer(
   const identityDirectory = createIdentityDirectoryFromEnv(env);
   const workProvider = optionalLinearWorkProvider(env);
   const observedSourceLedger = createObservedSourceLedger({ database });
+  const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
+    database
+  });
   const workItemProviderId = workProvider?.providerId ?? "linear";
   const workspace = {
     workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
@@ -56,7 +63,15 @@ export async function startServer(
       : {})
   });
   const knowledgeProvider = optionalNotionKnowledgeProvider(env);
-  const meetingNotesSource = optionalNotionMeetingNotesSource(env, observedSourceLedger);
+  const meetingNotesSource = optionalNotionMeetingNotesSource(
+    env,
+    observedSourceLedger,
+    operationalOutcomeMarkerVerifier
+  );
+  const operationalOutcomeWriter = optionalNotionOperationalOutcomeWriter(
+    env,
+    operationalOutcomeMarkerVerifier
+  );
   const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
   const meetingNotesSync = meetingNotesSource
     ? createMeetingNotesSync({
@@ -76,7 +91,24 @@ export async function startServer(
     meetingIntelligence,
     identityDirectory,
     ...(workProvider ? { workProvider } : {}),
-    ...(knowledgeProvider ? { knowledgeProvider } : {})
+    ...(knowledgeProvider ? { knowledgeProvider } : {}),
+    ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
+    ...(meetingNotesSource
+      ? {
+          operationalOutcomeSourceExecutionFence:
+            createLedgerBackedOperationalOutcomeSourceExecutionFence({
+              ledger: observedSourceLedger
+            })
+        }
+      : {}),
+    ...(meetingNotesSource
+      ? {
+          operationalOutcomeSourceCurrentnessVerifier:
+            createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({
+              ledger: observedSourceLedger
+            })
+        }
+      : {})
   });
   const bot = createDiscordMeetingBot({
     database,
@@ -150,13 +182,39 @@ function optionalNotionKnowledgeProvider(env: NodeJS.ProcessEnv) {
 
 function optionalNotionMeetingNotesSource(
   env: NodeJS.ProcessEnv,
-  ledger: ReturnType<typeof createObservedSourceLedger>
+  ledger: ReturnType<typeof createObservedSourceLedger>,
+  operationalOutcomeMarkerVerifier: ReturnType<
+    typeof createOperationalOutcomeMarkerVerifier
+  >
 ) {
   if (!hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])) {
     return undefined;
   }
 
-  return createNotionMeetingNotesSourceFromEnv({ env, ledger });
+  return createNotionMeetingNotesSourceFromEnv({
+    env,
+    ledger,
+    operationalOutcomeMarkerVerifier
+  });
+}
+
+function optionalNotionOperationalOutcomeWriter(
+  env: NodeJS.ProcessEnv,
+  markerVerifier: ReturnType<typeof createOperationalOutcomeMarkerVerifier>
+) {
+  const token = env["NOTION_API_TOKEN"]?.trim();
+
+  if (!token) {
+    return undefined;
+  }
+
+  const providerId = env["LUMA_NOTION_PROVIDER_ID"]?.trim();
+
+  return createNotionOperationalOutcomeWriter({
+    token,
+    ...(providerId ? { providerId } : {}),
+    markerVerifier
+  });
 }
 
 function meetingNotesSyncIntervalFromEnv(env: NodeJS.ProcessEnv): number | undefined {

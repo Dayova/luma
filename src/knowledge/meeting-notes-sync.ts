@@ -276,8 +276,14 @@ async function drainSource(
   } while (cursor);
 
   if (fullyReadableScan && completeScan) {
-    const tombstones = await completeScan.reconcileAbsent();
+    const reconciliation = await completeScan.reconcileAbsent();
+    const tombstones = reconciliation.tombstones;
     tombstonedRecords = tombstones.length;
+
+    if (reconciliation.partialReasons.length > 0) {
+      completeness = "partial";
+      partialReasons.push(...reconciliation.partialReasons);
+    }
 
     for (const tombstone of tombstones) {
       await deliver(tombstone);

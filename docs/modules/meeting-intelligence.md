@@ -39,19 +39,22 @@ interface MeetingIntelligence {
 - A `removed` imported-source revision is only emitted after a complete,
   readable provider scan confirms its root is absent. It is a candidate
   invalidation boundary, not an unavailable-read state: pre-removal candidates
-  cannot become current again without a later readable source revision, and
-  stale reconciliation execution cannot mutate a provider.
+  cannot become current again without a later readable source revision. It also
+  invalidates every pending or resumable reconciliation settlement for that
+  candidate; execution rechecks current source state before mutation and records
+  a stale-source receipt instead of writing an obsolete outcome.
 - Imported candidates reconcile through a read-only Work Catalog after source
   acceptance. The durable review records a canonical-search receipt, matching
   signals, source and work Evidence, and one immutable proposal outcome without
   mutating a provider. The current review view derives collisions rather than
   rewriting proposal history. Retryable catalog-read failures append a later
-  attempt with durable exponential backoff (one minute through one hour);
-  explicit Human refresh bypasses that cooldown.
+  attempt with durable exponential backoff beginning at one minute and capped
+  at one hour; an explicit Human refresh bypasses that cooldown.
 - A participant can resolve a current reconciliation proposal through a
   `human-judgment-recorded` Observation. That Human Judgment is Evidence and
-  outranks automatic matching; create/update resolutions produce only suggested
-  Follow-up Intents, never direct provider writes.
+  outranks automatic matching. Each resolution produces one suggested, opaque
+  `settle-operational-outcome` Follow-up Intent, never a direct provider write
+  or caller-supplied page target or Markdown.
 
 ## Ordering
 

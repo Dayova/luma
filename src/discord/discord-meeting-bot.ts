@@ -416,12 +416,20 @@ async function recoverFollowUp(
     return { content: `Follow-up Intent not found: ${command.intentId}` };
   }
 
-  if (intent.status !== "approved") {
+  const canRecoverPartialOperationalOutcome =
+    intent.type === "settle-operational-outcome" &&
+    intent.status === "partially-succeeded";
+  const canProbeManualOperationalOutcome =
+    intent.type === "settle-operational-outcome" &&
+    intent.status === "requires-manual-recovery";
+
+  if (
+    intent.status !== "approved" &&
+    !canRecoverPartialOperationalOutcome &&
+    !canProbeManualOperationalOutcome
+  ) {
     return {
-      content:
-        intent.status === "requires-manual-recovery"
-          ? `Follow-up already requires manual provider inspection: ${intent.id}`
-          : `Follow-up is not recoverable: ${intent.id} is ${intent.status}.`
+      content: `Follow-up is not recoverable: ${intent.id} is ${intent.status}.`
     };
   }
 
@@ -456,6 +464,12 @@ async function recoverFollowUp(
   if (result.observation.outcome.status === "failed") {
     return {
       content: `Follow-up recovery could not prove the provider outcome: ${result.observation.outcome.message}`
+    };
+  }
+
+  if (result.observation.outcome.status === "partially-succeeded") {
+    return {
+      content: `Follow-up recovery is still incomplete: ${result.observation.outcome.message}`
     };
   }
 
@@ -880,6 +894,8 @@ function followUpIntentLabel(intent: FollowUpIntent): string {
     case "update-knowledge":
     case "create-work-item":
       return intent.title;
+    case "settle-operational-outcome":
+      return "Publish approved operational outcome";
     case "update-work-item":
       return `Update ${intent.externalReference.externalId}`;
     case "comment-on-code-change":

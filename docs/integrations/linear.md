@@ -60,6 +60,13 @@ Follow-up Intent; its separate approval remains required before execution can
 mutate Linear. The immutable attempt history is available through
 `action-item-reconciliation-history` for audit.
 
+When a read of the Linear catalog is retryable, Meeting Intelligence schedules
+the next read automatically with durable exponential backoff: one minute at
+first, growing to a one-hour cap. A Human
+`refresh-action-item-reconciliation` Judgment deliberately bypasses that
+cooldown for the current review. Neither automatic retries nor Human refreshes
+gain a write capability.
+
 Linear's public update mutation has no server-side version precondition. Luma
 therefore does not turn a due-date mismatch into an executable Linear update:
 it remains a `needs-clarification` review for a human to apply in Linear. Luma

@@ -237,11 +237,11 @@ async function createReviewedSource() {
   }
 
   const intent = snapshot.state.followUpIntentions.find(
-    (candidate) => candidate.type === "update-work-item"
+    (candidate) => candidate.type === "settle-operational-outcome"
   );
 
   if (!intent) {
-    throw new Error("expected a suggested source-derived work update Intent");
+    throw new Error("expected a suggested source-derived settlement Intent");
   }
 
   return {

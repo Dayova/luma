@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ActionItemReconciliationResolution,
   ExternalReference,
   MeetingImportedFromSource,
   WorkspaceConfig
@@ -737,6 +738,7 @@ async function resolveAndApproveOperationalOutcome(input: {
   meetingId: string;
   reviewId: string;
   observationSuffix: string;
+  resolution?: ActionItemReconciliationResolution;
 }) {
   const resolution = await input.meetingIntelligence.observe({
     workspace,
@@ -752,7 +754,7 @@ async function resolveAndApproveOperationalOutcome(input: {
         judgment: {
           kind: "resolve-action-item-reconciliation",
           reviewId: input.reviewId,
-          resolution: { type: "accept-proposal" }
+          resolution: input.resolution ?? { type: "accept-proposal" }
         }
       }
     ]
@@ -805,6 +807,26 @@ async function resolveAndApproveOperationalOutcome(input: {
   }
 
   return intent;
+}
+
+async function followUpIntentStatus(input: {
+  meetingIntelligence: MeetingIntelligence;
+  meetingId: string;
+  intentId: string;
+}) {
+  const snapshot = await input.meetingIntelligence.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: input.meetingId,
+    query: { type: "snapshot" }
+  });
+
+  if (snapshot.type !== "snapshot") {
+    throw new Error("expected a Meeting snapshot");
+  }
+
+  return snapshot.state.followUpIntentions.find(
+    (candidate) => candidate.id === input.intentId
+  )?.status;
 }
 
 function rejectOneExecutionReceipt(delegate: MeetingIntelligence): MeetingIntelligence {
@@ -4315,6 +4337,183 @@ describe("Action Item reconciliation", () => {
       });
       expect(catalog.searchCalls).toEqual([]);
       expect(catalog.getCalls).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("settles a Human-accepted reject-not-work outcome without a WorkProvider", async () => {
+    const observation = sourceObservation({
+      sourceObjectId: "notion-reject-outcome-settlement",
+      completion: "completed"
+    });
+    const { database, meetingIntelligence } = await createHarness();
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review || review.outcome.type !== "reject-not-work") {
+        throw new Error("expected a reject-not-work reconciliation proposal");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "reject-outcome-settlement"
+      });
+      const execution = await createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      }).execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      const entry = writer.writes[0]?.outcome.entries[0];
+
+      expect(entry?.settlementIntentId).toBe(intent.id);
+      expect(entry?.resolution.type).toBe("reject-not-work");
+      expect(entry?.workReferences).toEqual([]);
+      expect(entry?.unresolved).toEqual([]);
+      expect(entry?.source).toEqual({
+        sourceObjectId: observation.source.sourceObjectId,
+        sourceRevision: observation.source.sourceRevision,
+        sourceContentHash: observation.source.contentHash
+      });
+
+      const write = writer.writes[0];
+
+      if (!write) {
+        throw new Error("expected an Operational Outcome write");
+      }
+
+      expect(write.target.page).toEqual(observation.source.externalReference);
+      expect(
+        renderOperationalOutcomeMarkdown({
+          outcome: write.outcome,
+          idempotencyKey: write.idempotencyKey
+        }).section
+      ).toContain(
+        `- Source revision: ${observation.source.sourceRevision}\n- Settlement Intent: \`${intent.id}\``
+      );
+
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        })
+      ).toBe("succeeded");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("settles a Human-selected clarification outcome and preserves it as unresolved", async () => {
+    const catalog = new ProgrammableWorkCatalog("linear", false);
+    const observation = sourceObservation({
+      sourceObjectId: "notion-clarification-outcome-settlement"
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected a source Action Item description");
+    }
+
+    const item = workItem({ dueDate: null });
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const review = reviewed.reviews[0]?.proposal;
+
+      if (!review || review.outcome.type !== "needs-clarification") {
+        throw new Error("expected a needs-clarification reconciliation proposal");
+      }
+      expect(review.outcome.rationale).toContain("cannot conditionally update");
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId: review.id,
+        observationSuffix: "clarification-outcome-settlement",
+        resolution: {
+          type: "select-needs-clarification",
+          reason: "The Action Item needs a confirmed owner before it becomes work."
+        }
+      });
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const execution = await executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+      const entry = writer.writes[0]?.outcome.entries[0];
+
+      expect(entry?.settlementIntentId).toBe(intent.id);
+      expect(entry?.resolution.type).toBe("needs-clarification");
+      expect(entry?.workReferences).toEqual([]);
+      expect(entry?.unresolved).toEqual([
+        "The Action Item needs a confirmed owner before it becomes work."
+      ]);
+      expect(entry?.source).toEqual({
+        sourceObjectId: observation.source.sourceObjectId,
+        sourceRevision: observation.source.sourceRevision,
+        sourceContentHash: observation.source.contentHash
+      });
+
+      const write = writer.writes[0];
+
+      if (!write) {
+        throw new Error("expected an Operational Outcome write");
+      }
+
+      expect(write.target.page).toEqual(observation.source.externalReference);
+      expect(
+        renderOperationalOutcomeMarkdown({
+          outcome: write.outcome,
+          idempotencyKey: write.idempotencyKey
+        }).section
+      ).toContain(
+        "#### Unresolved\n- The Action Item needs a confirmed owner before it becomes work\\."
+      );
+
+      const replay = await executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(replay.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes).toHaveLength(1);
+
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence,
+          meetingId: observation.meetingId,
+          intentId: intent.id
+        })
+      ).toBe("succeeded");
     } finally {
       await database.close();
     }

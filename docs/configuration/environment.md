@@ -48,6 +48,7 @@ NOTION_MEETINGS_DATA_SOURCE_ID=3982e872-28bf-8080-bf00-000b188b90d6
 NOTION_MEETINGS_TITLE_PROPERTY=Name
 NOTION_MEETINGS_ATTENDEES_PROPERTY=Attendees
 LUMA_NOTION_PROVIDER_ID=notion
+LUMA_NOTION_MEETING_SYNC_INTERVAL_MS=60000
 ```
 
 `Name` must be the title property. `Attendees` must be a People property. Follow-up Execution maps Meeting participants to Notion user IDs before creating a Meeting record. The page contains the Conclusion summary, decisions, Action Items, open questions, risks, provenance revision, and an idempotency marker.
@@ -98,39 +99,40 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 
 ## Variable Reference
 
-| Variable                             | Required        | Owner                    | Purpose                                                          |
-| ------------------------------------ | --------------- | ------------------------ | ---------------------------------------------------------------- |
-| `NODE_ENV`                           | No              | App                      | `development`, `test`, or `production`; defaults to development. |
-| `LUMA_DEFAULT_WORKSPACE_TIMEZONE`    | No              | App                      | Defaults to `Europe/Berlin`; used for relative dates.            |
-| `LUMA_WORKSPACE_ID`                  | No              | App                      | Defaults to `workspace_dayova`.                                  |
-| `LUMA_PGLITE_DATA_DIR`               | No              | Persistence              | Durable local database directory; defaults to `.luma/pglite`.    |
-| `DATABASE_URL`                       | Planned         | Persistence              | Future production PostgreSQL connection.                         |
-| `LINEAR_API_KEY`                     | With Linear     | Linear WorkProvider      | API credential for issue reads and mutations.                    |
-| `LINEAR_TEAM_ID`                     | With Linear     | Linear WorkProvider      | Team receiving approved work items.                              |
-| `LINEAR_API_URL`                     | No              | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                    |
-| `LUMA_LINEAR_PROVIDER_ID`            | No              | Linear WorkProvider      | External reference namespace; defaults to `linear`.              |
-| `NOTION_API_TOKEN`                   | With Notion     | Notion KnowledgeProvider | Internal integration secret.                                     |
-| `NOTION_MEETINGS_DATA_SOURCE_ID`     | With Notion     | Notion KnowledgeProvider | Parent data source for approved Meeting records.                 |
-| `NOTION_MEETINGS_TITLE_PROPERTY`     | No              | Notion KnowledgeProvider | Defaults to `Name`.                                              |
-| `NOTION_MEETINGS_ATTENDEES_PROPERTY` | No              | Notion KnowledgeProvider | Defaults to `Attendees`.                                         |
-| `LUMA_NOTION_PROVIDER_ID`            | No              | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.              |
-| `OPENAI_API_KEY`                     | For analysis    | ReasoningModel           | OpenAI API credential.                                           |
-| `LUMA_REASONING_MODEL_PROVIDER`      | No              | ReasoningModel           | `openai` by default; `disabled` defers analysis.                 |
-| `LUMA_REASONING_MODEL_NAME`          | No              | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                      |
-| `DISCORD_TOKEN`                      | For bot         | Discord Adapter          | Secret Gateway and REST token.                                   |
-| `DISCORD_CLIENT_ID`                  | For bot         | Discord Adapter          | Discord Application ID.                                          |
-| `DISCORD_GUILD_ID`                   | For bot         | Discord Adapter          | Server receiving guild-scoped commands.                          |
-| `LUMA_IDENTITY_PEOPLE_JSON`          | No              | Identity Directory       | Extends or overrides built-in provider identities.               |
-| `GITHUB_REPOSITORY`                  | GitHub only     | GitHub Adapter           | Target as `owner/repo`.                                          |
-| `GITHUB_APP_ID`                      | GitHub App auth | GitHub Adapter           | App identity used for JWT auth.                                  |
-| `GITHUB_APP_INSTALLATION_ID`         | GitHub App auth | GitHub Adapter           | Installation receiving access tokens.                            |
-| `GITHUB_APP_PRIVATE_KEY`             | GitHub App auth | GitHub Adapter           | PEM with real or escaped newlines.                               |
-| `GITHUB_APP_PRIVATE_KEY_BASE64`      | Alternative     | GitHub Adapter           | Single-line alternative to the PEM variable.                     |
-| `GITHUB_TOKEN`                       | Local fallback  | GitHub Adapter           | User-attributed token, optionally from `gh`.                     |
-| `LUMA_GITHUB_CODE_PROVIDER_ID`       | Planned         | GitHub CodeProvider      | Separate GitHub code-context namespace.                          |
-| `LUMA_LIVE_LINEAR_TESTS`             | No              | Tests                    | Set to `1` for non-mutating live validation.                     |
-| `LUMA_LIVE_NOTION_TESTS`             | No              | Tests                    | Set to `1` for non-mutating live validation.                     |
-| `LUMA_LIVE_GITHUB_TESTS`             | No              | Tests                    | Set to `1` for the GitHub compatibility smoke test.              |
+| Variable                               | Required        | Owner                    | Purpose                                                                   |
+| -------------------------------------- | --------------- | ------------------------ | ------------------------------------------------------------------------- |
+| `NODE_ENV`                             | No              | App                      | `development`, `test`, or `production`; defaults to development.          |
+| `LUMA_DEFAULT_WORKSPACE_TIMEZONE`      | No              | App                      | Defaults to `Europe/Berlin`; used for relative dates.                     |
+| `LUMA_WORKSPACE_ID`                    | No              | App                      | Defaults to `workspace_dayova`.                                           |
+| `LUMA_PGLITE_DATA_DIR`                 | No              | Persistence              | Durable local database directory; defaults to `.luma/pglite`.             |
+| `DATABASE_URL`                         | Planned         | Persistence              | Future production PostgreSQL connection.                                  |
+| `LINEAR_API_KEY`                       | With Linear     | Linear WorkProvider      | API credential for issue reads and mutations.                             |
+| `LINEAR_TEAM_ID`                       | With Linear     | Linear WorkProvider      | Team receiving approved work items.                                       |
+| `LINEAR_API_URL`                       | No              | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                             |
+| `LUMA_LINEAR_PROVIDER_ID`              | No              | Linear WorkProvider      | External reference namespace; defaults to `linear`.                       |
+| `NOTION_API_TOKEN`                     | With Notion     | Notion KnowledgeProvider | Internal integration secret.                                              |
+| `NOTION_MEETINGS_DATA_SOURCE_ID`       | With Notion     | Notion KnowledgeProvider | Parent data source for approved Meeting records.                          |
+| `NOTION_MEETINGS_TITLE_PROPERTY`       | No              | Notion KnowledgeProvider | Defaults to `Name`.                                                       |
+| `NOTION_MEETINGS_ATTENDEES_PROPERTY`   | No              | Notion KnowledgeProvider | Defaults to `Attendees`.                                                  |
+| `LUMA_NOTION_PROVIDER_ID`              | No              | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.                       |
+| `LUMA_NOTION_MEETING_SYNC_INTERVAL_MS` | No              | Meeting Notes source     | Full canonical source scan interval in milliseconds; defaults to `60000`. |
+| `OPENAI_API_KEY`                       | For analysis    | ReasoningModel           | OpenAI API credential.                                                    |
+| `LUMA_REASONING_MODEL_PROVIDER`        | No              | ReasoningModel           | `openai` by default; `disabled` defers analysis.                          |
+| `LUMA_REASONING_MODEL_NAME`            | No              | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                               |
+| `DISCORD_TOKEN`                        | For bot         | Discord Adapter          | Secret Gateway and REST token.                                            |
+| `DISCORD_CLIENT_ID`                    | For bot         | Discord Adapter          | Discord Application ID.                                                   |
+| `DISCORD_GUILD_ID`                     | For bot         | Discord Adapter          | Server receiving guild-scoped commands.                                   |
+| `LUMA_IDENTITY_PEOPLE_JSON`            | No              | Identity Directory       | Extends or overrides built-in provider identities.                        |
+| `GITHUB_REPOSITORY`                    | GitHub only     | GitHub Adapter           | Target as `owner/repo`.                                                   |
+| `GITHUB_APP_ID`                        | GitHub App auth | GitHub Adapter           | App identity used for JWT auth.                                           |
+| `GITHUB_APP_INSTALLATION_ID`           | GitHub App auth | GitHub Adapter           | Installation receiving access tokens.                                     |
+| `GITHUB_APP_PRIVATE_KEY`               | GitHub App auth | GitHub Adapter           | PEM with real or escaped newlines.                                        |
+| `GITHUB_APP_PRIVATE_KEY_BASE64`        | Alternative     | GitHub Adapter           | Single-line alternative to the PEM variable.                              |
+| `GITHUB_TOKEN`                         | Local fallback  | GitHub Adapter           | User-attributed token, optionally from `gh`.                              |
+| `LUMA_GITHUB_CODE_PROVIDER_ID`         | Planned         | GitHub CodeProvider      | Separate GitHub code-context namespace.                                   |
+| `LUMA_LIVE_LINEAR_TESTS`               | No              | Tests                    | Set to `1` for non-mutating live validation.                              |
+| `LUMA_LIVE_NOTION_TESTS`               | No              | Tests                    | Set to `1` for non-mutating live validation.                              |
+| `LUMA_LIVE_GITHUB_TESTS`               | No              | Tests                    | Set to `1` for the GitHub compatibility smoke test.                       |
 
 ## Security Rules
 

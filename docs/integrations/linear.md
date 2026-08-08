@@ -26,7 +26,9 @@ Use separate credentials for development and production. A personal API key is a
 - `assigneeId` resolves through the Identity Directory to a Linear member UUID.
 - `mentionPersonIds` resolve to Linear subscriber UUIDs.
 - Due date is written as Linear's issue due date.
-- Provider references store Linear's issue UUID as `externalId` and its human URL separately.
+- Provider references store Linear's human issue identifier (for example `LUM-3`) as
+  `externalId` and its human URL separately. The adapter keeps its provider lookup
+  identifier internal.
 - Linear state types normalize to provider-independent Work statuses.
 
 ## Idempotency
@@ -45,6 +47,28 @@ Linear owns the task. GitHub #20 describes the migration and DAY-39 is the canon
 - Duplicate issue concern: do not remove the idempotency marker from generated descriptions.
 
 The SDK is contained behind Luma's owned `LinearApi` facade and `WorkProvider` Interface.
+
+## Read-only reconciliation catalog
+
+Meeting Intelligence receives a narrowed `WorkCatalog` rather than a
+writer-capable `WorkProvider`. It can search and retrieve canonical Linear work
+to produce an evidence-backed reconciliation review, but it cannot create,
+update, or comment on an issue. The review is obtained through Luma's
+`action-item-reconciliation-review` Meeting query and remains a proposal until
+Human Judgment resolves it. A create/update resolution produces a **suggested**
+Follow-up Intent; its separate approval remains required before execution can
+mutate Linear. The immutable attempt history is available through
+`action-item-reconciliation-history` for audit.
+
+Linear's public update mutation has no server-side version precondition. Luma
+therefore does not turn a due-date mismatch into an executable Linear update:
+it remains a `needs-clarification` review for a human to apply in Linear. Luma
+only emits executable tracker updates for a provider that advertises an atomic
+conditional-update capability; it never falls back to an unconditional write.
+
+An exact source mention such as `LUM-3` is provider-qualified before it enters
+reconciliation. Matching never treats an unqualified identifier from a second
+provider as the same work item.
 
 ## Non-mutating Live Test
 

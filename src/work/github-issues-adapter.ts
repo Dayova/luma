@@ -116,6 +116,8 @@ export function createGitHubIssuesWorkProvider(
     searchWorkItems: (query) => adapter.searchWorkItems(query),
     getWorkItem: (id) => adapter.getWorkItem(id),
     createWorkItem: (input) => adapter.createWorkItem(input),
+    findCreatedWorkItemByIdempotencyKey: (idempotencyKey) =>
+      adapter.findCreatedWorkItemByIdempotencyKey(idempotencyKey),
     updateWorkItem: (id, input) => adapter.updateWorkItem(id, input),
     addComment: (id, body) => adapter.addComment(id, body)
   };
@@ -234,6 +236,13 @@ class GitHubIssuesAdapter implements WorkProvider {
     return this.toExternalReference(issue);
   }
 
+  async findCreatedWorkItemByIdempotencyKey(
+    idempotencyKey: string
+  ): Promise<ExternalReference | null> {
+    const existing = await this.findExistingIssueByIdempotencyKey(idempotencyKey);
+    return existing ? this.toExternalReference(existing) : null;
+  }
+
   async updateWorkItem(
     id: string,
     input: UpdateWorkItemInput
@@ -298,7 +307,10 @@ class GitHubIssuesAdapter implements WorkProvider {
     idempotencyKey: string
   ): Promise<GitHubIssue | null> {
     const marker = `${IDEMPOTENCY_MARKER_PREFIX} ${idempotencyKey}`;
-    const githubQuery = `repo:${this.owner}/${this.repo} is:issue "${marker}"`;
+    // Tuple keys are canonical JSON and therefore contain quotes. JSON string
+    // encoding is also valid GitHub-search phrase escaping, so the marker
+    // remains one exact phrase instead of terminating the query early.
+    const githubQuery = `repo:${this.owner}/${this.repo} is:issue ${JSON.stringify(marker)}`;
     const result = await this.request(
       `/search/issues?q=${encodeURIComponent(githubQuery)}&per_page=1`,
       {

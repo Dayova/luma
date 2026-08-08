@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertCompleteNotionMarkdown,
   createNotionKnowledgeProvider,
+  NotionKnowledgeProviderError,
   type NotionApi,
   type NotionApiDocument,
   type NotionCreateDocumentInput
@@ -22,8 +24,13 @@ function notionDocument(overrides: Partial<NotionApiDocument> = {}): NotionApiDo
 class FakeNotionApi implements NotionApi {
   readonly createCalls: NotionCreateDocumentInput[] = [];
   existing: NotionApiDocument | null = null;
+  markerProbeError: Error | null = null;
 
   findByIdempotencyKey(): Promise<NotionApiDocument | null> {
+    if (this.markerProbeError) {
+      return Promise.reject(this.markerProbeError);
+    }
+
     return Promise.resolve(this.existing);
   }
 
@@ -117,5 +124,42 @@ describe("Notion KnowledgeProvider", () => {
 
     expect(reference.externalId).toBe("notion-page-1");
     expect(api.createCalls).toHaveLength(0);
+  });
+
+  it("fails closed when a marker probe cannot read complete Notion Markdown", async () => {
+    const api = new FakeNotionApi();
+    api.markerProbeError = new NotionKnowledgeProviderError(
+      "notion-markdown-incomplete",
+      "Notion page notion-page-1 returned incomplete Markdown"
+    );
+    const provider = createNotionKnowledgeProvider({
+      api,
+      meetingsDataSourceId: "meetings"
+    });
+
+    await expect(
+      provider.createDocument({
+        title: "Product Meeting",
+        contentMarkdown: "Meeting record",
+        parentId: null,
+        idempotencyKey: "workspace:meeting:intent:execute"
+      })
+    ).rejects.toMatchObject({ code: "notion-markdown-incomplete" });
+    expect(api.createCalls).toEqual([]);
+  });
+
+  it("rejects truncated or unknown Notion Markdown before it can prove a marker absent", () => {
+    expect(() =>
+      assertCompleteNotionMarkdown("notion-page-1", {
+        truncated: true,
+        unknown_block_ids: []
+      })
+    ).toThrow("cannot be used to prove a Luma execution marker is absent");
+    expect(() =>
+      assertCompleteNotionMarkdown("notion-page-1", {
+        truncated: false,
+        unknown_block_ids: ["restricted-block"]
+      })
+    ).toThrow("cannot be used to prove a Luma execution marker is absent");
   });
 });

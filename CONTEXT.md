@@ -40,6 +40,14 @@ _Avoid_: Agreement, conclusion
 A Meeting Item describing work that may have an owner, deadline, status, evidence, and external work representation.
 _Avoid_: Task, todo
 
+**Imported Action Item Candidate**:
+A source-derived proposal for possible work that retains its original wording, modality, uncertainty, and source Evidence until Human Judgment resolves it.
+_Avoid_: Confirmed Action Item, task
+
+**Action Item Reconciliation**:
+A reviewable, immutable proposal that relates an Imported Action Item Candidate to canonical work as an existing link, an update, genuinely new work, not work, or a clarification need. Its current view may be blocked by a competing candidate until Human Judgment resolves it.
+_Avoid_: Automatic task creation, duplicate detector
+
 **Meeting State**:
 The current, revisable understanding of a Meeting at a specific Revision.
 _Avoid_: Projection, snapshot

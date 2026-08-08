@@ -1,6 +1,6 @@
 import type {
   FollowUpExecutionRecorded,
-  FollowUpIntent,
+  FollowUpIntentId,
   MeetingId,
   MeetingIntelligenceEvent,
   WorkspaceConfig
@@ -9,7 +9,8 @@ import type {
 export type ExecuteFollowUpInput = {
   workspace: WorkspaceConfig;
   meetingId: MeetingId;
-  intent: FollowUpIntent;
+  /** The executor loads the canonical approved intent by this ID. */
+  intentId: FollowUpIntentId;
 };
 
 export type ExecuteFollowUpResult = {
@@ -20,4 +21,10 @@ export type ExecuteFollowUpResult = {
 
 export interface FollowUpExecution {
   execute(input: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
+  /**
+   * An explicit operator-only recovery for a stranded execution lease. It
+   * performs read-only positive probes and records an indeterminate result if
+   * the provider cannot prove the original mutation's outcome.
+   */
+  recover(input: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
 }

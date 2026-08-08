@@ -57,6 +57,14 @@ export interface KnowledgeProvider {
   search(query: KnowledgeQuery): Promise<KnowledgeResult[]>;
   getDocument(id: string): Promise<KnowledgeDocument>;
   createDocument(input: CreateDocumentInput): Promise<ExternalReference>;
+  /**
+   * Optional positive-only recovery probe for a previously attempted create.
+   * `null` means the provider cannot prove a document exists; it never grants
+   * permission to repeat an indeterminate mutation automatically.
+   */
+  findCreatedDocumentByIdempotencyKey?(
+    idempotencyKey: string
+  ): Promise<ExternalReference | null>;
   updateDocument(id: string, input: UpdateDocumentInput): Promise<ExternalReference>;
   listChanges(cursor?: string): Promise<ChangePage>;
 }

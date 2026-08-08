@@ -266,6 +266,12 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         type: "approve",
         intentId: interaction.options.getString("intent_id", true)
       };
+    case "recover":
+      return {
+        ...base,
+        type: "recover",
+        intentId: interaction.options.getString("intent_id", true)
+      };
     case "reject": {
       const reason = interaction.options.getString("reason");
       return {
@@ -439,6 +445,18 @@ const meetingCommand = new SlashCommandBuilder()
     command
       .setName("approve")
       .setDescription("Approve and execute a proposed Follow-up Intent")
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Follow-up Intent ID")
+          .setRequired(true)
+          .setMaxLength(200)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("recover")
+      .setDescription("Safely resolve a stranded Follow-up execution")
       .addStringOption((option) =>
         option
           .setName("intent_id")

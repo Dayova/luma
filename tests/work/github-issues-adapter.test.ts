@@ -181,6 +181,51 @@ describe("GitHub Issues WorkProvider", () => {
     expect(fake.requests).toHaveLength(1);
   });
 
+  it("escapes a canonical JSON idempotency tuple as one GitHub search phrase", async () => {
+    const fake = createFakeFetch((request) => {
+      if (request.url.includes("/search/issues")) {
+        return responseJson({ items: [githubIssue()] });
+      }
+
+      throw new Error("create issue should not be called");
+    });
+    const provider = createGitHubIssuesWorkProvider({
+      token: "token",
+      owner: "owner",
+      repo: "repo",
+      apiBaseUrl: "https://api.github.example",
+      fetchImpl: fake.fetchImpl
+    });
+    const idempotencyKey = JSON.stringify([
+      "workspace",
+      "meeting:with:colons",
+      "intent:with:colons",
+      "execute"
+    ]);
+
+    await provider.createWorkItem({
+      title: "Investigate tuple marker escaping",
+      description: "Follow up.",
+      assigneeProviderUserId: null,
+      mentionProviderUserIds: [],
+      dueDate: null,
+      labels: [],
+      idempotencyKey
+    });
+
+    const searchUrl = fake.requests[0]?.url;
+
+    if (!searchUrl) {
+      throw new Error("expected an idempotency search request");
+    }
+
+    expect(new URL(searchUrl).searchParams.get("q")).toBe(
+      `repo:owner/repo is:issue ${JSON.stringify(
+        `luma-idempotency-key: ${idempotencyKey}`
+      )}`
+    );
+  });
+
   it("normalizes GitHub issue status, assignees, labels, and body due date into WorkItem", async () => {
     const fake = createFakeFetch((request) => {
       if (request.url.endsWith("/repos/owner/repo/issues/312")) {

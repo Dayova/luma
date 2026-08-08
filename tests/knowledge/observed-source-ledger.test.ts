@@ -92,6 +92,48 @@ describe("Observed source ledger", () => {
     }
   });
 
+  it("replays the immutable source identity when discovery metadata changes without content", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const originalSource = {
+      providerId: "notion",
+      sourceKind: "meeting-note" as const,
+      sourceObjectId: "meeting-notes-block-identity",
+      parentObjectId: "notion-page-original",
+      url: "https://notion.so/notion-page-original"
+    };
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source: originalSource,
+        providerVersion: "2026-08-07T08:35:00.000Z",
+        snapshot: snapshot("The source body is unchanged."),
+        observedAt: "2026-08-07T08:36:00.000Z"
+      });
+      const replayed = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source: {
+          ...originalSource,
+          parentObjectId: "notion-page-moved",
+          url: "https://notion.so/notion-page-moved"
+        },
+        providerVersion: "2026-08-07T08:37:00.000Z",
+        snapshot: snapshot("The source body is unchanged."),
+        observedAt: "2026-08-07T08:38:00.000Z"
+      });
+
+      expect(replayed).toMatchObject({
+        change: "unchanged",
+        revision: first.revision,
+        contentHash: first.contentHash,
+        source: originalSource
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
   it("keeps chronological revisions when source content changes and later reverts", async () => {
     const database = await createPgliteDatabase();
     const ledger = createObservedSourceLedger({ database });
@@ -215,6 +257,131 @@ describe("Observed source ledger", () => {
       expect(results.map((result) => result.revision)).toEqual([1, 1, 1]);
       expect(results.filter((result) => result.change === "new")).toHaveLength(1);
       expect(results.filter((result) => result.change === "unchanged")).toHaveLength(2);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("records a CAS-protected immutable tombstone and replays it without erasing history", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = {
+      providerId: "notion",
+      sourceKind: "meeting-note" as const,
+      sourceObjectId: "meeting-notes-block-removed",
+      parentObjectId: "notion-page-removed",
+      url: "https://notion.so/notion-page-removed"
+    };
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-07T08:35:00.000Z",
+        snapshot: snapshot("This Action Item must not outlive its source."),
+        observedAt: "2026-08-07T08:36:00.000Z"
+      });
+      const [initialHead] = await ledger.listCurrent({
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        sourceKind: "meeting-note"
+      });
+
+      if (!initialHead) {
+        throw new Error("expected the source head");
+      }
+
+      // A rediscovery with identical bytes must still invalidate an earlier
+      // absence conclusion. Revision/hash alone cannot distinguish it.
+      const unchangedRediscovery = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-07T08:50:00.000Z",
+        snapshot: snapshot("This Action Item must not outlive its source."),
+        observedAt: "2026-08-07T08:50:00.000Z"
+      });
+
+      expect(unchangedRediscovery).toMatchObject({
+        change: "unchanged",
+        revision: first.revision,
+        contentHash: first.contentHash
+      });
+      await expect(
+        ledger.recordTombstone({
+          workspaceId: "workspace_dayova",
+          previous: initialHead,
+          observedAt: "2026-08-07T09:00:00.000Z"
+        })
+      ).resolves.toBeNull();
+
+      const [currentHead] = await ledger.listCurrent({
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        sourceKind: "meeting-note"
+      });
+
+      if (!currentHead) {
+        throw new Error("expected the rediscovered source head");
+      }
+
+      const removed = await ledger.recordTombstone({
+        workspaceId: "workspace_dayova",
+        previous: currentHead,
+        observedAt: "2026-08-07T09:00:00.000Z"
+      });
+
+      expect(removed).toMatchObject({
+        change: "revised",
+        revision: 2,
+        providerVersion: null,
+        snapshot: {
+          lifecycle: "removed",
+          sections: {
+            actionItemsAndNotes: { state: "unavailable" }
+          },
+          completeness: { state: "removed" }
+        }
+      });
+      await expect(
+        ledger.get({ workspaceId: "workspace_dayova", source, revision: first.revision })
+      ).resolves.toMatchObject({
+        snapshot: snapshot("This Action Item must not outlive its source.")
+      });
+
+      const [removedHead] = await ledger.listCurrent({
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        sourceKind: "meeting-note"
+      });
+
+      if (!removed || !removedHead) {
+        throw new Error("expected a tombstone revision");
+      }
+
+      await expect(
+        ledger.recordTombstone({
+          workspaceId: "workspace_dayova",
+          previous: removedHead,
+          observedAt: "2026-08-07T09:01:00.000Z"
+        })
+      ).resolves.toMatchObject({ change: "unchanged", revision: 2 });
+
+      const rediscovered = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-07T09:05:00.000Z",
+        snapshot: snapshot("The source root returned."),
+        observedAt: "2026-08-07T09:05:00.000Z"
+      });
+
+      await expect(
+        ledger.recordTombstone({
+          workspaceId: "workspace_dayova",
+          previous: initialHead,
+          observedAt: "2026-08-07T09:06:00.000Z"
+        })
+      ).resolves.toBeNull();
+      expect(rediscovered.revision).toBe(3);
     } finally {
       await database.close();
     }

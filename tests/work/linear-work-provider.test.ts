@@ -5,6 +5,7 @@ import {
   type LinearApiIssue,
   type LinearCreateIssueInput
 } from "../../src/work/linear-work-provider.js";
+import { toWorkCatalog } from "../../src/work/interface.js";
 
 function linearIssue(overrides: Partial<LinearApiIssue> = {}): LinearApiIssue {
   return {
@@ -31,6 +32,7 @@ function linearIssue(overrides: Partial<LinearApiIssue> = {}): LinearApiIssue {
 
 class FakeLinearApi implements LinearApi {
   readonly createCalls: LinearCreateIssueInput[] = [];
+  readonly getCalls: string[] = [];
   existing: LinearApiIssue | null = null;
 
   searchIssues(): Promise<LinearApiIssue[]> {
@@ -41,7 +43,8 @@ class FakeLinearApi implements LinearApi {
     return Promise.resolve(this.existing);
   }
 
-  getIssue(): Promise<LinearApiIssue> {
+  getIssue(id: string): Promise<LinearApiIssue> {
+    this.getCalls.push(id);
     return Promise.resolve(linearIssue());
   }
 
@@ -128,14 +131,16 @@ describe("Linear WorkProvider", () => {
 
   it("normalizes Linear workflow states into provider-neutral work states", async () => {
     const api = new FakeLinearApi();
-    api.getIssue = () =>
-      Promise.resolve(
+    api.getIssue = (id) => {
+      api.getCalls.push(id);
+      return Promise.resolve(
         linearIssue({ stateType: "started", stateName: "Blocked", labels: ["blocked"] })
       );
+    };
     const provider = createLinearWorkProvider({ api, teamId: "team-dayova" });
 
-    await expect(provider.getWorkItem("DAY-301")).resolves.toMatchObject({
-      id: "DAY-301",
+    await expect(provider.getWorkItem("issue-301")).resolves.toMatchObject({
+      id: "issue-301",
       providerId: "linear",
       status: "blocked",
       assignees: [
@@ -146,5 +151,16 @@ describe("Linear WorkProvider", () => {
         }
       ]
     });
+    expect(api.getCalls).toEqual(["issue-301"]);
+  });
+
+  it("does not advertise conditional updates that Linear cannot atomically provide", () => {
+    const provider = createLinearWorkProvider({
+      api: new FakeLinearApi(),
+      teamId: "team-dayova"
+    });
+
+    expect(Object.hasOwn(provider, "updateWorkItemIfCurrent")).toBe(false);
+    expect(toWorkCatalog(provider).supportsConditionalUpdates).toBe(false);
   });
 });

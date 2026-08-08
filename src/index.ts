@@ -1,4 +1,9 @@
 export { createMeetingIntelligence } from "./meeting-intelligence/meeting-intelligence.js";
+export { rejectUnverifiedImportedSource } from "./meeting-intelligence/imported-source-observation-verifier.js";
+export type {
+  ImportedSourceObservationVerifier,
+  ImportedSourceObservationVerification
+} from "./meeting-intelligence/imported-source-observation-verifier.js";
 export type {
   ConcludeMeeting,
   MeetingIntelligence,
@@ -38,6 +43,25 @@ export type * from "./knowledge/meeting-notes-source.js";
 export type * from "./knowledge/observed-source-ledger.js";
 export { createObservedSourceLedger } from "./knowledge/observed-source-ledger.js";
 export {
+  createMeetingNotesIngestion,
+  observedMeetingNoteToObservation
+} from "./knowledge/meeting-notes-ingestion.js";
+export type {
+  CreateMeetingNotesIngestionInput,
+  IngestObservedMeetingNoteInput,
+  MeetingNotesIngestion
+} from "./knowledge/meeting-notes-ingestion.js";
+export { createLedgerBackedImportedSourceVerifier } from "./knowledge/ledger-backed-imported-source-verifier.js";
+export type { CreateLedgerBackedImportedSourceVerifierInput } from "./knowledge/ledger-backed-imported-source-verifier.js";
+export { createMeetingNotesSync } from "./knowledge/meeting-notes-sync.js";
+export type {
+  CreateMeetingNotesSyncInput,
+  MeetingNotesSync,
+  MeetingNotesSyncLogger,
+  MeetingNotesSyncResult,
+  MeetingNotesSyncScheduler
+} from "./knowledge/meeting-notes-sync.js";
+export {
   NotionMeetingNotesReadError,
   NotionMeetingNotesSourceError,
   createNotionMeetingNotesSource,
@@ -62,6 +86,7 @@ export type {
   NotionCreateDocumentInput,
   NotionKnowledgeProviderConfig
 } from "./knowledge/notion-knowledge-provider.js";
+export { toWorkCatalog } from "./work/interface.js";
 export type * from "./work/interface.js";
 export {
   LinearWorkProviderError,

@@ -69,6 +69,8 @@ class FollowUpReasoningModel implements ReasoningModel {
 class LinearWorkProvider implements WorkProvider {
   readonly providerId = "linear";
   readonly createCalls: CreateWorkItemInput[] = [];
+  readonly recoveryKeys: string[] = [];
+  recoveredWorkItem: ExternalReference | null = null;
 
   searchWorkItems(_query: WorkQuery): Promise<WorkItem[]> {
     void _query;
@@ -88,6 +90,13 @@ class LinearWorkProvider implements WorkProvider {
       externalId: "DAY-301",
       url: "https://linear.app/dayova/issue/DAY-301"
     });
+  }
+
+  findCreatedWorkItemByIdempotencyKey(
+    idempotencyKey: string
+  ): Promise<ExternalReference | null> {
+    this.recoveryKeys.push(idempotencyKey);
+    return Promise.resolve(this.recoveredWorkItem);
   }
 
   updateWorkItem(): Promise<ExternalReference> {
@@ -249,8 +258,12 @@ describe("Discord follow-up commands", () => {
         "<@779381502311137301> <@726409024894926869>"
       ].join("\n"),
       allowedUserIds: ["779381502311137301", "726409024894926869"],
-      idempotencyKey:
-        "workspace_dayova:discord_start_product:intent_linear_release:execute:follow-up-execution-succeeded"
+      idempotencyKey: `${JSON.stringify([
+        "workspace_dayova",
+        "discord_start_product",
+        "intent_linear_release",
+        "execute"
+      ])}:follow-up-execution-succeeded`
     });
   });
 
@@ -328,5 +341,121 @@ describe("Discord follow-up commands", () => {
     }
 
     expect(snapshot.state.followUpIntentions[0]?.status).toBe("rejected");
+  });
+
+  it("recovers a stranded execution through a positive provider marker without writing again", async () => {
+    const database = await createPgliteDatabase();
+    const identityDirectory = createLumaTeamIdentityDirectory();
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new FollowUpReasoningModel(),
+      now: () => new Date("2026-07-16T09:05:00.000Z")
+    });
+    const workProvider = new LinearWorkProvider();
+    const transport = new TestDiscordTransport();
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence,
+      followUpExecution: createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        identityDirectory,
+        workProvider,
+        now: () => new Date("2026-07-16T09:06:00.000Z")
+      }),
+      identityDirectory,
+      transport,
+      workspace,
+      guildId: "guild_dayova",
+      now: () => new Date("2026-07-16T09:05:00.000Z")
+    });
+
+    await bot.start();
+    await transport.execute({
+      type: "start",
+      interactionId: "start_recovery",
+      guildId: "guild_dayova",
+      channelId: "channel_product",
+      actorDiscordUserId: "779381502311137301",
+      occurredAt: "2026-07-16T09:00:00.000Z",
+      title: "Product Meeting",
+      languageMode: "en"
+    });
+    await transport.execute({
+      type: "note",
+      interactionId: "note_recovery",
+      guildId: "guild_dayova",
+      channelId: "thread_product",
+      actorDiscordUserId: "779381502311137301",
+      occurredAt: "2026-07-16T09:05:00.000Z",
+      text: "Create a release checklist task.",
+      language: "en"
+    });
+
+    const meetingId = "discord_start_recovery";
+    const intentId = "intent_linear_release";
+    const approval = await meetingIntelligence.observe({
+      workspace,
+      observations: [
+        {
+          type: "follow-up-intent-approved",
+          observationId: "test:recover:approve",
+          workspaceId: workspace.workspaceId,
+          meetingId,
+          occurredAt: "2026-07-16T09:06:00.000Z",
+          observedAt: "2026-07-16T09:06:00.000Z",
+          intentId,
+          approvedBy: "person_jakob"
+        }
+      ]
+    });
+    expect(approval.errors).toEqual([]);
+
+    const idempotencyKey = JSON.stringify([
+      workspace.workspaceId,
+      meetingId,
+      intentId,
+      "execute"
+    ]);
+    await database.query(
+      `INSERT INTO follow_up_executions (
+         workspace_id, meeting_id, intent_id, operation, idempotency_key,
+         status, attempts, result_json, execution_lease_id, created_at, updated_at
+       ) VALUES ($1, $2, $3, 'execute', $4, 'executing', 1, NULL, $5, $6, $6)`,
+      [
+        workspace.workspaceId,
+        meetingId,
+        intentId,
+        idempotencyKey,
+        "stranded-execution-lease",
+        "2026-07-16T09:06:00.000Z"
+      ]
+    );
+    workProvider.recoveredWorkItem = {
+      providerId: "linear",
+      objectType: "work-item",
+      externalId: "DAY-302",
+      url: "https://linear.app/dayova/issue/DAY-302"
+    };
+
+    const response = await transport.execute({
+      type: "recover",
+      interactionId: "recover_release",
+      guildId: "guild_dayova",
+      channelId: "thread_product",
+      actorDiscordUserId: "779381502311137301",
+      occurredAt: "2026-07-16T09:07:00.000Z",
+      intentId
+    });
+
+    expect(response.content).toBe(
+      "Follow-up recovered: https://linear.app/dayova/issue/DAY-302"
+    );
+    expect(workProvider.createCalls).toEqual([]);
+    expect(workProvider.recoveryKeys).toContain(idempotencyKey);
   });
 });

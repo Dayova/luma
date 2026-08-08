@@ -15,6 +15,7 @@ NOTION_MEETINGS_DATA_SOURCE_ID=3982e872-28bf-8080-bf00-000b188b90d6
 NOTION_MEETINGS_TITLE_PROPERTY=Name
 NOTION_MEETINGS_ATTENDEES_PROPERTY=Attendees
 LUMA_NOTION_PROVIDER_ID=notion
+LUMA_NOTION_MEETING_SYNC_INTERVAL_MS=60000
 ```
 
 The configured schema expects `Name` as a title property and `Attendees` as a People property.
@@ -83,11 +84,62 @@ Notion UI history or every intermediate edit that happened before a fetch. A
 metadata-only change (such as `last_edited_time`) does not create a revision;
 an A → B → A content sequence does create three chronological revisions.
 
-This is an ingestion foundation only. It does not yet submit source data to
-Meeting Intelligence, create Linear work, or mutate a Notion page. The later
-reconciliation slice must consume persisted source snapshots through Luma's
-public Meeting Intelligence interface and keep Notion-generated action items as
-proposals pending Human Judgment.
+`MeetingNotesIngestion` consumes a persisted observed source revision and
+submits a provider-neutral `meeting-imported-from-source` Observation through
+Luma's public Meeting Intelligence Interface. It records source-section
+Evidence and turns explicit unchecked/checked source Action Item blocks into
+Imported Action Item Candidates. Their original wording, modal language,
+source-block reference, source revision, and owner/deadline uncertainty remain
+intact; they are not silently promoted to confirmed work.
+Recognized work-item mentions retain the configured WorkProvider identity with
+their opaque external identifier, so identically named items cannot collide
+across providers.
+
+When a relative deadline identifies one calendar date, ingestion normalizes it
+from an offset-bearing meeting or capture instant in the workspace timezone.
+Offset-less or insufficient source timing remains explicitly ambiguous rather
+than depending on the host machine timezone.
+
+Each import carries an explicit source-section manifest. Meeting Intelligence
+accepts the source Observation, its manifest-bound Evidence, and its revised
+candidate state in one short database transaction. An unavailable Action Items
+section is retained as partial source state rather than treated as deletion of
+the last readable candidates; review uses the latest readable source revision,
+not arrival order.
+
+The source Observation also carries a flattened immutable Action Item block
+manifest. A candidate can only cite a declared Notion block whose exact text
+and completion state match its source Evidence.
+
+Meeting Intelligence independently re-derives a candidate's language,
+modality, owner wording, and mentioned work identifiers from that exact block
+text, then binds identifiers to the declared source WorkProvider. It rejects self-asserted stronger semantics,
+unbound project/component hints, or a document reference that does not match
+the Notion source identity.
+
+In the executable, `MeetingNotesSync` cursor-drains this source on startup and
+at the configured interval. It deliberately replays unchanged ledger revisions:
+the ledger capture and Meeting Intelligence delivery are separate durable steps,
+so a process interruption after capture must not drop a source revision. A
+ledger-backed source verifier admits only the byte-for-byte deterministic
+projection of a persisted revision; a structurally valid payload submitted
+directly to Meeting Intelligence is rejected.
+
+After—and only after—a complete, fully readable cursor drain, the Notion source
+compares the observed Meeting Notes roots with immutable ledger heads. A root
+that is absent becomes a new immutable `removed` tombstone revision and is
+delivered through the same verifier and ingestion path. That removes its current
+Action Item Candidates and invalidates suggested reconciliation Intents; an
+already approved Intent is stopped at execution with a stale-source receipt.
+Tombstones replay idempotently until delivered. Partial enumeration, a
+permission error, or an unreadable Meeting Note never implies deletion: those
+remain unavailable/partial source states and preserve the last readable
+candidates.
+
+This remains mutation-free. Source import does not create Linear work or mutate
+a Notion page. The reconciliation slice may only produce reviewable proposals
+until Human Judgment and an approved Follow-up Intent authorize a later
+execution.
 
 ## Non-mutating Live Test
 

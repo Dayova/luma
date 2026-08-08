@@ -1,4 +1,6 @@
 import type {
+  ActionItemReconciliationReview,
+  CurrentActionItemReconciliationReview,
   MeetingConclusion,
   MeetingId,
   MeetingIntelligenceError,
@@ -57,6 +59,12 @@ export type MeetingQuery =
   | {
       type: "participant-brief";
       participantId: PersonId;
+    }
+  | {
+      type: "action-item-reconciliation-review";
+    }
+  | {
+      type: "action-item-reconciliation-history";
     };
 
 export type QueryMeeting = {
@@ -91,6 +99,14 @@ export type MeetingQueryResult =
   | {
       type: "participant-brief";
       brief: ParticipantBrief;
+    }
+  | {
+      type: "action-item-reconciliation-review";
+      reviews: CurrentActionItemReconciliationReview[];
+    }
+  | {
+      type: "action-item-reconciliation-history";
+      reviews: ActionItemReconciliationReview[];
     };
 
 export type ConcludeMeeting = {

@@ -134,6 +134,14 @@ export function createNotionKnowledgeProvider(
       });
       return toExternalReference(document, providerId);
     },
+    async findCreatedDocumentByIdempotencyKey(idempotencyKey) {
+      const existing = await api.findByIdempotencyKey({
+        dataSourceId: config.meetingsDataSourceId,
+        idempotencyKey,
+        titleProperty
+      });
+      return existing ? toExternalReference(existing, providerId) : null;
+    },
     async updateDocument(
       id: string,
       input: UpdateDocumentInput
@@ -220,6 +228,17 @@ class NotionSdkApi implements NotionApi {
         ...(cursor ? { start_cursor: cursor } : {})
       });
       const pages = result.results.filter(isFullPage);
+
+      if (
+        result.request_status?.type === "incomplete" ||
+        pages.length !== result.results.length
+      ) {
+        throw new NotionKnowledgeProviderError(
+          "notion-idempotency-probe-incomplete",
+          "Notion returned incomplete page coverage while checking a Luma execution marker"
+        );
+      }
+
       const documents = await Promise.all(
         pages.map((page) => this.toApiDocument(page, input.titleProperty))
       );
@@ -330,11 +349,21 @@ class NotionSdkApi implements NotionApi {
       sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
       ...(input.cursor ? { start_cursor: input.cursor } : {})
     });
+    const pages = result.results.filter(isFullPage);
+
+    if (
+      result.request_status?.type === "incomplete" ||
+      pages.length !== result.results.length
+    ) {
+      throw new NotionKnowledgeProviderError(
+        "notion-change-scan-incomplete",
+        "Notion returned incomplete page coverage while listing Knowledge changes"
+      );
+    }
+
     return {
       documents: await Promise.all(
-        result.results
-          .filter(isFullPage)
-          .map((page) => this.toApiDocument(page, input.titleProperty))
+        pages.map((page) => this.toApiDocument(page, input.titleProperty))
       ),
       nextCursor: result.next_cursor
     };
@@ -345,6 +374,9 @@ class NotionSdkApi implements NotionApi {
     titleProperty: string
   ): Promise<NotionApiDocument> {
     const markdown = await this.client.pages.retrieveMarkdown({ page_id: page.id });
+
+    assertCompleteNotionMarkdown(page.id, markdown);
+
     const updatedBy = isFullUser(page.last_edited_by)
       ? {
           id: page.last_edited_by.id,
@@ -362,6 +394,20 @@ class NotionSdkApi implements NotionApi {
       updatedBy
     };
   }
+}
+
+export function assertCompleteNotionMarkdown(
+  pageId: string,
+  markdown: { truncated: boolean; unknown_block_ids: string[] }
+): void {
+  if (!markdown.truncated && markdown.unknown_block_ids.length === 0) {
+    return;
+  }
+
+  throw new NotionKnowledgeProviderError(
+    "notion-markdown-incomplete",
+    `Notion page ${pageId} returned incomplete Markdown; it cannot be used to prove a Luma execution marker is absent`
+  );
 }
 
 function readPageTitle(page: PageObjectResponse, titleProperty: string): string {

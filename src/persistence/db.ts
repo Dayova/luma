@@ -22,6 +22,12 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       created_at TEXT NOT NULL
     );
 
+    -- Establishes one immutable workspace configuration before concurrent
+    -- first deliveries can interpret source-derived deadlines differently.
+    CREATE TABLE IF NOT EXISTS workspace_config_locks (
+      workspace_id TEXT PRIMARY KEY
+    );
+
     CREATE TABLE IF NOT EXISTS meetings (
       workspace_id TEXT NOT NULL,
       meeting_id TEXT NOT NULL,
@@ -31,6 +37,14 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (workspace_id, meeting_id),
       FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+    );
+
+    -- A durable per-Meeting mutex lets transactions serialize even before the
+    -- first accepted Observation creates its Meeting state row.
+    CREATE TABLE IF NOT EXISTS meeting_state_locks (
+      workspace_id TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, meeting_id)
     );
 
     CREATE TABLE IF NOT EXISTS meeting_observations (
@@ -148,6 +162,7 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       source_reference_json TEXT NOT NULL,
       current_revision INTEGER NOT NULL DEFAULT 0,
       current_content_hash TEXT,
+      current_observation_generation INTEGER NOT NULL DEFAULT 0,
       first_observed_at TEXT NOT NULL,
       last_observed_at TEXT NOT NULL,
       last_provider_version TEXT,
@@ -201,6 +216,9 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS meeting_observed_at TEXT;
 
+    ALTER TABLE observed_sources
+      ADD COLUMN IF NOT EXISTS current_observation_generation INTEGER NOT NULL DEFAULT 0;
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS start_message_sent_at TEXT;
 
@@ -244,5 +262,8 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
 
     ALTER TABLE discord_meeting_threads
       ALTER COLUMN thread_url DROP NOT NULL;
+
+    ALTER TABLE follow_up_executions
+      ADD COLUMN IF NOT EXISTS execution_lease_id TEXT;
   `);
 }

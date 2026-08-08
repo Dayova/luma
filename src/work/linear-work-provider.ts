@@ -114,6 +114,13 @@ export function createLinearWorkProvider(config: LinearWorkProviderConfig): Work
       });
       return toExternalReference(issue, providerId);
     },
+    async findCreatedWorkItemByIdempotencyKey(idempotencyKey) {
+      const existing = await api.findIssueByIdempotencyKey({
+        teamId: config.teamId,
+        idempotencyKey
+      });
+      return existing ? toExternalReference(existing, providerId) : null;
+    },
     async updateWorkItem(id, input) {
       const issue = await api.updateIssue(id, toLinearUpdateInput(config.teamId, input));
       return toExternalReference(issue, providerId);
@@ -359,7 +366,7 @@ function toLinearUpdateInput(
 
 function toWorkItem(issue: LinearApiIssue, providerId: string): WorkItem {
   return {
-    id: issue.identifier,
+    id: issue.id,
     providerId,
     externalId: issue.identifier,
     title: issue.title,

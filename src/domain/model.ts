@@ -73,6 +73,261 @@ export type ExternalUser = {
   username?: string;
 };
 
+export type ImportedMeetingSourceCompleteness =
+  | "complete"
+  | "partial"
+  | "not-ready"
+  | "failed"
+  /** A fully readable canonical source scan confirmed this source root is gone. */
+  | "removed";
+
+export type ImportedMeetingSourceCompletenessReason = {
+  code: string;
+  message: string;
+  sourceBlockId?: string;
+};
+
+export type ImportedMeetingSource = {
+  providerId: string;
+  sourceKind: "meeting-note";
+  sourceObjectId: string;
+  parentObjectId: string | null;
+  sourceRevision: number;
+  contentHash: string;
+  providerVersion: string | null;
+  title: string | null;
+  externalReference: ExternalReference;
+  /** Provider whose opaque work-item identifiers are meaningful in this source. */
+  workItemProviderId: string;
+  completeness: ImportedMeetingSourceCompleteness;
+  completenessReasons: ImportedMeetingSourceCompletenessReason[];
+  actionItemsAvailability: "available" | "unavailable" | "unknown";
+  /**
+   * Immutable offset-bearing instant used for relative Action Item deadlines.
+   * Null means the source could preserve a phrase but could not normalize it.
+   */
+  deadlineReferenceAt: string | null;
+  capturedAt: string;
+};
+
+export type ImportedMeetingSourceSection = {
+  section: "summary" | "action-items-and-notes" | "transcript";
+  sourceBlockId: string;
+  excerpt: string;
+};
+
+/**
+ * Immutable source material for one actionable block. Candidates may only
+ * describe a block declared by the same source Observation.
+ */
+export type ImportedActionItemSourceBlock = {
+  sourceBlockId: string;
+  excerpt: string;
+  completion: "open" | "completed";
+};
+
+export type ImportedActionItemModality = {
+  kind: "commitment" | "request" | "suggestion" | "conditional" | "question" | "unknown";
+  sourceForm: string | null;
+};
+
+export type ImportedActionItemCandidateOwner =
+  | {
+      state: "known";
+      personId: PersonId;
+      sourceText: string;
+    }
+  | {
+      state: "unmapped";
+      sourceText: string;
+    }
+  | {
+      state: "unspecified";
+      sourceText: null;
+    }
+  | {
+      state: "ambiguous";
+      sourceText: string;
+    };
+
+export type ImportedWorkItemReference = {
+  providerId: string;
+  objectType: "work-item";
+  externalId: string;
+};
+
+export type ImportedActionItemCandidate = {
+  id: string;
+  lineageKey: string;
+  originalText: string;
+  description: string;
+  language: UtteranceLanguage;
+  modality: ImportedActionItemModality;
+  completion: "open" | "completed";
+  owner: ImportedActionItemCandidateOwner;
+  deadline: {
+    originalPhrase: string | null;
+    normalizedDate: string | null;
+    confidence: DueDateConfidence;
+    timezone: string;
+  };
+  mentionedWorkItemReferences: ImportedWorkItemReference[];
+  projectHints: string[];
+  componentHints: string[];
+  source: {
+    source: ImportedMeetingSource;
+    sourceBlockId: string;
+    sourceSection: "action-items-and-notes";
+    sourceExcerpt: string;
+  };
+  evidence: EvidenceReference[];
+};
+
+export type ReconciliationWorkItemSnapshot = {
+  providerId: string;
+  /** Opaque provider lookup identity; distinct from a human-facing external ID. */
+  lookupId: string;
+  externalId: string;
+  title: string;
+  description: string;
+  status: "backlog" | "planned" | "active" | "blocked" | "completed" | "cancelled";
+  assignees: ExternalUser[];
+  dueDate: string | null;
+  labels: string[];
+  projectId: string | null;
+  parentId: string | null;
+  url: string;
+  updatedAt: string;
+};
+
+export type ActionItemReconciliationMatchSignal = {
+  kind:
+    | "exact-id"
+    | "semantic"
+    | "project"
+    | "component"
+    | "ownership"
+    | "activity"
+    | "prior-mapping";
+  score: number;
+  detail: string;
+  workItem?: {
+    providerId: string;
+    externalId: string;
+  };
+};
+
+export type ActionItemReconciliationSearchReceipt = {
+  providerId: string;
+  query: string;
+  status: "completed" | "failed" | "not-configured";
+  workItems: ReconciliationWorkItemSnapshot[];
+  failure: string | null;
+};
+
+export type ActionItemReconciliationOutcome =
+  | {
+      type: "link-existing";
+      workItem: ReconciliationWorkItemSnapshot;
+      rationale: string;
+    }
+  | {
+      type: "update-existing";
+      workItem: ReconciliationWorkItemSnapshot;
+      rationale: string;
+    }
+  | {
+      type: "create-new";
+      rationale: string;
+    }
+  | {
+      type: "reject-not-work";
+      rationale: string;
+    }
+  | {
+      type: "needs-clarification";
+      rationale: string;
+    };
+
+export type ActionItemReconciliationResolution =
+  | {
+      type: "accept-proposal";
+    }
+  | {
+      type: "reject-proposal";
+      reason?: string;
+    }
+  | {
+      type: "select-existing";
+      providerId: string;
+      externalId: string;
+      action: "link-existing" | "update-existing";
+    }
+  | {
+      type: "select-create-new";
+    };
+
+/**
+ * An immutable, evidence-backed proposal. It never performs a WorkProvider
+ * mutation; an approved Follow-up Intent owns any later write.
+ */
+export type ActionItemReconciliationReview = {
+  id: string;
+  policyVersion: string;
+  attempt: number;
+  trigger: "initial-source-import" | "catalog-retry" | "human-refresh";
+  /** A retry is safe only when the catalog was unavailable or failed to read. */
+  retryable: boolean;
+  /**
+   * The earliest time an automatic retry may re-read a failed Work Catalog.
+   * Human-triggered refreshes deliberately bypass this schedule. `null` means
+   * the review did not fail while reading a configured catalog.
+   */
+  automaticRetryNotBefore: string | null;
+  catalogProviderId: string;
+  candidateId: string;
+  candidateLineageKey: string;
+  candidate: ImportedActionItemCandidate;
+  /** Source and hydrated canonical-work Evidence that grounds this proposal. */
+  evidence: EvidenceReference[];
+  searches: ActionItemReconciliationSearchReceipt[];
+  matchSignals: ActionItemReconciliationMatchSignal[];
+  outcome: ActionItemReconciliationOutcome;
+  reviewStatus: "proposed";
+  reviewedAt: string;
+};
+
+/** An immutable Human Judgment that resolves one immutable review proposal. */
+export type ActionItemReconciliationHumanResolution = {
+  id: string;
+  reviewId: string;
+  candidateId: string;
+  participantId: PersonId;
+  resolution: ActionItemReconciliationResolution;
+  outcome: ActionItemReconciliationOutcome;
+  evidence: EvidenceReference;
+  resolvedAt: string;
+};
+
+/** Immutable receipt linking a successful new work item to its source lineage. */
+export type ActionItemReconciliationCreatedWorkMapping = {
+  id: string;
+  reviewId: string;
+  candidateId: string;
+  candidateLineageKey: string;
+  externalReference: ExternalReference;
+  recordedAt: string;
+};
+
+/** The reconciliation query's current projection; it never mutates its proposal. */
+export type CurrentActionItemReconciliationReview = {
+  proposal: ActionItemReconciliationReview;
+  effectiveOutcome: ActionItemReconciliationOutcome;
+  status: "proposed" | "blocked-by-conflict" | "human-resolved";
+  conflictingCandidateIds: string[];
+  humanResolution: ActionItemReconciliationHumanResolution | null;
+};
+
 export type ObservationBase = {
   observationId: ObservationId;
   workspaceId: WorkspaceId;
@@ -129,6 +384,15 @@ export type AgendaChanged = ObservationBase & {
   agenda: AgendaItem[];
 };
 
+export type MeetingImportedFromSource = ObservationBase & {
+  type: "meeting-imported-from-source";
+  source: ImportedMeetingSource;
+  sourceSections: ImportedMeetingSourceSection[];
+  actionItemBlocks: ImportedActionItemSourceBlock[];
+  evidence: EvidenceReference[];
+  candidates: ImportedActionItemCandidate[];
+};
+
 export type MeetingItemCorrection = {
   statement?: string;
   ownerId?: PersonId | null;
@@ -165,6 +429,16 @@ export type HumanJudgment =
       kind: "split";
       meetingItemId: MeetingItemId;
       replacements: MeetingItemDraft[];
+    }
+  | {
+      kind: "resolve-action-item-reconciliation";
+      reviewId: string;
+      resolution: ActionItemReconciliationResolution;
+    }
+  | {
+      /** Ask Luma to re-read canonical work after a Human-reviewed stale target. */
+      kind: "refresh-action-item-reconciliation";
+      reviewId: string;
     };
 
 export type HumanJudgmentRecorded = ObservationBase & {
@@ -189,6 +463,8 @@ export type FollowUpIntentRejected = ObservationBase & {
 export type FollowUpExecutionRecorded = ObservationBase & {
   type: "follow-up-execution-recorded";
   intentId: FollowUpIntentId;
+  /** Opaque one-time capability issued by Follow-up Execution's DB claim. */
+  executionLeaseId: string;
   outcome:
     | {
         status: "succeeded";
@@ -222,6 +498,7 @@ export type MeetingObservation =
   | ParticipantJoined
   | ParticipantLeft
   | AgendaChanged
+  | MeetingImportedFromSource
   | HumanJudgmentRecorded
   | FollowUpIntentApproved
   | FollowUpIntentRejected
@@ -332,10 +609,14 @@ export type FollowUpIntentStatus =
   | "suggested"
   | "approved"
   | "rejected"
+  /** The source proposal was superseded before this intent could execute. */
+  | "invalidated"
   | "executing"
   | "succeeded"
   | "partially-succeeded"
-  | "failed";
+  | "failed"
+  /** A provider write may have happened but Luma could not prove its outcome. */
+  | "requires-manual-recovery";
 
 export type RecordMeetingIntent = {
   id: FollowUpIntentId;
@@ -356,6 +637,13 @@ export type UpdateKnowledgeIntent = {
   provenance: Provenance;
 };
 
+/** Links a write-capable follow-up intent to the Human-resolved source proposal it owns. */
+export type ActionItemReconciliationIntentBinding = {
+  reviewId: string;
+  candidateId: string;
+  candidateLineageKey: string;
+};
+
 export type CreateWorkItemIntent = {
   id: FollowUpIntentId;
   type: "create-work-item";
@@ -364,6 +652,9 @@ export type CreateWorkItemIntent = {
   assigneeId: PersonId | null;
   mentionPersonIds?: PersonId[];
   dueDate: string | null;
+  /** Optional for legacy/general intents; reconciliation supplies an opaque provider ID. */
+  providerId?: string;
+  reconciliation?: ActionItemReconciliationIntentBinding;
   relatedMeetingItemIds: MeetingItemId[];
   status: FollowUpIntentStatus;
   provenance: Provenance;
@@ -373,7 +664,13 @@ export type UpdateWorkItemIntent = {
   id: FollowUpIntentId;
   type: "update-work-item";
   externalReference: ExternalReference;
-  description: string;
+  /** Optional for generic intents; reconciliation preserves the hydrated provider lookup ID. */
+  providerObjectId?: string;
+  /** Omitted means preserve the canonical work item's existing description. */
+  description?: string;
+  /** Omitted means leave the provider due date unchanged. */
+  dueDate?: string | null;
+  reconciliation?: ActionItemReconciliationIntentBinding;
   relatedMeetingItemIds: MeetingItemId[];
   status: FollowUpIntentStatus;
   provenance: Provenance;
@@ -400,7 +697,7 @@ export type MeetingState = {
   workspaceId: WorkspaceId;
   meetingId: MeetingId;
   revision: number;
-  lifecycle: "scheduled" | "live" | "ended";
+  lifecycle: "scheduled" | "live" | "ended" | "imported";
   title: string;
   participants: MeetingParticipant[];
   agenda: AgendaItem[];
@@ -411,7 +708,19 @@ export type MeetingState = {
   actionItems: ActionItem[];
   openQuestions: OpenQuestion[];
   risks: Risk[];
+  /**
+   * Stable Meeting item identities whose current representation was confirmed,
+   * rejected, or corrected by a Human. Future AI proposals may not overwrite
+   * these items; a later Human Judgment remains the authoritative change path.
+   */
+  humanJudgmentItemIds: MeetingItemId[];
   followUpIntentions: FollowUpIntent[];
+  importedSources: ImportedMeetingSource[];
+  importedActionItemCandidates: ImportedActionItemCandidate[];
+  currentImportedActionItemCandidateIds: string[];
+  actionItemReconciliationReviews: ActionItemReconciliationReview[];
+  actionItemReconciliationHumanResolutions: ActionItemReconciliationHumanResolution[];
+  actionItemReconciliationCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[];
   lastObservationAt: string;
   lastAnalyzedAt: string | null;
 };
@@ -540,6 +849,12 @@ export type MeetingIntelligenceError =
     }
   | {
       code: "analysis-temporarily-unavailable";
+      retryable: true;
+    }
+  | {
+      code: "source-verification-unavailable";
+      observationId: ObservationId;
+      message: string;
       retryable: true;
     }
   | {

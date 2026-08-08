@@ -9,13 +9,16 @@ import {
   type PartialBlockObjectResponse
 } from "@notionhq/client";
 import type {
+  MeetingNotesCompleteScan,
   MeetingNotesScan,
   MeetingNotesScanPartialReason,
   MeetingNotesSource
 } from "./meeting-notes-source.js";
 import type {
   CapturedMeetingNoteBlock,
+  ObservedSourceHead,
   ObservedSourceLedger,
+  ObservedSourceRevision,
   RawMeetingNoteSection,
   RawMeetingNoteSnapshot,
   SourcePartialReason
@@ -114,15 +117,97 @@ export class NotionMeetingNotesReadError extends Error {
   }
 }
 
+type NotionMeetingNotesScanSession = {
+  workspaceId: string;
+  initialHeads: ObservedSourceHead[];
+  observedSourceObjectIds: Set<string>;
+  fullyReadable: boolean;
+};
+
 export function createNotionMeetingNotesSource(
   config: NotionMeetingNotesSourceConfig
 ): MeetingNotesSource {
   const api = config.api ?? createNotionSdkMeetingNotesApi(config);
   const providerId = config.providerId ?? "notion";
   const now = config.now ?? (() => new Date());
+  const scanSessionsByCursor = new Map<string, NotionMeetingNotesScanSession>();
+
+  const beginScanSession = async (
+    workspaceId: string
+  ): Promise<NotionMeetingNotesScanSession> => {
+    // A new first page abandons any incomplete prior cursor drain. That prior
+    // scan can no longer authorize an absence conclusion.
+    scanSessionsByCursor.clear();
+
+    return {
+      workspaceId,
+      initialHeads: await config.ledger.listCurrent({
+        workspaceId,
+        providerId,
+        sourceKind: "meeting-note"
+      }),
+      observedSourceObjectIds: new Set(),
+      fullyReadable: true
+    };
+  };
+
+  const consumeScanSession = (
+    workspaceId: string,
+    cursor: string
+  ): NotionMeetingNotesScanSession | null => {
+    const session = scanSessionsByCursor.get(cursor) ?? null;
+    scanSessionsByCursor.delete(cursor);
+
+    return session?.workspaceId === workspaceId ? session : null;
+  };
+
+  const completeScan = (
+    session: NotionMeetingNotesScanSession
+  ): MeetingNotesCompleteScan => {
+    let consumed = false;
+
+    return {
+      async reconcileAbsent() {
+        if (consumed) {
+          throw new Error(
+            "A completed Meeting Notes scan may reconcile absence only once"
+          );
+        }
+
+        consumed = true;
+
+        if (!session.fullyReadable) {
+          throw new Error("An incomplete Meeting Notes scan cannot reconcile absence");
+        }
+
+        const tombstones: ObservedSourceRevision[] = [];
+
+        for (const previous of session.initialHeads) {
+          if (session.observedSourceObjectIds.has(previous.source.sourceObjectId)) {
+            continue;
+          }
+
+          const tombstone = await config.ledger.recordTombstone({
+            workspaceId: session.workspaceId,
+            previous,
+            observedAt: now().toISOString()
+          });
+
+          if (tombstone) {
+            tombstones.push(tombstone);
+          }
+        }
+
+        return tombstones;
+      }
+    };
+  };
 
   return {
     async scan(input): Promise<MeetingNotesScan> {
+      const session = input.cursor
+        ? consumeScanSession(input.workspaceId, input.cursor)
+        : await beginScanSession(input.workspaceId);
       const page = await api.listDataSourcePages({
         dataSourceId: config.meetingsDataSourceId,
         ...(input.cursor ? { cursor: input.cursor } : {}),
@@ -157,6 +242,20 @@ export function createNotionMeetingNotesSource(
           continue;
         }
 
+        if (
+          rootBlocks.some(
+            (block) => block.type === "unknown" || block.type === "unsupported"
+          )
+        ) {
+          partialReasons.push({
+            code: "unreadable-page",
+            message:
+              "Notion returned unreadable root block content; Meeting Notes root absence cannot be inferred",
+            pageId: meetingPage.id,
+            retryable: true
+          });
+        }
+
         const sourceBlocks = rootBlocks.filter(isMeetingNotesBlock);
 
         for (const sourceBlock of sourceBlocks) {
@@ -189,16 +288,53 @@ export function createNotionMeetingNotesSource(
         }
       }
 
-      return {
+      const completeness =
+        partialReasons.length > 0 ||
+        records.some((record) => record.snapshot.completeness.state !== "complete")
+          ? "partial"
+          : "complete";
+      const scan: MeetingNotesScan = {
         records,
         nextCursor: page.nextCursor,
-        completeness:
-          partialReasons.length > 0 ||
-          records.some((record) => record.snapshot.completeness.state !== "complete")
-            ? "partial"
-            : "complete",
+        completeness,
         partialReasons
       };
+
+      if (!session) {
+        return scan;
+      }
+
+      for (const record of records) {
+        session.observedSourceObjectIds.add(record.source.sourceObjectId);
+      }
+
+      // Pagination is expected for an otherwise readable scan. It prevents
+      // issuance of the capability until the final cursor page, but it must
+      // not poison the whole session once that page is successfully drained.
+      const hasUnreadableMaterial =
+        partialReasons.some((reason) => reason.code !== "pagination-pending") ||
+        records.some((record) => record.snapshot.completeness.state !== "complete");
+
+      if (hasUnreadableMaterial) {
+        session.fullyReadable = false;
+      }
+
+      if (page.nextCursor) {
+        const conflictingSession = scanSessionsByCursor.get(page.nextCursor);
+
+        if (conflictingSession) {
+          // Interleaved cursors cannot prove which source roots each caller
+          // actually observed. Disable absence authority for both scans.
+          session.fullyReadable = false;
+          conflictingSession.fullyReadable = false;
+        } else {
+          scanSessionsByCursor.set(page.nextCursor, session);
+        }
+      } else if (session.fullyReadable) {
+        scan.completeScan = completeScan(session);
+      }
+
+      return scan;
     }
   };
 }

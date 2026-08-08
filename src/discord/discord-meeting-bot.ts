@@ -7,7 +7,10 @@ import type {
   UtteranceLanguage,
   WorkspaceConfig
 } from "../domain/model.js";
-import type { FollowUpExecution } from "../follow-up-execution/interface.js";
+import type {
+  ExecuteFollowUpResult,
+  FollowUpExecution
+} from "../follow-up-execution/interface.js";
 import type { IdentityDirectory } from "../identity/interface.js";
 import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
@@ -42,6 +45,10 @@ export type DiscordCommand =
     })
   | (DiscordCommandBase & {
       type: "approve";
+      intentId: string;
+    })
+  | (DiscordCommandBase & {
+      type: "recover";
       intentId: string;
     })
   | (DiscordCommandBase & {
@@ -220,6 +227,8 @@ async function handleCommand(
       return recordMeetingNote(input, command, now);
     case "approve":
       return approveFollowUp(input, command, now);
+    case "recover":
+      return recoverFollowUp(input, command);
     case "reject":
       return rejectFollowUp(input, command, now);
     case "stop":
@@ -317,7 +326,7 @@ async function approveFollowUp(
     return { content: "Follow-up execution is not configured." };
   }
 
-  await input.meetingIntelligence.observe({
+  const approval = await input.meetingIntelligence.observe({
     workspace: input.workspace,
     observations: [
       {
@@ -332,6 +341,18 @@ async function approveFollowUp(
       }
     ]
   });
+
+  const approvalError = approval.errors[0];
+
+  if (approvalError) {
+    return {
+      content:
+        approvalError.code === "invalid-observation"
+          ? `Follow-up cannot be approved: ${approvalError.message}`
+          : "Follow-up cannot be approved because its Meeting state is unavailable."
+    };
+  }
+
   const approvedSnapshot = await queryMeetingSnapshot(input, context.meetingThread);
   const approvedIntent = approvedSnapshot.followUpIntentions.find(
     (candidate) => candidate.id === intent.id
@@ -341,10 +362,16 @@ async function approveFollowUp(
     throw new Error(`Approved Follow-up Intent disappeared: ${intent.id}`);
   }
 
+  if (approvedIntent.status !== "approved") {
+    return {
+      content: `Follow-up was not approved: ${approvedIntent.id} is ${approvedIntent.status}.`
+    };
+  }
+
   const result = await input.followUpExecution.execute({
     workspace: input.workspace,
     meetingId: context.meetingThread.meeting_id,
-    intent: approvedIntent
+    intentId: approvedIntent.id
   });
   await publishMeetingEvents(input, {
     workspaceId: context.meetingThread.workspace_id,
@@ -367,6 +394,77 @@ async function approveFollowUp(
     content: firstReference
       ? `Follow-up completed: ${firstReference.url}`
       : `Follow-up completed: ${intent.id}`
+  };
+}
+
+async function recoverFollowUp(
+  input: CreateDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "recover" }>
+): Promise<DiscordCommandResponse> {
+  const context = await resolveActiveMeetingActor(input, command);
+
+  if ("response" in context) {
+    return context.response;
+  }
+
+  const snapshot = await queryMeetingSnapshot(input, context.meetingThread);
+  const intent = snapshot.followUpIntentions.find(
+    (candidate) => candidate.id === command.intentId
+  );
+
+  if (!intent) {
+    return { content: `Follow-up Intent not found: ${command.intentId}` };
+  }
+
+  if (intent.status !== "approved") {
+    return {
+      content:
+        intent.status === "requires-manual-recovery"
+          ? `Follow-up already requires manual provider inspection: ${intent.id}`
+          : `Follow-up is not recoverable: ${intent.id} is ${intent.status}.`
+    };
+  }
+
+  if (!input.followUpExecution) {
+    return { content: "Follow-up execution is not configured." };
+  }
+
+  let result: ExecuteFollowUpResult;
+
+  try {
+    result = await input.followUpExecution.recover({
+      workspace: input.workspace,
+      meetingId: context.meetingThread.meeting_id,
+      intentId: intent.id
+    });
+  } catch (error) {
+    return {
+      content: `Follow-up recovery could not run: ${
+        error instanceof Error ? error.message : "unknown recovery error"
+      }`
+    };
+  }
+
+  await publishMeetingEvents(input, {
+    workspaceId: context.meetingThread.workspace_id,
+    meetingId: context.meetingThread.meeting_id,
+    events: result.events,
+    mentionPersonIds: relevantPeople(intent, context.actor.personId),
+    idempotencyKeyPrefix: result.idempotencyKey
+  });
+
+  if (result.observation.outcome.status === "failed") {
+    return {
+      content: `Follow-up recovery could not prove the provider outcome: ${result.observation.outcome.message}`
+    };
+  }
+
+  const firstReference = result.observation.outcome.externalReferences[0];
+
+  return {
+    content: firstReference
+      ? `Follow-up recovered: ${firstReference.url}`
+      : `Follow-up recovered: ${intent.id}`
   };
 }
 

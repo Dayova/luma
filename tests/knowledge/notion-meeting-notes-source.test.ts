@@ -11,7 +11,10 @@ import {
   type NotionMeetingNotesApi,
   type NotionMeetingNotesBlock
 } from "../../src/knowledge/notion-meeting-notes-source.js";
-import { createObservedSourceLedger } from "../../src/knowledge/observed-source-ledger.js";
+import {
+  createObservedSourceLedger,
+  type ObservedSourceLedger
+} from "../../src/knowledge/observed-source-ledger.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 
 function block(
@@ -182,6 +185,29 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
     });
   }
 }
+
+function emptyPaginatedApi(): NotionMeetingNotesApi {
+  return {
+    listDataSourcePages: (input) =>
+      Promise.resolve(
+        input.cursor
+          ? { pages: [], nextCursor: null, incomplete: false }
+          : { pages: [], nextCursor: "shared-cursor", incomplete: false }
+      ),
+    listBlockChildren: () => Promise.resolve({ blocks: [], nextCursor: null }),
+    retrievePageMarkdown: () =>
+      Promise.resolve({ content: "", truncated: false, unknownBlockIds: [] })
+  };
+}
+
+const emptyObservedSourceLedger: ObservedSourceLedger = {
+  record: async () => {
+    throw new Error("The empty paginated API never records a source");
+  },
+  get: async () => null,
+  listCurrent: async () => [],
+  recordTombstone: async () => null
+};
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
@@ -450,6 +476,70 @@ describe("Notion Meeting Notes source", () => {
     }
   });
 
+  it("keeps paginated source scans isolated when Notion reuses a cursor across workspaces", async () => {
+    const database = await createPgliteDatabase();
+    const source = createNotionMeetingNotesSource({
+      api: emptyPaginatedApi(),
+      ledger: createObservedSourceLedger({ database }),
+      meetingsDataSourceId: "dayova-meetings"
+    });
+
+    try {
+      await source.scan({ workspaceId: "workspace_alpha" });
+      await source.scan({ workspaceId: "workspace_beta" });
+
+      const alpha = await source.scan({
+        workspaceId: "workspace_alpha",
+        cursor: "shared-cursor"
+      });
+      const beta = await source.scan({
+        workspaceId: "workspace_beta",
+        cursor: "shared-cursor"
+      });
+
+      expect(alpha.completeScan).toBeDefined();
+      expect(beta.completeScan).toBeDefined();
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("expires and bounds abandoned paginated source scans without granting absence authority", async () => {
+    let nowMs = Date.parse("2026-08-08T10:00:00.000Z");
+    const source = createNotionMeetingNotesSource({
+      api: emptyPaginatedApi(),
+      ledger: emptyObservedSourceLedger,
+      meetingsDataSourceId: "dayova-meetings",
+      now: () => new Date(nowMs)
+    });
+
+    await source.scan({ workspaceId: "workspace_expired" });
+    nowMs += 10 * 60 * 1000;
+
+    const expired = await source.scan({
+      workspaceId: "workspace_expired",
+      cursor: "shared-cursor"
+    });
+
+    expect(expired.completeScan).toBeUndefined();
+
+    for (let index = 0; index <= 100; index += 1) {
+      await source.scan({ workspaceId: `workspace_${index}` });
+    }
+
+    const evicted = await source.scan({
+      workspaceId: "workspace_0",
+      cursor: "shared-cursor"
+    });
+    const retained = await source.scan({
+      workspaceId: "workspace_100",
+      cursor: "shared-cursor"
+    });
+
+    expect(evicted.completeScan).toBeUndefined();
+    expect(retained.completeScan).toBeDefined();
+  });
+
   it("never infers root absence when Notion returns an unreadable root block", async () => {
     const database = await createPgliteDatabase();
     const baseApi = new FakeNotionMeetingNotesApi();
@@ -572,6 +662,12 @@ describe("Notion Meeting Notes source", () => {
         ])
       );
       expect(scan.completeness).toBe("partial");
+      expect(scan.partialReasons).toContainEqual(
+        expect.objectContaining({
+          code: "source-record-incomplete",
+          sourceObjectId: "meeting-notes-block-1"
+        })
+      );
     } finally {
       await database.close();
     }

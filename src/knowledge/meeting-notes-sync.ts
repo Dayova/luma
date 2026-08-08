@@ -217,24 +217,51 @@ async function drainSource(
     const incompleteRecords = page.records.filter(
       (record) => record.snapshot.completeness.state !== "complete"
     );
-    const incompleteRecordReasons: MeetingNotesScanPartialReason[] =
-      incompleteRecords.map((record) => ({
+    const sourceObjectIdsWithReportedIncompleteness = new Set(
+      page.partialReasons.flatMap((reason) =>
+        reason.code === "source-record-incomplete" && reason.sourceObjectId
+          ? [reason.sourceObjectId]
+          : []
+      )
+    );
+    const incompleteRecordReasons: MeetingNotesScanPartialReason[] = incompleteRecords
+      .filter(
+        (record) =>
+          !sourceObjectIdsWithReportedIncompleteness.has(record.source.sourceObjectId)
+      )
+      .map((record) => ({
         code: "source-record-incomplete",
         message:
           "A Meeting Notes source root was not fully readable; source absence cannot be inferred.",
         sourceObjectId: record.source.sourceObjectId,
         retryable: true
       }));
+    const unexplainedPartialReasons: MeetingNotesScanPartialReason[] =
+      page.completeness === "partial" &&
+      page.partialReasons.length === 0 &&
+      incompleteRecords.length === 0
+        ? [
+            {
+              code: "source-enumeration-incomplete",
+              message: "Meeting Notes source reported partial coverage without a reason.",
+              retryable: true
+            }
+          ]
+        : [];
 
     const pageIsNotFullyReadable =
       unresolvedPartialReasons.length > 0 ||
       incompleteRecords.length > 0 ||
-      (page.completeness === "partial" && page.partialReasons.length === 0);
+      unexplainedPartialReasons.length > 0;
 
     if (pageIsNotFullyReadable) {
       completeness = "partial";
       fullyReadableScan = false;
-      partialReasons.push(...unresolvedPartialReasons, ...incompleteRecordReasons);
+      partialReasons.push(
+        ...unresolvedPartialReasons,
+        ...incompleteRecordReasons,
+        ...unexplainedPartialReasons
+      );
     }
 
     for (const record of page.records) {

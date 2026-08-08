@@ -26,6 +26,8 @@ import type {
 
 const NOTION_MEETING_NOTES_API_VERSION = "2026-03-11";
 const DEFAULT_PAGE_SIZE = 100;
+const SCAN_SESSION_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_SCAN_SESSIONS = 100;
 
 export type NotionMeetingNotesPage = {
   id: string;
@@ -122,6 +124,7 @@ type NotionMeetingNotesScanSession = {
   initialHeads: ObservedSourceHead[];
   observedSourceObjectIds: Set<string>;
   fullyReadable: boolean;
+  createdAtMs: number;
 };
 
 export function createNotionMeetingNotesSource(
@@ -132,12 +135,48 @@ export function createNotionMeetingNotesSource(
   const now = config.now ?? (() => new Date());
   const scanSessionsByCursor = new Map<string, NotionMeetingNotesScanSession>();
 
+  const scanSessionKey = (workspaceId: string, cursor: string): string =>
+    JSON.stringify([workspaceId, cursor]);
+
+  const evictExpiredScanSessions = (): void => {
+    const expiresBeforeMs = now().getTime() - SCAN_SESSION_TTL_MS;
+
+    for (const [key, session] of scanSessionsByCursor) {
+      if (session.createdAtMs <= expiresBeforeMs) {
+        scanSessionsByCursor.delete(key);
+      }
+    }
+  };
+
+  const evictOldestScanSession = (): void => {
+    let oldestKey: string | null = null;
+    let oldestCreatedAtMs = Number.POSITIVE_INFINITY;
+
+    for (const [key, session] of scanSessionsByCursor) {
+      if (session.createdAtMs < oldestCreatedAtMs) {
+        oldestKey = key;
+        oldestCreatedAtMs = session.createdAtMs;
+      }
+    }
+
+    if (oldestKey) {
+      // Discarding an abandoned cursor can only remove absence authority. A
+      // later fresh scan will still reconcile from its own ledger snapshot.
+      scanSessionsByCursor.delete(oldestKey);
+    }
+  };
+
   const beginScanSession = async (
     workspaceId: string
   ): Promise<NotionMeetingNotesScanSession> => {
     // A new first page abandons any incomplete prior cursor drain. That prior
-    // scan can no longer authorize an absence conclusion.
-    scanSessionsByCursor.clear();
+    // scan can no longer authorize an absence conclusion. Other workspaces
+    // have independent scans and must retain their own cursor state.
+    for (const [key, session] of scanSessionsByCursor) {
+      if (session.workspaceId === workspaceId) {
+        scanSessionsByCursor.delete(key);
+      }
+    }
 
     return {
       workspaceId,
@@ -147,7 +186,8 @@ export function createNotionMeetingNotesSource(
         sourceKind: "meeting-note"
       }),
       observedSourceObjectIds: new Set(),
-      fullyReadable: true
+      fullyReadable: true,
+      createdAtMs: now().getTime()
     };
   };
 
@@ -155,10 +195,11 @@ export function createNotionMeetingNotesSource(
     workspaceId: string,
     cursor: string
   ): NotionMeetingNotesScanSession | null => {
-    const session = scanSessionsByCursor.get(cursor) ?? null;
-    scanSessionsByCursor.delete(cursor);
+    const key = scanSessionKey(workspaceId, cursor);
+    const session = scanSessionsByCursor.get(key) ?? null;
+    scanSessionsByCursor.delete(key);
 
-    return session?.workspaceId === workspaceId ? session : null;
+    return session;
   };
 
   const completeScan = (
@@ -205,6 +246,7 @@ export function createNotionMeetingNotesSource(
 
   return {
     async scan(input): Promise<MeetingNotesScan> {
+      evictExpiredScanSessions();
       const session = input.cursor
         ? consumeScanSession(input.workspaceId, input.cursor)
         : await beginScanSession(input.workspaceId);
@@ -288,6 +330,20 @@ export function createNotionMeetingNotesSource(
         }
       }
 
+      for (const record of records) {
+        if (record.snapshot.completeness.state === "complete") {
+          continue;
+        }
+
+        partialReasons.push({
+          code: "source-record-incomplete",
+          message:
+            "A Meeting Notes source root was not fully readable; source absence cannot be inferred.",
+          sourceObjectId: record.source.sourceObjectId,
+          retryable: true
+        });
+      }
+
       const completeness =
         partialReasons.length > 0 ||
         records.some((record) => record.snapshot.completeness.state !== "complete")
@@ -320,7 +376,8 @@ export function createNotionMeetingNotesSource(
       }
 
       if (page.nextCursor) {
-        const conflictingSession = scanSessionsByCursor.get(page.nextCursor);
+        const cursorKey = scanSessionKey(input.workspaceId, page.nextCursor);
+        const conflictingSession = scanSessionsByCursor.get(cursorKey);
 
         if (conflictingSession) {
           // Interleaved cursors cannot prove which source roots each caller
@@ -328,7 +385,10 @@ export function createNotionMeetingNotesSource(
           session.fullyReadable = false;
           conflictingSession.fullyReadable = false;
         } else {
-          scanSessionsByCursor.set(page.nextCursor, session);
+          while (scanSessionsByCursor.size >= MAX_PENDING_SCAN_SESSIONS) {
+            evictOldestScanSession();
+          }
+          scanSessionsByCursor.set(cursorKey, session);
         }
       } else if (session.fullyReadable) {
         scan.completeScan = completeScan(session);

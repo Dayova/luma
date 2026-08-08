@@ -296,6 +296,37 @@ describe("Meeting Notes sync", () => {
     });
   });
 
+  it("reports unexplained partial coverage and never grants it absence authority", async () => {
+    let reconcileCalls = 0;
+    const sync = createMeetingNotesSync({
+      workspace,
+      source: {
+        scan: () =>
+          Promise.resolve({
+            records: [],
+            nextCursor: null,
+            completeness: "partial" as const,
+            partialReasons: [],
+            completeScan: {
+              reconcileAbsent: () => {
+                reconcileCalls += 1;
+                return Promise.resolve([]);
+              }
+            }
+          })
+      },
+      ingestion: new RecordingIngestion(),
+      logger: quietLogger
+    });
+
+    const result = await sync.syncOnce();
+
+    expect(reconcileCalls).toBe(0);
+    expect(result.partialReasons).toEqual([
+      expect.objectContaining({ code: "source-enumeration-incomplete" })
+    ]);
+  });
+
   it("does not reconcile absence when an earlier paginated page contains an incomplete source record", async () => {
     let reconcileCalls = 0;
     const sync = createMeetingNotesSync({
@@ -325,6 +356,12 @@ describe("Meeting Notes sync", () => {
                       code: "pagination-pending" as const,
                       message: "A final page remains.",
                       retryable: false
+                    },
+                    {
+                      code: "source-record-incomplete" as const,
+                      message: "The source itself reported a partial root.",
+                      sourceObjectId: "partially-readable-root",
+                      retryable: true
                     }
                   ]
                 }
@@ -347,6 +384,9 @@ describe("Meeting Notes sync", () => {
         })
       ]
     });
+    expect(
+      result.partialReasons.filter((reason) => reason.code === "source-record-incomplete")
+    ).toHaveLength(1);
   });
 
   it("coalesces overlapping runs and does not schedule work after stop", async () => {

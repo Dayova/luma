@@ -125,7 +125,8 @@ export type ObservedSourceSnapshot = {
 /**
  * The mutable ledger head wrapped around an immutable snapshot. Its generation
  * advances on every successful provider observation, including an unchanged
- * content reread, so a stale absence scan cannot erase a rediscovered root.
+ * content reread, and whenever a new tombstone becomes current. This prevents
+ * a stale absence scan from erasing a rediscovered root.
  */
 export type ObservedSourceHead = ObservedSourceSnapshot & {
   observationGeneration: number;
@@ -484,8 +485,7 @@ export function createObservedSourceLedger(
 
           await transaction.query(
             `UPDATE observed_sources
-                SET last_observed_at = $5,
-                    current_observation_generation = current_observation_generation + 1
+                SET last_observed_at = $5
               WHERE workspace_id = $1
                 AND provider_id = $2
                 AND source_kind = $3
@@ -561,12 +561,12 @@ export function createObservedSourceLedger(
 function tombstoneSnapshot(previous: ObservedSourceHead): RawMeetingNoteSnapshot {
   return {
     schemaVersion: 1,
-    // Keep descriptive, non-actionable metadata for auditability. No original
-    // source material is carried into the tombstone revision.
-    title: previous.snapshot.title,
+    // The immutable historical revision retains source material for audit.
+    // The current tombstone deliberately contains only removal metadata.
+    title: null,
     lifecycle: "removed",
-    calendar: previous.snapshot.calendar,
-    recording: previous.snapshot.recording,
+    calendar: null,
+    recording: null,
     sections: {
       summary: unavailableRemovedSection(),
       actionItemsAndNotes: unavailableRemovedSection(),

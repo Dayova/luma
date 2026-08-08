@@ -335,7 +335,10 @@ describe("Observed source ledger", () => {
         revision: 2,
         providerVersion: null,
         snapshot: {
+          title: null,
           lifecycle: "removed",
+          calendar: null,
+          recording: null,
           sections: {
             actionItemsAndNotes: { state: "unavailable" }
           },
@@ -365,6 +368,16 @@ describe("Observed source ledger", () => {
           observedAt: "2026-08-07T09:01:00.000Z"
         })
       ).resolves.toMatchObject({ change: "unchanged", revision: 2 });
+
+      const [replayedTombstoneHead] = await ledger.listCurrent({
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        sourceKind: "meeting-note"
+      });
+
+      expect(replayedTombstoneHead?.observationGeneration).toBe(
+        removedHead.observationGeneration
+      );
 
       const rediscovered = await ledger.record({
         workspaceId: "workspace_dayova",

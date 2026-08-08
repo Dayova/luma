@@ -1,6 +1,6 @@
 import type { OperationalOutcomeTarget } from "./operational-outcome-writer.js";
 import type {
-  ObservedSourceLedger,
+  GetObservedSourceRevisionInput,
   ObservedSourceSnapshot
 } from "./observed-source-ledger.js";
 
@@ -22,7 +22,11 @@ export type OperationalOutcomeSourceCurrentness =
   | { status: "unavailable"; message: string };
 
 export type CreateLedgerBackedOperationalOutcomeSourceCurrentnessVerifierInput = {
-  ledger: Pick<ObservedSourceLedger, "get">;
+  ledger: {
+    get(
+      input: GetObservedSourceRevisionInput<"meeting-note">
+    ): Promise<ObservedSourceSnapshot<"meeting-note"> | null>;
+  };
 };
 
 /**

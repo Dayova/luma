@@ -288,6 +288,37 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         content_hash
       );
 
+    -- Context Ask is read-only, but its answer must remain reproducible from
+    -- the immutable conversation revision it used. The interaction ID is the
+    -- public idempotency boundary: a retry returns the original answer, while
+    -- a mismatched request is rejected by Context Intelligence.
+    CREATE TABLE IF NOT EXISTS context_inquiries (
+      workspace_id TEXT NOT NULL,
+      inquiry_id TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      source_provider_id TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      source_content_hash TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      result_content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, inquiry_id)
+    );
+
+    -- A pre-release Context Ask table may exist without this corruption-detecting
+    -- binding. Such legacy rows remain fail-closed until explicitly recreated.
+    ALTER TABLE context_inquiries
+      ADD COLUMN IF NOT EXISTS result_content_hash TEXT;
+
+    CREATE INDEX IF NOT EXISTS context_inquiries_source_revision_idx
+      ON context_inquiries (
+        workspace_id,
+        source_provider_id,
+        source_object_id,
+        source_revision
+      );
+
     -- An in-flight source-bound provider mutation holds this fence after it
     -- has atomically proved the exact ledger head it will act on. Source
     -- ingestion must not advance that root (or infer its removal) until the

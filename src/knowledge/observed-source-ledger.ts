@@ -74,20 +74,128 @@ export type RawMeetingNoteSnapshot = {
     | { state: "removed"; message: string };
 };
 
-export type ObservedSourceIdentity = {
-  providerId: string;
-  sourceKind: "meeting-note";
-  sourceObjectId: string;
-  parentObjectId: string | null;
-  url: string;
+export type ConversationSourcePartialReason = {
+  code:
+    | "history-truncated"
+    | "message-content-unavailable"
+    | "message-fetch-failed"
+    | "pagination-incomplete"
+    | "thread-not-readable"
+    | "unknown-provider-shape";
+  message: string;
+  messageId?: string;
 };
+
+export type RawConversationAuthor = {
+  providerUserId: string;
+  displayName: string;
+  /** The best identity-directory mapping known at capture time, if any. */
+  personId?: string | null;
+};
+
+export type RawConversationMessage =
+  | {
+      id: string;
+      /** Zero-based order in the exact captured evidence boundary. */
+      ordinal: number;
+      author: RawConversationAuthor;
+      createdAt: string;
+      editedAt: string | null;
+      replyToMessageId: string | null;
+      url: string;
+      state: "available";
+      text: string;
+    }
+  | {
+      id: string;
+      /** Zero-based order in the exact captured evidence boundary. */
+      ordinal: number;
+      author: RawConversationAuthor;
+      createdAt: string;
+      editedAt: string | null;
+      replyToMessageId: string | null;
+      url: string;
+      state: "deleted";
+      text: null;
+    };
+
+/**
+ * A bounded, immutable conversation capture. It represents evidence observed
+ * at one instant only; unlike a canonical Meeting Notes scan it has no
+ * authority to infer that an absent message or conversation was deleted.
+ */
+export type RawConversationSnapshot = {
+  schemaVersion: 1;
+  conversation: {
+    conversationObjectId: string;
+    parentConversationObjectId: string | null;
+    title: string | null;
+    url: string;
+  };
+  boundary: {
+    mode: "thread";
+    anchorMessageId: string;
+    firstMessageId: string;
+    lastMessageId: string;
+    /** Exact, ordered IDs represented by `messages`. */
+    messageIds: string[];
+  };
+  messages: RawConversationMessage[];
+  completeness:
+    | { state: "complete" }
+    | { state: "partial"; reasons: ConversationSourcePartialReason[] };
+};
+
+export type ObservedSourceKind = "meeting-note" | "conversation";
+
+type ObservedSourceIdentityByKind = {
+  "meeting-note": {
+    providerId: string;
+    sourceKind: "meeting-note";
+    sourceObjectId: string;
+    parentObjectId: string | null;
+    url: string;
+  };
+  conversation: {
+    providerId: string;
+    sourceKind: "conversation";
+    /** The immutable interaction/anchor message that requested the inquiry. */
+    sourceObjectId: string;
+    /** The bounded thread or conversation that supplied the evidence. */
+    parentObjectId: string;
+    /** Stable provider URL for the immutable anchor message. */
+    url: string;
+  };
+};
+
+type ObservedSourceKey<Kind extends ObservedSourceKind = ObservedSourceKind> = {
+  providerId: string;
+  sourceKind: Kind;
+  sourceObjectId: string;
+};
+
+type ObservedSourceSnapshotPayloadByKind = {
+  "meeting-note": RawMeetingNoteSnapshot;
+  conversation: RawConversationSnapshot;
+};
+
+/**
+ * The provider-neutral identity of a durable evidence root. Defaults preserve
+ * Meeting Notes callers while generic Ledger methods infer the correct kind.
+ */
+export type ObservedSourceIdentity<Kind extends ObservedSourceKind = "meeting-note"> =
+  ObservedSourceIdentityByKind[Kind];
+
+export type ObservedSourceSnapshotPayload<
+  Kind extends ObservedSourceKind = "meeting-note"
+> = ObservedSourceSnapshotPayloadByKind[Kind];
 
 /**
  * The provider-neutral identity of a source root whose mutable ledger head can
  * be fenced while Luma performs a source-bound external mutation.
  */
 export type ObservedSourceExecutionFenceSource = Pick<
-  ObservedSourceIdentity,
+  ObservedSourceIdentity<"meeting-note">,
   "providerId" | "sourceKind" | "sourceObjectId"
 >;
 
@@ -192,24 +300,33 @@ export class ObservedSourceExecutionFenceConflictError extends Error {
   }
 }
 
-export type RecordObservedSourceInput = {
-  workspaceId: string;
-  source: ObservedSourceIdentity;
-  providerVersion: string | null;
-  snapshot: RawMeetingNoteSnapshot;
-  observedAt: string;
+type RecordObservedSourceInputByKind = {
+  [Kind in ObservedSourceKind]: {
+    workspaceId: string;
+    source: ObservedSourceIdentityByKind[Kind];
+    providerVersion: string | null;
+    snapshot: ObservedSourceSnapshotPayloadByKind[Kind];
+    observedAt: string;
+  };
 };
 
-export type GetObservedSourceRevisionInput = {
+export type RecordObservedSourceInput<Kind extends ObservedSourceKind = "meeting-note"> =
+  RecordObservedSourceInputByKind[Kind];
+
+export type GetObservedSourceRevisionInput<
+  Kind extends ObservedSourceKind = "meeting-note"
+> = {
   workspaceId: string;
-  source: Pick<ObservedSourceIdentity, "providerId" | "sourceKind" | "sourceObjectId">;
+  source: ObservedSourceKey<Kind>;
   revision?: number;
 };
 
-export type ListObservedSourceHeadsInput = {
+export type ListObservedSourceHeadsInput<
+  Kind extends ObservedSourceKind = "meeting-note"
+> = {
   workspaceId: string;
   providerId: string;
-  sourceKind: "meeting-note";
+  sourceKind: Kind;
 };
 
 export type RecordObservedSourceTombstoneInput = {
@@ -219,18 +336,23 @@ export type RecordObservedSourceTombstoneInput = {
    * Its revision/hash provide compare-and-set protection if the source was
    * rediscovered while that scan was completing.
    */
-  previous: ObservedSourceHead;
+  previous: ObservedSourceHead<"meeting-note">;
   observedAt: string;
 };
 
-export type ObservedSourceSnapshot = {
-  source: ObservedSourceIdentity;
-  revision: number;
-  contentHash: string;
-  providerVersion: string | null;
-  capturedAt: string;
-  snapshot: RawMeetingNoteSnapshot;
+type ObservedSourceSnapshotByKind = {
+  [Kind in ObservedSourceKind]: {
+    source: ObservedSourceIdentityByKind[Kind];
+    revision: number;
+    contentHash: string;
+    providerVersion: string | null;
+    capturedAt: string;
+    snapshot: ObservedSourceSnapshotPayloadByKind[Kind];
+  };
 };
+
+export type ObservedSourceSnapshot<Kind extends ObservedSourceKind = "meeting-note"> =
+  ObservedSourceSnapshotByKind[Kind];
 
 /**
  * The mutable ledger head wrapped around an immutable snapshot. Its generation
@@ -238,16 +360,28 @@ export type ObservedSourceSnapshot = {
  * content reread, and whenever a new tombstone becomes current. This prevents
  * a stale absence scan from erasing a rediscovered root.
  */
-export type ObservedSourceHead = ObservedSourceSnapshot & {
-  observationGeneration: number;
+type ObservedSourceHeadByKind = {
+  [Kind in ObservedSourceKind]: ObservedSourceSnapshotByKind[Kind] & {
+    observationGeneration: number;
+  };
 };
 
-export type ObservedSourceRevision = ObservedSourceSnapshot & {
-  change: "new" | "revised" | "unchanged";
+export type ObservedSourceHead<Kind extends ObservedSourceKind = "meeting-note"> =
+  ObservedSourceHeadByKind[Kind];
+
+type ObservedSourceRevisionByKind = {
+  [Kind in ObservedSourceKind]: ObservedSourceSnapshotByKind[Kind] & {
+    change: "new" | "revised" | "unchanged";
+  };
 };
+
+export type ObservedSourceRevision<Kind extends ObservedSourceKind = "meeting-note"> =
+  ObservedSourceRevisionByKind[Kind];
 
 export interface ObservedSourceLedger {
-  record(input: RecordObservedSourceInput): Promise<ObservedSourceRevision>;
+  record<Input extends RecordObservedSourceInput<ObservedSourceKind>>(
+    input: Input
+  ): Promise<ObservedSourceRevision<Input["source"]["sourceKind"]>>;
   /**
    * Atomically proves the current source head is exactly the approved head,
    * then prevents a concurrent source revision or tombstone from advancing it.
@@ -266,9 +400,13 @@ export interface ObservedSourceLedger {
   releaseExecutionFence(
     input: Omit<ReleaseObservedSourceExecutionFenceInput, "database">
   ): Promise<void>;
-  get(input: GetObservedSourceRevisionInput): Promise<ObservedSourceSnapshot | null>;
+  get<Input extends GetObservedSourceRevisionInput<ObservedSourceKind>>(
+    input: Input
+  ): Promise<ObservedSourceSnapshot<Input["source"]["sourceKind"]> | null>;
   /** Lists immutable current heads for one provider-neutral source root family. */
-  listCurrent(input: ListObservedSourceHeadsInput): Promise<ObservedSourceHead[]>;
+  listCurrent<Input extends ListObservedSourceHeadsInput<ObservedSourceKind>>(
+    input: Input
+  ): Promise<ObservedSourceHead<Input["sourceKind"]>[]>;
   /**
    * Appends an immutable removal revision if this exact source head remains
    * current. `null` means a newer source revision won the race and must not be
@@ -276,7 +414,7 @@ export interface ObservedSourceLedger {
    */
   recordTombstone(
     input: RecordObservedSourceTombstoneInput
-  ): Promise<ObservedSourceRevision | null>;
+  ): Promise<ObservedSourceRevision<"meeting-note"> | null>;
 }
 
 export type CreateObservedSourceLedgerInput = {
@@ -322,6 +460,7 @@ type SourceSnapshotRow = {
 };
 
 type SourceHeadSnapshotRow = SourceSnapshotRow & {
+  source_object_id: string;
   current_observation_generation: number;
 };
 
@@ -330,6 +469,7 @@ export function createObservedSourceLedger(
 ): ObservedSourceLedger {
   return {
     async acquireExecutionFence(fenceInput) {
+      assertMeetingNoteMutationSource(fenceInput.source);
       validateExecutionFenceExpectedHead(fenceInput.expected);
       const key = sourceKey(fenceInput);
 
@@ -421,6 +561,7 @@ export function createObservedSourceLedger(
       });
     },
     async verifyExecutionFenceHeldCurrent(verificationInput) {
+      assertMeetingNoteMutationSource(verificationInput.source);
       validateExecutionFenceExpectedHead(verificationInput.expected);
       const key = sourceKey(verificationInput);
 
@@ -472,22 +613,28 @@ export function createObservedSourceLedger(
       });
     },
     async releaseExecutionFence(releaseInput): Promise<void> {
+      assertMeetingNoteMutationSource(releaseInput.source);
       await releaseObservedSourceExecutionFence({
         database: input.database,
         ...releaseInput
       });
     },
-    async record(recordInput) {
+    async record<Input extends RecordObservedSourceInput<ObservedSourceKind>>(
+      recordInput: Input
+    ): Promise<ObservedSourceRevision<Input["source"]["sourceKind"]>> {
+      validateObservedSourceRecord(recordInput);
       const canonicalPayload = canonicalJson(recordInput.snapshot);
-      const contentHash = `sha256:${createHash("sha256")
-        .update(canonicalPayload)
-        .digest("hex")}`;
+      const contentHash = observedSourceContentHash(canonicalPayload);
       const rawPayload = JSON.stringify(recordInput.snapshot);
       const sourceReference = JSON.stringify(recordInput.source);
       const result = await input.database.transaction(
         async (
           transaction
-        ): Promise<SourceFenceTransactionResult<ObservedSourceRevision>> => {
+        ): Promise<
+          SourceFenceTransactionResult<
+            ObservedSourceRevision<Input["source"]["sourceKind"]>
+          >
+        > => {
           await transaction.query(
             `INSERT INTO observed_sources (
              workspace_id,
@@ -546,19 +693,26 @@ export function createObservedSourceLedger(
             throw new Error("Observed source snapshot is missing");
           }
 
-          const currentSnapshotSource = currentSnapshot
-            ? parseObservedSourceIdentity(currentSnapshot.source_reference_json)
+          const currentSnapshotObservation = currentSnapshot
+            ? toObservedSourceSnapshot<Input["source"]["sourceKind"]>(
+                currentSnapshot,
+                recordInput.source
+              )
             : null;
+          const currentSnapshotSource = currentSnapshotObservation?.source ?? null;
 
-          const conflict = await sourceRecordExecutionFenceConflict(transaction, {
-            workspaceId: recordInput.workspaceId,
-            source: recordInput.source,
-            head,
-            observedContentHash: contentHash,
-            currentSnapshotParentObjectId: currentSnapshotSource?.parentObjectId ?? null,
-            observedParentObjectId: recordInput.source.parentObjectId,
-            observedAt: recordInput.observedAt
-          });
+          const conflict = isMeetingNoteSource(recordInput.source)
+            ? await sourceRecordExecutionFenceConflict(transaction, {
+                workspaceId: recordInput.workspaceId,
+                source: recordInput.source,
+                head,
+                observedContentHash: contentHash,
+                currentSnapshotParentObjectId:
+                  currentSnapshotSource?.parentObjectId ?? null,
+                observedParentObjectId: recordInput.source.parentObjectId,
+                observedAt: recordInput.observedAt
+              })
+            : null;
 
           if (conflict) {
             // Return normally so the durable supersession signal commits; the
@@ -568,7 +722,7 @@ export function createObservedSourceLedger(
 
           if (
             head.current_content_hash === contentHash &&
-            currentSnapshot !== null &&
+            currentSnapshotObservation !== null &&
             currentSnapshotSource !== null &&
             currentSnapshotSource?.parentObjectId === recordInput.source.parentObjectId
           ) {
@@ -593,19 +747,13 @@ export function createObservedSourceLedger(
             );
             return {
               outcome: "recorded",
-              value: {
-                change: "unchanged",
-                // A URL-only reread must keep the identity originally bound to
-                // this immutable revision. The parent page is the external
-                // Operational Outcome target, so a parent move instead mints a
-                // new revision below even when extracted content is unchanged.
-                source: currentSnapshotSource,
-                revision: currentSnapshot.source_revision,
-                contentHash: currentSnapshot.content_hash,
-                providerVersion: currentSnapshot.provider_version,
-                capturedAt: currentSnapshot.captured_at,
-                snapshot: parseSnapshot(currentSnapshot.raw_payload_json)
-              }
+              // A URL-only reread must keep the identity originally bound to
+              // this immutable revision. A parent move instead mints a new
+              // revision even when the captured evidence is unchanged.
+              value: observedSourceRevisionFromSnapshot(
+                currentSnapshotObservation,
+                "unchanged"
+              )
             };
           }
 
@@ -662,15 +810,12 @@ export function createObservedSourceLedger(
 
           return {
             outcome: "recorded",
-            value: {
-              change: head.current_revision === 0 ? "new" : "revised",
-              source: recordInput.source,
+            value: observedSourceRevisionFromRecord<Input["source"]["sourceKind"]>(
+              recordInput as RecordObservedSourceInput<Input["source"]["sourceKind"]>,
+              head.current_revision === 0 ? "new" : "revised",
               revision,
-              contentHash,
-              providerVersion: recordInput.providerVersion,
-              capturedAt: recordInput.observedAt,
-              snapshot: recordInput.snapshot
-            }
+              contentHash
+            )
           };
         }
       );
@@ -684,7 +829,9 @@ export function createObservedSourceLedger(
 
       return result.value;
     },
-    async get(getInput): Promise<ObservedSourceSnapshot | null> {
+    async get<Input extends GetObservedSourceRevisionInput<ObservedSourceKind>>(
+      getInput: Input
+    ): Promise<ObservedSourceSnapshot<Input["source"]["sourceKind"]> | null> {
       if (
         getInput.revision !== undefined &&
         (!Number.isInteger(getInput.revision) || getInput.revision <= 0)
@@ -731,9 +878,16 @@ export function createObservedSourceLedger(
             );
       const snapshot = result.rows[0];
 
-      return snapshot ? toObservedSourceSnapshot(snapshot) : null;
+      return snapshot
+        ? toObservedSourceSnapshot<Input["source"]["sourceKind"]>(
+            snapshot,
+            getInput.source
+          )
+        : null;
     },
-    async listCurrent(listInput): Promise<ObservedSourceHead[]> {
+    async listCurrent<Input extends ListObservedSourceHeadsInput<ObservedSourceKind>>(
+      listInput: Input
+    ): Promise<ObservedSourceHead<Input["sourceKind"]>[]> {
       const result = await input.database.query<SourceHeadSnapshotRow>(
         `SELECT snapshots.source_revision,
                 snapshots.content_hash,
@@ -741,6 +895,7 @@ export function createObservedSourceLedger(
                 snapshots.source_reference_json,
                 snapshots.captured_at,
                 snapshots.raw_payload_json,
+                sources.source_object_id,
                 sources.current_observation_generation
            FROM observed_sources AS sources
            JOIN observed_source_snapshots AS snapshots
@@ -756,25 +911,34 @@ export function createObservedSourceLedger(
         [listInput.workspaceId, listInput.providerId, listInput.sourceKind]
       );
 
-      return result.rows.map(toObservedSourceHead);
+      return result.rows.map((row) =>
+        toObservedSourceHead<Input["sourceKind"]>(row, {
+          providerId: listInput.providerId,
+          sourceKind: listInput.sourceKind,
+          sourceObjectId: row.source_object_id
+        })
+      );
     },
-    async recordTombstone(tombstoneInput): Promise<ObservedSourceRevision | null> {
+    async recordTombstone(
+      tombstoneInput: RecordObservedSourceTombstoneInput
+    ): Promise<ObservedSourceRevision<"meeting-note"> | null> {
+      assertMeetingNoteMutationSource(tombstoneInput.previous.source);
       const sourceKeyInput = {
         workspaceId: tombstoneInput.workspaceId,
         source: tombstoneInput.previous.source
       } satisfies Pick<RecordObservedSourceInput, "workspaceId" | "source">;
       const tombstone = tombstoneSnapshot();
       const canonicalPayload = canonicalJson(tombstone);
-      const contentHash = `sha256:${createHash("sha256")
-        .update(canonicalPayload)
-        .digest("hex")}`;
+      const contentHash = observedSourceContentHash(canonicalPayload);
       const rawPayload = JSON.stringify(tombstone);
       const sourceReference = JSON.stringify(tombstoneInput.previous.source);
 
       const result = await input.database.transaction(
         async (
           transaction
-        ): Promise<SourceFenceTransactionResult<ObservedSourceRevision | null>> => {
+        ): Promise<
+          SourceFenceTransactionResult<ObservedSourceRevision<"meeting-note"> | null>
+        > => {
           const headResult = await transaction.query<SourceHeadRow>(
             `SELECT current_revision, current_content_hash, current_observation_generation
              FROM observed_sources
@@ -842,16 +1006,16 @@ export function createObservedSourceLedger(
               [...sourceKey(sourceKeyInput), tombstoneInput.observedAt]
             );
 
+            const stored = toObservedSourceSnapshot<"meeting-note">(
+              snapshot,
+              tombstoneInput.previous.source
+            );
+
             return {
               outcome: "recorded",
               value: {
                 change: "unchanged",
-                source: parseObservedSourceIdentity(snapshot.source_reference_json),
-                revision: snapshot.source_revision,
-                contentHash: snapshot.content_hash,
-                providerVersion: snapshot.provider_version,
-                capturedAt: snapshot.captured_at,
-                snapshot: parseSnapshot(snapshot.raw_payload_json)
+                ...stored
               }
             };
           }
@@ -937,6 +1101,7 @@ export function createObservedSourceLedger(
 export async function releaseObservedSourceExecutionFence(
   input: ReleaseObservedSourceExecutionFenceInput
 ): Promise<void> {
+  assertMeetingNoteMutationSource(input.source);
   await input.database.query(
     `DELETE FROM observed_source_execution_fences
       WHERE workspace_id = $1
@@ -968,7 +1133,8 @@ export async function releaseObservedSourceExecutionFencesForExecution(
       WHERE workspace_id = $1
         AND meeting_id = $2
         AND intent_id = $3
-        AND execution_lease_id = $4`,
+        AND execution_lease_id = $4
+        AND source_kind = 'meeting-note'`,
     [
       input.workspaceId,
       input.owner.meetingId,
@@ -989,7 +1155,10 @@ export async function releaseObservedSourceExecutionFencesForSettlement(
 ): Promise<void> {
   await input.database.query(
     `DELETE FROM observed_source_execution_fences
-      WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3`,
+      WHERE workspace_id = $1
+        AND meeting_id = $2
+        AND intent_id = $3
+        AND source_kind = 'meeting-note'`,
     [input.workspaceId, input.meetingId, input.intentId]
   );
 }
@@ -1058,7 +1227,9 @@ async function readObservedSourceSnapshot(
 
 async function sourceRecordExecutionFenceConflict(
   database: Pick<LumaDatabase, "query">,
-  input: ObservedSourceKeyInput & {
+  input: {
+    workspaceId: string;
+    source: ObservedSourceExecutionFenceSource;
     head: SourceHeadRow;
     observedContentHash: string;
     currentSnapshotParentObjectId: string | null;
@@ -1096,7 +1267,11 @@ async function sourceRecordExecutionFenceConflict(
 
 async function sourceTombstoneExecutionFenceConflict(
   database: Pick<LumaDatabase, "query">,
-  input: ObservedSourceKeyInput & { observedAt: string }
+  input: {
+    workspaceId: string;
+    source: ObservedSourceExecutionFenceSource;
+    observedAt: string;
+  }
 ): Promise<SourceExecutionFenceConflict | null> {
   const fence = await readSourceExecutionFenceForUpdate(database, sourceKey(input));
 
@@ -1241,7 +1416,7 @@ function sameExecutionFenceOwner(
 
 type ObservedSourceKeyInput = {
   workspaceId: string;
-  source: ObservedSourceExecutionFenceSource;
+  source: ObservedSourceKey;
 };
 
 function sourceKey(input: ObservedSourceKeyInput): [string, string, string, string] {
@@ -1253,68 +1428,424 @@ function sourceKey(input: ObservedSourceKeyInput): [string, string, string, stri
   ];
 }
 
-function parseSnapshot(value: string): RawMeetingNoteSnapshot {
+function validateObservedSourceRecord(
+  input: RecordObservedSourceInput<ObservedSourceKind>
+): void {
+  validateObservedSourceIdentity(input.source);
+
+  if (input.source.sourceKind === "meeting-note") {
+    if (!isRawMeetingNoteSnapshot(input.snapshot)) {
+      throw new Error("Observed Meeting Notes snapshot has an invalid shape");
+    }
+    return;
+  }
+
+  if (input.source.sourceKind === "conversation") {
+    if (!isRawConversationSnapshot(input.snapshot)) {
+      throw new Error("Observed conversation snapshot has an invalid shape");
+    }
+
+    validateConversationSnapshotBinding(input.source, input.snapshot);
+    return;
+  }
+
+  throw new Error("Observed source kind is unsupported");
+}
+
+function toObservedSourceSnapshot<Kind extends ObservedSourceKind>(
+  snapshot: SourceSnapshotRow,
+  expectedSource: ObservedSourceKey<Kind>
+): ObservedSourceSnapshot<Kind> {
+  const source = parseObservedSourceIdentity(snapshot.source_reference_json);
+
+  if (
+    source.providerId !== expectedSource.providerId ||
+    source.sourceKind !== expectedSource.sourceKind ||
+    source.sourceObjectId !== expectedSource.sourceObjectId
+  ) {
+    throw new Error("Observed source identity does not match its stored source row");
+  }
+
+  const parsedSnapshot = parseSnapshot(source.sourceKind, snapshot.raw_payload_json);
+  assertStoredSnapshotContentHash(snapshot.content_hash, parsedSnapshot);
+
+  if (source.sourceKind === "conversation") {
+    validateConversationSnapshotBinding(
+      source,
+      parsedSnapshot as RawConversationSnapshot
+    );
+  }
+
+  return {
+    source,
+    revision: snapshot.source_revision,
+    contentHash: snapshot.content_hash,
+    providerVersion: snapshot.provider_version,
+    capturedAt: snapshot.captured_at,
+    snapshot: parsedSnapshot
+  } as ObservedSourceSnapshot<Kind>;
+}
+
+function toObservedSourceHead<Kind extends ObservedSourceKind>(
+  snapshot: SourceHeadSnapshotRow,
+  expectedSource: ObservedSourceKey<Kind>
+): ObservedSourceHead<Kind> {
+  return {
+    ...toObservedSourceSnapshot(snapshot, expectedSource),
+    observationGeneration: snapshot.current_observation_generation
+  } as ObservedSourceHead<Kind>;
+}
+
+function observedSourceRevisionFromSnapshot<Kind extends ObservedSourceKind>(
+  snapshot: ObservedSourceSnapshot<Kind>,
+  change: ObservedSourceRevision<Kind>["change"]
+): ObservedSourceRevision<Kind> {
+  return { ...snapshot, change } as ObservedSourceRevision<Kind>;
+}
+
+function observedSourceRevisionFromRecord<Kind extends ObservedSourceKind>(
+  input: RecordObservedSourceInput<Kind>,
+  change: ObservedSourceRevision<Kind>["change"],
+  revision: number,
+  contentHash: string
+): ObservedSourceRevision<Kind> {
+  return {
+    change,
+    source: input.source,
+    revision,
+    contentHash,
+    providerVersion: input.providerVersion,
+    capturedAt: input.observedAt,
+    snapshot: input.snapshot
+  } as ObservedSourceRevision<Kind>;
+}
+
+function parseSnapshot(
+  sourceKind: ObservedSourceKind,
+  value: string
+): ObservedSourceSnapshotPayload<ObservedSourceKind> {
   const parsed: unknown = JSON.parse(value);
 
-  if (!isRawMeetingNoteSnapshot(parsed)) {
+  if (sourceKind === "meeting-note") {
+    if (!isRawMeetingNoteSnapshot(parsed)) {
+      throw new Error("Observed source snapshot has an invalid stored shape");
+    }
+    return parsed;
+  }
+
+  if (!isRawConversationSnapshot(parsed)) {
     throw new Error("Observed source snapshot has an invalid stored shape");
   }
 
   return parsed;
 }
 
-function toObservedSourceSnapshot(snapshot: SourceSnapshotRow): ObservedSourceSnapshot {
-  return {
-    source: parseObservedSourceIdentity(snapshot.source_reference_json),
-    revision: snapshot.source_revision,
-    contentHash: snapshot.content_hash,
-    providerVersion: snapshot.provider_version,
-    capturedAt: snapshot.captured_at,
-    snapshot: parseSnapshot(snapshot.raw_payload_json)
-  };
+function assertStoredSnapshotContentHash(
+  contentHash: string,
+  snapshot: ObservedSourceSnapshotPayload<ObservedSourceKind>
+): void {
+  if (contentHash !== observedSourceContentHash(canonicalJson(snapshot))) {
+    throw new Error(
+      "Observed source snapshot content hash does not match its stored payload"
+    );
+  }
 }
 
-function toObservedSourceHead(snapshot: SourceHeadSnapshotRow): ObservedSourceHead {
-  return {
-    ...toObservedSourceSnapshot(snapshot),
-    observationGeneration: snapshot.current_observation_generation
-  };
+function observedSourceContentHash(canonicalPayload: string): string {
+  return `sha256:${createHash("sha256").update(canonicalPayload).digest("hex")}`;
 }
 
-function parseObservedSourceIdentity(value: string): ObservedSourceIdentity {
+function parseObservedSourceIdentity(
+  value: string
+): ObservedSourceIdentity<ObservedSourceKind> {
   const parsed: unknown = JSON.parse(value);
 
   if (
     !isRecord(parsed) ||
-    typeof parsed["providerId"] !== "string" ||
-    parsed["sourceKind"] !== "meeting-note" ||
-    typeof parsed["sourceObjectId"] !== "string" ||
-    (parsed["parentObjectId"] !== null && typeof parsed["parentObjectId"] !== "string") ||
-    typeof parsed["url"] !== "string"
+    !isNonBlankString(parsed["providerId"]) ||
+    !isNonBlankString(parsed["sourceObjectId"]) ||
+    !isNonBlankString(parsed["url"])
+  ) {
+    throw new Error("Observed source identity has an invalid stored shape");
+  }
+
+  if (parsed["sourceKind"] === "meeting-note") {
+    if (
+      parsed["parentObjectId"] !== null &&
+      !isNonBlankString(parsed["parentObjectId"])
+    ) {
+      throw new Error("Observed source identity has an invalid stored shape");
+    }
+
+    return {
+      providerId: parsed["providerId"],
+      sourceKind: "meeting-note",
+      sourceObjectId: parsed["sourceObjectId"],
+      parentObjectId: parsed["parentObjectId"],
+      url: parsed["url"]
+    };
+  }
+
+  if (
+    parsed["sourceKind"] !== "conversation" ||
+    !isNonBlankString(parsed["parentObjectId"])
   ) {
     throw new Error("Observed source identity has an invalid stored shape");
   }
 
   return {
     providerId: parsed["providerId"],
-    sourceKind: "meeting-note",
+    sourceKind: "conversation",
     sourceObjectId: parsed["sourceObjectId"],
     parentObjectId: parsed["parentObjectId"],
     url: parsed["url"]
   };
 }
 
+function validateObservedSourceIdentity(
+  source: ObservedSourceIdentity<ObservedSourceKind>
+): void {
+  assertSupportedObservedSourceKind(source.sourceKind);
+
+  if (
+    !isNonBlankString(source.providerId) ||
+    !isNonBlankString(source.sourceObjectId) ||
+    !isNonBlankString(source.url) ||
+    (source.parentObjectId !== null && !isNonBlankString(source.parentObjectId))
+  ) {
+    throw new Error("Observed source identity has an invalid shape");
+  }
+
+  if (source.sourceKind === "conversation" && !isNonBlankString(source.parentObjectId)) {
+    throw new Error("Observed conversation source requires a conversation parent");
+  }
+}
+
+function validateConversationSnapshotBinding(
+  source: ObservedSourceIdentity<"conversation">,
+  snapshot: RawConversationSnapshot
+): void {
+  const { boundary, messages } = snapshot;
+
+  if (source.sourceObjectId !== boundary.anchorMessageId) {
+    throw new Error("Observed conversation source must match its anchor message");
+  }
+
+  if (source.parentObjectId !== snapshot.conversation.conversationObjectId) {
+    throw new Error("Observed conversation source must match its conversation parent");
+  }
+
+  if (messages.length === 0 || boundary.messageIds.length !== messages.length) {
+    throw new Error("Observed conversation boundary must contain every captured message");
+  }
+
+  if (
+    new Set(boundary.messageIds).size !== boundary.messageIds.length ||
+    !boundary.messageIds.includes(boundary.anchorMessageId)
+  ) {
+    throw new Error("Observed conversation boundary has an invalid anchor message");
+  }
+
+  const first = messages[0];
+  const last = messages.at(-1);
+
+  if (
+    !first ||
+    !last ||
+    boundary.firstMessageId !== first.id ||
+    boundary.lastMessageId !== last.id
+  ) {
+    throw new Error(
+      "Observed conversation boundary does not match captured message order"
+    );
+  }
+
+  for (const [index, message] of messages.entries()) {
+    if (message.ordinal !== index || boundary.messageIds[index] !== message.id) {
+      throw new Error("Observed conversation boundary does not match captured messages");
+    }
+  }
+}
+
 function isRawMeetingNoteSnapshot(value: unknown): value is RawMeetingNoteSnapshot {
-  return isRecord(value) && value["schemaVersion"] === 1;
+  // Schema version alone is no longer a sufficient discriminator: bounded
+  // conversations use the same version and must never inherit Meeting Notes'
+  // execution-fence or tombstone authority through an untyped caller.
+  return (
+    isRecord(value) && value["schemaVersion"] === 1 && !isRawConversationSnapshot(value)
+  );
+}
+
+function isRawConversationSnapshot(value: unknown): value is RawConversationSnapshot {
+  if (
+    !isRecord(value) ||
+    value["schemaVersion"] !== 1 ||
+    !isRawConversation(value["conversation"]) ||
+    !isRawConversationBoundary(value["boundary"]) ||
+    !Array.isArray(value["messages"]) ||
+    !Array.from(value["messages"]).every(isRawConversationMessage) ||
+    !isRawConversationCompleteness(value["completeness"])
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isRawConversation(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonBlankString(value["conversationObjectId"]) &&
+    (value["parentConversationObjectId"] === null ||
+      isNonBlankString(value["parentConversationObjectId"])) &&
+    (value["title"] === null || typeof value["title"] === "string") &&
+    isNonBlankString(value["url"])
+  );
+}
+
+function isRawConversationBoundary(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    value["mode"] === "thread" &&
+    isNonBlankString(value["anchorMessageId"]) &&
+    isNonBlankString(value["firstMessageId"]) &&
+    isNonBlankString(value["lastMessageId"]) &&
+    Array.isArray(value["messageIds"]) &&
+    Array.from(value["messageIds"]).every(isNonBlankString)
+  );
+}
+
+function isRawConversationMessage(value: unknown): value is RawConversationMessage {
+  if (
+    !isRecord(value) ||
+    !isNonBlankString(value["id"]) ||
+    !Number.isInteger(value["ordinal"]) ||
+    (value["ordinal"] as number) < 0 ||
+    !isRawConversationAuthor(value["author"]) ||
+    !isNonBlankString(value["createdAt"]) ||
+    (value["editedAt"] !== null && !isNonBlankString(value["editedAt"])) ||
+    (value["replyToMessageId"] !== null &&
+      !isNonBlankString(value["replyToMessageId"])) ||
+    !isNonBlankString(value["url"])
+  ) {
+    return false;
+  }
+
+  return (
+    (value["state"] === "available" && typeof value["text"] === "string") ||
+    (value["state"] === "deleted" && value["text"] === null)
+  );
+}
+
+function isRawConversationAuthor(value: unknown): value is RawConversationAuthor {
+  return (
+    isRecord(value) &&
+    isNonBlankString(value["providerUserId"]) &&
+    isNonBlankString(value["displayName"]) &&
+    (value["personId"] === undefined ||
+      value["personId"] === null ||
+      isNonBlankString(value["personId"]))
+  );
+}
+
+function isRawConversationCompleteness(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value["state"] === "complete") {
+    return true;
+  }
+
+  return (
+    value["state"] === "partial" &&
+    Array.isArray(value["reasons"]) &&
+    value["reasons"].length > 0 &&
+    Array.from(value["reasons"]).every(isConversationSourcePartialReason)
+  );
+}
+
+function isConversationSourcePartialReason(
+  value: unknown
+): value is ConversationSourcePartialReason {
+  return (
+    isRecord(value) &&
+    (value["code"] === "history-truncated" ||
+      value["code"] === "message-content-unavailable" ||
+      value["code"] === "message-fetch-failed" ||
+      value["code"] === "pagination-incomplete" ||
+      value["code"] === "thread-not-readable" ||
+      value["code"] === "unknown-provider-shape") &&
+    isNonBlankString(value["message"]) &&
+    (value["messageId"] === undefined || isNonBlankString(value["messageId"]))
+  );
+}
+
+function isMeetingNoteSource(
+  source: ObservedSourceIdentity<ObservedSourceKind>
+): source is ObservedSourceIdentity<"meeting-note"> {
+  return source.sourceKind === "meeting-note";
+}
+
+function assertSupportedObservedSourceKind(
+  sourceKind: unknown
+): asserts sourceKind is ObservedSourceKind {
+  if (sourceKind !== "meeting-note" && sourceKind !== "conversation") {
+    throw new Error("Observed source kind is unsupported");
+  }
+}
+
+/**
+ * Fences and tombstones authorize external Operational Outcome mutations.
+ * Keep their runtime boundary narrow even when an untyped caller bypasses the
+ * public TypeScript contract.
+ */
+function assertMeetingNoteMutationSource(
+  source: unknown
+): asserts source is ObservedSourceExecutionFenceSource {
+  if (
+    !isRecord(source) ||
+    source["sourceKind"] !== "meeting-note" ||
+    !isNonBlankString(source["providerId"]) ||
+    !isNonBlankString(source["sourceObjectId"])
+  ) {
+    throw new Error(
+      "Observed source fence and tombstone APIs support only valid meeting-note roots"
+    );
+  }
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
 
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error("Canonical source payload contains an unsupported number");
+    }
+    return JSON.stringify(value);
+  }
+
+  if (
+    typeof value === "undefined" ||
+    typeof value === "bigint" ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    throw new Error("Canonical source payload contains an unsupported value");
+  }
+
   if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
+    // JSON.stringify writes an undefined array element as null. Match that
+    // durable representation so a valid input can be replayed by hash.
+    return `[${Array.from(value, (element) =>
+      canonicalJson(element === undefined ? null : element)
+    ).join(",")}]`;
   }
 
   if (!isRecord(value)) {
@@ -1323,6 +1854,9 @@ function canonicalJson(value: unknown): string {
 
   return `{${Object.keys(value)
     .sort()
+    // JSON.stringify omits undefined object properties. Optional capture
+    // fields use that representation when an adapter has no value.
+    .filter((key) => value[key] !== undefined)
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
     .join(",")}}`;
 }

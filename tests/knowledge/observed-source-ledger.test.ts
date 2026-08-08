@@ -5,6 +5,13 @@ import { describe, expect, it } from "vitest";
 import {
   createObservedSourceLedger,
   ObservedSourceExecutionFenceConflictError,
+  releaseObservedSourceExecutionFencesForExecution,
+  releaseObservedSourceExecutionFencesForSettlement,
+  type ObservedSourceExecutionFenceSource,
+  type ObservedSourceHead,
+  type ObservedSourceIdentity,
+  type RecordObservedSourceTombstoneInput,
+  type RawConversationSnapshot,
   type RawMeetingNoteSnapshot
 } from "../../src/knowledge/observed-source-ledger.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
@@ -46,6 +53,101 @@ function snapshot(transcript: string): RawMeetingNoteSnapshot {
       unknownBlockIds: []
     },
     completeness: { state: "complete" }
+  };
+}
+
+function conversationSnapshot(
+  input: {
+    conversationObjectId?: string;
+    firstText?: string;
+    secondState?: "available" | "deleted";
+    reverseOrder?: boolean;
+  } = {}
+): RawConversationSnapshot {
+  const first = {
+    id: "message-1",
+    ordinal: 0,
+    author: {
+      providerUserId: "discord-user-jakob",
+      displayName: "Jakob",
+      personId: "person-jakob"
+    },
+    createdAt: "2026-08-08T09:00:00.000Z",
+    editedAt: null,
+    replyToMessageId: null,
+    url: "https://discord.com/channels/guild-1/thread-1/message-1",
+    state: "available" as const,
+    text: input.firstText ?? "Wir behalten die Evidence."
+  };
+  const second =
+    input.secondState === "deleted"
+      ? {
+          id: "message-2",
+          ordinal: 1,
+          author: {
+            providerUserId: "discord-user-fabius",
+            displayName: "Fabius",
+            personId: "person-fabius"
+          },
+          createdAt: "2026-08-08T09:01:00.000Z",
+          editedAt: "2026-08-08T09:02:00.000Z",
+          replyToMessageId: "message-1",
+          url: "https://discord.com/channels/guild-1/thread-1/message-2",
+          state: "deleted" as const,
+          text: null
+        }
+      : {
+          id: "message-2",
+          ordinal: 1,
+          author: {
+            providerUserId: "discord-user-fabius",
+            displayName: "Fabius",
+            personId: "person-fabius"
+          },
+          createdAt: "2026-08-08T09:01:00.000Z",
+          editedAt: null,
+          replyToMessageId: "message-1",
+          url: "https://discord.com/channels/guild-1/thread-1/message-2",
+          state: "available" as const,
+          text: "We might ship after review."
+        };
+  const messages = (input.reverseOrder ? [second, first] : [first, second]).map(
+    (message, ordinal) => ({ ...message, ordinal })
+  );
+  const firstMessage = messages[0];
+  const lastMessage = messages.at(-1);
+
+  if (!firstMessage || !lastMessage) {
+    throw new Error("expected a bounded conversation snapshot");
+  }
+
+  return {
+    schemaVersion: 1,
+    conversation: {
+      conversationObjectId: input.conversationObjectId ?? "thread-1",
+      parentConversationObjectId: "channel-1",
+      title: "Luma evidence review",
+      url: "https://discord.com/channels/guild-1/thread-1"
+    },
+    boundary: {
+      mode: "thread",
+      anchorMessageId: "message-1",
+      firstMessageId: firstMessage.id,
+      lastMessageId: lastMessage.id,
+      messageIds: messages.map((message) => message.id)
+    },
+    messages,
+    completeness: { state: "complete" }
+  };
+}
+
+function conversationSource(parentObjectId = "thread-1") {
+  return {
+    providerId: "discord",
+    sourceKind: "conversation" as const,
+    sourceObjectId: "message-1",
+    parentObjectId,
+    url: `https://discord.com/channels/guild-1/${parentObjectId}/message-1`
   };
 }
 
@@ -747,5 +849,622 @@ describe("Observed source ledger", () => {
     } finally {
       await database.close();
     }
+  });
+
+  it("records bounded conversation evidence as immutable revisions and lists its current head", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = conversationSource();
+    const firstSnapshot = conversationSnapshot();
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-08T09:03:00.000Z",
+        snapshot: firstSnapshot,
+        observedAt: "2026-08-08T09:03:30.000Z"
+      });
+      const reread = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-08T09:04:00.000Z",
+        snapshot: firstSnapshot,
+        observedAt: "2026-08-08T09:04:30.000Z"
+      });
+      const edited = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-08T09:05:00.000Z",
+        snapshot: conversationSnapshot({
+          firstText: "Wir behalten die unveränderte Evidence."
+        }),
+        observedAt: "2026-08-08T09:05:30.000Z"
+      });
+      const deleted = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-08T09:06:00.000Z",
+        snapshot: conversationSnapshot({ secondState: "deleted" }),
+        observedAt: "2026-08-08T09:06:30.000Z"
+      });
+      const reordered = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: "2026-08-08T09:07:00.000Z",
+        snapshot: conversationSnapshot({ reverseOrder: true }),
+        observedAt: "2026-08-08T09:07:30.000Z"
+      });
+
+      expect(first).toMatchObject({
+        change: "new",
+        revision: 1,
+        source,
+        snapshot: firstSnapshot
+      });
+      expect(reread).toMatchObject({
+        change: "unchanged",
+        revision: first.revision,
+        contentHash: first.contentHash,
+        source
+      });
+      expect(edited).toMatchObject({ change: "revised", revision: 2 });
+      expect(deleted).toMatchObject({
+        change: "revised",
+        revision: 3,
+        snapshot: {
+          messages: [
+            expect.objectContaining({ id: "message-1", state: "available" }),
+            expect.objectContaining({ id: "message-2", state: "deleted", text: null })
+          ]
+        }
+      });
+      expect(reordered).toMatchObject({
+        change: "revised",
+        revision: 4,
+        snapshot: {
+          boundary: {
+            firstMessageId: "message-2",
+            lastMessageId: "message-1",
+            messageIds: ["message-2", "message-1"]
+          }
+        }
+      });
+
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source,
+          revision: first.revision
+        })
+      ).resolves.toMatchObject({
+        source,
+        revision: first.revision,
+        snapshot: firstSnapshot
+      });
+
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "discord",
+          sourceKind: "conversation"
+        })
+      ).resolves.toMatchObject([
+        {
+          source,
+          revision: reordered.revision,
+          snapshot: reordered.snapshot,
+          observationGeneration: 5
+        }
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("mints a conversation revision when its anchor moves to another conversation", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const originalSource = conversationSource("thread-a");
+    const movedSource = conversationSource("thread-b");
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source: originalSource,
+        providerVersion: null,
+        snapshot: conversationSnapshot({ conversationObjectId: "thread-a" }),
+        observedAt: "2026-08-08T09:00:00.000Z"
+      });
+      const moved = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source: movedSource,
+        providerVersion: null,
+        snapshot: conversationSnapshot({ conversationObjectId: "thread-b" }),
+        observedAt: "2026-08-08T09:01:00.000Z"
+      });
+
+      expect(moved).toMatchObject({
+        change: "revised",
+        revision: first.revision + 1,
+        source: movedSource
+      });
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source: originalSource,
+          revision: first.revision
+        })
+      ).resolves.toMatchObject({ source: originalSource });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("replays a conversation with omitted optional metadata under the same canonical hash", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = conversationSource();
+    const captured = conversationSnapshot();
+    const firstMessage = captured.messages[0];
+
+    if (!firstMessage) {
+      throw new Error("expected a captured conversation message");
+    }
+
+    // Provider adapters commonly represent an unmapped identity as undefined;
+    // JSON persistence omits it. Its replay must still verify the same hash.
+    delete firstMessage.author.personId;
+
+    try {
+      const recorded = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: null,
+        snapshot: captured,
+        observedAt: "2026-08-08T09:00:00.000Z"
+      });
+
+      const replayed = await ledger.get({
+        workspaceId: "workspace_dayova",
+        source,
+        revision: recorded.revision
+      });
+      const replayedFirstMessage = replayed?.snapshot.messages[0];
+
+      if (!replayedFirstMessage) {
+        throw new Error("expected the persisted conversation message");
+      }
+
+      expect(replayed.contentHash).toBe(recorded.contentHash);
+      expect(replayedFirstMessage.author).not.toHaveProperty("personId");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("replays JSON-normalized sparse meeting-note metadata under the same canonical hash", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = {
+      providerId: "notion",
+      sourceKind: "meeting-note" as const,
+      sourceObjectId: "meeting-notes-block-1",
+      parentObjectId: "notion-page-1",
+      url: "https://notion.so/notion-page-1"
+    };
+    const captured = snapshot("Sparse metadata remains durable.");
+
+    // JSON.stringify preserves a sparse array position as null. The canonical
+    // hash must use that same representation even for legacy meeting snapshots.
+    captured.markdown.unknownBlockIds = new Array<string>(1);
+
+    try {
+      const recorded = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: null,
+        snapshot: captured,
+        observedAt: "2026-08-08T09:00:00.000Z"
+      });
+      const replayed = await ledger.get({
+        workspaceId: "workspace_dayova",
+        source,
+        revision: recorded.revision
+      });
+
+      expect(replayed?.contentHash).toBe(recorded.contentHash);
+      expect(replayed?.snapshot.markdown.unknownBlockIds).toEqual([null]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects malformed conversation records and fails closed for malformed stored payloads", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = conversationSource();
+
+    try {
+      const untypedLedger = ledger as unknown as {
+        record(input: {
+          workspaceId: string;
+          source: {
+            providerId: string;
+            sourceKind: string;
+            sourceObjectId: string;
+            parentObjectId: string;
+            url: string;
+          };
+          providerVersion: string | null;
+          snapshot: RawConversationSnapshot;
+          observedAt: string;
+        }): Promise<unknown>;
+      };
+
+      await expect(
+        untypedLedger.record({
+          workspaceId: "workspace_dayova",
+          source: { ...source, sourceKind: "other" },
+          providerVersion: null,
+          snapshot: conversationSnapshot(),
+          observedAt: "2026-08-08T08:59:00.000Z"
+        })
+      ).rejects.toThrow("source kind is unsupported");
+
+      await expect(
+        untypedLedger.record({
+          workspaceId: "workspace_dayova",
+          source: {
+            ...source,
+            sourceKind: "meeting-note",
+            parentObjectId: "notion-page-1"
+          },
+          providerVersion: null,
+          snapshot: conversationSnapshot(),
+          observedAt: "2026-08-08T08:59:15.000Z"
+        })
+      ).rejects.toThrow("Observed Meeting Notes snapshot has an invalid shape");
+
+      const sparsePartialReasons = new Array<{
+        code: "history-truncated";
+        message: string;
+      }>(1);
+      const sparseCompleteness = {
+        ...conversationSnapshot(),
+        completeness: { state: "partial" as const, reasons: sparsePartialReasons }
+      } satisfies RawConversationSnapshot;
+
+      await expect(
+        ledger.record({
+          workspaceId: "workspace_dayova",
+          source,
+          providerVersion: null,
+          snapshot: sparseCompleteness,
+          observedAt: "2026-08-08T08:59:30.000Z"
+        })
+      ).rejects.toThrow("invalid shape");
+
+      const malformed = {
+        ...conversationSnapshot(),
+        boundary: {
+          ...conversationSnapshot().boundary,
+          anchorMessageId: "unobserved-anchor"
+        }
+      } as RawConversationSnapshot;
+
+      await expect(
+        ledger.record({
+          workspaceId: "workspace_dayova",
+          source,
+          providerVersion: null,
+          snapshot: malformed,
+          observedAt: "2026-08-08T09:00:00.000Z"
+        })
+      ).rejects.toThrow("anchor message");
+
+      const recorded = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: null,
+        snapshot: conversationSnapshot(),
+        observedAt: "2026-08-08T09:01:00.000Z"
+      });
+
+      await database.query(
+        `UPDATE observed_source_snapshots
+            SET raw_payload_json = $5
+          WHERE workspace_id = $1
+            AND provider_id = $2
+            AND source_kind = $3
+            AND source_object_id = $4`,
+        [
+          "workspace_dayova",
+          source.providerId,
+          source.sourceKind,
+          source.sourceObjectId,
+          JSON.stringify({ schemaVersion: 1 })
+        ]
+      );
+
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source,
+          revision: recorded.revision
+        })
+      ).rejects.toThrow("invalid stored shape");
+
+      await database.query(
+        `UPDATE observed_source_snapshots
+            SET raw_payload_json = $5
+          WHERE workspace_id = $1
+            AND provider_id = $2
+            AND source_kind = $3
+            AND source_object_id = $4`,
+        [
+          "workspace_dayova",
+          source.providerId,
+          source.sourceKind,
+          source.sourceObjectId,
+          JSON.stringify(
+            conversationSnapshot({
+              firstText: "Tampered evidence must not retain its old hash."
+            })
+          )
+        ]
+      );
+
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source,
+          revision: recorded.revision
+        })
+      ).rejects.toThrow("content hash does not match");
+
+      await database.query(
+        `UPDATE observed_source_snapshots
+            SET raw_payload_json = $5,
+                source_reference_json = $6
+          WHERE workspace_id = $1
+            AND provider_id = $2
+            AND source_kind = $3
+            AND source_object_id = $4`,
+        [
+          "workspace_dayova",
+          source.providerId,
+          source.sourceKind,
+          source.sourceObjectId,
+          JSON.stringify(conversationSnapshot()),
+          JSON.stringify({
+            ...source,
+            sourceKind: "meeting-note",
+            parentObjectId: null
+          })
+        ]
+      );
+
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source,
+          revision: recorded.revision
+        })
+      ).rejects.toThrow("does not match");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("does not let a stale execution fence block read-only conversation capture", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = conversationSource();
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: null,
+        snapshot: conversationSnapshot(),
+        observedAt: "2026-08-08T09:00:00.000Z"
+      });
+
+      await database.query(
+        `INSERT INTO observed_source_execution_fences (
+           workspace_id, provider_id, source_kind, source_object_id,
+           source_revision, source_content_hash,
+           meeting_id, intent_id, execution_lease_id, acquired_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          "workspace_dayova",
+          source.providerId,
+          source.sourceKind,
+          source.sourceObjectId,
+          first.revision,
+          first.contentHash,
+          "meeting-not-applicable",
+          "intent-not-applicable",
+          "lease-not-applicable",
+          "2026-08-08T09:00:30.000Z"
+        ]
+      );
+
+      await expect(
+        ledger.record({
+          workspaceId: "workspace_dayova",
+          source,
+          providerVersion: null,
+          snapshot: conversationSnapshot({
+            firstText: "Die Conversation bleibt read-only."
+          }),
+          observedAt: "2026-08-08T09:01:00.000Z"
+        })
+      ).resolves.toMatchObject({ change: "revised", revision: 2 });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails closed when an untyped caller sends a conversation root to mutation APIs", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = conversationSource();
+    const owner = {
+      meetingId: "meeting-not-applicable",
+      intentId: "intent-not-applicable",
+      executionLeaseId: "lease-not-applicable"
+    };
+
+    try {
+      const first = await ledger.record({
+        workspaceId: "workspace_dayova",
+        source,
+        providerVersion: null,
+        snapshot: conversationSnapshot(),
+        observedAt: "2026-08-08T09:00:00.000Z"
+      });
+      const [head] = await ledger.listCurrent({
+        workspaceId: "workspace_dayova",
+        providerId: source.providerId,
+        sourceKind: source.sourceKind
+      });
+
+      if (!head) {
+        throw new Error("expected a recorded conversation head");
+      }
+
+      const untypedLedger = ledger as unknown as {
+        acquireExecutionFence(input: {
+          workspaceId: string;
+          source: typeof source;
+          expected: { revision: number; contentHash: string };
+          owner: typeof owner;
+          now: Date;
+        }): Promise<unknown>;
+        verifyExecutionFenceHeldCurrent(input: {
+          workspaceId: string;
+          source: typeof source;
+          expected: { revision: number; contentHash: string };
+          owner: typeof owner;
+        }): Promise<unknown>;
+        releaseExecutionFence(input: {
+          workspaceId: string;
+          source: typeof source;
+          owner: typeof owner;
+        }): Promise<void>;
+        recordTombstone(input: {
+          workspaceId: string;
+          previous: typeof head;
+          observedAt: string;
+        }): Promise<unknown>;
+      };
+
+      const expected = {
+        revision: first.revision,
+        contentHash: first.contentHash
+      };
+
+      await expect(
+        untypedLedger.acquireExecutionFence({
+          workspaceId: "workspace_dayova",
+          source,
+          expected,
+          owner,
+          now: new Date("2026-08-08T09:00:30.000Z")
+        })
+      ).rejects.toThrow("only valid meeting-note roots");
+      await expect(
+        untypedLedger.verifyExecutionFenceHeldCurrent({
+          workspaceId: "workspace_dayova",
+          source,
+          expected,
+          owner
+        })
+      ).rejects.toThrow("only valid meeting-note roots");
+      await expect(
+        untypedLedger.releaseExecutionFence({
+          workspaceId: "workspace_dayova",
+          source,
+          owner
+        })
+      ).rejects.toThrow("only valid meeting-note roots");
+      await expect(
+        untypedLedger.recordTombstone({
+          workspaceId: "workspace_dayova",
+          previous: head,
+          observedAt: "2026-08-08T09:01:00.000Z"
+        })
+      ).rejects.toThrow("only valid meeting-note roots");
+
+      await database.query(
+        `INSERT INTO observed_source_execution_fences (
+           workspace_id, provider_id, source_kind, source_object_id,
+           source_revision, source_content_hash,
+           meeting_id, intent_id, execution_lease_id, acquired_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          "workspace_dayova",
+          source.providerId,
+          source.sourceKind,
+          source.sourceObjectId,
+          first.revision,
+          first.contentHash,
+          owner.meetingId,
+          owner.intentId,
+          owner.executionLeaseId,
+          "2026-08-08T09:00:30.000Z"
+        ]
+      );
+
+      await releaseObservedSourceExecutionFencesForExecution({
+        database,
+        workspaceId: "workspace_dayova",
+        owner
+      });
+      await releaseObservedSourceExecutionFencesForSettlement({
+        database,
+        workspaceId: "workspace_dayova",
+        meetingId: owner.meetingId,
+        intentId: owner.intentId
+      });
+
+      await expect(
+        database.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count
+             FROM observed_source_execution_fences
+            WHERE workspace_id = $1
+              AND provider_id = $2
+              AND source_kind = $3
+              AND source_object_id = $4`,
+          [
+            "workspace_dayova",
+            source.providerId,
+            source.sourceKind,
+            source.sourceObjectId
+          ]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps conversation roots out of tombstone and execution-fence APIs", () => {
+    type ConversationCanBeFenced =
+      ObservedSourceIdentity<"conversation"> extends ObservedSourceExecutionFenceSource
+        ? true
+        : false;
+    type ConversationCanBeTombstoned =
+      ObservedSourceHead<"conversation"> extends RecordObservedSourceTombstoneInput["previous"]
+        ? true
+        : false;
+
+    const conversationCanBeFenced: ConversationCanBeFenced = false;
+    const conversationCanBeTombstoned: ConversationCanBeTombstoned = false;
+
+    expect(conversationCanBeFenced).toBe(false);
+    expect(conversationCanBeTombstoned).toBe(false);
   });
 });

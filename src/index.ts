@@ -109,6 +109,23 @@ export type { GitHubIssuesWorkProviderConfig } from "./work/github-issues-adapte
 export type * from "./code/interface.js";
 export type * from "./organizational-context/interface.js";
 export {
+  createContextIntelligence,
+  ContextIntelligenceError
+} from "./context-intelligence/context-intelligence.js";
+export type { CreateContextIntelligenceInput } from "./context-intelligence/context-intelligence.js";
+export type * from "./context-intelligence/interface.js";
+export type * from "./context-intelligence/context-answerer.js";
+export type * from "./context-intelligence/conversation-evidence-source.js";
+export {
+  createOpenAIContextAnswerer,
+  OpenAIContextAnswererError
+} from "./context-intelligence/openai-context-answerer.js";
+export type {
+  OpenAIContextAnswererConfig,
+  OpenAIContextAnswererResponseClient,
+  OpenAIContextAnswererResponseRequest
+} from "./context-intelligence/openai-context-answerer.js";
+export {
   createFollowUpExecution,
   renderDiscordReceiptEvents
 } from "./follow-up-execution/follow-up-execution.js";

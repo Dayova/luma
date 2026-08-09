@@ -33,7 +33,7 @@ A bare `LUM-<number>` always means a Linear issue. A bare GitHub `#<number>` is 
 ## Skill Publishing Rules
 
 - When a skill says **publish a spec**, store the durable full specification in Notion and create or update one Luma issue with the execution summary, acceptance criteria, and Notion link.
-- When a skill says **publish tickets**, create one Luma issue per ticket in dependency order. Use native parent and blocking relationships and apply the mapped `ready-for-agent` label when appropriate.
+- When a skill says **publish tickets**, create one Luma issue per ticket in dependency order. For every triaged published ticket, apply exactly one mapped category role and exactly one mapped state role from [Triage Labels](triage-labels.md); `ready-for-agent` is a state role, not a category. Use native parent and blocking relationships.
 - When a skill says **fetch the relevant ticket**, read the full Linear issue, comments, labels, status, and relations.
 
 ## Wayfinding Operations
@@ -41,7 +41,7 @@ A bare `LUM-<number>` always means a Linear issue. A bare GitHub `#<number>` is 
 Used by `$wayfinder`. The map and its tickets are Linear issues in the Luma team.
 
 - **Map**: create one issue labelled `wayfinder:map`. Its description holds Destination, Notes, Decisions so far, Not yet specified, and Out of scope. It is the required low-resolution index; the ticket comment remains the full decision record. Linear replaces the whole description on update and offers no conditional write, so the map's decision-journal comments are part of the effective map until a human consolidates them into the index.
-- **Child ticket**: create an issue with `parentId` set to the map and exactly one type label: `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or `wayfinder:task`. Create siblings in the intended exploration order; their `createdAt` order is the stable default order for the frontier. Express true dependencies with native blocker relations, not by relying on a description ordering.
+- **Child ticket**: create an issue with `parentId` set to the map and exactly one type label: `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or `wayfinder:task`. When the child is triaged, it must additionally have exactly one mapped category role and exactly one mapped state role; the Wayfinder type label does not replace either role. Create siblings in the intended exploration order; their `createdAt` order is the stable default order for the frontier. Express true dependencies with native blocker relations, not by relying on a description ordering.
 - **Blocking**: set native `blockedBy` or `blocks` relations. Use `removeBlockedBy` or `removeBlocks` when a decision invalidates an edge.
 - **Frontier**: list every page of the map's children with `orderBy: createdAt`, exclude completed or canceled issues, fetch relations, then keep only unassigned issues with no open blockers. Sort eligible children client-side by `createdAt` ascending and then identifier ascending; choose the first. A later item that must precede an earlier child needs an explicit blocker relation; do not infer an ordering from the map description.
 - **Claim**: assign the active Luma owner before any work and move the ticket to `In Progress`. Verify the user against the Luma team rather than assuming the connector identity.

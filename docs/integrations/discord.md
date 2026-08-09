@@ -122,7 +122,7 @@ LUMA_DEFAULT_WORKSPACE_TIMEZONE=Europe/Berlin
 LUMA_PGLITE_DATA_DIR=.luma/pglite
 ```
 
-`DISCORD_TOKEN` is a secret. Never commit it, paste it into issues, or reuse the same token across development and production.
+`DISCORD_TOKEN` is a secret. Never commit it, paste it into issues, or reuse the same token across development and production. Before any live Discord rollout, follow the [credential-rotation runbook](../configuration/discord-token-rotation.md) and record only its non-secret proof on the rollout ticket.
 
 ## Running The Development Bot
 

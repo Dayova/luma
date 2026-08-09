@@ -230,6 +230,40 @@ function noMeetingAnalysisProposals(): MeetingAnalysisProposalBatch {
   };
 }
 
+function speakerOwnershipProposalModel(stableKey: string): ReasoningModel {
+  return new ProgrammableReasoningModel((request) => {
+    const evidence = request.evidence[0];
+
+    if (!evidence) {
+      throw new Error("expected transcript Evidence");
+    }
+
+    return {
+      actionItems: [
+        {
+          stableKey,
+          description: "Complete the release checklist.",
+          ownerId: "person_jakob",
+          dueDate: {
+            originalPhrase: null,
+            normalizedDate: null,
+            confidence: "unknown",
+            timezone: "Europe/Berlin"
+          },
+          status: "candidate",
+          relatedDecisionIds: [],
+          evidenceIds: [evidence.evidenceId],
+          confidence: "high"
+        }
+      ],
+      decisions: [],
+      openQuestions: [],
+      risks: [],
+      followUpIntentions: []
+    };
+  });
+}
+
 /**
  * Preserves the existing action during a Human speaker correction so the test
  * proves projection remaps its provenance rather than a fresh model proposal.
@@ -1292,37 +1326,7 @@ describe("MeetingIntelligence observe/query", () => {
     const meetingId = "meeting_general_self_commitment";
     const meetingIntelligence = createMeetingIntelligence({
       database,
-      reasoningModel: new ProgrammableReasoningModel((request) => {
-        const evidence = request.evidence[0];
-
-        if (!evidence) {
-          throw new Error("expected transcript Evidence");
-        }
-
-        return {
-          actionItems: [
-            {
-              stableKey: "german-self-commitment",
-              description: "Complete the release checklist.",
-              ownerId: "person_jakob",
-              dueDate: {
-                originalPhrase: null,
-                normalizedDate: null,
-                confidence: "unknown",
-                timezone: "Europe/Berlin"
-              },
-              status: "candidate",
-              relatedDecisionIds: [],
-              evidenceIds: [evidence.evidenceId],
-              confidence: "high"
-            }
-          ],
-          decisions: [],
-          openQuestions: [],
-          risks: [],
-          followUpIntentions: []
-        };
-      }),
+      reasoningModel: speakerOwnershipProposalModel("german-self-commitment"),
       now: () => new Date("2026-08-08T10:00:00.000Z")
     });
 
@@ -1347,7 +1351,7 @@ describe("MeetingIntelligence observe/query", () => {
             },
             startedAt: "2026-08-08T09:04:58.000Z",
             endedAt: "2026-08-08T09:05:02.000Z",
-            originalText: "Ich mache das.",
+            originalText: "Ja, übernehme ich.",
             language: "de"
           }
         ]
@@ -1389,6 +1393,77 @@ describe("MeetingIntelligence observe/query", () => {
       await database.close();
     }
   });
+
+  it("keeps a whitespace-amplified acknowledgement near miss as a proposed owner without delaying observation", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_whitespace_amplified_acknowledgement",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_whitespace_amplified_acknowledgement";
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: speakerOwnershipProposalModel(
+        "whitespace-amplified-acknowledgement"
+      ),
+      now: () => new Date("2026-08-08T10:00:00.000Z")
+    });
+    const sourceText = `Ja${" ".repeat(50_000)},${" ".repeat(50_000)}machex ich`;
+
+    try {
+      const startedAt = performance.now();
+
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "whitespace-amplified-acknowledgement:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-08T09:05:00.000Z",
+            observedAt: "2026-08-08T09:05:01.000Z",
+            utteranceId: "whitespace-amplified-acknowledgement:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-08T09:04:58.000Z",
+            endedAt: "2026-08-08T09:05:02.000Z",
+            originalText: sourceText,
+            language: "de"
+          }
+        ]
+      });
+
+      expect(performance.now() - startedAt).toBeLessThan(1_000);
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(snapshot.state.actionItems[0]).toMatchObject({
+        ownerId: null,
+        ownership: {
+          status: "proposed",
+          proposedOwnerPersonId: "person_jakob",
+          confidence: "low",
+          basis: "inferred-assignment"
+        }
+      });
+    } finally {
+      await database.close();
+    }
+  }, 3_000);
 
   it("does not turn a refusal, question, or capability statement into confirmed self-ownership", async () => {
     const cases = [

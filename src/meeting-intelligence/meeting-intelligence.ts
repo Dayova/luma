@@ -5702,6 +5702,13 @@ function speakerSelfCommitmentOwnership(
     : null;
 }
 
+// The acknowledgement separator admits either a comma with optional
+// surrounding whitespace, whitespace alone, or no separator. Keeping those
+// alternatives disjoint avoids polynomial backtracking on a rejected source
+// utterance with a long whitespace run.
+const SPEAKER_SELF_COMMITMENT =
+  /\b(?:ich\s+(?:mache|übernehme|kümmere\s+mich|bearbeite|werde\s+(?:das\s+)?(?:machen|übernehmen))|(?:das\s+)?(?:mache|übernehme)\s+ich|ja(?:\s*,\s*|\s+)?(?:mache|übernehme)\s+ich|i(?:\s+will|'ll)\s+(?:do|take|handle|own|prepare))\b/iu;
+
 function isSpeakerSelfCommitment(text: string | undefined): boolean {
   if (!text) {
     return false;
@@ -5719,9 +5726,7 @@ function isSpeakerSelfCommitment(text: string | undefined): boolean {
     return false;
   }
 
-  return /\b(?:ich\s+(?:mache|übernehme|kümmere\s+mich|bearbeite|werde\s+(?:das\s+)?(?:machen|übernehmen))|(?:das\s+)?(?:mache|übernehme)\s+ich|ja\s*,?\s*(?:mache|übernehme)\s+ich|i(?:\s+will|'ll)\s+(?:do|take|handle|own|prepare))\b/iu.test(
-    normalized
-  );
+  return SPEAKER_SELF_COMMITMENT.test(normalized);
 }
 
 function reconcileDecisions(

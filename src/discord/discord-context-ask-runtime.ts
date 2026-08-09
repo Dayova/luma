@@ -15,6 +15,8 @@ export const MAX_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS = 3_600_000;
 const DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH = 1_500;
 const DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER =
   "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question.";
+const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER =
+  "Luma cannot answer reliably from the captured evidence.";
 
 /**
  * Explicit opt-in scope for Discord conversation Ask. The adapter enforces it
@@ -300,6 +302,14 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
   );
 
   if (answerEvidence.length === 0) {
+    if (
+      result.uncertainty === "insufficient-evidence" &&
+      result.facts.length === 0 &&
+      result.inferences.length === 0
+    ) {
+      return renderInsufficientEvidenceResult(result);
+    }
+
     return DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER;
   }
 
@@ -338,6 +348,41 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
   }
 
+  return renderDiscordResponse(lines);
+}
+
+/**
+ * Context Intelligence deliberately produces this no-answer shape for a
+ * partial capture or a boundary with no available original text. Do not render
+ * its answer text: unlike a normal answer it has no evidence. The renderer
+ * owns the fixed explanation while retaining the core's labelled limitations
+ * and recovery guidance.
+ */
+function renderInsufficientEvidenceResult(result: ContextInquiryResult): string {
+  const lines = [
+    "Luma Ask",
+    "",
+    DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER,
+    "",
+    "Uncertainty: insufficient-evidence"
+  ];
+
+  if (result.warnings.length > 0) {
+    lines.push("", "Limitations:");
+    lines.push(
+      ...result.warnings.map((warning) => `- ${escapeDiscordInlineText(warning.message)}`)
+    );
+  }
+
+  if (result.unresolved.length > 0) {
+    lines.push("", "Unresolved:");
+    lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
+  }
+
+  return renderDiscordResponse(lines);
+}
+
+function renderDiscordResponse(lines: readonly string[]): string {
   const rendered = lines.join("\n");
 
   return rendered.length <= DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH

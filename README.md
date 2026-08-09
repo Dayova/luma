@@ -39,6 +39,7 @@ pnpm verify
 ```
 
 This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural Vitest suite.
+GitHub Actions runs the same command for pull requests and pushes to `main`.
 
 ## Toolchain
 

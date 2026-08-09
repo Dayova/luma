@@ -82,6 +82,15 @@ export function commitmentDispositionFor(
 }
 
 /**
+ * The acknowledgement branch has one unambiguous separator alternative: a
+ * comma (with optional surrounding whitespace), whitespace, or neither.
+ * Separating those cases prevents whitespace from being partitioned across
+ * adjacent `\\s*` terms during a rejected match.
+ */
+const SELF_COMMITMENT =
+  /\b(?:ich\s+(?:mache|übernehme|kümmere\s+mich|bearbeite)|(?:das\s+)?(?:mache|übernehme)\s+ich|ja(?:\s*,\s*|\s+)?(?:mache|übernehme)\s+ich)\b/iu;
+
+/**
  * Provider-neutral, deterministic semantics derived from canonical source
  * wording. Both ingestion and Meeting Intelligence use these functions so a
  * public Observation cannot assert a more certain meaning than its Evidence.
@@ -107,9 +116,7 @@ export function importedActionItemModalityFor(text: string): ImportedActionItemM
     return { kind: "completed-work", sourceForm: null };
   }
 
-  const selfCommitment = text.match(
-    /\b(?:ich\s+(?:mache|übernehme|kümmere\s+mich|bearbeite)|(?:das\s+)?(?:mache|übernehme)\s+ich|ja\s*,?\s*(?:mache|übernehme)\s+ich)\b/iu
-  );
+  const selfCommitment = text.match(SELF_COMMITMENT);
 
   if (selfCommitment) {
     return {
@@ -281,6 +288,7 @@ export function mentionedWorkItemExternalIdsFor(text: string): string[] {
 }
 
 const GITHUB_URL_CANDIDATE = /https:\/\/github\.com\/[^\s<>"'`[\]{}]+/giu;
+const GITHUB_URL_TRAILING_PUNCTUATION = new Set([".", ",", ";", ":", "!", ")", "}", "]"]);
 const GITHUB_OWNER = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})";
 const GITHUB_REPOSITORY = "[A-Za-z0-9_.-]+";
 const GITHUB_PULL_REQUEST_URL = new RegExp(
@@ -335,7 +343,13 @@ function trimSourceUrlPunctuation(value: string): string {
   // A trailing question mark can encode an empty query and must therefore
   // remain part of the candidate. Failing closed is preferable to treating a
   // non-exact source URL as the canonical implementation locator.
-  return value.replace(/[.,;:!)}\]]+$/u, "");
+  let end = value.length;
+
+  while (end > 0 && GITHUB_URL_TRAILING_PUNCTUATION.has(value.charAt(end - 1))) {
+    end -= 1;
+  }
+
+  return end === value.length ? value : value.slice(0, end);
 }
 
 function githubImplementationReferenceFromUrl(

@@ -18,7 +18,7 @@ Use the connected Linear app for tracker operations:
 - **Create or update**: use `save_issue`; pass `team: "Luma"` when creating.
 - **Read**: use `get_issue`, including relations when blockers, children, duplicates, or related work matter.
 - **List**: use `list_issues` scoped to the Luma team and the narrowest useful state, label, parent, assignee, or query filter.
-- **Comment**: use `create_comment`; read existing discussion with `list_comments` before adding context.
+- **Comment**: use `save_comment`; read existing discussion with `list_comments` before adding context.
 - **Label**: read the issue first, then pass the complete intended label set to `save_issue` because `labels` replaces the existing set.
 - **Close**: use `Done` for completed work and `Canceled` for rejected or `wontfix` work.
 

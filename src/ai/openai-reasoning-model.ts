@@ -6,8 +6,10 @@ import type {
   StructuredReasoningRequest,
   StructuredReasoningResult
 } from "./reasoning-model.js";
-
-const DEFAULT_OPENAI_REASONING_MODEL = "gpt-5.6-luna";
+import {
+  DEFAULT_OPENAI_REASONING_MODEL,
+  openAIReasoningModelNameFromEnv
+} from "./openai-model-config.js";
 
 const confidenceSchema = z.enum(["low", "medium", "high"]);
 const evidenceIdsSchema = z.array(z.string().min(1)).min(1);
@@ -232,10 +234,9 @@ export function createOpenAIReasoningModel(
 export function createOpenAIReasoningModelFromEnv(
   env: NodeJS.ProcessEnv = process.env
 ): ReasoningModel {
-  const model = nonBlank(env["LUMA_REASONING_MODEL_NAME"]);
   return createOpenAIReasoningModel({
     apiKey: requireEnv(env, "OPENAI_API_KEY"),
-    ...(model ? { model } : {})
+    model: openAIReasoningModelNameFromEnv(env)
   });
 }
 

@@ -95,7 +95,7 @@ LUMA_REASONING_MODEL_PROVIDER=openai
 LUMA_REASONING_MODEL_NAME=gpt-5.6-luna
 ```
 
-The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model; override it per environment when a different quality/cost point is required.
+The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model; override it per environment when a different quality/cost point is required. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default.
 
 When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and reports analysis as deferred. Set `LUMA_REASONING_MODEL_PROVIDER=disabled` to make that behavior explicit.
 

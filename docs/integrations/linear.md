@@ -75,6 +75,26 @@ Linear owns the task. GitHub #20 describes the migration and DAY-39 is the canon
 
 The SDK is contained behind Luma's owned `LinearApi` facade and `WorkProvider` Interface.
 
+## Dedicated least-privilege read-only catalog
+
+`LinearReadOnlyWorkCatalog` is a separate production Adapter for an eventual
+source-bound review surface. It is configured with `LINEAR_READONLY_API_KEY`
+and `LINEAR_TEAM_ID`; it never reads or falls back to `LINEAR_API_KEY`, and it
+does not accept a `WorkProvider` instance. Create the read-only key with only
+Linear's **Read** permission.
+
+The catalog implements only the existing read-only `WorkCatalog` operations:
+
+- team-scoped text search is hard-capped at ten results;
+- one issue may be fetched only after its opaque selector was returned by that
+  catalog's bounded search; and
+- no generic list, create, update, comment, assignment, or delete operation is
+  exposed.
+
+This slice does not wire the catalog into the executable server or authorize a
+native Notion agent. It is intentionally separate from the writer-capable
+`LinearWorkProvider` used by approved Follow-up Execution.
+
 ## Read-only reconciliation catalog
 
 Meeting Intelligence receives a narrowed `WorkCatalog` rather than a
@@ -114,4 +134,14 @@ set -a
 source .env
 set +a
 LUMA_LIVE_LINEAR_TESTS=1 pnpm test -- tests/work/linear-work-provider.live.test.ts
+```
+
+For the dedicated catalog, create a separate Read-permission key and run only
+the bounded search smoke test:
+
+```bash
+set -a
+source .env
+set +a
+LUMA_LIVE_LINEAR_READONLY_TESTS=1 pnpm exec vitest run tests/work/linear-read-only-work-catalog.live.test.ts
 ```

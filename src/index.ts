@@ -101,6 +101,16 @@ export type {
   LinearWorkProviderConfig
 } from "./work/linear-work-provider.js";
 export {
+  LinearReadOnlyWorkCatalogError,
+  createLinearReadOnlyWorkCatalog,
+  createLinearReadOnlyWorkCatalogFromEnv
+} from "./work/linear-read-only-work-catalog.js";
+export type {
+  LinearReadOnlyApi,
+  LinearReadOnlyApiIssue,
+  LinearReadOnlyWorkCatalogConfig
+} from "./work/linear-read-only-work-catalog.js";
+export {
   GitHubIssuesAdapterError,
   createGitHubIssuesWorkProvider,
   createGitHubIssuesWorkProviderFromEnv

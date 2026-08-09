@@ -1,5 +1,6 @@
 import type {
   ContextEvidence,
+  ContextEvidenceClaim,
   ContextInquiryResult
 } from "../context-intelligence/interface.js";
 
@@ -12,6 +13,8 @@ export const DEFAULT_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS = 60_000;
 export const MAX_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS = 3_600_000;
 
 const DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH = 1_500;
+const DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER =
+  "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question.";
 
 /**
  * Explicit opt-in scope for Discord conversation Ask. The adapter enforces it
@@ -285,22 +288,39 @@ export function createDiscordContextAskRateLimiter(config: {
 }
 
 /**
- * Discord replies contain only escaped model prose and citations derived from
- * captured Discord URLs. A too-long answer is not truncated into a claim.
+ * Discord replies contain only escaped model prose and Evidence derived from
+ * captured Discord Evidence. Facts and inferences remain visibly distinct.
+ * A too-long answer is not truncated into a claim.
  */
 export function renderDiscordContextAskResult(result: ContextInquiryResult): string {
-  const citations = uniqueAvailableDiscordEvidence(result.answer.evidence);
+  const capturedEvidence = capturedDiscordEvidenceById(result.evidence);
+  const answerEvidence = uniqueAvailableDiscordEvidence(
+    result.answer.evidence,
+    capturedEvidence
+  );
+
+  if (answerEvidence.length === 0 && result.uncertainty !== "insufficient-evidence") {
+    return DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER;
+  }
+
   const lines = ["Luma Ask", "", escapeDiscordPlainText(result.answer.text)];
 
-  if (citations.length > 0) {
+  if (answerEvidence.length > 0) {
     lines.push("", "Evidence:");
-    lines.push(
-      ...citations.map(
-        (evidence) =>
-          `- ${escapeDiscordPlainText(evidence.author.displayName)}: <${evidence.url}>`
-      )
-    );
+    lines.push(...renderEvidenceLines(answerEvidence, ""));
   }
+
+  appendEvidenceClaimSection(lines, "Facts", result.facts, capturedEvidence, (fact) =>
+    escapeDiscordInlineText(fact.text)
+  );
+  appendEvidenceClaimSection(
+    lines,
+    "Inferences",
+    result.inferences,
+    capturedEvidence,
+    (inference) =>
+      `${escapeDiscordInlineText(inference.text)} (confidence: ${inference.confidence})`
+  );
 
   if (result.uncertainty !== "none") {
     lines.push("", `Uncertainty: ${result.uncertainty}`);
@@ -325,16 +345,79 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     : "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question.";
 }
 
-function uniqueAvailableDiscordEvidence(evidence: ContextEvidence[]): ContextEvidence[] {
+function appendEvidenceClaimSection<T extends ContextEvidenceClaim>(
+  lines: string[],
+  heading: string,
+  claims: readonly T[],
+  capturedEvidence: ReadonlyMap<string, ContextEvidence>,
+  formatEscapedClaim: (claim: T) => string
+): void {
+  const renderableClaims = claimsWithCapturedEvidence(claims, capturedEvidence);
+
+  if (renderableClaims.length === 0) {
+    return;
+  }
+
+  lines.push("", `${heading}:`);
+
+  for (const { claim, evidence } of renderableClaims) {
+    lines.push(`- ${formatEscapedClaim(claim)}`);
+    lines.push("  Evidence:", ...renderEvidenceLines(evidence, "  "));
+  }
+}
+
+function claimsWithCapturedEvidence<T extends ContextEvidenceClaim>(
+  claims: readonly T[],
+  capturedEvidence: ReadonlyMap<string, ContextEvidence>
+): Array<{ claim: T; evidence: ContextEvidence[] }> {
+  const renderableClaims: Array<{ claim: T; evidence: ContextEvidence[] }> = [];
+
+  for (const claim of claims) {
+    const evidence = uniqueAvailableDiscordEvidence(claim.evidence, capturedEvidence);
+
+    if (evidence.length > 0) {
+      renderableClaims.push({ claim, evidence });
+    }
+  }
+
+  return renderableClaims;
+}
+
+function renderEvidenceLines(
+  evidence: readonly ContextEvidence[],
+  indent: string
+): string[] {
+  return evidence.map(
+    (item) =>
+      `${indent}- ${escapeDiscordInlineText(item.author.displayName)}: <${item.url}>`
+  );
+}
+
+function capturedDiscordEvidenceById(
+  evidence: readonly ContextEvidence[]
+): ReadonlyMap<string, ContextEvidence> {
+  const capturedEvidence = new Map<string, ContextEvidence>();
+
+  for (const item of evidence) {
+    if (item.state === "available" && isDiscordMessageUrl(item.url)) {
+      capturedEvidence.set(item.evidenceId, item);
+    }
+  }
+
+  return capturedEvidence;
+}
+
+function uniqueAvailableDiscordEvidence(
+  evidence: readonly ContextEvidence[],
+  capturedEvidence: ReadonlyMap<string, ContextEvidence>
+): ContextEvidence[] {
   const byMessageId = new Map<string, ContextEvidence>();
 
   for (const item of evidence) {
-    if (
-      item.state === "available" &&
-      isDiscordMessageUrl(item.url) &&
-      !byMessageId.has(item.messageId)
-    ) {
-      byMessageId.set(item.messageId, item);
+    const captured = capturedEvidence.get(item.evidenceId);
+
+    if (captured && !byMessageId.has(captured.messageId)) {
+      byMessageId.set(captured.messageId, captured);
     }
   }
 
@@ -351,6 +434,11 @@ function escapeDiscordPlainText(value: string): string {
     .replace(/\\/gu, "\\\\")
     .replace(/([`*_~|>#\u005b\u005d()<>{}])/gu, "\\$1")
     .replace(/@/gu, "@\u200b");
+}
+
+/** Text inside a Discord list item cannot introduce another visible list item. */
+function escapeDiscordInlineText(value: string): string {
+  return escapeDiscordPlainText(value).replace(/[\r\n\u2028\u2029]+/gu, " ");
 }
 
 function escapeRegularExpression(value: string): string {

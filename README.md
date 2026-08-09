@@ -15,12 +15,13 @@ complete Discord Ask → Verify → Reconcile → Execute product path.
 
 ## Current Delivery Boundary
 
-LUM-2 (Notion Meeting Notes ingestion and observed revisions) and LUM-3
-(read-only Linear reconciliation) are complete foundations. LUM-9 is the
-current German speaker-attribution and Action Item-ownership safety P0 before
-the meeting wedge can be called production-safe. LUM-6, LUM-7, and LUM-8—the
-approved settlement, durable execution, and compact Operational Outcome
-writeback work—remain incomplete.
+LUM-2 (Notion Meeting Notes ingestion and observed revisions), LUM-3
+(read-only Linear reconciliation), LUM-7/LUM-8 (source-bound settlement and
+Operational Outcome writeback), LUM-9 (German speaker and ownership safety),
+and LUM-10 (source-bound GitHub implementation references) are complete
+foundations. LUM-6 remains open: LUM-11 requires a product decision and then
+a safe, target-bound canonical Notion patch capability before the first
+production-safe meeting wedge can be complete.
 
 ## Public Interfaces
 

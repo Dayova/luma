@@ -13,6 +13,10 @@ sources and interaction surfaces over the shared Luma core.
 A time-bounded team conversation whose evidence and follow-up can continue evolving after the live call ends.
 _Avoid_: Call, recording, session
 
+**Conversation**:
+An ordered, bounded, provider-native discussion that Luma can preserve as Evidence without treating it as a Meeting or creating a Meeting Note.
+_Avoid_: Meeting, transcript dump, chat log
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row
@@ -98,5 +102,5 @@ A provider-normalized event connected to a Meeting Item, external object, or Fol
 _Avoid_: Webhook payload, provider event
 
 **Organizational Context**:
-Permission-filtered, normalized knowledge, work, code, and previous-Meeting information retrieved to understand or answer questions about a Meeting.
+Permission-filtered, normalized knowledge, work, code, and prior Luma information retrieved to understand or answer questions about a Meeting or Conversation.
 _Avoid_: RAG result, search result

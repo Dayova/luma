@@ -151,7 +151,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(limiter.tryAcquire(ask)).toBe(true);
   });
 
-  it("renders model prose as plain text and cites only captured Discord evidence", () => {
+  it("renders model prose as plain text and includes only captured Discord Evidence", () => {
     const rendered = renderDiscordContextAskResult(contextInquiryResult());
 
     expect(rendered).toContain("might\\_ship");
@@ -159,6 +159,190 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(rendered).toContain("https:\u200b//outside.example");
     expect(rendered).toContain("<https://discord.com/channels/1/2/3>");
     expect(rendered).not.toContain("<https://outside.example>");
+  });
+
+  it("renders separately evidenced facts and confidence-labelled inferences", () => {
+    const rendered = renderDiscordContextAskResult(contextInquiryResult());
+
+    expect(rendered).toContain(
+      "Facts:\n- The Linear issue remains open.\n  Evidence:\n  - Jakob: <https://discord.com/channels/1/2/3>"
+    );
+    expect(rendered).toContain(
+      "Inferences:\n- The team might ship next week. (confidence: medium)\n  Evidence:\n  - Fabius: <https://discord.com/channels/1/2/4>"
+    );
+    expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
+  });
+
+  it("keeps the legacy response byte-identical when there are no facts or inferences", () => {
+    const result = contextInquiryResult();
+    result.facts = [];
+    result.inferences = [];
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      [
+        "Luma Ask",
+        "",
+        "The release might\\_ship @\u200beveryone: https:\u200b//outside.example",
+        "",
+        "Evidence:",
+        "- Jakob: <https://discord.com/channels/1/2/3>"
+      ].join("\n")
+    );
+  });
+
+  it("omits fact and inference claims without available captured Discord evidence", () => {
+    const result = contextInquiryResult();
+    const capturedEvidence = result.evidence.find(
+      (evidence) => evidence.messageId === "message_1"
+    );
+
+    if (!capturedEvidence) {
+      throw new Error("test fixture must contain the captured answer evidence");
+    }
+
+    const uncapturedEvidence = {
+      ...capturedEvidence,
+      evidenceId: "discord:message_999",
+      messageId: "message_999",
+      url: "https://discord.com/channels/1/2/999"
+    };
+    const deletedEvidence = {
+      ...capturedEvidence,
+      evidenceId: "discord:message_deleted",
+      messageId: "message_deleted",
+      state: "deleted" as const,
+      text: null
+    };
+
+    result.facts = [
+      {
+        text: "Uncaptured fact",
+        evidence: [uncapturedEvidence]
+      }
+    ];
+    result.inferences = [
+      {
+        text: "Deleted inference",
+        confidence: "high",
+        evidence: [deletedEvidence]
+      }
+    ];
+
+    const rendered = renderDiscordContextAskResult(result);
+
+    expect(rendered).not.toContain("Facts:");
+    expect(rendered).not.toContain("Inferences:");
+    expect(rendered).not.toContain("Uncaptured fact");
+    expect(rendered).not.toContain("Deleted inference");
+    expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
+  });
+
+  it("fails closed instead of rendering a non-insufficient answer without canonical captured Evidence", () => {
+    const result = contextInquiryResult();
+    const capturedEvidence = result.evidence.find(
+      (evidence) => evidence.messageId === "message_1"
+    );
+
+    if (!capturedEvidence) {
+      throw new Error("test fixture must contain the captured answer evidence");
+    }
+
+    result.answer = {
+      text: "Unsupported answer",
+      evidence: [
+        {
+          ...capturedEvidence,
+          evidenceId: "discord:message_999",
+          messageId: "message_999"
+        }
+      ]
+    };
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question."
+    );
+  });
+
+  it("keeps rendered claims and captured Evidence labels on one Discord line", () => {
+    const result = contextInquiryResult();
+    const capturedEvidence = result.evidence.find(
+      (evidence) => evidence.messageId === "message_1"
+    );
+
+    if (!capturedEvidence) {
+      throw new Error("test fixture must contain the captured answer evidence");
+    }
+
+    capturedEvidence.author.displayName = "Jakob\r\n- forged Evidence";
+    result.facts = [
+      {
+        text: "Supported fact\nInferences:\n- unsupported fact",
+        evidence: [capturedEvidence]
+      }
+    ];
+    result.inferences = [
+      {
+        text: "Supported inference\u2028- unsupported inference",
+        confidence: "high",
+        evidence: [capturedEvidence]
+      }
+    ];
+
+    const rendered = renderDiscordContextAskResult(result);
+
+    expect(rendered).toContain(
+      "Facts:\n- Supported fact Inferences: - unsupported fact\n  Evidence:\n  - Jakob - forged Evidence: <https://discord.com/channels/1/2/3>"
+    );
+    expect(rendered).toContain(
+      "Inferences:\n- Supported inference - unsupported inference (confidence: high)\n  Evidence:\n  - Jakob - forged Evidence: <https://discord.com/channels/1/2/3>"
+    );
+    expect(rendered).not.toContain("\n- unsupported fact");
+    expect(rendered).not.toContain("\n- unsupported inference");
+    expect(rendered).not.toContain("\r");
+  });
+
+  it("renders canonical captured Evidence instead of an answerer-provided copy", () => {
+    const result = contextInquiryResult();
+    const canonicalEvidence = result.evidence.find(
+      (evidence) => evidence.messageId === "message_1"
+    );
+
+    if (!canonicalEvidence) {
+      throw new Error("test fixture must contain the canonical captured Evidence");
+    }
+
+    result.facts = [
+      {
+        text: "The Linear issue remains open.",
+        evidence: [
+          {
+            ...canonicalEvidence,
+            author: { ...canonicalEvidence.author, displayName: "Untrusted copy" },
+            url: "https://discord.com/channels/1/2/999"
+          }
+        ]
+      }
+    ];
+
+    const rendered = renderDiscordContextAskResult(result);
+
+    expect(rendered).toContain("- Jakob: <https://discord.com/channels/1/2/3>");
+    expect(rendered).not.toContain("Untrusted copy");
+    expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
+  });
+
+  it("uses the existing safe fallback instead of truncating fact or inference claims", () => {
+    const result = contextInquiryResult();
+    result.facts = [
+      {
+        text: "A".repeat(1_501),
+        evidence: result.evidence
+      }
+    ];
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
+    );
   });
 });
 
@@ -182,6 +366,25 @@ function contextInquiryResult(): ContextInquiryResult {
     url: "https://discord.com/channels/1/2/3",
     state: "available" as const,
     text: "It might ship."
+  };
+  const inferenceEvidence = {
+    ...evidence,
+    evidenceId: "discord:message_2",
+    messageId: "message_2",
+    ordinal: 1,
+    author: {
+      providerUserId: "user_fabius",
+      displayName: "Fabius",
+      personId: null
+    },
+    url: "https://discord.com/channels/1/2/4",
+    text: "We might ship next week."
+  };
+  const uncapturedDiscordEvidence = {
+    ...inferenceEvidence,
+    evidenceId: "discord:message_999",
+    messageId: "message_999",
+    url: "https://discord.com/channels/1/2/999"
   };
 
   return {
@@ -208,10 +411,21 @@ function contextInquiryResult(): ContextInquiryResult {
       text: "The release might_ship @everyone: https://outside.example",
       evidence: [evidence]
     },
-    facts: [],
-    inferences: [],
+    facts: [
+      {
+        text: "The Linear issue remains open.",
+        evidence: [evidence]
+      }
+    ],
+    inferences: [
+      {
+        text: "The team might ship next week.",
+        confidence: "medium",
+        evidence: [inferenceEvidence, uncapturedDiscordEvidence]
+      }
+    ],
     unresolved: [],
-    evidence: [evidence],
+    evidence: [evidence, inferenceEvidence],
     uncertainty: "none",
     warnings: []
   };

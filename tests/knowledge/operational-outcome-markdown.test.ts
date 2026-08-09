@@ -63,6 +63,40 @@ const outcome: OperationalOutcome = {
 };
 
 describe("Operational Outcome Markdown", () => {
+  it("keeps v1 GitHub rendering stable while v2 marks source-bound implementation links", () => {
+    const v1 = renderOperationalOutcomeMarkdown({
+      outcome,
+      idempotencyKey: "outcome-v1"
+    });
+    const v2 = renderOperationalOutcomeMarkdown({
+      outcome: {
+        ...outcome,
+        formatVersion: 2,
+        entries: [
+          {
+            ...outcome.entries[0]!,
+            githubReferences: [
+              {
+                providerId: "github-code",
+                objectType: "pull-request",
+                externalId: "Dayova/Luma#42",
+                url: "https://github.com/Dayova/Luma/pull/42"
+              }
+            ]
+          }
+        ]
+      },
+      idempotencyKey: "outcome-v2"
+    });
+
+    expect(v1.section).toContain("#### GitHub\n- None");
+    expect(v2.section).toContain(
+      "#### GitHub implementation references (source-bound)\n- `github-code:Dayova/Luma#42` — <https://github.com/Dayova/Luma/pull/42>"
+    );
+    expect(parseOperationalOutcomeSection(v1.section)).toMatchObject({ status: "valid" });
+    expect(parseOperationalOutcomeSection(v2.section)).toMatchObject({ status: "valid" });
+  });
+
   it("recognizes and strips exactly its checksum-valid owned section without touching raw Meeting Note bytes", () => {
     const rendered = renderOperationalOutcomeMarkdown({
       outcome,

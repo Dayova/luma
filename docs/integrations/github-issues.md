@@ -100,6 +100,11 @@ For a `CreateWorkItemIntent`, `assigneeId` becomes the GitHub issue assignee whe
 
 This Adapter implements the WorkProvider Interface only. GitHub PRs, commits, files, reviews, releases, and implementation status belong to the separate CodeProvider Interface.
 
+An Operational Outcome may render an exact GitHub PR or full commit URL that was
+present in immutable Action Item source text. That is source-bound provenance,
+not a GitHub Issues Adapter lookup, a CodeProvider discovery result, or a claim
+that the reference implements the work.
+
 ## Live Test
 
 The live test is non-mutating and skipped by default:

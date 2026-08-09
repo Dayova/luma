@@ -1,6 +1,7 @@
 import type {
   ActionItemOwnershipAttribution,
   ImportedActionItemCandidate,
+  ImportedImplementationReference,
   ImportedActionItemModality,
   UtteranceLanguage
 } from "./model.js";
@@ -277,6 +278,107 @@ export function mentionedWorkItemExternalIdsFor(text: string): string[] {
       return !NON_WORK_ITEM_IDENTIFIER_PREFIXES.has(prefix);
     })
     .sort();
+}
+
+const GITHUB_URL_CANDIDATE = /https:\/\/github\.com\/[^\s<>"'`[\]{}]+/giu;
+const GITHUB_OWNER = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})";
+const GITHUB_REPOSITORY = "[A-Za-z0-9_.-]+";
+const GITHUB_PULL_REQUEST_URL = new RegExp(
+  `^https://github\\.com/(${GITHUB_OWNER})/(${GITHUB_REPOSITORY})/pull/([1-9]\\d*)$`,
+  "u"
+);
+const GITHUB_COMMIT_URL = new RegExp(
+  `^https://github\\.com/(${GITHUB_OWNER})/(${GITHUB_REPOSITORY})/commit/([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`,
+  "u"
+);
+
+/**
+ * Extracts only exact, canonical GitHub pull-request and full commit URLs
+ * from source text. This intentionally performs no GitHub lookup, title/ID
+ * search, branch inference, or implementation-status claim.
+ */
+export function mentionedGitHubImplementationReferencesFor(
+  text: string,
+  providerId = "github-code"
+): ImportedImplementationReference[] {
+  const normalizedProviderId = providerId.trim();
+
+  if (normalizedProviderId.length === 0) {
+    throw new Error("GitHub implementation reference provider ID must be non-empty");
+  }
+
+  const references = new Map<string, ImportedImplementationReference>();
+
+  for (const match of text.matchAll(GITHUB_URL_CANDIDATE)) {
+    const reference = githubImplementationReferenceFromUrl(
+      trimSourceUrlPunctuation(match[0] ?? ""),
+      normalizedProviderId
+    );
+
+    if (reference) {
+      references.set(`${reference.objectType}:${reference.externalId}`, reference);
+    }
+  }
+
+  return [...references.values()].sort(
+    (left, right) =>
+      compareBytewise(left.externalId, right.externalId) ||
+      compareBytewise(left.objectType, right.objectType)
+  );
+}
+
+function compareBytewise(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function trimSourceUrlPunctuation(value: string): string {
+  // A trailing question mark can encode an empty query and must therefore
+  // remain part of the candidate. Failing closed is preferable to treating a
+  // non-exact source URL as the canonical implementation locator.
+  return value.replace(/[.,;:!)}\]]+$/u, "");
+}
+
+function githubImplementationReferenceFromUrl(
+  value: string,
+  providerId: string
+): ImportedImplementationReference | null {
+  const pullRequest = value.match(GITHUB_PULL_REQUEST_URL);
+
+  if (pullRequest) {
+    const [, owner, repository, number] = pullRequest;
+
+    if (!owner || !repository || !number) {
+      return null;
+    }
+
+    return {
+      providerId,
+      objectType: "pull-request",
+      externalId: `${owner}/${repository}#${number}`,
+      url: `https://github.com/${owner}/${repository}/pull/${number}`
+    };
+  }
+
+  const commit = value.match(GITHUB_COMMIT_URL);
+
+  if (commit) {
+    const [, owner, repository, sha] = commit;
+
+    if (!owner || !repository || !sha) {
+      return null;
+    }
+
+    const normalizedSha = sha.toLowerCase();
+
+    return {
+      providerId,
+      objectType: "commit",
+      externalId: `${owner}/${repository}@${normalizedSha}`,
+      url: `https://github.com/${owner}/${repository}/commit/${normalizedSha}`
+    };
+  }
+
+  return null;
 }
 
 /**

@@ -644,15 +644,23 @@ async function settleOperationalOutcome(
     );
   }
 
-  const plan = operationalOutcomeSettlementPlan(intent, settlement);
-  await assertOperationalOutcomeSourceCurrentness(dependencies, plan.target);
+  const requestedPlan = operationalOutcomeSettlementPlan(intent, settlement);
+  await assertOperationalOutcomeSourceCurrentness(dependencies, requestedPlan.target);
   const durable = await ensureOperationalOutcomeSettlement({
     database: dependencies.database,
     workspaceId: input.workspace.workspaceId,
     meetingId: input.meetingId,
-    plan,
+    plan: requestedPlan,
     now: new Date()
   });
+  const plan = durable.plan;
+
+  if (!sameOperationalOutcomeSettlementPlan(plan, settlement)) {
+    throw new NonRetryableExecutionError(
+      "operational-outcome-settlement-not-supported",
+      "The approved reconciliation source no longer matches its durable Operational Outcome plan"
+    );
+  }
   const ownsPage = await ensureOperationalOutcomePageWorkspaceOwnership({
     database: dependencies.database,
     workspaceId: input.workspace.workspaceId,
@@ -1802,7 +1810,7 @@ async function operationalOutcomeForPage(
   }
 
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     operationToken,
     scope: {
       workspaceId,
@@ -1869,7 +1877,7 @@ function operationalOutcomeEntryForSettlement(
     resolution: plan.resolution.outcome,
     workReferences,
     knowledgeReferences: [],
-    githubReferences: [],
+    githubReferences: plan.sourceBoundImplementationReferences,
     unresolved: [
       ...(plan.resolution.outcome.type === "needs-clarification"
         ? [plan.resolution.outcome.rationale]
@@ -1884,13 +1892,17 @@ function operationalOutcomeSettlementPlan(
   settlement: CanonicalOperationalOutcomeSettlement
 ): NewOperationalOutcomeSettlementPlan {
   return {
-    version: 2,
+    version: 3,
     intentId: intent.id,
     binding: intent.reconciliation,
     target: settlement.target,
     candidate: settlement.review.candidate,
     ownership: settlement.review.ownership,
-    resolution: settlement.resolution
+    resolution: settlement.resolution,
+    sourceBoundImplementationReferences:
+      settlement.review.candidate.sourceBoundImplementationReferences.map(
+        (reference) => ({ ...reference })
+      )
   };
 }
 
@@ -1909,8 +1921,40 @@ function sameOperationalOutcomeSettlementPlan(
     plan.target.sourceRevision === settlement.target.sourceRevision &&
     plan.target.sourceContentHash === settlement.target.sourceContentHash &&
     sameActionItemOwnership(plan.ownership, settlement.review.ownership) &&
-    plan.resolution.id === settlement.resolution.id
+    plan.resolution.id === settlement.resolution.id &&
+    (plan.version !== 3 ||
+      sameSourceBoundImplementationReferences(
+        plan.sourceBoundImplementationReferences,
+        settlement.review.candidate.sourceBoundImplementationReferences
+      ))
   );
+}
+
+function sameSourceBoundImplementationReferences(
+  left: ExternalReference[],
+  right: ExternalReference[]
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const canonical = (references: ExternalReference[]) =>
+    [...references]
+      .map((reference) => ({
+        providerId: reference.providerId,
+        objectType: reference.objectType,
+        externalId: reference.externalId,
+        url: reference.url
+      }))
+      .sort(
+        (first, second) =>
+          first.providerId.localeCompare(second.providerId) ||
+          first.objectType.localeCompare(second.objectType) ||
+          first.externalId.localeCompare(second.externalId) ||
+          first.url.localeCompare(second.url)
+      );
+
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
 async function canonicalMeetingStateForSettlement(

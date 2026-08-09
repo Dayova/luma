@@ -61,6 +61,7 @@ import {
   importedActionItemOwnershipFor,
   importedActionItemSourceOwnerFor,
   isOffsetBearingInstant,
+  mentionedGitHubImplementationReferencesFor,
   mentionedWorkItemExternalIdsFor
 } from "../domain/imported-action-item-semantics.js";
 import type {
@@ -2634,7 +2635,7 @@ async function existingAcceptedObservation(
     return "none";
   }
 
-  return canonicalObservationPayload(parseJson<unknown>(row.payload_json)) ===
+  return canonicalLegacyObservationPayload(parseJson<unknown>(row.payload_json)) ===
     canonicalObservationPayload(observation)
     ? "same"
     : "different";
@@ -2642,6 +2643,97 @@ async function existingAcceptedObservation(
 
 function canonicalObservationPayload(value: unknown): string {
   return canonicalJsonValue(JSON.parse(JSON.stringify(value)));
+}
+
+function canonicalLegacyObservationPayload(value: unknown): string {
+  return canonicalJsonValue(
+    normalizeLegacySourceBoundImplementationReferences(JSON.parse(JSON.stringify(value)))
+  );
+}
+
+/**
+ * LUM-10 added deterministic fields to an otherwise immutable imported-source
+ * Observation. A sync may replay the same pre-LUM-10 source revision, so
+ * comparison upgrades only genuinely absent fields from its already-persisted
+ * source block. Any present (including malformed) value remains observable as
+ * a conflict and is never silently repaired.
+ */
+function normalizeLegacySourceBoundImplementationReferences(value: unknown): unknown {
+  if (!isRecord(value) || value["type"] !== "meeting-imported-from-source") {
+    return value;
+  }
+
+  const source = normalizeLegacyImplementationReferenceSource(value["source"]);
+  const providerId = implementationReferenceProviderIdForLegacyPayload(source);
+  const candidates = Array.isArray(value["candidates"])
+    ? value["candidates"].map((candidate) =>
+        normalizeLegacyImplementationReferenceCandidate(candidate, providerId)
+      )
+    : value["candidates"];
+
+  return {
+    ...value,
+    source,
+    candidates
+  };
+}
+
+function normalizeLegacyImplementationReferenceSource(value: unknown): unknown {
+  if (!isRecord(value) || value["implementationReferenceProviderId"] !== undefined) {
+    return value;
+  }
+
+  return {
+    ...value,
+    implementationReferenceProviderId: "github-code"
+  };
+}
+
+function implementationReferenceProviderIdForLegacyPayload(
+  value: unknown
+): string | null {
+  return isRecord(value) && isNonBlankString(value["implementationReferenceProviderId"])
+    ? value["implementationReferenceProviderId"]
+    : null;
+}
+
+function normalizeLegacyImplementationReferenceCandidate(
+  value: unknown,
+  rootProviderId: string | null
+): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const candidateSource = value["source"];
+
+  if (!isRecord(candidateSource)) {
+    return value;
+  }
+
+  const nestedSource = normalizeLegacyImplementationReferenceSource(
+    candidateSource["source"]
+  );
+  const providerId =
+    implementationReferenceProviderIdForLegacyPayload(nestedSource) ?? rootProviderId;
+  const sourceExcerpt = candidateSource["sourceExcerpt"];
+  const references =
+    value["sourceBoundImplementationReferences"] === undefined &&
+    typeof sourceExcerpt === "string" &&
+    providerId !== null
+      ? mentionedGitHubImplementationReferencesFor(sourceExcerpt, providerId)
+      : value["sourceBoundImplementationReferences"];
+
+  return {
+    ...value,
+    ...(value["sourceBoundImplementationReferences"] === undefined
+      ? { sourceBoundImplementationReferences: references }
+      : {}),
+    source: {
+      ...candidateSource,
+      source: nestedSource
+    }
+  };
 }
 
 async function verifyImportedSourceObservations(
@@ -3705,6 +3797,16 @@ function validateImportedMeetingSourceObservation(
       );
     }
 
+    const implementationReferenceError =
+      validateImportedCandidateImplementationReferences(candidate);
+
+    if (implementationReferenceError) {
+      return invalidImportedSourceObservation(
+        observation,
+        `Imported Action Item Candidate ${candidate.id} ${implementationReferenceError}`
+      );
+    }
+
     const hintError = validateImportedCandidateHints(candidate);
 
     if (hintError) {
@@ -4277,6 +4379,13 @@ function validateImportedSourceExternalReference(
   }
 
   if (
+    typeof source.implementationReferenceProviderId !== "string" ||
+    source.implementationReferenceProviderId.trim().length === 0
+  ) {
+    return "Imported source does not declare an implementation reference provider identity";
+  }
+
+  if (
     source.deadlineReferenceAt !== null &&
     !isOffsetBearingInstant(source.deadlineReferenceAt)
   ) {
@@ -4423,6 +4532,83 @@ function validateImportedCandidateWorkItemReferences(
   return null;
 }
 
+function validateImportedCandidateImplementationReferences(
+  candidate: ImportedActionItemCandidate
+): string | null {
+  const references = candidate.sourceBoundImplementationReferences;
+
+  if (!Array.isArray(references)) {
+    return "has invalid source-bound GitHub implementation references";
+  }
+
+  const expected = mentionedGitHubImplementationReferencesFor(
+    candidate.source.sourceExcerpt,
+    candidate.source.source.implementationReferenceProviderId
+  );
+  const normalized = references
+    .map((reference) => {
+      if (
+        !reference ||
+        typeof reference !== "object" ||
+        typeof reference.providerId !== "string" ||
+        reference.providerId.trim().length === 0 ||
+        (reference.objectType !== "pull-request" && reference.objectType !== "commit") ||
+        typeof reference.externalId !== "string" ||
+        reference.externalId.trim().length === 0 ||
+        typeof reference.url !== "string" ||
+        reference.url.trim().length === 0
+      ) {
+        return null;
+      }
+
+      return {
+        providerId: reference.providerId,
+        objectType: reference.objectType,
+        externalId: reference.externalId,
+        url: reference.url
+      };
+    })
+    .sort((left, right) => {
+      if (!left || !right) {
+        return left ? -1 : right ? 1 : 0;
+      }
+
+      return (
+        compareImportedImplementationReference(left.externalId, right.externalId) ||
+        compareImportedImplementationReference(left.objectType, right.objectType)
+      );
+    });
+
+  if (normalized.some((reference) => reference === null)) {
+    return "has invalid source-bound GitHub implementation references";
+  }
+
+  if (normalized.length !== expected.length) {
+    return "does not declare exactly the GitHub implementation references present in its source excerpt";
+  }
+
+  for (const [index, reference] of normalized.entries()) {
+    const expectedReference = expected[index];
+
+    if (
+      !reference ||
+      !expectedReference ||
+      reference.providerId !== expectedReference.providerId ||
+      reference.objectType !== expectedReference.objectType ||
+      reference.externalId !== expectedReference.externalId ||
+      reference.url !== expectedReference.url
+    ) {
+      return "does not declare exactly the GitHub implementation references present in its source excerpt";
+    }
+  }
+
+  return null;
+}
+
+function compareImportedImplementationReference(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function validateImportedCandidateHints(
   candidate: ImportedActionItemCandidate
 ): string | null {
@@ -4554,6 +4740,7 @@ function sameImportedMeetingSource(
     left.providerVersion === right.providerVersion &&
     left.title === right.title &&
     left.workItemProviderId === right.workItemProviderId &&
+    left.implementationReferenceProviderId === right.implementationReferenceProviderId &&
     left.deadlineReferenceAt === right.deadlineReferenceAt &&
     left.completeness === right.completeness &&
     sameActionItemsAvailability(
@@ -5155,6 +5342,8 @@ function normalizeImportedMeetingSource(
     completenessReasons: source.completenessReasons ?? [],
     actionItemsAvailability: source.actionItemsAvailability ?? "unknown",
     workItemProviderId: source.workItemProviderId ?? "linear",
+    implementationReferenceProviderId:
+      source.implementationReferenceProviderId ?? "github-code",
     deadlineReferenceAt: source.deadlineReferenceAt ?? null
   };
 }
@@ -5176,6 +5365,8 @@ function normalizeImportedActionItemCandidate(
     candidate.sourceOwner ??
     normalizeLegacyImportedActionItemSourceOwner(legacyOwner) ??
     importedActionItemSourceOwnerFor(candidate.source.sourceExcerpt);
+  const normalizedSource =
+    source ?? normalizeImportedMeetingSource(candidate.source.source);
 
   return {
     ...candidate,
@@ -5189,12 +5380,16 @@ function normalizeImportedActionItemCandidate(
       ? candidate.componentHints
       : [],
     mentionedWorkItemReferences: normalizeImportedWorkItemReferences(candidate),
+    sourceBoundImplementationReferences: normalizeImportedImplementationReferences(
+      candidate,
+      normalizedSource.implementationReferenceProviderId
+    ),
     modality: wasLegacyCompleted
       ? { kind: "unknown", sourceForm: candidate.modality.sourceForm ?? null }
       : candidate.modality,
     source: {
       ...candidate.source,
-      source: source ?? normalizeImportedMeetingSource(candidate.source.source)
+      source: normalizedSource
     }
   };
 }
@@ -5254,6 +5449,18 @@ function normalizeImportedWorkItemReferences(
         ]
       : []
   );
+}
+
+function normalizeImportedImplementationReferences(
+  candidate: ImportedActionItemCandidate,
+  providerId: string
+): ImportedActionItemCandidate["sourceBoundImplementationReferences"] {
+  return Array.isArray(candidate.sourceBoundImplementationReferences)
+    ? candidate.sourceBoundImplementationReferences
+    : mentionedGitHubImplementationReferencesFor(
+        candidate.source.sourceExcerpt,
+        providerId
+      );
 }
 
 function isLegacyCompletedModality(value: unknown): boolean {

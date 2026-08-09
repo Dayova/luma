@@ -10,7 +10,8 @@ import type {
 } from "../../src/domain/model.js";
 import {
   importedActionItemOwnershipFor,
-  importedActionItemSourceOwnerFor
+  importedActionItemSourceOwnerFor,
+  mentionedGitHubImplementationReferencesFor
 } from "../../src/domain/imported-action-item-semantics.js";
 import { createMeetingNotesIngestion } from "../../src/knowledge/meeting-notes-ingestion.js";
 import { createMeetingIntelligence as createProductionMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
@@ -236,6 +237,7 @@ function directImportedMeetingObservation(input?: {
       version: "2026-08-07T09:31:00.000Z"
     },
     workItemProviderId: "linear",
+    implementationReferenceProviderId: "github-code",
     completeness: "complete",
     completenessReasons: [],
     actionItemsAvailability: "available",
@@ -295,6 +297,10 @@ function directImportedMeetingObservation(input?: {
       timezone: "Europe/Berlin"
     },
     mentionedWorkItemReferences: [],
+    sourceBoundImplementationReferences: mentionedGitHubImplementationReferencesFor(
+      candidateExcerpt,
+      source.implementationReferenceProviderId
+    ),
     projectHints: [],
     componentHints: [],
     source: {
@@ -1018,6 +1024,70 @@ describe("Meeting Notes ingestion", () => {
             providerId: "linear",
             objectType: "work-item",
             externalId: "LUM-3"
+          }
+        ]
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("preserves only exact GitHub implementation URLs bound to an Action Item source block", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new NoAnalysisReasoningModel()
+    });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const source = observedMeetingNote({
+      contentHash: "sha256:source-bound-github-references-v1"
+    });
+    const actionItems = source.snapshot.sections.actionItemsAndNotes;
+
+    if (actionItems.state !== "available") {
+      throw new Error("expected available source Action Items");
+    }
+
+    actionItems.blocks = [
+      {
+        id: "action-source-bound-github",
+        type: "to-do",
+        text: "Jakob will verify https://github.com/Dayova/Luma/pull/42 and https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567. Ignore https://github.com/Dayova/Luma/issues/42, http://github.com/Dayova/Luma/pull/43, https://github.com/Dayova/Luma/pull/44/files, https://github.com:443/Dayova/Luma/pull/45, https://github.com/Dayova/Luma/pull/./46, https://github.com/Dayova/Luma/pull/47?, https://github.com/Dayova/Luma/pull/48#, https://github.com/Dayova/Luma/PULL/49, and https://github.com/Dayova/Luma/commit/abc123.",
+        checked: false,
+        children: []
+      }
+    ];
+    const ingestion = createMeetingNotesIngestion({ meetingIntelligence });
+
+    try {
+      await ingestion.ingest({ workspace, source });
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      expect(snapshot.state.importedActionItemCandidates[0]).toMatchObject({
+        sourceBoundImplementationReferences: [
+          {
+            providerId: "github-code",
+            objectType: "pull-request",
+            externalId: "Dayova/Luma#42",
+            url: "https://github.com/Dayova/Luma/pull/42"
+          },
+          {
+            providerId: "github-code",
+            objectType: "commit",
+            externalId: "Dayova/Luma@0123456789abcdef0123456789abcdef01234567",
+            url: "https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567"
           }
         ]
       });
@@ -2742,6 +2812,165 @@ describe("Meeting Notes ingestion", () => {
       });
 
       expect(corrected.acceptedObservationIds).toEqual([observation.observationId]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("rejects a direct GitHub implementation reference that is not exact source evidence", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new NoAnalysisReasoningModel()
+    });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const observation = directImportedMeetingObservation({
+      contentHash: "sha256:direct-source-bound-github-reference",
+      candidateExcerpt:
+        "Jakob will review https://github.com/Dayova/Luma/pull/42 by Friday."
+    });
+    const candidate = observation.candidates[0];
+
+    if (!candidate) {
+      throw new Error("expected source Action Item Candidate");
+    }
+
+    const forgedReference = {
+      ...observation,
+      candidates: [
+        {
+          ...candidate,
+          sourceBoundImplementationReferences: [
+            {
+              providerId: "github-code",
+              objectType: "commit" as const,
+              externalId: "Dayova/Luma@0123456789abcdef0123456789abcdef01234567",
+              url: "https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567"
+            }
+          ]
+        }
+      ]
+    } satisfies MeetingImportedFromSource;
+
+    try {
+      const rejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [forgedReference]
+      });
+      const invalidError = rejected.errors[0];
+
+      if (!invalidError || invalidError.code !== "invalid-observation") {
+        throw new Error("expected an invalid Observation error");
+      }
+
+      expect(invalidError.message).toContain(
+        "does not declare exactly the GitHub implementation references"
+      );
+
+      const corrected = await meetingIntelligence.observe({
+        workspace,
+        observations: [observation]
+      });
+
+      expect(corrected.acceptedObservationIds).toEqual([observation.observationId]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("replays a pre-LUM-10 imported source payload as the same immutable Observation", async () => {
+    const database = await createPgliteDatabase();
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new NoAnalysisReasoningModel()
+    });
+    const workspace = {
+      workspaceId: "workspace_dayova",
+      timezone: "Europe/Berlin"
+    };
+    const observation = directImportedMeetingObservation({
+      candidateExcerpt:
+        "Jakob will review https://github.com/Dayova/Luma/pull/42 by Friday."
+    });
+
+    try {
+      const accepted = await meetingIntelligence.observe({
+        workspace,
+        observations: [observation]
+      });
+
+      expect(accepted.errors).toEqual([]);
+      expect(accepted.acceptedObservationIds).toEqual([observation.observationId]);
+
+      const stored = await database.query<{ payload_json: string }>(
+        `SELECT payload_json
+           FROM meeting_observations
+          WHERE workspace_id = $1 AND observation_id = $2`,
+        [workspace.workspaceId, observation.observationId]
+      );
+      const payloadJson = stored.rows[0]?.payload_json;
+
+      if (!payloadJson) {
+        throw new Error("expected persisted imported-source Observation");
+      }
+
+      const legacyPayload = JSON.parse(payloadJson) as Record<string, unknown>;
+      const legacySource = legacyPayload["source"] as Record<string, unknown>;
+      const legacyCandidates = legacyPayload["candidates"] as Record<string, unknown>[];
+
+      delete legacySource["implementationReferenceProviderId"];
+
+      for (const legacyCandidate of legacyCandidates) {
+        delete legacyCandidate["sourceBoundImplementationReferences"];
+        const legacyCandidateSource = legacyCandidate["source"] as Record<
+          string,
+          unknown
+        >;
+        const nestedLegacySource = legacyCandidateSource["source"] as Record<
+          string,
+          unknown
+        >;
+
+        delete nestedLegacySource["implementationReferenceProviderId"];
+      }
+
+      await database.query(
+        `UPDATE meeting_observations
+            SET payload_json = $3
+          WHERE workspace_id = $1 AND observation_id = $2`,
+        [workspace.workspaceId, observation.observationId, JSON.stringify(legacyPayload)]
+      );
+
+      const malformedIncoming = JSON.parse(
+        JSON.stringify(legacyPayload)
+      ) as MeetingImportedFromSource;
+      const malformed = await meetingIntelligence.observe({
+        workspace,
+        observations: [malformedIncoming]
+      });
+
+      expect(malformed.acceptedObservationIds).toEqual([]);
+      expect(malformed.errors).toHaveLength(1);
+      const malformedError = malformed.errors[0];
+
+      if (!malformedError || malformedError.code !== "invalid-observation") {
+        throw new Error("expected an invalid imported-source Observation error");
+      }
+
+      expect(malformedError.message).toContain(
+        "does not declare an implementation reference provider identity"
+      );
+
+      const replay = await meetingIntelligence.observe({
+        workspace,
+        observations: [observation]
+      });
+
+      expect(replay.duplicateObservationIds).toEqual([observation.observationId]);
+      expect(replay.errors).toEqual([]);
     } finally {
       await database.close();
     }

@@ -32,6 +32,7 @@ const source: ImportedMeetingSource = {
     version: "2026-08-08T10:00:00.000Z"
   },
   workItemProviderId: "linear",
+  implementationReferenceProviderId: "github-code",
   completeness: "complete",
   completenessReasons: [],
   actionItemsAvailability: "available",

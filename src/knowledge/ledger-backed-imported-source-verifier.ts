@@ -12,6 +12,7 @@ import type { ObservedSourceLedger } from "./observed-source-ledger.js";
 export type CreateLedgerBackedImportedSourceVerifierInput = {
   ledger: ObservedSourceLedger;
   workItemProviderId?: string;
+  implementationReferenceProviderId?: string;
 };
 
 /**
@@ -23,9 +24,18 @@ export function createLedgerBackedImportedSourceVerifier(
   input: CreateLedgerBackedImportedSourceVerifierInput
 ): ImportedSourceObservationVerifier {
   const workItemProviderId = (input.workItemProviderId ?? "linear").trim();
+  const implementationReferenceProviderId = (
+    input.implementationReferenceProviderId ?? "github-code"
+  ).trim();
 
   if (workItemProviderId.length === 0) {
     throw new Error("Imported source verification requires a WorkProvider identity");
+  }
+
+  if (implementationReferenceProviderId.length === 0) {
+    throw new Error(
+      "Imported source verification requires an implementation reference provider identity"
+    );
   }
 
   return {
@@ -56,7 +66,8 @@ export function createLedgerBackedImportedSourceVerifier(
               change: "unchanged"
             }
           } satisfies IngestObservedMeetingNoteInput,
-          workItemProviderId
+          workItemProviderId,
+          implementationReferenceProviderId
         );
 
         return sameCanonicalObservation(expected, observation)

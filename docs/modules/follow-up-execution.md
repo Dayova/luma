@@ -88,6 +88,13 @@ independent durable state, and source freshness is rechecked before the outcome
 write, so a known-not-applied Notion write remains resumable without repeating
 a completed Linear mutation.
 
+Exact GitHub pull-request and full commit URLs found in an immutable Action Item
+source block are source-bound display provenance only. A new settlement freezes
+that exact list in its durable plan before any provider boundary and renders it
+under **GitHub implementation references (source-bound)**. It does not call
+GitHub, search for related code, infer implementation status, or mutate a code
+host; historical v1/v2 settlement plans continue to render no such links.
+
 It supports `update-work-item` only when the active WorkProvider offers an
 atomic conditional update; Linear does not, so its reconciliation updates remain
 manual review. `comment-on-code-change` is explicitly rejected until Luma has

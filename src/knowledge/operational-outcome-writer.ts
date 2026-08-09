@@ -41,7 +41,11 @@ export type OperationalOutcomeEntry = {
  * settlement can never replace a later reconciliation outcome.
  */
 export type OperationalOutcome = {
-  formatVersion: 1;
+  /**
+   * v1 payloads remain renderable byte-for-byte for positive recovery.
+   * v2 labels GitHub entries explicitly as source-bound implementation links.
+   */
+  formatVersion: 1 | 2;
   /**
    * Random, durable write capability generated after the page lease is held.
    * It prevents a user from pre-seeding a future checksum-valid aggregate and

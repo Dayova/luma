@@ -220,12 +220,15 @@ function renderOperationalOutcomeBody(outcome: OperationalOutcome): string {
   return outcome.entries
     .flatMap((entry, index) => [
       ...(index === 0 ? [] : [""]),
-      ...renderOperationalOutcomeEntry(entry)
+      ...renderOperationalOutcomeEntry(entry, outcome.formatVersion)
     ])
     .join("\n");
 }
 
-function renderOperationalOutcomeEntry(entry: OperationalOutcomeEntry): string[] {
+function renderOperationalOutcomeEntry(
+  entry: OperationalOutcomeEntry,
+  formatVersion: OperationalOutcome["formatVersion"]
+): string[] {
   const resolution = entry.resolution;
   const lines = [
     `### ${renderInlineCode(entry.settlementIntentId)}`,
@@ -242,7 +245,7 @@ function renderOperationalOutcomeEntry(entry: OperationalOutcomeEntry): string[]
   lines.push(...renderReferences(entry.workReferences));
   lines.push("", "#### Knowledge");
   lines.push(...renderReferences(entry.knowledgeReferences));
-  lines.push("", "#### GitHub");
+  lines.push("", githubHeadingFor(formatVersion));
   lines.push(...renderReferences(entry.githubReferences));
   lines.push("", "#### Unresolved");
   lines.push(
@@ -258,6 +261,12 @@ function renderOperationalOutcomeEntry(entry: OperationalOutcomeEntry): string[]
   lines.push(`- Settlement Intent: ${renderInlineCode(entry.settlementIntentId)}`);
 
   return lines;
+}
+
+function githubHeadingFor(formatVersion: OperationalOutcome["formatVersion"]): string {
+  return formatVersion === 2
+    ? "#### GitHub implementation references (source-bound)"
+    : "#### GitHub";
 }
 
 function renderOwnership(ownership: ActionItemOwnershipAttribution): string[] {
@@ -425,6 +434,10 @@ function normalizedOperationalOutcome(outcome: OperationalOutcome): OperationalO
     throw new Error("Operational Outcome must contain at least one settlement entry");
   }
 
+  if (outcome.formatVersion !== 1 && outcome.formatVersion !== 2) {
+    throw new Error("Operational Outcome format version is unsupported");
+  }
+
   if (
     entries.some(
       (entry, index) =>
@@ -439,7 +452,7 @@ function normalizedOperationalOutcome(outcome: OperationalOutcome): OperationalO
   }
 
   return {
-    formatVersion: 1,
+    formatVersion: outcome.formatVersion,
     operationToken: outcome.operationToken,
     scope: { ...outcome.scope },
     entries

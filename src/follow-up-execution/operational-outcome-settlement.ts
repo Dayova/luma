@@ -5,6 +5,7 @@ import type {
   ExternalReference,
   ImportedActionItemCandidate
 } from "../domain/model.js";
+import { sameActionItemOwnership } from "../domain/action-item-ownership.js";
 import type {
   OperationalOutcome,
   OperationalOutcomeTarget
@@ -13,11 +14,11 @@ import type { LumaDatabase } from "../persistence/db.js";
 
 export type OperationalOutcomeSettlementPlan = {
   /**
-   * Version 1 is a read-compatible historical plan. New plans are always v2;
-   * v1 gets an explicit unresolved ownership projection when read so it can
-   * remain in an aggregate without authorizing a new provider mutation.
+   * Versions 1 and 2 are read-compatible historical plans. New plans are v3;
+   * old plans get explicit empty implementation references when read so they
+   * remain aggregates without gaining a new source claim during recovery.
    */
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   intentId: string;
   binding: ActionItemReconciliationIntentBinding;
   target: OperationalOutcomeTarget;
@@ -25,11 +26,16 @@ export type OperationalOutcomeSettlementPlan = {
   /** Effective reviewed ownership; source candidate wording stays immutable. */
   ownership: ActionItemOwnershipAttribution;
   resolution: ActionItemReconciliationHumanResolution;
+  /**
+   * Exact GitHub PR/commit locators frozen from immutable source wording at
+   * plan creation. They are display provenance, never live GitHub facts.
+   */
+  sourceBoundImplementationReferences: ExternalReference[];
 };
 
-/** New execution plans must carry the v2 ownership binding. */
+/** New execution plans must carry ownership plus source-bound code references. */
 export type NewOperationalOutcomeSettlementPlan = OperationalOutcomeSettlementPlan & {
-  version: 2;
+  version: 3;
 };
 
 export type OperationalOutcomeSettlementStageName = "work" | "outcome";
@@ -109,7 +115,7 @@ export async function ensureOperationalOutcomeSettlement(input: {
   const timestamp = input.now.toISOString();
   const planJson = JSON.stringify(plan);
 
-  if (plan.version !== 2) {
+  if (plan.version !== 3) {
     throw new Error("Legacy Operational Outcome plans are read-only and not executable");
   }
 
@@ -124,9 +130,13 @@ export async function ensureOperationalOutcomeSettlement(input: {
     const existingPlanJson = existing.rows[0]?.plan_json;
 
     if (existingPlanJson && existingPlanJson !== planJson) {
-      throw new Error(
-        `Operational Outcome settlement ${plan.intentId} conflicts with its immutable canonical plan`
-      );
+      const existingPlan = parsePlan(existingPlanJson);
+
+      if (!isReadCompatibleV2Plan(existingPlan, plan)) {
+        throw new Error(
+          `Operational Outcome settlement ${plan.intentId} conflicts with its immutable canonical plan`
+        );
+      }
     }
 
     if (!existingPlanJson) {
@@ -1144,7 +1154,10 @@ function parsePlan(json: string): OperationalOutcomeSettlementPlan {
 
     if (parsed.version === 1) {
       return {
-        ...(parsed as Omit<OperationalOutcomeSettlementPlan, "ownership">),
+        ...(parsed as Omit<
+          OperationalOutcomeSettlementPlan,
+          "ownership" | "sourceBoundImplementationReferences"
+        >),
         // v1 plans predate ownership reliability. They may be rendered as
         // historic settled facts but are never a proof to execute/reassign
         // work under the v2 ownership gate.
@@ -1152,12 +1165,13 @@ function parsePlan(json: string): OperationalOutcomeSettlementPlan {
           status: "unresolved",
           reason: "unsupported-semantics",
           likelyOwnerPersonId: null
-        }
+        },
+        sourceBoundImplementationReferences: []
       };
     }
 
     if (
-      parsed.version !== 2 ||
+      (parsed.version !== 2 && parsed.version !== 3) ||
       !parsed.ownership ||
       typeof parsed.ownership !== "object" ||
       typeof parsed.ownership.status !== "string"
@@ -1165,7 +1179,18 @@ function parsePlan(json: string): OperationalOutcomeSettlementPlan {
       throw new Error("missing ownership-bound settlement plan version");
     }
 
-    return parsed as OperationalOutcomeSettlementPlan;
+    return {
+      ...(parsed as Omit<
+        OperationalOutcomeSettlementPlan,
+        "sourceBoundImplementationReferences"
+      >),
+      sourceBoundImplementationReferences:
+        parsed.version === 3
+          ? parseSourceBoundImplementationReferences(
+              parsed.sourceBoundImplementationReferences
+            )
+          : []
+    };
   } catch (error) {
     throw new Error(
       `Operational Outcome settlement plan is invalid: ${
@@ -1173,6 +1198,77 @@ function parsePlan(json: string): OperationalOutcomeSettlementPlan {
       }`
     );
   }
+}
+
+function parseSourceBoundImplementationReferences(value: unknown): ExternalReference[] {
+  if (!Array.isArray(value)) {
+    throw new Error("missing source-bound GitHub implementation references");
+  }
+
+  const references = value.map((reference) => {
+    if (
+      !reference ||
+      typeof reference !== "object" ||
+      typeof Reflect.get(reference, "providerId") !== "string" ||
+      String(Reflect.get(reference, "providerId")).trim().length === 0 ||
+      (Reflect.get(reference, "objectType") !== "pull-request" &&
+        Reflect.get(reference, "objectType") !== "commit") ||
+      typeof Reflect.get(reference, "externalId") !== "string" ||
+      String(Reflect.get(reference, "externalId")).trim().length === 0 ||
+      typeof Reflect.get(reference, "url") !== "string" ||
+      String(Reflect.get(reference, "url")).trim().length === 0
+    ) {
+      throw new Error("invalid source-bound GitHub implementation reference");
+    }
+
+    return {
+      providerId: String(Reflect.get(reference, "providerId")),
+      objectType: Reflect.get(reference, "objectType") as "pull-request" | "commit",
+      externalId: String(Reflect.get(reference, "externalId")),
+      url: String(Reflect.get(reference, "url"))
+    } satisfies ExternalReference;
+  });
+
+  const unique = new Set<string>();
+
+  for (const reference of references) {
+    const key = `${reference.providerId}\u0000${reference.objectType}\u0000${reference.externalId}\u0000${reference.url}`;
+
+    if (unique.has(key)) {
+      throw new Error("duplicate source-bound GitHub implementation reference");
+    }
+
+    unique.add(key);
+  }
+
+  return references;
+}
+
+function isReadCompatibleV2Plan(
+  existing: OperationalOutcomeSettlementPlan,
+  requested: NewOperationalOutcomeSettlementPlan
+): boolean {
+  return existing.version === 2 && sameExecutionPlanBinding(existing, requested);
+}
+
+function sameExecutionPlanBinding(
+  left: OperationalOutcomeSettlementPlan,
+  right: OperationalOutcomeSettlementPlan
+): boolean {
+  return (
+    left.intentId === right.intentId &&
+    left.binding.reviewId === right.binding.reviewId &&
+    left.binding.candidateId === right.binding.candidateId &&
+    left.binding.candidateLineageKey === right.binding.candidateLineageKey &&
+    left.target.workspaceId === right.target.workspaceId &&
+    left.target.providerId === right.target.providerId &&
+    left.target.page.externalId === right.target.page.externalId &&
+    left.target.sourceObjectId === right.target.sourceObjectId &&
+    left.target.sourceRevision === right.target.sourceRevision &&
+    left.target.sourceContentHash === right.target.sourceContentHash &&
+    sameActionItemOwnership(left.ownership, right.ownership) &&
+    left.resolution.id === right.resolution.id
+  );
 }
 
 function parseExternalReferences(json: string | null): ExternalReference[] {

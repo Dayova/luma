@@ -99,6 +99,8 @@ export type ImportedMeetingSource = {
   externalReference: ExternalReference;
   /** Provider whose opaque work-item identifiers are meaningful in this source. */
   workItemProviderId: string;
+  /** Provider namespace for exact GitHub implementation locators in this source. */
+  implementationReferenceProviderId: string;
   completeness: ImportedMeetingSourceCompleteness;
   completenessReasons: ImportedMeetingSourceCompletenessReason[];
   actionItemsAvailability: "available" | "unavailable" | "unknown";
@@ -200,6 +202,18 @@ export type ImportedWorkItemReference = {
   externalId: string;
 };
 
+/**
+ * An exact GitHub implementation locator present in immutable source wording.
+ * It records a source claim only; it does not assert that the referenced code
+ * implements the Action Item or that GitHub currently resolves the locator.
+ */
+export type ImportedImplementationReference = {
+  providerId: string;
+  objectType: "pull-request" | "commit";
+  externalId: string;
+  url: string;
+};
+
 export type ImportedActionItemCandidate = {
   id: string;
   lineageKey: string;
@@ -219,6 +233,8 @@ export type ImportedActionItemCandidate = {
     timezone: string;
   };
   mentionedWorkItemReferences: ImportedWorkItemReference[];
+  /** Exact GitHub PR/commit URLs found in this immutable source block. */
+  sourceBoundImplementationReferences: ImportedImplementationReference[];
   projectHints: string[];
   componentHints: string[];
   source: {

@@ -55,7 +55,7 @@ const snapshot: RawMeetingNoteSnapshot = {
         {
           id: "action-block",
           type: "to-do",
-          text: "Jakob will verify the Luma source by Friday.",
+          text: "Jakob will verify https://github.com/Dayova/Luma/pull/42 by Friday.",
           checked: false,
           children: []
         }
@@ -127,6 +127,32 @@ describe("ledger-backed imported source verification", () => {
       expect(rejected.acceptedObservationIds).toEqual([]);
       expect(rejected.errors[0]?.code).toBe("invalid-observation");
       expect(rejected.errors[0]).toHaveProperty(
+        "message",
+        expect.stringContaining("does not match the immutable ledger")
+      );
+
+      const forgedImplementationReference = {
+        ...observation,
+        candidates: observation.candidates.map((candidate) => ({
+          ...candidate,
+          sourceBoundImplementationReferences: [
+            {
+              providerId: "github-code",
+              objectType: "commit" as const,
+              externalId: "Dayova/Luma@0123456789abcdef0123456789abcdef01234567",
+              url: "https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567"
+            }
+          ]
+        }))
+      } satisfies MeetingImportedFromSource;
+      const forgedImplementationRejected = await meetingIntelligence.observe({
+        workspace,
+        observations: [forgedImplementationReference]
+      });
+
+      expect(forgedImplementationRejected.acceptedObservationIds).toEqual([]);
+      expect(forgedImplementationRejected.errors[0]?.code).toBe("invalid-observation");
+      expect(forgedImplementationRejected.errors[0]).toHaveProperty(
         "message",
         expect.stringContaining("does not match the immutable ledger")
       );

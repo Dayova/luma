@@ -2,6 +2,7 @@ import type {
   EvidenceReference,
   ImportedActionItemCandidate,
   ImportedActionItemSourceBlock,
+  ImportedImplementationReference,
   ImportedMeetingSource,
   ImportedMeetingSourceSection,
   ImportedWorkItemReference,
@@ -25,6 +26,7 @@ import {
   importedActionItemModalityFor,
   importedActionItemOwnershipFor,
   importedActionItemSourceOwnerFor,
+  mentionedGitHubImplementationReferencesFor,
   mentionedWorkItemExternalIdsFor
 } from "../domain/imported-action-item-semantics.js";
 import type {
@@ -50,22 +52,34 @@ export type CreateMeetingNotesIngestionInput = {
   meetingIntelligence: MeetingIntelligence;
   /** Dayova's canonical work tracker unless a different WorkProvider is configured. */
   workItemProviderId?: string;
+  /** Provider namespace for exact GitHub implementation locators. */
+  implementationReferenceProviderId?: string;
 };
 
 export function createMeetingNotesIngestion(
   input: CreateMeetingNotesIngestionInput
 ): MeetingNotesIngestion {
   const workItemProviderId = (input.workItemProviderId ?? "linear").trim();
+  const implementationReferenceProviderId = (
+    input.implementationReferenceProviderId ?? "github-code"
+  ).trim();
 
   if (workItemProviderId.length === 0) {
     throw new Error("Meeting Notes ingestion requires a WorkProvider identity");
+  }
+
+  if (implementationReferenceProviderId.length === 0) {
+    throw new Error(
+      "Meeting Notes ingestion requires an implementation reference provider identity"
+    );
   }
 
   return {
     ingest: (ingestInput) => {
       const observation = observedMeetingNoteToObservation(
         ingestInput,
-        workItemProviderId
+        workItemProviderId,
+        implementationReferenceProviderId
       );
       return input.meetingIntelligence.observe({
         workspace: ingestInput.workspace,
@@ -82,9 +96,14 @@ export function createMeetingNotesIngestion(
  */
 export function observedMeetingNoteToObservation(
   input: IngestObservedMeetingNoteInput,
-  workItemProviderId: string
+  workItemProviderId: string,
+  implementationReferenceProviderId = "github-code"
 ): MeetingImportedFromSource {
-  const source = toImportedMeetingSource(input.source, workItemProviderId);
+  const source = toImportedMeetingSource(
+    input.source,
+    workItemProviderId,
+    implementationReferenceProviderId
+  );
   const meetingId = importedSourceMeetingId(source);
   const sourceSections = sourceSectionsFromSnapshot(input.source);
   const actionItemBlocks = actionItemBlocksFromSnapshot(input.source);
@@ -119,7 +138,8 @@ export function observedMeetingNoteToObservation(
 
 function toImportedMeetingSource(
   source: ObservedSourceRevision,
-  workItemProviderId: string
+  workItemProviderId: string,
+  implementationReferenceProviderId: string
 ): ImportedMeetingSource {
   return {
     providerId: source.source.providerId,
@@ -138,6 +158,7 @@ function toImportedMeetingSource(
       version: source.providerVersion ?? source.contentHash
     },
     workItemProviderId,
+    implementationReferenceProviderId,
     completeness: completenessFromSnapshot(source),
     completenessReasons: completenessReasonsFromSnapshot(source),
     actionItemsAvailability:
@@ -316,6 +337,10 @@ function actionItemCandidates(
           originalText,
           workItemProviderId
         ),
+        sourceBoundImplementationReferences: mentionedGitHubImplementationReferences(
+          originalText,
+          importedSource.implementationReferenceProviderId
+        ),
         projectHints: [],
         componentHints: [],
         source,
@@ -369,6 +394,13 @@ function mentionedWorkItemReferences(
     objectType: "work-item",
     externalId
   }));
+}
+
+function mentionedGitHubImplementationReferences(
+  text: string,
+  providerId: string
+): ImportedImplementationReference[] {
+  return mentionedGitHubImplementationReferencesFor(text, providerId);
 }
 
 function uniqueEvidence(evidence: EvidenceReference[]): EvidenceReference[] {

@@ -8,7 +8,8 @@ import type {
 } from "../../src/domain/model.js";
 import {
   importedActionItemOwnershipFor,
-  importedActionItemSourceOwnerFor
+  importedActionItemSourceOwnerFor,
+  mentionedGitHubImplementationReferencesFor
 } from "../../src/domain/imported-action-item-semantics.js";
 import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
@@ -590,6 +591,7 @@ function sourceObservation(
     sourceObjectId?: string;
     meetingId?: string;
     workItemProviderId?: string;
+    sourceBoundImplementationReferences?: MeetingImportedFromSource["candidates"][number]["sourceBoundImplementationReferences"];
     blockId?: string;
     description?: string;
     completeness?: MeetingImportedFromSource["source"]["completeness"];
@@ -626,6 +628,7 @@ function sourceObservation(
       version: `2026-08-0${revision}T09:00:00.000Z`
     },
     workItemProviderId: input.workItemProviderId ?? "linear",
+    implementationReferenceProviderId: "github-code",
     completeness: input.completeness ?? "complete",
     completenessReasons: [],
     actionItemsAvailability: "available",
@@ -682,6 +685,12 @@ function sourceObservation(
         externalId: "LUM-3"
       }
     ],
+    sourceBoundImplementationReferences:
+      input.sourceBoundImplementationReferences ??
+      mentionedGitHubImplementationReferencesFor(
+        description,
+        source.implementationReferenceProviderId
+      ),
     projectHints: input.projectHints ?? [],
     componentHints: input.componentHints ?? [],
     source: {
@@ -2293,7 +2302,240 @@ describe("Action Item reconciliation", () => {
     }
   });
 
-  it("keeps a completed v1 settlement in a v2 page aggregate with explicit unresolved ownership", async () => {
+  it("recovers source-bound GitHub implementation references from the durable settlement plan", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-source-bound-github-recovery",
+      description:
+        "Jakob will finish LUM-3 with https://github.com/Dayova/Luma/pull/42 and https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567 by Friday."
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter(1);
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "source-bound-github-recovery"
+      });
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const first = await executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(first.observation.outcome.status).toBe("partially-succeeded");
+      expect(writer.writes).toEqual([]);
+
+      const recovered = await executor.recover({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      const renderedOutcome = writer.writes[0]?.outcome;
+
+      expect(renderedOutcome?.formatVersion).toBe(2);
+      expect(renderedOutcome?.entries[0]?.githubReferences).toEqual([
+        {
+          providerId: "github-code",
+          objectType: "pull-request",
+          externalId: "Dayova/Luma#42",
+          url: "https://github.com/Dayova/Luma/pull/42"
+        },
+        {
+          providerId: "github-code",
+          objectType: "commit",
+          externalId: "Dayova/Luma@0123456789abcdef0123456789abcdef01234567",
+          url: "https://github.com/Dayova/Luma/commit/0123456789abcdef0123456789abcdef01234567"
+        }
+      ]);
+      expect(
+        renderOperationalOutcomeMarkdown({
+          outcome:
+            renderedOutcome ??
+            (() => {
+              throw new Error("expected written outcome");
+            })(),
+          idempotencyKey: writer.writes[0]?.idempotencyKey ?? "missing"
+        }).section
+      ).toContain("#### GitHub implementation references (source-bound)");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a durable v2 settlement plan read-compatible without backfilling current GitHub source links", async () => {
+    const catalog = new ProgrammableWorkCatalog();
+    const observation = sourceObservation({
+      sourceObjectId: "notion-v2-github-plan-compatibility",
+      description:
+        "Jakob will finish LUM-3 with https://github.com/Dayova/Luma/pull/42 by Friday."
+    });
+    const description = observation.candidates[0]?.description;
+
+    if (!description) {
+      throw new Error("expected source Action Item description");
+    }
+
+    const item = workItem();
+    catalog.respondToSearch("LUM-3", [item]);
+    catalog.respondToSearch(description, [item]);
+    catalog.respondToGet(item.id, item);
+    const { database, meetingIntelligence } = await createHarness(catalog);
+    const writer = new RecordingOperationalOutcomeWriter();
+
+    try {
+      const reviewed = await observeAndReview(meetingIntelligence, observation);
+      const reviewId = reviewed.reviews[0]?.proposal.id;
+
+      if (!reviewId) {
+        throw new Error("expected a reconciliation review");
+      }
+
+      const intent = await resolveAndApproveOperationalOutcome({
+        meetingIntelligence,
+        meetingId: observation.meetingId,
+        reviewId,
+        observationSuffix: "v2-github-plan-compatibility"
+      });
+
+      if (intent.type !== "settle-operational-outcome") {
+        throw new Error("expected an Operational Outcome settlement Intent");
+      }
+
+      const snapshot = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: observation.meetingId,
+        query: { type: "snapshot" }
+      });
+
+      if (snapshot.type !== "snapshot") {
+        throw new Error("expected Meeting snapshot");
+      }
+
+      const review = snapshot.state.actionItemReconciliationReviews.find(
+        (candidate) => candidate.id === intent.reconciliation.reviewId
+      );
+      const resolution = snapshot.state.actionItemReconciliationHumanResolutions.find(
+        (candidate) => candidate.reviewId === intent.reconciliation.reviewId
+      );
+
+      if (!review || !resolution) {
+        throw new Error("expected approved immutable reconciliation facts");
+      }
+
+      const source = observation.source;
+      const legacyPlan = {
+        version: 2,
+        intentId: intent.id,
+        binding: intent.reconciliation,
+        target: {
+          workspaceId: workspace.workspaceId,
+          providerId: source.providerId,
+          page: source.externalReference,
+          sourceObjectId: source.sourceObjectId,
+          sourceRevision: source.sourceRevision,
+          sourceContentHash: source.contentHash
+        },
+        candidate: review.candidate,
+        ownership: review.ownership,
+        resolution
+      };
+      const timestamp = "2026-08-08T10:01:00.000Z";
+
+      await database.transaction(async (transaction) => {
+        await transaction.query(
+          `INSERT INTO operational_outcome_settlements (
+             workspace_id, meeting_id, intent_id, review_id, candidate_id,
+             candidate_lineage_key, source_provider_id, source_document_id,
+             source_object_id, source_revision, source_content_hash, plan_json,
+             created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+          [
+            workspace.workspaceId,
+            observation.meetingId,
+            intent.id,
+            legacyPlan.binding.reviewId,
+            legacyPlan.binding.candidateId,
+            legacyPlan.binding.candidateLineageKey,
+            legacyPlan.target.providerId,
+            legacyPlan.target.page.externalId,
+            legacyPlan.target.sourceObjectId,
+            legacyPlan.target.sourceRevision,
+            legacyPlan.target.sourceContentHash,
+            JSON.stringify(legacyPlan),
+            timestamp
+          ]
+        );
+
+        for (const [stage, status] of [
+          ["work", "not-required"],
+          ["outcome", "pending"]
+        ] as const) {
+          await transaction.query(
+            `INSERT INTO operational_outcome_settlement_stages (
+               workspace_id, meeting_id, intent_id, stage, status,
+               idempotency_key, attempts, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $7)`,
+            [
+              workspace.workspaceId,
+              observation.meetingId,
+              intent.id,
+              stage,
+              status,
+              `legacy-v2:${stage}`,
+              timestamp
+            ]
+          );
+        }
+      });
+
+      const executor = createFollowUpExecution({
+        database,
+        meetingIntelligence,
+        operationalOutcomeWriter: writer,
+        now: () => new Date("2026-08-08T10:02:00.000Z")
+      });
+      const execution = await executor.execute({
+        workspace,
+        meetingId: observation.meetingId,
+        intentId: intent.id
+      });
+
+      expect(execution.observation.outcome.status).toBe("succeeded");
+      expect(writer.writes[0]?.outcome.entries[0]?.githubReferences).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps a completed v1 settlement in a v3 page aggregate with explicit unresolved ownership", async () => {
     const catalog = new ProgrammableWorkCatalog();
     const observation = sourceObservation({
       sourceObjectId: "notion-root-v2-after-legacy",

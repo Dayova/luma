@@ -14,6 +14,15 @@ import {
 } from "../../src/discord/discord-meeting-bot.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
 import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
+import type {
+  ChangePage,
+  CreateDocumentInput,
+  KnowledgeDocument,
+  KnowledgeProvider,
+  KnowledgeQuery,
+  KnowledgeResult,
+  UpdateDocumentInput
+} from "../../src/knowledge/interface.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import type {
@@ -22,7 +31,11 @@ import type {
   WorkProvider,
   WorkQuery
 } from "../../src/work/interface.js";
-import type { ExternalReference } from "../../src/domain/model.js";
+import type {
+  ExternalReference,
+  FollowUpIntent,
+  MeetingState
+} from "../../src/domain/model.js";
 
 class FollowUpReasoningModel implements ReasoningModel {
   generateStructured<T>(
@@ -108,6 +121,46 @@ class LinearWorkProvider implements WorkProvider {
   }
 }
 
+class RecordingKnowledgeProvider implements KnowledgeProvider {
+  readonly providerId = "notion-meetings";
+  readonly createCalls: CreateDocumentInput[] = [];
+  readonly updateCalls: Array<{ id: string; input: UpdateDocumentInput }> = [];
+  readonly markerLookups: string[] = [];
+  marker: ExternalReference | null = null;
+
+  search(_query: KnowledgeQuery): Promise<KnowledgeResult[]> {
+    void _query;
+    return Promise.resolve([]);
+  }
+
+  getDocument(_id: string): Promise<KnowledgeDocument> {
+    void _id;
+    return Promise.reject(new Error("not needed"));
+  }
+
+  createDocument(input: CreateDocumentInput): Promise<ExternalReference> {
+    this.createCalls.push(input);
+    return Promise.reject(new Error("legacy generic knowledge must not create"));
+  }
+
+  findCreatedDocumentByIdempotencyKey(
+    idempotencyKey: string
+  ): Promise<ExternalReference | null> {
+    this.markerLookups.push(idempotencyKey);
+    return Promise.resolve(this.marker);
+  }
+
+  updateDocument(id: string, input: UpdateDocumentInput): Promise<ExternalReference> {
+    this.updateCalls.push({ id, input });
+    return Promise.reject(new Error("legacy generic knowledge must not update"));
+  }
+
+  listChanges(_cursor?: string): Promise<ChangePage> {
+    void _cursor;
+    return Promise.resolve({ changes: [], nextCursor: null });
+  }
+}
+
 class TestDiscordTransport implements DiscordTransport {
   readonly sentMessages: Array<{
     channelId: string;
@@ -153,6 +206,197 @@ class TestDiscordTransport implements DiscordTransport {
 
     return this.handler(command);
   }
+}
+
+async function createLegacyGenericKnowledgeDiscordContext() {
+  const database = await createPgliteDatabase();
+  const identityDirectory = createLumaTeamIdentityDirectory();
+  const workspace = {
+    workspaceId: "workspace_legacy_generic_knowledge",
+    timezone: "Europe/Berlin"
+  };
+  const meetingId = "discord_start_legacy_generic_knowledge";
+  const meetingIntelligence = createMeetingIntelligence({
+    database,
+    reasoningModel: new FollowUpReasoningModel(),
+    now: () => new Date("2026-08-09T11:00:00.000Z")
+  });
+  const knowledgeProvider = new RecordingKnowledgeProvider();
+  const transport = new TestDiscordTransport();
+  const bot = createDiscordMeetingBot({
+    database,
+    meetingIntelligence,
+    followUpExecution: createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory,
+      knowledgeProvider,
+      now: () => new Date("2026-08-09T11:01:00.000Z")
+    }),
+    identityDirectory,
+    transport,
+    workspace,
+    guildId: "guild_dayova",
+    now: () => new Date("2026-08-09T11:00:00.000Z")
+  });
+
+  await bot.start();
+  await transport.execute({
+    type: "start",
+    interactionId: "start_legacy_generic_knowledge",
+    guildId: "guild_dayova",
+    channelId: "channel_product",
+    actorDiscordUserId: "779381502311137301",
+    occurredAt: "2026-08-09T10:58:00.000Z",
+    title: "Product Meeting",
+    languageMode: "en"
+  });
+  await transport.execute({
+    type: "note",
+    interactionId: "note_legacy_generic_knowledge",
+    guildId: "guild_dayova",
+    channelId: "thread_product",
+    actorDiscordUserId: "779381502311137301",
+    occurredAt: "2026-08-09T10:59:00.000Z",
+    text: "Wir sollten die Customer Policy festhalten.",
+    language: "de"
+  });
+
+  return {
+    database,
+    workspace,
+    meetingId,
+    meetingIntelligence,
+    knowledgeProvider,
+    transport
+  };
+}
+
+type LegacyGenericKnowledgeDiscordContext = Awaited<
+  ReturnType<typeof createLegacyGenericKnowledgeDiscordContext>
+>;
+type LegacyGenericKnowledgeIntent = Extract<FollowUpIntent, { type: "update-knowledge" }>;
+
+async function currentMeetingState(
+  context: LegacyGenericKnowledgeDiscordContext
+): Promise<MeetingState> {
+  const snapshot = await context.meetingIntelligence.query({
+    workspaceId: context.workspace.workspaceId,
+    meetingId: context.meetingId,
+    query: { type: "snapshot" }
+  });
+
+  if (snapshot.type !== "snapshot") {
+    throw new Error("expected Meeting snapshot");
+  }
+
+  return snapshot.state;
+}
+
+async function seedHistoricLegacyGenericKnowledgeIntent(
+  context: LegacyGenericKnowledgeDiscordContext,
+  status: FollowUpIntent["status"]
+): Promise<LegacyGenericKnowledgeIntent> {
+  const state = await currentMeetingState(context);
+  const followUpIntentions = state.followUpIntentions;
+  const currentIntent = followUpIntentions.find(
+    (candidate): candidate is Extract<FollowUpIntent, { type: "create-work-item" }> =>
+      candidate.id === "intent_linear_release"
+  );
+
+  if (!currentIntent) {
+    throw new Error("expected generated Follow-up Intent");
+  }
+  const intent: LegacyGenericKnowledgeIntent = {
+    id: "intent_legacy_generic_knowledge",
+    type: "update-knowledge",
+    title: "Customer policy",
+    bodyMarkdown: "## Customer policy\n\nRemember this.",
+    relatedMeetingItemIds: [],
+    status,
+    provenance: currentIntent.provenance
+  };
+
+  // Generic update-knowledge is now rejected by Meeting Intelligence, so this
+  // fixture writes only a canonical Intent that existed before containment.
+  await context.database.query(
+    `UPDATE meetings
+        SET state_json = $3
+      WHERE workspace_id = $1 AND meeting_id = $2`,
+    [
+      context.workspace.workspaceId,
+      context.meetingId,
+      JSON.stringify({
+        ...state,
+        followUpIntentions: followUpIntentions.map((candidate) =>
+          candidate.id === currentIntent.id ? intent : candidate
+        )
+      })
+    ]
+  );
+
+  return intent;
+}
+
+async function seedHistoricLegacyGenericKnowledgeExecution(
+  context: LegacyGenericKnowledgeDiscordContext,
+  mode: "manual" | "executing"
+): Promise<{ intent: LegacyGenericKnowledgeIntent; idempotencyKey: string }> {
+  const intent = await seedHistoricLegacyGenericKnowledgeIntent(
+    context,
+    mode === "manual" ? "requires-manual-recovery" : "approved"
+  );
+  const idempotencyKey = JSON.stringify([
+    context.workspace.workspaceId,
+    context.meetingId,
+    intent.id,
+    "execute"
+  ]);
+  const executionLeaseId = `historic-legacy-generic-knowledge-${mode}`;
+  const occurredAt = "2026-08-09T11:02:00.000Z";
+  const resultJson =
+    mode === "manual"
+      ? JSON.stringify({
+          observation: {
+            type: "follow-up-execution-recorded",
+            observationId: "historic-legacy-generic-knowledge:manual",
+            workspaceId: context.workspace.workspaceId,
+            meetingId: context.meetingId,
+            occurredAt,
+            observedAt: occurredAt,
+            intentId: intent.id,
+            executionLeaseId,
+            outcome: {
+              status: "failed",
+              errorCode: "provider-outcome-unknown",
+              message: "The historic provider response could not be proven.",
+              retryable: false,
+              requiresManualRecovery: true
+            }
+          },
+          events: [],
+          idempotencyKey
+        })
+      : null;
+
+  await context.database.query(
+    `INSERT INTO follow_up_executions (
+       workspace_id, meeting_id, intent_id, operation, idempotency_key,
+       status, attempts, result_json, execution_lease_id, created_at, updated_at
+     ) VALUES ($1, $2, $3, 'execute', $4, $5, 1, $6, $7, $8, $8)`,
+    [
+      context.workspace.workspaceId,
+      context.meetingId,
+      intent.id,
+      idempotencyKey,
+      mode === "manual" ? "completed" : "executing",
+      resultJson,
+      executionLeaseId,
+      occurredAt
+    ]
+  );
+
+  return { intent, idempotencyKey };
 }
 
 describe("Discord follow-up commands", () => {
@@ -451,5 +695,101 @@ describe("Discord follow-up commands", () => {
     );
     expect(workProvider.createCalls).toEqual([]);
     expect(workProvider.recoveryKeys).toContain(idempotencyKey);
+  });
+
+  it("blocks legacy generic knowledge approval before it can reach a provider", async () => {
+    const context = await createLegacyGenericKnowledgeDiscordContext();
+
+    try {
+      const intent = await seedHistoricLegacyGenericKnowledgeIntent(context, "suggested");
+      const response = await context.transport.execute({
+        type: "approve",
+        interactionId: "approve_legacy_generic_knowledge",
+        guildId: "guild_dayova",
+        channelId: "thread_product",
+        actorDiscordUserId: "779381502311137301",
+        occurredAt: "2026-08-09T11:01:00.000Z",
+        intentId: intent.id
+      });
+
+      expect(response.content).toContain("legacy generic knowledge update is disabled");
+      expect(response.content).toContain("will not create or update");
+      expect(context.knowledgeProvider.markerLookups).toEqual([]);
+      expect(context.knowledgeProvider.createCalls).toEqual([]);
+      expect(context.knowledgeProvider.updateCalls).toEqual([]);
+      expect((await currentMeetingState(context)).followUpIntentions).toContainEqual(
+        expect.objectContaining({ id: intent.id, status: "suggested" })
+      );
+    } finally {
+      await context.database.close();
+    }
+  });
+
+  it.each(["manual", "executing"] as const)(
+    "recovers a historic %s legacy generic create only from its exact positive marker",
+    async (mode) => {
+      const context = await createLegacyGenericKnowledgeDiscordContext();
+
+      try {
+        const { intent, idempotencyKey } =
+          await seedHistoricLegacyGenericKnowledgeExecution(context, mode);
+        const externalId = `notion-historic-legacy-generic-${mode}`;
+        const url = `https://notion.so/${externalId}`;
+        context.knowledgeProvider.marker = {
+          providerId: context.knowledgeProvider.providerId,
+          objectType: "document",
+          externalId,
+          url
+        };
+
+        const response = await context.transport.execute({
+          type: "recover",
+          interactionId: `recover_legacy_generic_knowledge_${mode}`,
+          guildId: "guild_dayova",
+          channelId: "thread_product",
+          actorDiscordUserId: "779381502311137301",
+          occurredAt: "2026-08-09T11:03:00.000Z",
+          intentId: intent.id
+        });
+
+        expect(response.content).toBe(`Follow-up recovered: ${url}`);
+        expect(context.knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
+        expect(context.knowledgeProvider.createCalls).toEqual([]);
+        expect(context.knowledgeProvider.updateCalls).toEqual([]);
+      } finally {
+        await context.database.close();
+      }
+    }
+  );
+
+  it("keeps a historic generic knowledge create manual when Discord recovery finds no marker", async () => {
+    const context = await createLegacyGenericKnowledgeDiscordContext();
+
+    try {
+      const { intent, idempotencyKey } =
+        await seedHistoricLegacyGenericKnowledgeExecution(context, "manual");
+      const response = await context.transport.execute({
+        type: "recover",
+        interactionId: "recover_legacy_generic_knowledge_without_marker",
+        guildId: "guild_dayova",
+        channelId: "thread_product",
+        actorDiscordUserId: "779381502311137301",
+        occurredAt: "2026-08-09T11:03:00.000Z",
+        intentId: intent.id
+      });
+
+      expect(response.content).toContain(
+        "Follow-up recovery could not prove the provider outcome"
+      );
+      expect(response.content).toContain("will not create or update");
+      expect(context.knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
+      expect(context.knowledgeProvider.createCalls).toEqual([]);
+      expect(context.knowledgeProvider.updateCalls).toEqual([]);
+      expect((await currentMeetingState(context)).followUpIntentions).toContainEqual(
+        expect.objectContaining({ id: intent.id, status: "requires-manual-recovery" })
+      );
+    } finally {
+      await context.database.close();
+    }
   });
 });

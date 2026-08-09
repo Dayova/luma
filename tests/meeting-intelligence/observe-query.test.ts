@@ -57,9 +57,8 @@ class DeferredReasoningModel implements ReasoningModel {
   });
 
   async generateStructured<T>(
-    _request: StructuredReasoningRequest<T>
+    request: StructuredReasoningRequest<T>
   ): Promise<StructuredReasoningResult<T>> {
-    void _request;
     this.signalAnalysis?.();
     this.signalAnalysis = null;
     await this.analysisReleased;
@@ -74,7 +73,7 @@ class DeferredReasoningModel implements ReasoningModel {
       metadata: {
         provider: "test",
         model: "deferred",
-        promptVersion: "meeting-intelligence-v1"
+        promptVersion: request.promptVersion
       }
     };
   }
@@ -340,6 +339,72 @@ describe("MeetingIntelligence observe/query", () => {
           query: { type: "unsupported" } as never
         })
       ).rejects.toThrow("Unsupported Meeting query type");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("uses the current Meeting Intelligence prompt version for analysis", async () => {
+    const database = await createPgliteDatabase();
+    const workspace = {
+      workspaceId: "workspace_prompt_version",
+      timezone: "Europe/Berlin"
+    };
+    const meetingId = "meeting_prompt_version";
+    let observedPromptVersion: string | null = null;
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: new ProgrammableReasoningModel((request) => {
+        observedPromptVersion = request.promptVersion;
+        return noMeetingAnalysisProposals();
+      })
+    });
+
+    try {
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "meeting-started",
+            observationId: "prompt-version:start",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-09T10:00:00.000Z",
+            observedAt: "2026-08-09T10:00:01.000Z",
+            title: "Prompt provenance",
+            startedAt: "2026-08-09T10:00:00.000Z",
+            languageMode: "en",
+            participantIds: []
+          }
+        ]
+      });
+      await meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            type: "utterance-committed",
+            observationId: "prompt-version:utterance",
+            workspaceId: workspace.workspaceId,
+            meetingId,
+            occurredAt: "2026-08-09T10:01:00.000Z",
+            observedAt: "2026-08-09T10:01:01.000Z",
+            utteranceId: "prompt-version:utt",
+            version: 1,
+            speaker: {
+              status: "attributed",
+              personId: "person_jakob",
+              confidence: "deterministic",
+              basis: "provider-identity"
+            },
+            startedAt: "2026-08-09T10:00:58.000Z",
+            endedAt: "2026-08-09T10:01:02.000Z",
+            originalText: "We should retain prompt provenance.",
+            language: "en"
+          }
+        ]
+      });
+
+      expect(observedPromptVersion).toBe("meeting-intelligence-v2");
     } finally {
       await database.close();
     }

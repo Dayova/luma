@@ -83,6 +83,7 @@ describe("OpenAI ReasoningModel", () => {
       schemaName: "MeetingAnalysisProposalBatch",
       strict: true
     });
+    expect(JSON.stringify(client.requests[0]?.schema)).not.toContain("update-knowledge");
   });
 
   it("rejects output that cites an unknown evidence ID", async () => {
@@ -134,5 +135,50 @@ describe("OpenAI ReasoningModel", () => {
         input: {}
       })
     ).rejects.toThrow("unknown evidence ID");
+  });
+
+  it("rejects a legacy generic knowledge proposal from a nonconforming model", async () => {
+    const client: OpenAIResponseClient = {
+      create: () =>
+        Promise.resolve({
+          outputText: JSON.stringify({
+            actionItems: [],
+            decisions: [],
+            openQuestions: [],
+            risks: [],
+            followUpIntentions: [
+              {
+                id: "intent_legacy_knowledge",
+                type: "update-knowledge",
+                title: "Customer policy",
+                bodyMarkdown: "## Customer policy",
+                relatedMeetingItemIds: [],
+                evidenceIds: ["real-evidence"],
+                confidence: "high"
+              }
+            ]
+          })
+        })
+    };
+    const model = createOpenAIReasoningModel({ client, model: "gpt-5.6-luna" });
+
+    await expect(
+      model.generateStructured({
+        workspaceId: "workspace_dayova",
+        meetingId: "meeting_product",
+        purpose: "understand-discussion",
+        promptVersion: "meeting-intelligence-v2",
+        schemaName: "MeetingAnalysisProposalBatch",
+        evidence: [
+          {
+            evidenceId: "real-evidence",
+            source: "transcript",
+            sourceObjectId: "utt_release"
+          }
+        ],
+        context: [],
+        input: {}
+      })
+    ).rejects.toThrow();
   });
 });

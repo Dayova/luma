@@ -90,7 +90,7 @@ import {
 import type { LumaDatabase } from "../persistence/db.js";
 
 const ANALYSIS_VERSION = "meeting-analysis-v1";
-const PROMPT_VERSION = "meeting-intelligence-v1";
+const PROMPT_VERSION = "meeting-intelligence-v2";
 const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v1";
 
 export type CreateMeetingIntelligenceInput = {
@@ -3465,6 +3465,13 @@ function validateFollowUpIntentApproval(
     return invalidFollowUpIntentApproval(
       observation,
       "Follow-up Intent must exist before it can be approved"
+    );
+  }
+
+  if (intent.type === "update-knowledge") {
+    return invalidFollowUpIntentApproval(
+      observation,
+      "The legacy generic update-knowledge Intent is disabled. Luma will not create or update a Notion document without a Human-selected canonical target, exact region, and conflict policy."
     );
   }
 
@@ -6879,16 +6886,19 @@ async function validateFollowUpExecutionReceipt(
   const canProbeManualOperationalOutcome =
     intent?.type === "settle-operational-outcome" &&
     intent.status === "requires-manual-recovery";
+  const canProbeManualLegacyGenericKnowledgeCreate =
+    intent?.type === "update-knowledge" && intent.status === "requires-manual-recovery";
 
   if (
     !intent ||
     (intent.status !== "approved" &&
       !canResumePartialSettlement &&
-      !canProbeManualOperationalOutcome)
+      !canProbeManualOperationalOutcome &&
+      !canProbeManualLegacyGenericKnowledgeCreate)
   ) {
     return invalidFollowUpExecutionReceipt(
       observation,
-      "Follow-up execution receipt must target a canonically approved, resumable partial, or manual-probe settlement Intent"
+      "Follow-up execution receipt must target a canonically approved, resumable partial, manual-probe settlement, or historic generic-create recovery Intent"
     );
   }
 
@@ -7159,8 +7169,12 @@ function reconcileFollowUpIntentions(
         });
         break;
       case "update-knowledge":
+        // Retain the model proposal and its provenance as an audit record, but
+        // do not surface arbitrary Markdown as an approvable Notion mutation.
+        // LUM-11 owns the later Human-selected canonical patch capability.
         byId.set(proposal.id, {
           ...common,
+          status: "rejected",
           type: proposal.type,
           title: proposal.title,
           bodyMarkdown: proposal.bodyMarkdown

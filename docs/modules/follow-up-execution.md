@@ -80,8 +80,13 @@ interface FollowUpExecution {
 ## Current Implementation
 
 The current implementation supports approved `create-work-item`,
-`record-meeting`, `update-knowledge`, and
-`settle-operational-outcome` paths. A settled reconciliation can create or
+`record-meeting`, and `settle-operational-outcome` paths. New generic
+`update-knowledge` proposals are retained only as policy-rejected audit
+records: Luma does not create or update a canonical Notion document until
+LUM-11 provides a Human-selected target, exact region, and conflict policy.
+For a historical generic document create whose outcome was already
+indeterminate, recovery may only read its exact idempotency marker and record
+that already-created document; it never retries or creates a document. A settled reconciliation can create or
 link work as approved, then records the compact page-owned Operational Outcome
 aggregate on the canonical Notion source page. Its work and outcome stages have
 independent durable state, and source freshness is rechecked before the outcome

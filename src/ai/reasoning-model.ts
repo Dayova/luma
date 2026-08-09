@@ -106,6 +106,9 @@ export type FollowUpIntentProposal =
       type: "record-meeting";
       title: string;
     })
+  // Retained at the port boundary so Meeting Intelligence can preserve an
+  // explicit policy-rejected audit record if a legacy or non-OpenAI model
+  // emits it. The OpenAI schema no longer permits this proposal.
   | (FollowUpIntentProposalBase & {
       type: "update-knowledge";
       title: string;

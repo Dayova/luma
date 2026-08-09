@@ -114,14 +114,6 @@ const meetingAnalysisSchema = z
         z
           .object({
             ...followUpBase,
-            type: z.literal("update-knowledge"),
-            title: z.string().min(1),
-            bodyMarkdown: z.string().min(1)
-          })
-          .strict(),
-        z
-          .object({
-            ...followUpBase,
             type: z.literal("create-work-item"),
             title: z.string().min(1),
             description: z.string().min(1),
@@ -325,7 +317,7 @@ const MEETING_INTELLIGENCE_INSTRUCTIONS = `You are the reasoning adapter for Lum
 
 Use only the supplied evidence. Cite every factual output with one or more supplied evidence IDs. Preserve the source language, modality, names, repository identifiers, issue identifiers, dates, and technical terms. Do not turn "might" into "will" or "could" into "must".
 
-Linear owns executable work. Propose create-work-item or update-work-item when something needs to be done. Notion owns meeting records, decisions, and durable business knowledge. Propose record-meeting or update-knowledge when something needs to be known, understood, or remembered. Do not duplicate executable tasks in Notion. GitHub owns code changes and pull requests.
+Linear owns executable work. Propose create-work-item or update-work-item when something needs to be done. Notion owns meeting records and decisions. Propose record-meeting for a durable meeting record. Do not propose generic knowledge-document creation or updates: safe canonical knowledge patches require a Human-selected target, exact region, and conflict policy. Do not duplicate executable tasks in Notion. GitHub owns code changes and pull requests.
 
 External mutations are proposals only. Every Follow-up Intent must remain subject to explicit human approval.`;
 
@@ -482,10 +474,6 @@ const meetingAnalysisJsonSchema: Record<string, unknown> = objectSchema(
       items: {
         anyOf: [
           followUpIntentJsonSchema("record-meeting", { title: stringSchema }),
-          followUpIntentJsonSchema("update-knowledge", {
-            title: stringSchema,
-            bodyMarkdown: stringSchema
-          }),
           followUpIntentJsonSchema("create-work-item", {
             title: stringSchema,
             description: stringSchema,

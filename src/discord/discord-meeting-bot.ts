@@ -388,6 +388,13 @@ async function approveFollowUp(
     return { content: `Follow-up Intent not found: ${command.intentId}` };
   }
 
+  if (intent.type === "update-knowledge") {
+    return {
+      content:
+        "This legacy generic knowledge update is disabled. Luma will not create or update a Notion document without a Human-selected canonical target, exact region, and conflict policy."
+    };
+  }
+
   if (intent.status === "rejected") {
     return { content: `Follow-up Intent was rejected: ${command.intentId}` };
   }
@@ -496,11 +503,14 @@ async function recoverFollowUp(
   const canProbeManualOperationalOutcome =
     intent.type === "settle-operational-outcome" &&
     intent.status === "requires-manual-recovery";
+  const canProbeManualLegacyGenericKnowledgeCreate =
+    intent.type === "update-knowledge" && intent.status === "requires-manual-recovery";
 
   if (
     intent.status !== "approved" &&
     !canRecoverPartialOperationalOutcome &&
-    !canProbeManualOperationalOutcome
+    !canProbeManualOperationalOutcome &&
+    !canProbeManualLegacyGenericKnowledgeCreate
   ) {
     return {
       content: `Follow-up is not recoverable: ${intent.id} is ${intent.status}.`

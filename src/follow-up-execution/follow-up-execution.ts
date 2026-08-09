@@ -86,6 +86,7 @@ class NonRetryableExecutionError extends Error {
       | "operational-outcome-writer-not-configured"
       | "operational-outcome-source-ledger-superseded"
       | "action-item-ownership-not-executable"
+      | "legacy-generic-knowledge-update-disabled"
       | "code-comment-write-not-supported",
     message: string
   ) {
@@ -270,6 +271,41 @@ async function recoverClaimedIntent(
     );
   }
 
+  if (
+    (claim.type === "claimed" || claim.type === "recovery") &&
+    claim.intent.type === "update-knowledge"
+  ) {
+    const executionInput: CanonicalExecutionInput = {
+      ...executeInput,
+      intent: claim.intent,
+      executionLeaseId: claim.executionLeaseId,
+      // The existing execution reservation's tuple-bound marker is the sole
+      // fact a historic generic document-create recovery may inspect. It may
+      // never re-enter the disabled generic mutation path.
+      recoveryIdempotencyKeys: [claim.idempotencyKey]
+    };
+    const externalReferences = await recoverCreatedReferences(
+      dependencies,
+      executionInput
+    );
+    const observation = externalReferences
+      ? recoveredHistoricGenericKnowledgeCreateObservation(
+          executionInput,
+          externalReferences,
+          now
+        )
+      : indeterminateExecutionObservation(executionInput, now);
+
+    return persistExecutionReceipt(
+      dependencies,
+      executeInput.workspace,
+      executionInput,
+      observation,
+      claim.idempotencyKey,
+      now
+    );
+  }
+
   if (claim.type !== "recovery") {
     throw new Error(
       `Follow-up Intent ${executeInput.intentId} has no recoverable execution`
@@ -437,6 +473,33 @@ function successfulExecutionObservation(
   externalReferences: ExternalReference[],
   now: () => Date
 ): FollowUpExecutionRecorded {
+  return succeededExecutionObservation(
+    input,
+    externalReferences,
+    summarizeSuccess(input.intent, externalReferences),
+    now
+  );
+}
+
+function recoveredHistoricGenericKnowledgeCreateObservation(
+  input: CanonicalExecutionInput,
+  externalReferences: ExternalReference[],
+  now: () => Date
+): FollowUpExecutionRecorded {
+  return succeededExecutionObservation(
+    input,
+    externalReferences,
+    "Recovered historic generic Notion document creation from its exact provider marker. No new Notion document was created and canonical knowledge was not updated.",
+    now
+  );
+}
+
+function succeededExecutionObservation(
+  input: CanonicalExecutionInput,
+  externalReferences: ExternalReference[],
+  summary: string,
+  now: () => Date
+): FollowUpExecutionRecorded {
   const occurredAt = now().toISOString();
 
   return {
@@ -451,7 +514,7 @@ function successfulExecutionObservation(
     outcome: {
       status: "succeeded",
       externalReferences,
-      summary: summarizeSuccess(input.intent, externalReferences)
+      summary
     }
   };
 }
@@ -475,8 +538,11 @@ function indeterminateExecutionObservation(
       status: "failed",
       errorCode: "provider-outcome-unknown",
       message:
-        "Luma could not prove the outcome of an interrupted provider mutation. Inspect the provider before creating a fresh approved Intent.",
-      retryable: false
+        input.intent.type === "update-knowledge"
+          ? "Luma could not prove the outcome of a historic generic Notion document creation. It will not create or update a Notion document; only an exact provider marker can recover the historic result."
+          : "Luma could not prove the outcome of an interrupted provider mutation. Inspect the provider before creating a fresh approved Intent.",
+      retryable: false,
+      requiresManualRecovery: true
     }
   };
 }
@@ -523,21 +589,10 @@ async function runProviderMutation(
       return [reference];
     }
     case "update-knowledge": {
-      if (!dependencies.knowledgeProvider) {
-        throw new Error("KnowledgeProvider is not configured");
-      }
-
-      const reference = await createDocumentWithPositiveRecovery(
-        dependencies.knowledgeProvider,
-        {
-          title: intent.title,
-          contentMarkdown: intent.bodyMarkdown,
-          parentId: null,
-          idempotencyKey
-        },
-        input.recoveryIdempotencyKeys
+      throw new NonRetryableExecutionError(
+        "legacy-generic-knowledge-update-disabled",
+        "The legacy generic update-knowledge Intent is disabled. No Notion document was created or updated; Luma requires a Human-selected canonical target, exact region, and conflict policy."
       );
-      return [reference];
     }
     case "create-work-item": {
       throw new NonRetryableExecutionError(
@@ -3714,6 +3769,13 @@ async function claimCanonicalExecution(
       execution?.status === "completed" &&
       previous?.observation.outcome.status === "failed" &&
       previous.observation.outcome.requiresManualRecovery === true;
+    const probesManualLegacyGenericKnowledgeCreate =
+      mode === "recover" &&
+      intent?.type === "update-knowledge" &&
+      intent.status === "requires-manual-recovery" &&
+      execution?.status === "completed" &&
+      previous?.observation.outcome.status === "failed" &&
+      previous.observation.outcome.errorCode === "provider-outcome-unknown";
     const recoversExecutingManualOperationalOutcome =
       mode === "recover" &&
       intent?.type === "settle-operational-outcome" &&
@@ -3776,6 +3838,7 @@ async function claimCanonicalExecution(
       (intent.status !== "approved" &&
         !resumesPartialSettlement &&
         !probesManualOperationalOutcome &&
+        !probesManualLegacyGenericKnowledgeCreate &&
         !recoversExecutingManualOperationalOutcome)
     ) {
       throw new Error(
@@ -3801,7 +3864,8 @@ async function claimCanonicalExecution(
     if (
       mode === "recover" &&
       !resumesPartialSettlement &&
-      !probesManualOperationalOutcome
+      !probesManualOperationalOutcome &&
+      !probesManualLegacyGenericKnowledgeCreate
     ) {
       throw new Error(
         `Follow-up Intent ${input.intentId} has no active execution to recover`
@@ -3844,7 +3908,9 @@ async function claimCanonicalExecution(
     // marker proof. Let that inspection run even after its source changed so
     // it can safely complete a prior write or retain its lease as manual; it
     // never re-enters the normal write path on a stale source.
-    return current || probesManualOperationalOutcome
+    return current ||
+      probesManualOperationalOutcome ||
+      probesManualLegacyGenericKnowledgeCreate
       ? { type: "claimed", intent, executionLeaseId, idempotencyKey }
       : { type: "stale", intent, executionLeaseId, idempotencyKey };
   });

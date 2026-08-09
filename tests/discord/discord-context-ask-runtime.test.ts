@@ -263,6 +263,19 @@ describe("Discord Context Ask runtime boundary", () => {
     );
   });
 
+  it("fails closed instead of rendering an insufficient-evidence answer without canonical captured Evidence", () => {
+    const result = contextInquiryResult();
+    result.uncertainty = "insufficient-evidence";
+    result.answer = {
+      text: "Unsupported insufficient-evidence answer",
+      evidence: []
+    };
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question."
+    );
+  });
+
   it("keeps rendered claims and captured Evidence labels on one Discord line", () => {
     const result = contextInquiryResult();
     const capturedEvidence = result.evidence.find(

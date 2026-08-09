@@ -299,7 +299,7 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     capturedEvidence
   );
 
-  if (answerEvidence.length === 0 && result.uncertainty !== "insufficient-evidence") {
+  if (answerEvidence.length === 0) {
     return DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER;
   }
 

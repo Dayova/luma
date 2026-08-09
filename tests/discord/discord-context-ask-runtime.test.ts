@@ -276,6 +276,80 @@ describe("Discord Context Ask runtime boundary", () => {
     );
   });
 
+  it("keeps core capture limitations explicit without rendering an unsupported no-answer text", () => {
+    const result = contextInquiryResult();
+    result.answer = {
+      text: "This model-controlled text must never render.",
+      evidence: []
+    };
+    result.facts = [];
+    result.inferences = [];
+    result.uncertainty = "insufficient-evidence";
+    result.warnings = [
+      {
+        code: "conversation-boundary-incomplete",
+        message:
+          "Luma did not answer because the thread boundary is incomplete: history-truncated"
+      }
+    ];
+    result.unresolved = ["Capture a complete thread boundary before asking again."];
+
+    const rendered = renderDiscordContextAskResult(result);
+
+    expect(rendered).toBe(
+      [
+        "Luma Ask",
+        "",
+        "Luma cannot answer reliably from the captured evidence.",
+        "",
+        "Uncertainty: insufficient-evidence",
+        "",
+        "Limitations:",
+        "- Luma did not answer because the thread boundary is incomplete: history-truncated",
+        "",
+        "Unresolved:",
+        "- Capture a complete thread boundary before asking again."
+      ].join("\n")
+    );
+    expect(rendered).not.toContain("This model-controlled text must never render.");
+  });
+
+  it("keeps a renderer-owned no-answer recovery path when capture limitations exceed Discord's cap", () => {
+    const result = contextInquiryResult();
+    result.answer = {
+      text: "This model-controlled text must never render.",
+      evidence: []
+    };
+    result.facts = [];
+    result.inferences = [];
+    result.uncertainty = "insufficient-evidence";
+    result.warnings = [
+      {
+        code: "conversation-boundary-incomplete",
+        message: `Luma did not answer because the thread boundary is incomplete: ${"history-truncated; ".repeat(
+          100
+        )}`
+      }
+    ];
+    result.unresolved = ["Capture a complete thread boundary before asking again."];
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      [
+        "Luma Ask",
+        "",
+        "Luma cannot answer reliably from the captured evidence.",
+        "",
+        "Uncertainty: insufficient-evidence",
+        "",
+        "Limitations:",
+        "- The detailed capture limitations are too long for a safe Discord reply.",
+        "",
+        "Unresolved:",
+        "- Capture a complete thread boundary before asking again."
+      ].join("\n")
+    );
+  });
+
   it("keeps rendered claims and captured Evidence labels on one Discord line", () => {
     const result = contextInquiryResult();
     const capturedEvidence = result.evidence.find(

@@ -1,11 +1,24 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. Use the matching Linear labels where present and express progress through Linear workflow states. Do not create a second task solely to carry a triage label.
+Matt Pocock's triage skill requires exactly one category role and one state role on every triaged issue. Use these exact, case-sensitive Linear labels.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+## Category Roles
+
+| Role in mattpocock/skills | Linear label  | Meaning                     |
+| ------------------------- | ------------- | --------------------------- |
+| `bug`                     | `Bug`         | Existing behavior is broken |
+| `enhancement`             | `enhancement` | New feature or improvement  |
+
+`Feature`, `Improvement`, and other product labels may coexist, but they do not replace the canonical category role.
+
+## State Roles
+
+| Role in mattpocock/skills | Linear label      | Linear workflow state | Meaning                                   |
+| ------------------------- | ----------------- | --------------------- | ----------------------------------------- |
+| `needs-triage`            | `needs-triage`    | `Triage`              | Maintainer needs to evaluate the issue    |
+| `needs-info`              | `needs-info`      | `Triage`              | Waiting for actionable reporter context   |
+| `ready-for-agent`         | `ready-for-agent` | `Todo`                | Fully specified, ready for an AFK agent   |
+| `ready-for-human`         | `ready-for-human` | `Todo`                | Requires human implementation or judgment |
+| `wontfix`                 | `wontfix`         | `Canceled`            | Will not be actioned                      |
+
+Workflow states record progress after work starts. Keep only one canonical state-role label, replacing it when the triage disposition changes; other non-triage labels may remain.

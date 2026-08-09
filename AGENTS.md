@@ -10,6 +10,10 @@ Linear is the canonical tracker for executable work. GitHub Issues are compatibi
 
 The default Matt Pocock triage vocabulary maps onto Linear workflow states and labels. See `docs/agents/triage-labels.md`.
 
+### Matt Pocock skill updates
+
+When installing or updating `mattpocock/skills`, refresh the lock and revalidate the Linear triage and Wayfinder compatibility overlay. See `docs/agents/matt-pocock-skills.md`.
+
 ### Domain docs
 
 This is a single-context repo with root `CONTEXT.md` and root `docs/adr/`. See `docs/agents/domain.md`.

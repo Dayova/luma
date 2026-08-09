@@ -204,6 +204,9 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 
 - Never commit `.env`, provider keys, private-key files, or copied tokens.
 - Rotate a credential immediately if it appears in chat, an issue, a page, or a log.
+- Before a live Discord rollout, complete the [Discord credential-rotation
+  runbook](discord-token-rotation.md); it intentionally records only non-secret
+  rotation proof.
 - Do not log provider request headers or complete environment objects.
 - Keep development and production credentials separate.
 - Grant only the provider access documented for the active capability.

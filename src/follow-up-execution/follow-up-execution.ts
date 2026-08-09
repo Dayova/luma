@@ -3904,10 +3904,11 @@ async function claimCanonicalExecution(
 
     const current = isCurrentReconciliationIntent(state, intent);
 
-    // A manual settlement can be recovered only through an exact read-only
-    // marker proof. Let that inspection run even after its source changed so
-    // it can safely complete a prior write or retain its lease as manual; it
-    // never re-enters the normal write path on a stale source.
+    // A manual settlement and historic generic knowledge create can be
+    // recovered only through an exact read-only marker proof. Let that
+    // inspection run even after its source changed so it can safely complete a
+    // prior write or retain its lease as manual; it never re-enters the normal
+    // write path on a stale source.
     return current ||
       probesManualOperationalOutcome ||
       probesManualLegacyGenericKnowledgeCreate

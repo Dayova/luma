@@ -178,6 +178,9 @@ async function seedHistoricGenericKnowledgeIntent(
     throw new Error("expected generic knowledge update Intent");
   }
 
+  // The containment policy makes these legacy suggested/approved states
+  // unreachable through observe, so this fixture writes only its canonical
+  // historical state directly.
   await context.database.query(
     `UPDATE meetings
         SET state_json = $3
@@ -544,6 +547,11 @@ describe("legacy generic update-knowledge containment", () => {
       expect(knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
       expect(knowledgeProvider.createCalls).toEqual([]);
       expect(knowledgeProvider.updateCalls).toEqual([]);
+      expect(
+        (await snapshotFor(context)).followUpIntentions.find(
+          (candidate) => candidate.id === intent.id
+        )
+      ).toMatchObject({ status: "succeeded" });
     } finally {
       await context.database.close();
     }

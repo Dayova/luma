@@ -90,7 +90,7 @@ import {
 import type { LumaDatabase } from "../persistence/db.js";
 
 const ANALYSIS_VERSION = "meeting-analysis-v1";
-const PROMPT_VERSION = "meeting-intelligence-v1";
+const PROMPT_VERSION = "meeting-intelligence-v2";
 const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v1";
 
 export type CreateMeetingIntelligenceInput = {

@@ -40,6 +40,10 @@ pnpm verify
 
 This runs Prettier checks, ESLint, TypeScript type checking, and the behavioural Vitest suite.
 
+## License
+
+Luma is available under the [MIT License](LICENSE).
+
 ## Toolchain
 
 Luma uses `pnpm@11.12.0`. Its strict dependency layout catches undeclared dependencies, while its workspace support leaves room for provider Adapters to become separate packages without changing package managers. Node.js 24 or newer and Corepack are required.

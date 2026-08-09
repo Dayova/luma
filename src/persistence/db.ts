@@ -323,6 +323,45 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         source_revision
       );
 
+    -- Native Notion review is read-only, but its result must remain bound to
+    -- the authenticated native actor, exact requested page, and immutable
+    -- source revision that supplied reconciliation evidence. The native run
+    -- ID is the public idempotency boundary: a retry returns the original
+    -- receipt, while a changed request fails closed before another capture.
+    CREATE TABLE IF NOT EXISTS source_bound_native_reviews (
+      workspace_id TEXT NOT NULL,
+      native_run_id TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      actor_identity_provider_id TEXT NOT NULL,
+      actor_provider_user_id TEXT NOT NULL,
+      actor_person_id TEXT,
+      page_provider_id TEXT NOT NULL,
+      page_id TEXT NOT NULL,
+      source_provider_id TEXT,
+      source_object_id TEXT,
+      source_revision INTEGER CHECK (source_revision > 0),
+      source_content_hash TEXT,
+      capability_version TEXT NOT NULL,
+      receipt_json TEXT NOT NULL,
+      receipt_content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      CHECK (
+        (source_provider_id IS NULL AND source_object_id IS NULL AND
+         source_revision IS NULL AND source_content_hash IS NULL) OR
+        (source_provider_id IS NOT NULL AND source_object_id IS NOT NULL AND
+         source_revision IS NOT NULL AND source_content_hash IS NOT NULL)
+      ),
+      PRIMARY KEY (workspace_id, native_run_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS source_bound_native_reviews_source_revision_idx
+      ON source_bound_native_reviews (
+        workspace_id,
+        source_provider_id,
+        source_object_id,
+        source_revision
+      );
+
     -- An in-flight source-bound provider mutation holds this fence after it
     -- has atomically proved the exact ledger head it will act on. Source
     -- ingestion must not advance that root (or infer its removal) until the

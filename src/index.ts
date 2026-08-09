@@ -131,6 +131,25 @@ export type * from "./context-intelligence/interface.js";
 export type * from "./context-intelligence/context-answerer.js";
 export type * from "./context-intelligence/conversation-evidence-source.js";
 export {
+  SOURCE_BOUND_NATIVE_REVIEW_CAPABILITY_VERSION,
+  SourceBoundNativeReviewError,
+  createSourceBoundNativeReview
+} from "./native-review/source-bound-native-review.js";
+export type {
+  CapturedMeetingNoteEvidence,
+  CreateSourceBoundNativeReviewInput,
+  ExactMeetingNotePage,
+  MeetingNoteEvidenceCapture,
+  MeetingNoteEvidenceSource,
+  OpaqueNativeReviewWorkReference,
+  SourceBoundNativeReview,
+  SourceBoundNativeReviewClarificationCode,
+  SourceBoundNativeReviewReceipt,
+  SourceBoundNativeReviewRequest,
+  SourceBoundNativeReviewSource,
+  TrustedNativeActor
+} from "./native-review/source-bound-native-review.js";
+export {
   createOpenAIContextAnswerer,
   OpenAIContextAnswererError
 } from "./context-intelligence/openai-context-answerer.js";

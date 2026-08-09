@@ -20,6 +20,17 @@ export type IdentityLookup = {
 
 export interface IdentityDirectory {
   getPerson(input: IdentityLookup): Promise<PersonIdentity | null>;
+  /**
+   * Returns every internal Person bound to one provider account. Callers that
+   * need authorization must reject zero or multiple results; a provider
+   * account, display name, attendee entry, or model claim is never itself a
+   * Person authorization.
+   */
+  findPeopleByProviderUserId(input: {
+    workspaceId: WorkspaceId;
+    providerId: string;
+    providerUserId: string;
+  }): Promise<PersonIdentity[]>;
   findPersonByDiscordUserId(input: {
     workspaceId: WorkspaceId;
     discordUserId: string;

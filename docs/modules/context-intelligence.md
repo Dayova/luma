@@ -3,7 +3,7 @@
 ## Responsibility
 
 Context Intelligence answers a bounded question from immutable conversation
-evidence. It owns capture, durable source revisioning, citation validation,
+evidence. It owns capture, durable source revisioning, Evidence validation,
 answer generation, and idempotent replay beneath one read-only operation.
 
 It is adjacent to Meeting Intelligence, not an extension of it. A Discord
@@ -29,12 +29,15 @@ asking its owned `ContextAnswerer` port.
 - A successful answer is bound to a specific immutable conversation revision
   and content hash. Replay retrieves that historic revision rather than
   recapturing or re-answering.
-- Stored answers are replayed only if their subject, boundary, evidence, and
-  cited evidence still exactly match the persisted source revision.
+- Stored answers are replayed only if their subject, boundary, and supporting
+  Evidence still exactly match the persisted source revision.
 - The persisted result carries a SHA-256 corruption check; replay rejects a
   changed result rather than silently strengthening its wording or provenance.
-- Facts, answers, and inferences cite captured available Evidence. Inferences
+- Facts, answers, and inferences are grounded in captured available Evidence. Inferences
   additionally carry confidence.
+- Discord Ask rendering keeps facts and inferences visibly separate, includes
+  confidence and captured Discord Evidence for each claim, and omits a claim
+  that has no available supporting Evidence rather than presenting it as fact.
 - Explicitly deleted messages remain visible as deleted evidence, but their
   text is never sent to the answerer and they cannot support a claim.
 - A partial conversation boundary does not reach the answerer. It yields an

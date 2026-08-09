@@ -5,8 +5,7 @@ import type {
   ContextAnswerRequest,
   ContextAnswerResult
 } from "./context-answerer.js";
-
-const DEFAULT_OPENAI_CONTEXT_ANSWER_MODEL = "gpt-5.6-luna";
+import { DEFAULT_OPENAI_REASONING_MODEL } from "../ai/openai-model-config.js";
 
 const evidenceIdsSchema = z.array(z.string().min(1)).min(1);
 const contextAnswerClaimSchema = z
@@ -73,7 +72,7 @@ export class OpenAIContextAnswererError extends Error {
 export function createOpenAIContextAnswerer(
   config: OpenAIContextAnswererConfig
 ): ContextAnswerer {
-  const model = config.model ?? DEFAULT_OPENAI_CONTEXT_ANSWER_MODEL;
+  const model = config.model ?? DEFAULT_OPENAI_REASONING_MODEL;
   const client =
     config.client ?? createOpenAIContextAnswererResponseClient(config.apiKey);
 

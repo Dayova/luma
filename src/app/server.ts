@@ -3,7 +3,8 @@ import type {
   StructuredReasoningRequest,
   StructuredReasoningResult
 } from "../ai/reasoning-model.js";
-import { createOpenAIReasoningModelFromEnv } from "../ai/openai-reasoning-model.js";
+import { createOpenAIReasoningModel } from "../ai/openai-reasoning-model.js";
+import { openAIReasoningModelNameFromEnv } from "../ai/openai-model-config.js";
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
 import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
@@ -31,20 +32,38 @@ export type RunningLumaApp = {
   stop(): Promise<void>;
 };
 
+/**
+ * Production adapter factories vary at the application-composition seam.
+ * Keeping them injectable lets this wiring be verified without provider calls.
+ */
+type StartServerDependencies = {
+  createDatabase?: typeof createPgliteDatabase;
+  createDiscordTransport?: typeof createDiscordJsTransportFromEnv;
+  createOpenAIReasoningModel?: typeof createOpenAIReasoningModel;
+  createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
+};
+
 export async function startServer(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  dependencies: StartServerDependencies = {}
 ): Promise<RunningLumaApp> {
+  const createDatabase = dependencies.createDatabase ?? createPgliteDatabase;
+  const createDiscordTransport =
+    dependencies.createDiscordTransport ?? createDiscordJsTransportFromEnv;
+  const createReasoningModel =
+    dependencies.createOpenAIReasoningModel ?? createOpenAIReasoningModel;
+  const createContextAnswerer =
+    dependencies.createOpenAIContextAnswerer ?? createOpenAIContextAnswerer;
   const config = loadAppConfigFromEnv(env);
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
+  const openAIReasoningModelName = openAIReasoningModelNameFromEnv(env);
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
   }
 
-  const database = await createPgliteDatabase(
-    env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite"
-  );
+  const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
   const identityDirectory = createIdentityDirectoryFromEnv(env);
   const workProvider = optionalLinearWorkProvider(env);
   const observedSourceLedger = createObservedSourceLedger({ database });
@@ -52,7 +71,7 @@ export async function startServer(
     database
   });
   const workItemProviderId = workProvider?.providerId ?? "linear";
-  const discordTransport = createDiscordJsTransportFromEnv(env, discordContextAskConfig);
+  const discordTransport = createDiscordTransport(env, discordContextAskConfig);
   const workspace = {
     workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
     timezone: config.defaultWorkspaceTimezone,
@@ -61,7 +80,11 @@ export async function startServer(
   };
   const meetingIntelligence = createMeetingIntelligence({
     database,
-    reasoningModel: reasoningModelFromEnv(env),
+    reasoningModel: reasoningModelFromEnv(
+      env,
+      openAIReasoningModelName,
+      createReasoningModel
+    ),
     ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
     ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
       ? {
@@ -125,8 +148,9 @@ export async function startServer(
         database,
         ledger: observedSourceLedger,
         conversationEvidenceSource: discordTransport,
-        answerer: createOpenAIContextAnswerer({
-          apiKey: requireEnv(env, "OPENAI_API_KEY")
+        answerer: createContextAnswerer({
+          apiKey: requireEnv(env, "OPENAI_API_KEY"),
+          model: openAIReasoningModelName
         })
       })
     : undefined;
@@ -178,7 +202,11 @@ const unavailableReasoningModel: ReasoningModel = {
   }
 };
 
-function reasoningModelFromEnv(env: NodeJS.ProcessEnv): ReasoningModel {
+function reasoningModelFromEnv(
+  env: NodeJS.ProcessEnv,
+  model: string,
+  createReasoningModel: typeof createOpenAIReasoningModel
+): ReasoningModel {
   const provider = env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() || "openai";
 
   if (provider === "disabled" || !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
@@ -189,7 +217,10 @@ function reasoningModelFromEnv(env: NodeJS.ProcessEnv): ReasoningModel {
     throw new Error(`Unsupported LUMA_REASONING_MODEL_PROVIDER: ${provider}`);
   }
 
-  return createOpenAIReasoningModelFromEnv(env);
+  return createReasoningModel({
+    apiKey: requireEnv(env, "OPENAI_API_KEY"),
+    model
+  });
 }
 
 function optionalLinearWorkProvider(env: NodeJS.ProcessEnv) {

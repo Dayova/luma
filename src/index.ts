@@ -16,6 +16,10 @@ export type {
 export type * from "./domain/model.js";
 export type * from "./ai/reasoning-model.js";
 export {
+  DEFAULT_OPENAI_REASONING_MODEL,
+  openAIReasoningModelNameFromEnv
+} from "./ai/openai-model-config.js";
+export {
   OpenAIReasoningModelError,
   createOpenAIReasoningModel,
   createOpenAIReasoningModelFromEnv

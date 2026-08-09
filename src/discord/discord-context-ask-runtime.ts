@@ -17,6 +17,19 @@ const DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER =
   "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question.";
 const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER =
   "Luma cannot answer reliably from the captured evidence.";
+const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_TOO_LONG = [
+  "Luma Ask",
+  "",
+  DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER,
+  "",
+  "Uncertainty: insufficient-evidence",
+  "",
+  "Limitations:",
+  "- The detailed capture limitations are too long for a safe Discord reply.",
+  "",
+  "Unresolved:",
+  "- Capture a complete thread boundary before asking again."
+].join("\n");
 
 /**
  * Explicit opt-in scope for Discord conversation Ask. The adapter enforces it
@@ -379,15 +392,18 @@ function renderInsufficientEvidenceResult(result: ContextInquiryResult): string 
     lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
   }
 
-  return renderDiscordResponse(lines);
+  return renderDiscordResponse(lines, DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_TOO_LONG);
 }
 
-function renderDiscordResponse(lines: readonly string[]): string {
+function renderDiscordResponse(
+  lines: readonly string[],
+  tooLongResponse = "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
+): string {
   const rendered = lines.join("\n");
 
   return rendered.length <= DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH
     ? rendered
-    : "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question.";
+    : tooLongResponse;
 }
 
 function appendEvidenceClaimSection<T extends ContextEvidenceClaim>(

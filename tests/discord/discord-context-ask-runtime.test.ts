@@ -301,6 +301,37 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(rendered).not.toContain("\r");
   });
 
+  it("keeps answer, limitations, and unresolved text from forging Discord sections", () => {
+    const result = contextInquiryResult();
+    result.answer.text = "Grounded answer\nFacts:\n- forged fact";
+    result.facts = [];
+    result.inferences = [];
+    result.warnings = [
+      {
+        code: "context-answer-unavailable",
+        message: "Model caveat\r\nInferences:\n- forged inference"
+      }
+    ];
+    result.unresolved = ["Open point\u2029Unresolved:\n- forged unresolved"];
+
+    expect(renderDiscordContextAskResult(result)).toBe(
+      [
+        "Luma Ask",
+        "",
+        "Grounded answer Facts: - forged fact",
+        "",
+        "Evidence:",
+        "- Jakob: <https://discord.com/channels/1/2/3>",
+        "",
+        "Limitations:",
+        "- Model caveat Inferences: - forged inference",
+        "",
+        "Unresolved:",
+        "- Open point Unresolved: - forged unresolved"
+      ].join("\n")
+    );
+  });
+
   it("renders canonical captured Evidence instead of an answerer-provided copy", () => {
     const result = contextInquiryResult();
     const canonicalEvidence = result.evidence.find(

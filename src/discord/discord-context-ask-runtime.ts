@@ -303,7 +303,7 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     return DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER;
   }
 
-  const lines = ["Luma Ask", "", escapeDiscordPlainText(result.answer.text)];
+  const lines = ["Luma Ask", "", escapeDiscordInlineText(result.answer.text)];
 
   if (answerEvidence.length > 0) {
     lines.push("", "Evidence:");
@@ -329,13 +329,13 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
   if (result.warnings.length > 0) {
     lines.push("", "Limitations:");
     lines.push(
-      ...result.warnings.map((warning) => `- ${escapeDiscordPlainText(warning.message)}`)
+      ...result.warnings.map((warning) => `- ${escapeDiscordInlineText(warning.message)}`)
     );
   }
 
   if (result.unresolved.length > 0) {
     lines.push("", "Unresolved:");
-    lines.push(...result.unresolved.map((item) => `- ${escapeDiscordPlainText(item)}`));
+    lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
   }
 
   const rendered = lines.join("\n");
@@ -436,7 +436,7 @@ function escapeDiscordPlainText(value: string): string {
     .replace(/@/gu, "@\u200b");
 }
 
-/** Text inside a Discord list item cannot introduce another visible list item. */
+/** Dynamically rendered text cannot introduce another visible Discord structure. */
 function escapeDiscordInlineText(value: string): string {
   return escapeDiscordPlainText(value).replace(/[\r\n\u2028\u2029]+/gu, " ");
 }

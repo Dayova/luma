@@ -263,17 +263,42 @@ describe("Discord Context Ask runtime boundary", () => {
     );
   });
 
-  it("fails closed instead of rendering an insufficient-evidence answer without canonical captured Evidence", () => {
+  it("retains insufficient-evidence limitations without rendering unsupported claims", () => {
     const result = contextInquiryResult();
     result.uncertainty = "insufficient-evidence";
     result.answer = {
       text: "Unsupported insufficient-evidence answer",
       evidence: []
     };
+    result.warnings = [
+      {
+        code: "conversation-boundary-incomplete",
+        message:
+          "Luma did not answer because the thread boundary is incomplete: history-truncated"
+      }
+    ];
+    result.unresolved = ["Capture a complete thread boundary before asking again."];
 
-    expect(renderDiscordContextAskResult(result)).toBe(
-      "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question."
+    const rendered = renderDiscordContextAskResult(result);
+
+    expect(rendered).toBe(
+      [
+        "Luma Ask",
+        "",
+        "Luma cannot answer reliably from the captured evidence.",
+        "",
+        "Uncertainty: insufficient-evidence",
+        "",
+        "Limitations:",
+        "- Luma did not answer because the thread boundary is incomplete: history-truncated",
+        "",
+        "Unresolved:",
+        "- Capture a complete thread boundary before asking again."
+      ].join("\n")
     );
+    expect(rendered).not.toContain("Unsupported insufficient-evidence answer");
+    expect(rendered).not.toContain("The Linear issue remains open.");
+    expect(rendered).not.toContain("The team might ship next week.");
   });
 
   it("keeps core capture limitations explicit without rendering an unsupported no-answer text", () => {

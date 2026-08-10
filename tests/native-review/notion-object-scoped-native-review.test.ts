@@ -319,6 +319,40 @@ describe("dormant source-bound native review composition", () => {
     }
   );
 
+  it("replays one native run without another capture, Linear read, or durable observation", async () => {
+    const harness = await createCompositionHarness();
+
+    try {
+      const first = await harness.review.review(nativeReviewRequest());
+      const snapshotsAfterFirst = await workspaceRowCount(
+        harness.database,
+        "observed_source_snapshots"
+      );
+      const observationsAfterFirst = await workspaceRowCount(
+        harness.database,
+        "meeting_observations"
+      );
+      expect(snapshotsAfterFirst).toBe(1);
+      expect(observationsAfterFirst).toBe(1);
+
+      const replay = await harness.review.review(nativeReviewRequest());
+
+      expect(replay).toEqual(first);
+      expect(harness.reader.pageCalls).toEqual([pageId, pageId]);
+      expect(harness.reader.markdownCalls).toEqual([{ pageId, includeTranscript: true }]);
+      expect(harness.linearApi.searchCalls).toHaveLength(2);
+      expect(harness.linearApi.getCalls).toEqual(["issue-301"]);
+      await expect(
+        workspaceRowCount(harness.database, "observed_source_snapshots")
+      ).resolves.toBe(snapshotsAfterFirst);
+      await expect(
+        workspaceRowCount(harness.database, "meeting_observations")
+      ).resolves.toBe(observationsAfterFirst);
+    } finally {
+      await harness.database.close();
+    }
+  });
+
   it("rejects a narrowed writer catalog even when a caller erases its type", async () => {
     const database = await createPgliteDatabase();
     const writer = writerCatalog();
@@ -553,6 +587,19 @@ async function createCompositionHarness(
       now: () => new Date("2026-08-10T09:02:00.000Z")
     })
   };
+}
+
+async function workspaceRowCount(
+  database: Awaited<ReturnType<typeof createPgliteDatabase>>,
+  table: "observed_source_snapshots" | "meeting_observations"
+): Promise<number> {
+  const result = await database.query<{ count: number }>(
+    `SELECT COUNT(*)::int AS count
+       FROM ${table}
+      WHERE workspace_id = $1`,
+    [workspace.workspaceId]
+  );
+  return result.rows[0]?.count ?? 0;
 }
 
 function nativeIdentityDirectory() {

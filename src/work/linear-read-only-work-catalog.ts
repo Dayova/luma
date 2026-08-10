@@ -20,7 +20,13 @@ const READ_ONLY_LABEL_FETCH_LIMIT = MAX_ISSUE_LABEL_COUNT + 1;
 export type LinearReadOnlyApiIssue = LinearApiIssue;
 
 export const linearReadOnlyApiBrand: unique symbol = Symbol("LinearReadOnlyApi");
-const linearReadOnlyWorkCatalogBrand: unique symbol = Symbol("LinearReadOnlyWorkCatalog");
+/**
+ * Names the nominal read-only catalog contract for declaration emit. Runtime
+ * issuance still also requires membership in this module's private WeakSet.
+ */
+export const linearReadOnlyWorkCatalogBrand: unique symbol = Symbol(
+  "LinearReadOnlyWorkCatalog"
+);
 const constructedReadOnlyCatalogs = new WeakSet<object>();
 const requireLinearSdk = createRequire(import.meta.url);
 let cachedLinearSdk: LinearSdkModule | undefined;
@@ -53,8 +59,9 @@ export interface LinearReadOnlyApi extends LinearReadOnlyApiOperations {
 
 /**
  * A catalog created by this module's separately credentialed read-only
- * factories. The unexported brand prevents a narrowed writer catalog from
- * entering a composition seam merely by satisfying WorkCatalog structurally.
+ * factories. The nominal brand, together with the private issuance registry,
+ * prevents a narrowed writer catalog from entering a composition seam merely
+ * by satisfying WorkCatalog structurally.
  */
 export interface LinearReadOnlyWorkCatalog extends WorkCatalog {
   readonly [linearReadOnlyWorkCatalogBrand]: true;
@@ -224,9 +231,10 @@ export function createLinearReadOnlyWorkCatalogFromEnv(
 }
 
 /**
- * Lets app composition validate the nominal catalog at runtime without
- * exposing the brand token. A type assertion cannot turn a writer catalog
- * into a separately constructed read-only catalog.
+ * Lets app composition validate both the declaration-visible nominal brand
+ * and this module's private issuance registry. A type assertion or copied
+ * public brand token cannot turn a writer catalog into a separately
+ * constructed read-only catalog.
  */
 export function isIssuedLinearReadOnlyWorkCatalog(
   value: unknown

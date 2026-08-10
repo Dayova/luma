@@ -31,7 +31,8 @@ import {
 } from "./operational-outcome-markdown.js";
 import { canonicalNotionObjectId } from "./notion-object-id.js";
 
-const NOTION_MEETING_NOTES_API_VERSION = "2026-03-11";
+/** The pinned API version shared by both broad scans and exact-page captures. */
+export const NOTION_MEETING_NOTES_API_VERSION = "2026-03-11";
 const DEFAULT_PAGE_SIZE = 100;
 // Notion child-page reads use `DEFAULT_PAGE_SIZE`; exceeding either bound is
 // malformed provider material, never a reason to continue an unbounded scan.

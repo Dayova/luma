@@ -107,6 +107,26 @@ or source Action Items.
 
 If Notion returns `object_not_found`, reconnect the integration to the Meetings data source and verify that the data-source ID, rather than a page URL fragment from another database, is configured.
 
+### Dormant exact-page native reader
+
+LUM-30 adds a separately configured reader for the isolated native-review
+proof. Create a second Notion integration with read-only access to precisely
+the selected Meeting Note page, not to the canonical data source or a parent
+workspace. Configure it independently:
+
+```dotenv
+LUMA_NATIVE_NOTION_READONLY_API_TOKEN=ntn_...
+LUMA_NATIVE_NOTION_PAGE_ID=<exact-opaque-page-id>
+LUMA_LIVE_NATIVE_NOTION_READONLY_TESTS=0
+```
+
+`createNotionObjectScopedMeetingNoteEvidenceReaderFromEnv` reads only those
+two `LUMA_NATIVE_*` values; it never falls back to `NOTION_API_TOKEN`, accepts
+no generic client or data-source configuration, and returns only the exact
+reader capability. The factory is dormant configuration—not server wiring,
+OAuth, a browser/native ingress, or a Notion write. Set the live-test flag to
+`1` only when deliberately running the non-mutating, one-page smoke test.
+
 ## OpenAI Setup
 
 ```dotenv
@@ -197,6 +217,9 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `NOTION_MEETINGS_ATTENDEES_PROPERTY`                | No                | Notion KnowledgeProvider | Defaults to `Attendees`.                                                    |
 | `LUMA_NOTION_PROVIDER_ID`                           | No                | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.                         |
 | `LUMA_NOTION_MEETING_SYNC_INTERVAL_MS`              | No                | Meeting Notes source     | Full canonical source scan interval in milliseconds; defaults to `60000`.   |
+| `LUMA_NATIVE_NOTION_READONLY_API_TOKEN`             | Exact-page proof  | Native exact-page reader | Separate read-only page credential; never falls back to `NOTION_API_TOKEN`. |
+| `LUMA_NATIVE_NOTION_PAGE_ID`                        | Exact-page proof  | Native exact-page reader | One opaque Meeting Note page identity; no data source or search scope.      |
+| `LUMA_LIVE_NATIVE_NOTION_READONLY_TESTS`            | No; exact `1`     | Tests                    | Opt-in non-mutating one-page exact-reader smoke test.                       |
 | `OPENAI_API_KEY`                                    | For analysis      | ReasoningModel           | OpenAI API credential.                                                      |
 | `LUMA_REASONING_MODEL_PROVIDER`                     | No                | ReasoningModel           | `openai` by default; `disabled` defers analysis.                            |
 | `LUMA_REASONING_MODEL_NAME`                         | No                | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                                 |

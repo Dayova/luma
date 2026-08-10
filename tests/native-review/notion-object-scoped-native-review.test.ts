@@ -7,6 +7,10 @@ import type {
 import { createDormantSourceBoundNativeReview } from "../../src/app/dormant-source-bound-native-review.js";
 import { createStaticIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import type { IdentityDirectory } from "../../src/identity/interface.js";
+import {
+  createNotionObjectScopedMeetingNoteEvidenceReaderForTest,
+  createNotionObjectScopedMeetingNoteEvidenceTransportForTest
+} from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
 import type { NotionObjectScopedMeetingNoteEvidenceReader } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import type { NotionMeetingNotesBlock } from "../../src/knowledge/notion-meeting-notes-source.js";
 import type { OperationalOutcomeMarkerVerifier } from "../../src/knowledge/operational-outcome-writer.js";
@@ -163,6 +167,152 @@ class FinalTrashedExactPageReader extends ExactPageReader {
   }
 }
 
+function createFactoryBackedExactPageReader(): {
+  reader: NotionObjectScopedMeetingNoteEvidenceReader;
+  initialization: Array<{ auth: string; notionVersion: string; retry: false }>;
+  pageCalls: string[];
+  markdownCalls: Array<{ pageId: string; includeTranscript: boolean }>;
+  blockCalls: Array<{ blockId: string; cursor?: string }>;
+} {
+  const initialization: Array<{ auth: string; notionVersion: string; retry: false }> = [];
+  const pageCalls: string[] = [];
+  const markdownCalls: Array<{ pageId: string; includeTranscript: boolean }> = [];
+  const blockCalls: Array<{ blockId: string; cursor?: string }> = [];
+  const blockPages: Record<string, Record<string, unknown>> = {
+    [`${pageId}:first`]: rawReaderBlockList([
+      rawReaderMeetingNotesRoot({
+        summaryBlockId: "summary-block",
+        notesBlockId: "notes-block",
+        transcriptBlockId: "transcript-block"
+      })
+    ]),
+    "summary-block:first": rawReaderBlockList([
+      rawReaderChildBlock({
+        id: "summary-line",
+        parentBlockId: "summary-block",
+        text: "Review only the exact meeting."
+      })
+    ]),
+    "notes-block:first": rawReaderBlockList([
+      rawReaderChildBlock({
+        id: "action-item-1",
+        parentBlockId: "notes-block",
+        type: "to_do",
+        text: "Jakob will review LUM-301 by Friday.",
+        checked: false
+      })
+    ]),
+    "transcript-block:first": rawReaderBlockList([
+      rawReaderChildBlock({
+        id: "transcript-line",
+        parentBlockId: "transcript-block",
+        text: "Original speech stays canonical."
+      })
+    ])
+  };
+
+  const reader = createNotionObjectScopedMeetingNoteEvidenceReaderForTest({
+    pageId,
+    readOnlyApiToken: "native-read-only-token",
+    transport: createNotionObjectScopedMeetingNoteEvidenceTransportForTest((input) => {
+      initialization.push({ ...input });
+
+      return {
+        retrievePage: (request) => {
+          pageCalls.push(request.pageId);
+          return Promise.resolve({
+            object: "page",
+            id: pageId,
+            url: "https://www.notion.so/product-sync",
+            last_edited_time: "2026-08-10T09:00:00.000Z",
+            in_trash: false,
+            properties: {
+              Name: { type: "title", title: [{ plain_text: "Product sync" }] }
+            }
+          });
+        },
+        retrievePageMarkdown: (request) => {
+          markdownCalls.push({ ...request });
+          return Promise.resolve({
+            object: "page_markdown",
+            id: pageId,
+            markdown: "# Product sync",
+            truncated: false,
+            unknown_block_ids: []
+          });
+        },
+        listBlockChildren: (request) => {
+          blockCalls.push({ ...request });
+          const page = blockPages[`${request.blockId}:${request.cursor ?? "first"}`];
+
+          return page
+            ? Promise.resolve(page)
+            : Promise.reject(new Error(`Unexpected exact-page read: ${request.blockId}`));
+        }
+      };
+    })
+  });
+
+  return { reader, initialization, pageCalls, markdownCalls, blockCalls };
+}
+
+function rawReaderBlockList(results: Record<string, unknown>[]): Record<string, unknown> {
+  return {
+    object: "list",
+    type: "block",
+    results,
+    next_cursor: null,
+    has_more: false
+  };
+}
+
+function rawReaderMeetingNotesRoot(input: {
+  summaryBlockId: string;
+  notesBlockId: string;
+  transcriptBlockId: string;
+}): Record<string, unknown> {
+  return {
+    object: "block",
+    id: "meeting-notes-root",
+    type: "meeting_notes",
+    has_children: true,
+    in_trash: false,
+    parent: { type: "page_id", page_id: pageId },
+    meeting_notes: {
+      title: [{ plain_text: "Product sync" }],
+      status: "notes_ready",
+      children: {
+        summary_block_id: input.summaryBlockId,
+        notes_block_id: input.notesBlockId,
+        transcript_block_id: input.transcriptBlockId
+      }
+    }
+  };
+}
+
+function rawReaderChildBlock(input: {
+  id: string;
+  parentBlockId: string;
+  type?: "paragraph" | "to_do";
+  text: string;
+  checked?: boolean;
+}): Record<string, unknown> {
+  const type = input.type ?? "paragraph";
+  const richText = [{ plain_text: input.text }];
+
+  return {
+    object: "block",
+    id: input.id,
+    type,
+    has_children: false,
+    in_trash: false,
+    parent: { type: "block_id", block_id: input.parentBlockId },
+    ...(type === "to_do"
+      ? { to_do: { rich_text: richText, checked: input.checked ?? false } }
+      : { paragraph: { rich_text: richText } })
+  };
+}
+
 class RecordingLinearReadOnlyApi {
   readonly searchCalls: Array<{ teamId: string; text: string; limit: number }> = [];
   readonly getCalls: string[] = [];
@@ -275,6 +425,86 @@ describe("dormant source-bound native review composition", () => {
       ).resolves.toMatchObject({ rows: [{ count: 0 }] });
       expect("searchWorkItems" in review).toBe(false);
       expect("createWorkItem" in review).toBe(false);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("runs the owned Notion reader factory through the native review receipt without provider mutation", async () => {
+    const database = await createPgliteDatabase();
+    const exactPageReader = createFactoryBackedExactPageReader();
+    const linearApi = new RecordingLinearReadOnlyApi();
+    const readOnlyCatalog = createLinearReadOnlyWorkCatalogForTest({
+      teamId: "team-dayova",
+      api: createLinearReadOnlyApiForTest({
+        searchIssues: (input) => linearApi.searchIssues(input),
+        getIssue: (id) => linearApi.getIssue(id)
+      })
+    });
+    const review = createDormantSourceBoundNativeReview({
+      database,
+      workspace,
+      identityDirectory: nativeIdentityDirectory(),
+      reasoningModel: new NoAnalysisReasoningModel(),
+      reader: exactPageReader.reader,
+      operationalOutcomeMarkerVerifier: neverOwnedOperationalOutcomeMarker,
+      page: { providerId, pageId },
+      readOnlyWorkCatalog: readOnlyCatalog,
+      now: () => new Date("2026-08-10T09:02:00.000Z")
+    });
+
+    try {
+      const receipt = await review.review(
+        nativeReviewRequest({ nativeRunId: "native-notion-run-owned-reader" })
+      );
+
+      expect(receipt).toMatchObject({
+        workspaceId: workspace.workspaceId,
+        source: { providerId, sourceObjectId: "meeting-notes-root", revision: 1 },
+        outcome: {
+          type: "reviewed",
+          workReferences: [{ providerId: "linear", lookupId: "issue-301" }]
+        }
+      });
+      expect(exactPageReader.initialization).toEqual([
+        {
+          auth: "native-read-only-token",
+          notionVersion: "2026-03-11",
+          retry: false
+        }
+      ]);
+      expect(exactPageReader.pageCalls).toEqual([pageId, pageId]);
+      expect(exactPageReader.markdownCalls).toEqual([
+        { pageId, includeTranscript: true }
+      ]);
+      expect(exactPageReader.blockCalls).toEqual([
+        { blockId: pageId },
+        { blockId: "summary-block" },
+        { blockId: "notes-block" },
+        { blockId: "transcript-block" }
+      ]);
+      expect("listDataSourcePages" in exactPageReader.reader).toBe(false);
+      expect(linearApi.searchCalls).toEqual([
+        { teamId: "team-dayova", text: "LUM-301", limit: 10 },
+        {
+          teamId: "team-dayova",
+          text: "Jakob will review LUM-301 by Friday.",
+          limit: 10
+        }
+      ]);
+      expect(linearApi.getCalls).toEqual(["issue-301"]);
+      await expect(
+        workspaceRowCount(database, "observed_source_snapshots")
+      ).resolves.toBe(1);
+      await expect(workspaceRowCount(database, "meeting_observations")).resolves.toBe(1);
+      await expect(
+        database.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count
+             FROM follow_up_executions
+            WHERE workspace_id = $1`,
+          [workspace.workspaceId]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: 0 }] });
     } finally {
       await database.close();
     }

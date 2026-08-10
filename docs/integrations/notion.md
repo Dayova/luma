@@ -245,6 +245,15 @@ provider SDK, or runtime export. Its catalog must be issued by the dedicated
 read-only Linear factory, so a narrowed writer catalog cannot accidentally
 enter this composition.
 
+LUM-30 separately supplies the exact-page reader that this dormant composition
+may receive. `createNotionObjectScopedMeetingNoteEvidenceReaderFromEnv` reads
+only `LUMA_NATIVE_NOTION_READONLY_API_TOKEN` and
+`LUMA_NATIVE_NOTION_PAGE_ID`; it never falls back to `NOTION_API_TOKEN` or a
+data-source credential. It constructs only the three bounded Notion read
+operations for that page, not the native-review composition or any ingress.
+This explicit reader configuration therefore does not activate the server,
+OAuth, browser/native agent, canonical write, or Discord behavior.
+
 Do not enable this surface through an environment flag alone. Production
 composition must supply evidence for all three properties first.
 

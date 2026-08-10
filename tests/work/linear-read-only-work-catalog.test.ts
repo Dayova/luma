@@ -4,15 +4,18 @@ import {
   createLinearReadOnlyWorkCatalog,
   createLinearReadOnlyWorkCatalogForTest,
   createLinearReadOnlyWorkCatalogFromEnv,
+  isIssuedLinearReadOnlyWorkCatalog,
   LinearReadOnlyWorkCatalogError,
   type LinearReadOnlyApi,
   type LinearReadOnlyApiIssue,
+  type LinearReadOnlyWorkCatalog,
   type LinearReadOnlyWorkCatalogConfig
 } from "../../src/work/linear-read-only-work-catalog.js";
 import type {
   LinearApi,
   LinearWorkProviderConfig
 } from "../../src/work/linear-work-provider.js";
+import type { WorkCatalog, toWorkCatalog } from "../../src/work/interface.js";
 
 type LinearReadOnlyApiOperations = Pick<LinearReadOnlyApi, "searchIssues" | "getIssue">;
 
@@ -560,6 +563,13 @@ describe("LinearReadOnlyWorkCatalog", () => {
       Parameters<typeof createLinearReadOnlyApiForTest>[0]
     >();
     expectTypeOf<LinearApi>().not.toExtend<LinearReadOnlyApi>();
+    expectTypeOf<
+      ReturnType<typeof createLinearReadOnlyWorkCatalogForTest>
+    >().toExtend<LinearReadOnlyWorkCatalog>();
+    expectTypeOf<WorkCatalog>().not.toExtend<LinearReadOnlyWorkCatalog>();
+    expectTypeOf<
+      ReturnType<typeof toWorkCatalog>
+    >().not.toExtend<LinearReadOnlyWorkCatalog>();
 
     const rejectWriterApi = (): LinearReadOnlyApi => {
       const api = undefined as unknown as LinearApi;
@@ -589,9 +599,14 @@ describe("LinearReadOnlyWorkCatalog", () => {
       "getWorkItem",
       "identityProviderId",
       "providerId",
+      "providerScopeId",
       "searchWorkItems",
       "supportsConditionalUpdates"
     ]);
+    expect(catalog.providerScopeId).toBe("team-luma");
+    expect(Object.isFrozen(catalog)).toBe(true);
+    expect(isIssuedLinearReadOnlyWorkCatalog(catalog)).toBe(true);
+    expect(isIssuedLinearReadOnlyWorkCatalog({ ...catalog })).toBe(false);
     expect(Object.hasOwn(catalog, "createWorkItem")).toBe(false);
     expect(Object.hasOwn(catalog, "updateWorkItem")).toBe(false);
     expect(Object.hasOwn(catalog, "addComment")).toBe(false);

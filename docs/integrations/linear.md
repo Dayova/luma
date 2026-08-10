@@ -3,9 +3,10 @@
 Linear is Luma's sole canonical provider for executable work. A Meeting Action
 Item remains evidence-grounded domain state; a source-bound reconciliation
 settlement may mutate Linear only after its current source, reconciliation,
-authorization, and ownership state are valid. LUM-6, LUM-7, and LUM-8 remain
-incomplete, so this document describes their implemented safety foundation,
-not a completed production workflow.
+authorization, and ownership state are valid. LUM-7 and LUM-8 are completed
+safety foundations; LUM-6 remains incomplete because canonical knowledge
+writeback still awaits LUM-11. This document describes the implemented safety
+foundation, not a completed production workflow.
 
 ## Setup
 

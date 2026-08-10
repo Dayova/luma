@@ -160,6 +160,36 @@ a Notion page. The reconciliation slice may only produce reviewable proposals
 until Human Judgment and an approved Follow-up Intent authorize a later
 execution.
 
+## Source-bound native review core
+
+`SourceBoundNativeReview` is a dormant, read-only core for a future native
+Notion review surface. It receives only a trusted native run ID, an
+authenticated provider actor, and an exact page identity. It does **not**
+accept a Person ID, attendee identity, Meeting Note root, ledger revision,
+content hash, model claim, or generic Linear request from that surface.
+
+The core resolves the actor through `IdentityDirectory`, captures exactly one
+provider-derived Meeting Note root for that requested page, records and
+re-reads its immutable ledger revision, then drives the existing ingestion and
+reconciliation seams. Its durable result is idempotent by native run ID and
+contains only the mapped actor, source revision/hash, review IDs, and opaque
+work lookup references. An unmapped/ambiguous actor, unreadable or ambiguous
+page/root, incomplete source, or read-only catalog failure produces a durable
+safe clarification and never a provider mutation.
+
+This core is intentionally **not wired into the executable yet**. The current
+server's ordinary Notion source and writer-derived Linear catalog do not prove
+the three required deployment properties:
+
+- trusted native ingress that authenticates the provider actor and exact page;
+- direct, object-scoped read access to that exact page (not a broad source
+  scan filtered after the fact); and
+- a separately composed `LINEAR_READONLY_API_KEY` catalog, never
+  `LINEAR_API_KEY` or a `WorkProvider` writer.
+
+Do not enable this surface through an environment flag alone. Production
+composition must supply evidence for all three properties first.
+
 ## Operational Outcome writeback
 
 After an approved reconciliation settlement, Luma records its compact

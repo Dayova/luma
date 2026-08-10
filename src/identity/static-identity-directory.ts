@@ -21,6 +21,13 @@ export function createStaticIdentityDirectory(
     getPerson({ personId }) {
       return Promise.resolve(peopleById.get(personId) ?? null);
     },
+    findPeopleByProviderUserId({ providerId, providerUserId }) {
+      return Promise.resolve(
+        input.people.filter(
+          (person) => providerUserIdFor(person, providerId) === providerUserId
+        )
+      );
+    },
     findPersonByDiscordUserId({ discordUserId }) {
       return Promise.resolve(peopleByDiscordUserId.get(discordUserId) ?? null);
     },
@@ -164,7 +171,7 @@ export async function resolveProviderUserId(input: {
     personId: input.personId
   });
 
-  return person ? providerUserId(person, input.providerId) : null;
+  return person ? providerUserIdFor(person, input.providerId) : null;
 }
 
 export async function resolveProviderUserIds(input: {
@@ -183,7 +190,7 @@ export async function resolveProviderUserIds(input: {
   });
 
   return people
-    .map((person) => providerUserId(person, input.providerId))
+    .map((person) => providerUserIdFor(person, input.providerId))
     .filter((providerUserId): providerUserId is string => Boolean(providerUserId));
 }
 
@@ -228,7 +235,7 @@ function unique(values: PersonId[]): PersonId[] {
   return [...new Set(values)];
 }
 
-function providerUserId(person: PersonIdentity, providerId: string): string | null {
+function providerUserIdFor(person: PersonIdentity, providerId: string): string | null {
   switch (providerId) {
     case "linear":
       return person.linearUserId;

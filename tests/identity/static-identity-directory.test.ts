@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createIdentityDirectoryFromEnv,
   createLumaTeamIdentityDirectory,
+  createStaticIdentityDirectory,
   renderDiscordMentions,
   renderGitHubMentions,
   resolveProviderUserId,
@@ -90,6 +91,45 @@ describe("IdentityDirectory", () => {
     });
 
     expect(person?.personId).toBe("person_jakob");
+  });
+
+  it("returns every provider-identity match so authorization can reject ambiguity", async () => {
+    const identityDirectory = createStaticIdentityDirectory({
+      people: [
+        {
+          personId: "person_one",
+          displayName: "One",
+          discordUserId: null,
+          discordUsername: null,
+          githubLogin: null,
+          githubUserId: null,
+          atlassianAccountId: null,
+          notionUserId: "notion-user-shared",
+          linearUserId: null,
+          languagePreference: "auto"
+        },
+        {
+          personId: "person_two",
+          displayName: "Two",
+          discordUserId: null,
+          discordUsername: null,
+          githubLogin: null,
+          githubUserId: null,
+          atlassianAccountId: null,
+          notionUserId: "notion-user-shared",
+          linearUserId: null,
+          languagePreference: "auto"
+        }
+      ]
+    });
+
+    await expect(
+      identityDirectory.findPeopleByProviderUserId({
+        workspaceId: "workspace_luma",
+        providerId: "notion",
+        providerUserId: "notion-user-shared"
+      })
+    ).resolves.toMatchObject([{ personId: "person_one" }, { personId: "person_two" }]);
   });
 
   it("resolves provider accounts without coupling callers to a provider", async () => {

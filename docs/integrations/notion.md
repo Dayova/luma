@@ -254,6 +254,13 @@ operations for that page, not the native-review composition or any ingress.
 This explicit reader configuration therefore does not activate the server,
 OAuth, browser/native agent, canonical write, or Discord behavior.
 
+The exact-page source opens a fresh reader session for every capture, so
+overlapping captures cannot share provider-derived block authority. A caller
+using the exported raw reader directly must use
+`withNotionObjectScopedMeetingNoteEvidenceReaderSession(...)` for a complete
+multi-step capture; a second direct capture start fails closed before any
+provider read.
+
 Do not enable this surface through an environment flag alone. Production
 composition must supply evidence for all three properties first.
 

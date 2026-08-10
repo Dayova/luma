@@ -78,6 +78,7 @@ export class NotionObjectScopedMeetingNoteEvidenceReaderError extends Error {
       | "notion-object-scoped-reader-page-unverified"
       | "notion-object-scoped-reader-block-forbidden"
       | "notion-object-scoped-reader-cursor-forbidden"
+      | "notion-object-scoped-reader-capture-in-progress"
       | "notion-object-scoped-reader-request-invalid"
       | "notion-object-scoped-reader-budget-exhausted",
     message: string
@@ -135,6 +136,21 @@ export function createNotionObjectScopedMeetingNoteEvidenceReaderForTest(
 }
 
 /**
+ * Runs one complete capture against a fresh, provider-derived capability
+ * tree. Production composition owns this boundary, but callers that share an
+ * exported reader must use it rather than interleaving the three raw methods.
+ * Readers outside this factory retain their supplied interface unchanged.
+ */
+export function withNotionObjectScopedMeetingNoteEvidenceReaderSession<T>(
+  reader: NotionObjectScopedMeetingNoteEvidenceReader,
+  operation: (sessionReader: NotionObjectScopedMeetingNoteEvidenceReader) => Promise<T>
+): Promise<T> {
+  const createSession = captureSessionFactories.get(reader);
+
+  return operation(createSession ? createSession() : reader);
+}
+
+/**
  * Brands no provider client: it only packages the three finite read
  * operations for deterministic tests. This function is deliberately not
  * exported from `src/index.ts`.
@@ -153,6 +169,15 @@ type BoundReaderConfig = {
   pageId: string;
   readOnlyApiToken: string;
 };
+
+type DirectCaptureGate = {
+  active: boolean;
+};
+
+const captureSessionFactories = new WeakMap<
+  NotionObjectScopedMeetingNoteEvidenceReader,
+  () => NotionObjectScopedMeetingNoteEvidenceReader
+>();
 
 type CapabilityState = {
   exactPageVerified: boolean;
@@ -175,6 +200,19 @@ type CapabilityState = {
 function createBoundReader(
   config: BoundReaderConfig,
   transport: RawExactPageTransport
+): NotionObjectScopedMeetingNoteEvidenceReader {
+  const directCaptureGate: DirectCaptureGate = { active: false };
+  const reader = createReaderSession(config, transport, directCaptureGate);
+
+  captureSessionFactories.set(reader, () => createReaderSession(config, transport));
+
+  return reader;
+}
+
+function createReaderSession(
+  config: BoundReaderConfig,
+  transport: RawExactPageTransport,
+  directCaptureGate?: DirectCaptureGate
 ): NotionObjectScopedMeetingNoteEvidenceReader {
   const state: CapabilityState = {
     exactPageVerified: false,
@@ -213,6 +251,7 @@ function createBoundReader(
   const reader: NotionObjectScopedMeetingNoteEvidenceReader = {
     async retrievePage(input) {
       requireConfiguredPage(input, config.pageId);
+      claimDirectCapture(directCaptureGate);
       resetForPageAttempt();
 
       try {
@@ -223,6 +262,7 @@ function createBoundReader(
         resetForVerifiedPage();
         return page;
       } catch (error) {
+        releaseDirectCapture(directCaptureGate);
         throw toSafeReadError(error);
       }
     },
@@ -321,6 +361,27 @@ function createBoundReader(
   };
 
   return Object.freeze(reader);
+}
+
+function claimDirectCapture(gate: DirectCaptureGate | undefined): void {
+  if (!gate) {
+    return;
+  }
+
+  if (gate.active) {
+    throw readerError(
+      "notion-object-scoped-reader-capture-in-progress",
+      "A direct exact-page capture is already active; concurrent captures require an isolated reader session"
+    );
+  }
+
+  gate.active = true;
+}
+
+function releaseDirectCapture(gate: DirectCaptureGate | undefined): void {
+  if (gate) {
+    gate.active = false;
+  }
 }
 
 function clearDescendantsOfConfiguredPage(pageId: string, state: CapabilityState): void {

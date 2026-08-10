@@ -5,7 +5,10 @@ import {
   createNotionObjectScopedMeetingNoteEvidenceReaderForTest,
   createNotionObjectScopedMeetingNoteEvidenceTransportForTest
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
-import type { NotionObjectScopedMeetingNoteEvidenceReader } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
+import {
+  createNotionObjectScopedMeetingNoteEvidenceSource,
+  type NotionObjectScopedMeetingNoteEvidenceReader
+} from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import { NotionMeetingNotesReadError } from "../../src/knowledge/notion-meeting-notes-source.js";
 const pageId = "14d90a82-a4fb-4a97-8a3f-299a9dad204a";
 const otherPageId = "4e28a2a7-2b90-4566-bb3d-4e50c3f3519d";
@@ -372,6 +375,24 @@ function isTransportMaterialFactory(value: unknown): value is () => unknown {
   return typeof value === "function";
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+
+  return {
+    promise,
+    resolve: () => {
+      if (!resolve) {
+        throw new Error("The deferred test gate was not initialized");
+      }
+
+      resolve();
+    }
+  };
+}
+
 function capturedSynchronousError(action: () => unknown): unknown {
   try {
     action();
@@ -451,6 +472,133 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       { blockId: meetingNotesRootId },
       { blockId: summaryBlockId }
     ]);
+  });
+
+  it("keeps simultaneous exact-page captures isolated from each other's provider-derived authority", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    const concurrentPageGate = deferred();
+    let pageReadCount = 0;
+    let secondPageReadStarted = false;
+    let hasStartedSecondCapture = false;
+    let resolveSecondCapture!: (value: [Promise<unknown>]) => void;
+    const secondCaptureStarted = new Promise<[Promise<unknown>]>((resolve) => {
+      resolveSecondCapture = resolve;
+    });
+    const request = {
+      workspaceId: "workspace_dayova",
+      page: { providerId: "notion", pageId }
+    };
+
+    transport.pageMaterial = () => {
+      pageReadCount += 1;
+
+      if (pageReadCount === 2) {
+        secondPageReadStarted = true;
+        return concurrentPageGate.promise.then(() => rawPage());
+      }
+
+      return rawPage();
+    };
+    transport.blockMaterial.set(`${pageId}:first`, () => ({
+      then(resolve: (value: unknown) => void) {
+        resolve(rawBlockList([rawMeetingNotesRoot()]));
+        // The first root response has already been parsed by the reader when
+        // this runs. Start a second capture before the first source boundary
+        // can consume that root. Its page response stays paused so a shared
+        // reader state can only be exposed by cross-capture interference.
+        queueMicrotask(() => {
+          if (!hasStartedSecondCapture) {
+            hasStartedSecondCapture = true;
+            resolveSecondCapture([source.capture(request)]);
+          }
+        });
+      }
+    }));
+    transport.blockMaterial.set(
+      `${summaryBlockId}:first`,
+      rawBlockList([rawChildBlock({ id: summaryLineId, parentBlockId: summaryBlockId })])
+    );
+    transport.blockMaterial.set(
+      `${notesBlockId}:first`,
+      rawBlockList([
+        rawChildBlock({ id: safeSummaryDescendantId, parentBlockId: notesBlockId })
+      ])
+    );
+    transport.blockMaterial.set(
+      `${transcriptBlockId}:first`,
+      rawBlockList([
+        rawChildBlock({ id: anotherSummaryBlockId, parentBlockId: transcriptBlockId })
+      ])
+    );
+
+    const reader = createTestReader(transport);
+
+    const source = createNotionObjectScopedMeetingNoteEvidenceSource({
+      workspaceId: request.workspaceId,
+      providerId: request.page.providerId,
+      pageId,
+      reader,
+      now: () => new Date("2026-08-10T09:01:00.000Z")
+    });
+
+    const firstCapture = source.capture(request);
+    const [secondCapture] = await secondCaptureStarted;
+    await vi.waitFor(() => expect(secondPageReadStarted).toBe(true));
+    const first = await firstCapture;
+    concurrentPageGate.resolve();
+    const second = await secondCapture;
+
+    for (const capture of [first, second]) {
+      expect(capture).toMatchObject({
+        status: "captured",
+        evidence: {
+          source: {
+            providerId: "notion",
+            parentObjectId: pageId,
+            sourceObjectId: meetingNotesRootId
+          }
+        }
+      });
+    }
+
+    expect(transport.pageCalls).toEqual([pageId, pageId, pageId, pageId]);
+    expect(transport.markdownCalls).toEqual([
+      { pageId, includeTranscript: true },
+      { pageId, includeTranscript: true }
+    ]);
+    expect(transport.blockCalls).toHaveLength(10);
+    for (const call of transport.blockCalls) {
+      expect([
+        pageId,
+        meetingNotesRootId,
+        summaryBlockId,
+        notesBlockId,
+        transcriptBlockId
+      ]).toContain(call.blockId);
+      expect(call.cursor).toBeUndefined();
+    }
+  });
+
+  it("rejects an overlapping direct capture before it can share provider-derived authority", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    const rootPageGate = deferred();
+    transport.blockMaterial.set(
+      `${pageId}:first`,
+      rootPageGate.promise.then(() => rawBlockList([rawMeetingNotesRoot()]))
+    );
+    const reader = createTestReader(transport);
+
+    await reader.retrievePage({ pageId });
+    const rootRead = reader.listBlockChildren({ blockId: pageId });
+    await vi.waitFor(() => expect(transport.blockCalls).toEqual([{ blockId: pageId }]));
+
+    await expect(reader.retrievePage({ pageId })).rejects.toMatchObject({
+      code: "notion-object-scoped-reader-capture-in-progress"
+    });
+    expect(transport.pageCalls).toEqual([pageId]);
+
+    rootPageGate.resolve();
+    await expect(rootRead).resolves.toMatchObject({ nextCursor: null });
   });
 
   it("rejects out-of-order, mismatched, and forged direct reads before transport I/O", async () => {

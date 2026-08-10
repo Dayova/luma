@@ -9,6 +9,7 @@ import {
   listAllNotionBlockChildren,
   NotionMeetingNotesReadError,
   type NotionMeetingNoteSnapshotReader,
+  type NotionMeetingNotesBlock,
   type NotionMeetingNotesPage
 } from "./notion-meeting-notes-source.js";
 import { canonicalNotionObjectId } from "./notion-object-id.js";
@@ -131,6 +132,22 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
           );
         }
 
+        if (hasNotReadyMeetingNotesLifecycle(root)) {
+          return unavailable(
+            "meeting-note-root-unreadable",
+            "The configured Meeting Note root could not be read safely.",
+            true
+          );
+        }
+
+        if (!hasCompleteMeetingNotesSectionPointers(root)) {
+          return unavailable(
+            "meeting-note-root-unreadable",
+            "The configured Meeting Note root could not be read safely.",
+            false
+          );
+        }
+
         const canonicalRoot = { ...root, id: rootId };
 
         try {
@@ -157,7 +174,7 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
             return unavailable(
               "meeting-note-root-unreadable",
               "The configured Meeting Note root is not completely readable.",
-              false
+              true
             );
           }
 
@@ -317,6 +334,25 @@ function isExactConfiguredPage(
 
 function isUnreadableRootBlock(block: { type: string }): boolean {
   return block.type === "unknown" || block.type === "unsupported";
+}
+
+function hasNotReadyMeetingNotesLifecycle(root: NotionMeetingNotesBlock): boolean {
+  const status = root.meetingNotes?.status;
+
+  return (
+    typeof status === "string" && status.trim().length > 0 && status !== "notes_ready"
+  );
+}
+
+function hasCompleteMeetingNotesSectionPointers(root: NotionMeetingNotesBlock): boolean {
+  const details = root.meetingNotes;
+
+  return (
+    details !== undefined &&
+    [details.summaryBlockId, details.notesBlockId, details.transcriptBlockId].every(
+      (pointer) => canonicalNotionObjectId(pointer) !== null
+    )
+  );
 }
 
 async function readConfiguredPage(input: {

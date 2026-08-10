@@ -15,6 +15,7 @@ import {
 
 const DEFAULT_BLOCK_CHILD_PAGE_SIZE = 100;
 const MAX_BLOCK_CHILD_PAGES_PER_PARENT = 100;
+const MAX_BLOCK_CHILD_PAGES_PER_SESSION = 500;
 const NOTION_PAGE_ID_PATTERN =
   /^(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/iu;
 const requireNotionSdk = createRequire(import.meta.url);
@@ -179,6 +180,7 @@ type CapabilityState = {
   allowedCursorsByBlockId: Map<string, Set<string>>;
   reservedCursorsByBlockId: Map<string, Set<string>>;
   blockReadCounts: Map<string, number>;
+  totalBlockReads: number;
   rootCandidates: Array<{
     block: NotionMeetingNotesBlock;
     raw: Record<string, unknown>;
@@ -250,6 +252,7 @@ function createReaderSession(
     allowedCursorsByBlockId: new Map(),
     reservedCursorsByBlockId: new Map(),
     blockReadCounts: new Map(),
+    totalBlockReads: 0,
     rootCandidates: [],
     meetingNotesRoot: null,
     rootScanInProgress: false
@@ -732,7 +735,10 @@ function releaseReservedCursor(
 function consumeBlockReadBudget(blockId: string, state: CapabilityState): void {
   const previous = state.blockReadCounts.get(blockId) ?? 0;
 
-  if (previous >= MAX_BLOCK_CHILD_PAGES_PER_PARENT) {
+  if (
+    previous >= MAX_BLOCK_CHILD_PAGES_PER_PARENT ||
+    state.totalBlockReads >= MAX_BLOCK_CHILD_PAGES_PER_SESSION
+  ) {
     throw readerError(
       "notion-object-scoped-reader-budget-exhausted",
       "The configured Meeting Note block exceeds the exact-page read budget"
@@ -740,6 +746,7 @@ function consumeBlockReadBudget(blockId: string, state: CapabilityState): void {
   }
 
   state.blockReadCounts.set(blockId, previous + 1);
+  state.totalBlockReads += 1;
 }
 
 type ParsedBlockChildrenPage = {

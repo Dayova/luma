@@ -416,6 +416,12 @@ function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : "";
 }
 
+function serializedError(value: unknown): string {
+  return value instanceof Error
+    ? JSON.stringify(value, Object.getOwnPropertyNames(value))
+    : JSON.stringify(value);
+}
+
 describe("object-scoped Notion Meeting Note evidence reader", () => {
   it("re-exports its callback session contract from the public barrel", () => {
     expectTypeOf<PublicNotionObjectScopedMeetingNoteEvidenceSession>().toEqualTypeOf<NotionObjectScopedMeetingNoteEvidenceSession>();
@@ -1091,6 +1097,23 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     });
   });
 
+  it("caps repeated root rescans across one reader session before another provider read", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    transport.blockMaterial.set(`${pageId}:first`, rawBlockList([rawMeetingNotesRoot()]));
+    const reader = createTestReader(transport);
+
+    await reader.retrievePage({ pageId });
+
+    for (let index = 0; index < 500; index += 1) {
+      await reader.listBlockChildren({ blockId: pageId });
+    }
+
+    await expect(reader.listBlockChildren({ blockId: pageId })).rejects.toMatchObject({
+      code: "notion-object-scoped-reader-budget-exhausted"
+    });
+    expect(transport.blockCalls).toHaveLength(500);
+  });
+
   it("keeps a provider-issued cursor available until its response parses successfully", async () => {
     const transport = new ProgrammableExactPageTransport();
     let cursorAttempt = 0;
@@ -1182,6 +1205,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
   it("accepts a compact configured page ID with canonical provider responses", async () => {
     const compactPageId = pageId.replaceAll("-", "");
     const transport = new ProgrammableExactPageTransport();
+    transport.pageMaterial = rawPage({ id: pageId });
     transport.blockMaterial.set(
       `${compactPageId}:first`,
       rawBlockList([rawMeetingNotesRoot()])
@@ -1260,16 +1284,24 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     expect(errorMessage(transientError)).not.toContain(
       "provider response contains a secret URL and token"
     );
+    expect(serializedError(transientError)).not.toContain(
+      "provider response contains a secret URL and token"
+    );
+    expect((transientError as Error).cause).toBeUndefined();
 
     transport.pageMaterial = new NotionMeetingNotesReadError(
       "source-restricted",
       "provider says this page is restricted to a private group"
     );
 
-    expect(await capturedRejectedError(reader.retrievePage({ pageId }))).toMatchObject({
+    const restrictedError = await capturedRejectedError(reader.retrievePage({ pageId }));
+
+    expect(restrictedError).toMatchObject({
       code: "source-restricted",
       message: "Notion exact-page access is unavailable"
     });
+    expect(serializedError(restrictedError)).not.toContain("private group");
+    expect((restrictedError as Error).cause).toBeUndefined();
 
     transport.pageMaterial = new NotionMeetingNotesReadError(
       "unsafe-operational-outcome-markdown",

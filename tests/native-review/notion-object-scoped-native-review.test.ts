@@ -40,6 +40,7 @@ const ownedReaderTranscriptBlockId = "a53cf699-7810-4de3-86e9-39c5ff27a904";
 const ownedReaderSummaryLineId = "a53cf699-7810-4de3-86e9-39c5ff27a905";
 const ownedReaderActionItemId = "a53cf699-7810-4de3-86e9-39c5ff27a906";
 const ownedReaderTranscriptLineId = "a53cf699-7810-4de3-86e9-39c5ff27a907";
+const germanModalTranscript = "Jakob könnte den Rollout morgen prüfen.";
 const neverOwnedOperationalOutcomeMarker: OperationalOutcomeMarkerVerifier = {
   isOwned: () => Promise.resolve(false)
 };
@@ -60,10 +61,36 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
   readonly blockCalls: Array<{ blockId: string; cursor?: string }> = [];
   readonly markdownCalls: Array<{ pageId: string; includeTranscript: boolean }> = [];
 
-  capture<T>(
+  async capture<T>(
     operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
   ): Promise<T> {
-    return operation(this);
+    let active = true;
+    const session = Object.freeze({
+      retrievePage: (input: { pageId: string }) =>
+        active
+          ? this.retrievePage(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            ),
+      listBlockChildren: (input: { blockId: string; cursor?: string }) =>
+        active
+          ? this.listBlockChildren(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            ),
+      retrievePageMarkdown: (input: { pageId: string; includeTranscript: boolean }) =>
+        active
+          ? this.retrievePageMarkdown(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            )
+    } satisfies NotionObjectScopedMeetingNoteEvidenceSession);
+
+    try {
+      return await operation(session);
+    } finally {
+      active = false;
+    }
   }
 
   retrievePage(input: { pageId: string }) {
@@ -150,7 +177,7 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
         block({
           id: "transcript-line",
           type: "paragraph",
-          text: "Original speech stays canonical."
+          text: germanModalTranscript
         })
       ],
       nextCursor: null
@@ -240,7 +267,7 @@ function createFactoryBackedExactPageReader(): {
       rawReaderChildBlock({
         id: ownedReaderTranscriptLineId,
         parentBlockId: ownedReaderTranscriptBlockId,
-        text: "Original speech stays canonical."
+        text: germanModalTranscript
       })
     ])
   };
@@ -370,6 +397,14 @@ class RecordingLinearReadOnlyApi {
 }
 
 describe("dormant source-bound native review composition", () => {
+  it("models an exact-page callback session that expires after capture", async () => {
+    const reader = new ExactPageReader();
+    const escaped = await reader.capture((session) => Promise.resolve(session));
+
+    await expect(escaped.retrievePage({ pageId })).rejects.toThrow("session has expired");
+    expect(reader.pageCalls).toEqual([]);
+  });
+
   it("returns only a revision-pinned review from one exact page and a separately scoped read-only catalog", async () => {
     const database = await createPgliteDatabase();
     const reader = new ExactPageReader();
@@ -532,7 +567,21 @@ describe("dormant source-bound native review composition", () => {
       await expect(
         workspaceRowCount(database, "observed_source_snapshots")
       ).resolves.toBe(1);
+      const snapshots = await database.query<{ raw_payload_json: string }>(
+        `SELECT raw_payload_json
+           FROM observed_source_snapshots
+          WHERE workspace_id = $1`,
+        [workspace.workspaceId]
+      );
+      expect(snapshots.rows[0]?.raw_payload_json).toContain(germanModalTranscript);
       await expect(workspaceRowCount(database, "meeting_observations")).resolves.toBe(1);
+      const observations = await database.query<{ payload_json: string }>(
+        `SELECT payload_json
+           FROM meeting_observations
+          WHERE workspace_id = $1`,
+        [workspace.workspaceId]
+      );
+      expect(observations.rows[0]?.payload_json).toContain(germanModalTranscript);
       await expect(
         database.query<{ count: number }>(
           `SELECT COUNT(*)::int AS count
@@ -675,7 +724,7 @@ describe("dormant source-bound native review composition", () => {
         outcome: {
           type: "needs-clarification",
           code: "meeting-note-root-unreadable",
-          retryable: false
+          retryable: true
         }
       });
       expect(harness.linearApi.searchCalls).toEqual([]);

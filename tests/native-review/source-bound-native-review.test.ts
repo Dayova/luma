@@ -164,6 +164,24 @@ describe("SourceBoundNativeReview", () => {
     }
   });
 
+  it("serializes concurrent requests for one native run into one capture and deterministic replay", async () => {
+    const harness = await createNativeReviewHarness();
+
+    try {
+      const [first, second] = await Promise.all([
+        harness.review.review(nativeReviewRequest()),
+        harness.review.review(nativeReviewRequest())
+      ]);
+
+      expect(second).toEqual(first);
+      expect(harness.source.captures).toHaveLength(1);
+      expect(harness.catalog.searches).toHaveLength(2);
+      expect(harness.catalog.gets).toEqual(["issue-301"]);
+    } finally {
+      await harness.database.close();
+    }
+  });
+
   it("fails closed before ingestion when a ledger reread substitutes another root and revision", async () => {
     const harness = await createNativeReviewHarness();
     const request = nativeReviewRequest();
@@ -644,6 +662,44 @@ describe("SourceBoundNativeReview", () => {
       });
       expect(harness.source.captures).toHaveLength(1);
       expect(harness.catalog.searches).toHaveLength(2);
+    } finally {
+      await harness.database.close();
+    }
+  });
+
+  it("rejects a digest-valid stored receipt with an unknown clarification code", async () => {
+    const harness = await createNativeReviewHarness({
+      people: []
+    });
+
+    try {
+      const first = await harness.review.review(nativeReviewRequest());
+      const forgedReceipt = {
+        ...first,
+        outcome: {
+          ...first.outcome,
+          code: "unknown-clarification-code"
+        }
+      };
+      const receiptJson = JSON.stringify(forgedReceipt);
+      const receiptContentHash = `sha256:${createHash("sha256")
+        .update(receiptJson)
+        .digest("hex")}`;
+
+      await harness.database.query(
+        `UPDATE source_bound_native_reviews
+            SET receipt_json = $3,
+                receipt_content_hash = $4
+          WHERE workspace_id = $1 AND native_run_id = $2`,
+        [workspace.workspaceId, first.nativeRunId, receiptJson, receiptContentHash]
+      );
+
+      await expect(harness.review.review(nativeReviewRequest())).rejects.toMatchObject({
+        code: "native-review-receipt-corrupt",
+        retryable: false
+      });
+      expect(harness.source.captures).toHaveLength(0);
+      expect(harness.catalog.searches).toEqual([]);
     } finally {
       await harness.database.close();
     }

@@ -354,13 +354,16 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       PRIMARY KEY (workspace_id, native_run_id)
     );
 
+    -- A source-revision receipt reader never needs clarification receipts,
+    -- which have no immutable source identity to invalidate or replay.
     CREATE INDEX IF NOT EXISTS source_bound_native_reviews_source_revision_idx
       ON source_bound_native_reviews (
         workspace_id,
         source_provider_id,
         source_object_id,
         source_revision
-      );
+      )
+      WHERE source_provider_id IS NOT NULL;
 
     -- An in-flight source-bound provider mutation holds this fence after it
     -- has atomically proved the exact ledger head it will act on. Source

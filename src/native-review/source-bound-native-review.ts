@@ -86,23 +86,27 @@ export type OpaqueNativeReviewWorkReference = {
   lookupId: string;
 };
 
+const sourceBoundNativeReviewClarificationCodes = [
+  "native-actor-unmapped",
+  "native-actor-ambiguous",
+  "native-identity-unavailable",
+  "meeting-note-page-not-found",
+  "meeting-note-page-unreadable",
+  "meeting-note-root-missing",
+  "meeting-note-root-ambiguous",
+  "meeting-note-root-unreadable",
+  "meeting-note-capture-unavailable",
+  "meeting-note-root-invalid",
+  "meeting-note-ledger-unavailable",
+  "meeting-note-ledger-invalid",
+  "meeting-note-source-incomplete",
+  "meeting-note-ingestion-rejected",
+  "meeting-intelligence-unavailable",
+  "work-catalog-unavailable"
+] as const;
+
 export type SourceBoundNativeReviewClarificationCode =
-  | "native-actor-unmapped"
-  | "native-actor-ambiguous"
-  | "native-identity-unavailable"
-  | "meeting-note-page-not-found"
-  | "meeting-note-page-unreadable"
-  | "meeting-note-root-missing"
-  | "meeting-note-root-ambiguous"
-  | "meeting-note-root-unreadable"
-  | "meeting-note-capture-unavailable"
-  | "meeting-note-root-invalid"
-  | "meeting-note-ledger-unavailable"
-  | "meeting-note-ledger-invalid"
-  | "meeting-note-source-incomplete"
-  | "meeting-note-ingestion-rejected"
-  | "meeting-intelligence-unavailable"
-  | "work-catalog-unavailable";
+  (typeof sourceBoundNativeReviewClarificationCodes)[number];
 
 export type SourceBoundNativeReviewReceipt = {
   capabilityVersion: typeof SOURCE_BOUND_NATIVE_REVIEW_CAPABILITY_VERSION;
@@ -881,11 +885,7 @@ function opaqueWorkReferences(
     }
   }
 
-  return [...byIdentity.values()].sort(
-    (left, right) =>
-      compareStrings(left.providerId, right.providerId) ||
-      compareStrings(left.lookupId, right.lookupId)
-  );
+  return [...byIdentity.values()].sort(compareOpaqueWorkReferences);
 }
 
 function clarificationReceipt(input: {
@@ -912,7 +912,7 @@ function clarificationReceipt(input: {
       message: input.message,
       retryable: input.retryable,
       reviewIds: [...(input.reviewIds ?? [])].sort(compareStrings),
-      workReferences: [...(input.workReferences ?? [])]
+      workReferences: [...(input.workReferences ?? [])].sort(compareOpaqueWorkReferences)
     }
   };
 }
@@ -1105,6 +1105,8 @@ async function replayStoredReceipt(input: {
         sourceKind: "meeting-note",
         sourceObjectId: receipt.source.sourceObjectId,
         parentObjectId: receipt.source.pageId,
+        // Synthetic: receipts do not store a URL, and replay validation deliberately
+        // excludes it. Add a replayable URL binding before comparing URLs here.
         url: "replay-bound-source"
       },
       revision: receipt.source.revision,
@@ -1423,10 +1425,16 @@ function isReceiptOutcome(
 
   return (
     outcome.type === "reviewed" ||
-    (isNonBlankString(outcome.code) &&
+    (isSourceBoundNativeReviewClarificationCode(outcome.code) &&
       isNonBlankString(outcome.message) &&
       typeof outcome.retryable === "boolean")
   );
+}
+
+function isSourceBoundNativeReviewClarificationCode(
+  value: unknown
+): value is SourceBoundNativeReviewClarificationCode {
+  return sourceBoundNativeReviewClarificationCodes.some((code) => code === value);
 }
 
 function isOpaqueWorkReference(value: unknown): value is OpaqueNativeReviewWorkReference {
@@ -1448,6 +1456,16 @@ function sha256(value: string): string {
 
 function compareStrings(left: string, right: string): number {
   return left.localeCompare(right);
+}
+
+function compareOpaqueWorkReferences(
+  left: OpaqueNativeReviewWorkReference,
+  right: OpaqueNativeReviewWorkReference
+): number {
+  return (
+    compareStrings(left.providerId, right.providerId) ||
+    compareStrings(left.lookupId, right.lookupId)
+  );
 }
 
 const sourceBoundNativeReviewLocks = new WeakMap<

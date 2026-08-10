@@ -9,6 +9,7 @@ import {
 const verificationToken = "secret_luma_notion_webhook_verification_token";
 const workspaceId = "workspace_dayova";
 const canonicalMeetingsDataSourceId = "dayova-meetings";
+const canonicalMeetingsDataSourceUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const meetingPageId = "11111111-2222-3333-4444-555555555555";
 
 class RecordingWakeUpQueue implements NotionWebhookWakeUpQueue {
@@ -219,6 +220,36 @@ describe("Notion webhook wake-up ingress", () => {
     );
 
     expect(result).toMatchObject({
+      status: "queued",
+      wakeUp: { kind: "canonical-reconciliation" }
+    });
+    expect(queue.wakeUps).toEqual([
+      expect.objectContaining({ kind: "canonical-reconciliation" })
+    ]);
+  });
+
+  it("recognizes equivalent Notion data-source UUID spellings as canonical", () => {
+    const queue = new RecordingWakeUpQueue();
+    const ingress = createNotionWebhookWakeUpIngress({
+      workspaceId,
+      canonicalMeetingsDataSourceId: canonicalMeetingsDataSourceUuid
+        .replaceAll("-", "")
+        .toUpperCase(),
+      verificationToken,
+      queue
+    });
+
+    expect(
+      ingress.receive(
+        signedDelivery(
+          webhookEvent({
+            id: "event-canonical-data-source-uuid",
+            type: "data_source.content_updated",
+            entity: { id: canonicalMeetingsDataSourceUuid, type: "data_source" }
+          })
+        )
+      )
+    ).toMatchObject({
       status: "queued",
       wakeUp: { kind: "canonical-reconciliation" }
     });

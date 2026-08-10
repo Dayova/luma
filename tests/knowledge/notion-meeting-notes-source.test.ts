@@ -21,6 +21,7 @@ import { createPgliteDatabase } from "../../src/persistence/db.js";
 
 const baseMeetingMarkdown =
   "# Product sync\n\nWir prüfen die Quelle before we create work.";
+const canonicalMeetingsDataSourceUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const directRefreshMeetingPageId = "11111111-2222-3333-4444-555555555555";
 const directRefreshOutsidePageId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
@@ -510,6 +511,45 @@ describe("Notion Meeting Notes source", () => {
         directRefreshMeetingPageId,
         directRefreshOutsidePageId
       ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("recognizes equivalent Notion data-source UUID spellings as canonical page membership", async () => {
+    const database = await createPgliteDatabase();
+    const source = createNotionMeetingNotesSource({
+      api: new FakeNotionMeetingNotesApi(),
+      ledger: createObservedSourceLedger({ database }),
+      meetingsDataSourceId: canonicalMeetingsDataSourceUuid
+        .replaceAll("-", "")
+        .toUpperCase(),
+      pageReader: {
+        retrievePage: ({ pageId }) =>
+          Promise.resolve({
+            page: {
+              id: pageId,
+              title: "Product sync",
+              url: `https://notion.so/${pageId}`,
+              lastEditedAt: "2026-08-10T10:00:00.000Z",
+              inTrash: false
+            },
+            parentDataSourceId: canonicalMeetingsDataSourceUuid
+          })
+      }
+    });
+
+    try {
+      const refreshed = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: directRefreshMeetingPageId
+      });
+
+      expect(refreshed.status).toBe("refreshed");
+      expect(refreshed.records).toHaveLength(1);
+      expect(refreshed.records[0]?.source.parentObjectId).toBe(
+        directRefreshMeetingPageId
+      );
     } finally {
       await database.close();
     }

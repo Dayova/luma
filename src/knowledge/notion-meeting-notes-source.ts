@@ -203,6 +203,8 @@ export function createNotionMeetingNotesSource(
 ): NotionMeetingNotesSource {
   const api = config.api ?? createNotionSdkMeetingNotesApi(config);
   const pageReader = config.pageReader ?? asNotionMeetingNotesPageReader(api);
+  const meetingsDataSourceId =
+    canonicalNotionObjectId(config.meetingsDataSourceId) ?? config.meetingsDataSourceId;
   const providerId = config.providerId ?? "notion";
   const now = config.now ?? (() => new Date());
   const scanSessionsByCursor = new Map<string, NotionMeetingNotesScanSession>();
@@ -340,7 +342,7 @@ export function createNotionMeetingNotesSource(
         ? consumeScanSession(input.workspaceId, input.cursor)
         : await beginScanSession(input.workspaceId);
       const page = await api.listDataSourcePages({
-        dataSourceId: config.meetingsDataSourceId,
+        dataSourceId: meetingsDataSourceId,
         ...(input.cursor ? { cursor: input.cursor } : {}),
         limit: input.limit ?? DEFAULT_PAGE_SIZE
       });
@@ -475,7 +477,13 @@ export function createNotionMeetingNotesSource(
       // A direct page request can never establish absence. A page outside the
       // configured canonical data source (or now in trash) is simply not a
       // candidate; only a completed canonical scan can tombstone a root.
-      if (pageRead.parentDataSourceId !== config.meetingsDataSourceId || page.inTrash) {
+      if (
+        !isCanonicalMeetingsDataSourceMembership(
+          pageRead.parentDataSourceId,
+          meetingsDataSourceId
+        ) ||
+        page.inTrash
+      ) {
         return {
           status: "ignored",
           records: [],
@@ -511,6 +519,20 @@ export function createNotionMeetingNotesSource(
       };
     }
   };
+}
+
+function isCanonicalMeetingsDataSourceMembership(
+  parentDataSourceId: string | null,
+  canonicalMeetingsDataSourceId: string
+): boolean {
+  if (parentDataSourceId === null) {
+    return false;
+  }
+
+  return (
+    (canonicalNotionObjectId(parentDataSourceId) ?? parentDataSourceId) ===
+    canonicalMeetingsDataSourceId
+  );
 }
 
 type CaptureNotionMeetingPageInput = {

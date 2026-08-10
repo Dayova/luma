@@ -100,10 +100,13 @@ export function createNotionWebhookWakeUpIngress(
   input: CreateNotionWebhookWakeUpIngressInput
 ): NotionWebhookWakeUpIngress {
   const workspaceId = requiredOpaqueIdentifier(input.workspaceId, "workspaceId");
-  const canonicalMeetingsDataSourceId = requiredOpaqueIdentifier(
+  const configuredMeetingsDataSourceId = requiredOpaqueIdentifier(
     input.canonicalMeetingsDataSourceId,
     "canonicalMeetingsDataSourceId"
   );
+  const canonicalMeetingsDataSourceId =
+    canonicalNotionObjectId(configuredMeetingsDataSourceId) ??
+    configuredMeetingsDataSourceId;
   const verificationToken = requiredSecret(input.verificationToken, "verificationToken");
   const subscriptionId = optionalOpaqueIdentifier(input.subscriptionId, "subscriptionId");
   const integrationId = optionalOpaqueIdentifier(input.integrationId, "integrationId");
@@ -152,9 +155,12 @@ export function createNotionWebhookWakeUpIngress(
       }
 
       if (event.type === "data_source.content_updated") {
+        const eventDataSourceId =
+          canonicalNotionObjectId(event.entity.id) ?? event.entity.id;
+
         if (
           event.entity.type !== "data_source" ||
-          event.entity.id !== canonicalMeetingsDataSourceId
+          eventDataSourceId !== canonicalMeetingsDataSourceId
         ) {
           return { status: "ignored", reason: "outside-canonical-meetings" };
         }

@@ -112,6 +112,7 @@ export function createMeetingNotesObservationRuntime(
     { kind: "canonical-reconciliation" }
   > | null = null;
   let activeDrain: Promise<MeetingNotesObservationRuntimeDrain> | null = null;
+  let acceptedWakeUpDuringActiveDrain = false;
   let lastWebhookReceivedAt: string | null = null;
   let lastWakeUpAt: string | null = null;
   let lastWakeUpOccurredAt: string | null = null;
@@ -123,11 +124,11 @@ export function createMeetingNotesObservationRuntime(
   const queueWakeUp = (
     wakeUp: NotionWebhookWakeUp,
     replayingFailedWakeUp: boolean
-  ): { status: "queued" | "coalesced" } => {
+  ): { status: "queued" | "coalesced"; accepted: boolean } => {
     lastWebhookReceivedAt = wakeUp.receivedAt;
 
     if (!replayingFailedWakeUp && rememberedDeliveries.has(wakeUp.deliveryId)) {
-      return { status: "coalesced" };
+      return { status: "coalesced", accepted: false };
     }
 
     if (!replayingFailedWakeUp) {
@@ -147,11 +148,11 @@ export function createMeetingNotesObservationRuntime(
       // reads current authority for every page and avoids doing the same work
       // twice; a page signal arriving after it is likewise coalesced below.
       pendingPages.clear();
-      return { status: wasPending ? "coalesced" : "queued" };
+      return { status: wasPending ? "coalesced" : "queued", accepted: true };
     }
 
     if (pendingCanonicalReconciliation) {
-      return { status: "coalesced" };
+      return { status: "coalesced", accepted: true };
     }
 
     const existing = pendingPages.get(wakeUp.pageId);
@@ -169,32 +170,43 @@ export function createMeetingNotesObservationRuntime(
         pendingPages.clear();
         pageWakeUpOverflowCount += 1;
         lastPageWakeUpOverflowAt = wakeUp.receivedAt;
-        return { status: "coalesced" };
+        return { status: "coalesced", accepted: true };
       }
 
       pendingPages.set(wakeUp.pageId, wakeUp);
-      return { status: "queued" };
+      return { status: "queued", accepted: true };
     }
 
     if (isLaterWakeUp(wakeUp, existing)) {
       pendingPages.set(wakeUp.pageId, wakeUp);
     }
 
-    return { status: "coalesced" };
+    return { status: "coalesced", accepted: true };
   };
 
-  const enqueue = (wakeUp: NotionWebhookWakeUp): { status: "queued" | "coalesced" } =>
-    queueWakeUp(wakeUp, false);
+  const enqueue = (wakeUp: NotionWebhookWakeUp): { status: "queued" | "coalesced" } => {
+    const queued = queueWakeUp(wakeUp, false);
+
+    if (queued.accepted && activeDrain) {
+      acceptedWakeUpDuringActiveDrain = true;
+    }
+
+    return { status: queued.status };
+  };
 
   const requeueFailedWakeUp = (
     wakeUp: NotionWebhookWakeUp
-  ): { status: "queued" | "coalesced" } => queueWakeUp(wakeUp, true);
+  ): { status: "queued" | "coalesced" } => {
+    const queued = queueWakeUp(wakeUp, true);
+    return { status: queued.status };
+  };
 
   const drain = (): Promise<MeetingNotesObservationRuntimeDrain> => {
     if (activeDrain) {
       return activeDrain;
     }
 
+    acceptedWakeUpDuringActiveDrain = false;
     const pageWakeUps = [...pendingPages.values()].sort((left, right) =>
       left.pageId.localeCompare(right.pageId)
     );
@@ -230,7 +242,19 @@ export function createMeetingNotesObservationRuntime(
       }
     });
     activeDrain = run.finally(() => {
+      const shouldStartSuccessor =
+        acceptedWakeUpDuringActiveDrain &&
+        hasPendingWakeUps(pendingPages, pendingCanonicalReconciliation);
       activeDrain = null;
+
+      if (shouldStartSuccessor) {
+        // A delivery can arrive after this drain takes its bounded snapshot.
+        // Start exactly one successor for that externally accepted work. A
+        // failed refresh does not count as a new external wake-up, so it
+        // stays caller-led/scheduled rather than spinning an automatic retry
+        // loop.
+        void drain().catch(() => undefined);
+      }
     });
     return activeDrain;
   };
@@ -265,6 +289,16 @@ export function createMeetingNotesObservationRuntime(
       };
     }
   };
+}
+
+function hasPendingWakeUps(
+  pendingPages: ReadonlyMap<string, NotionWebhookWakeUp>,
+  pendingCanonicalReconciliation: Extract<
+    NotionWebhookWakeUp,
+    { kind: "canonical-reconciliation" }
+  > | null
+): boolean {
+  return pendingPages.size > 0 || pendingCanonicalReconciliation !== null;
 }
 
 type DrainWakeUpsInput = {

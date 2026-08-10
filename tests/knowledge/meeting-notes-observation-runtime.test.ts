@@ -27,6 +27,18 @@ const workspace: WorkspaceConfig = {
 };
 const notionPageId = "11111111-2222-3333-4444-555555555555";
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
+}
+
 function sourceRevision(
   sourceObjectId: string,
   change: ObservedSourceRevision["change"] = "new",
@@ -203,6 +215,76 @@ describe("Meeting Notes observation runtime", () => {
       canonicalReconciliationPending: false,
       lastWebhookReceivedAt: "2026-08-10T11:44:30.000Z",
       lastWakeUpAt: "2026-08-10T11:45:00.000Z"
+    });
+  });
+
+  it("drains a later wake-up after the active provider refresh completes", async () => {
+    const firstRefreshStarted = deferred<void>();
+    const releaseFirstRefresh = deferred<void>();
+    const refreshedPageIds: string[] = [];
+    const ingestion = new RecordingIngestion();
+    const reconciliation = new RecordingCanonicalReconciliation();
+    const refresher: MeetingNotesPageRefresher = {
+      async refreshPage({ pageId }) {
+        refreshedPageIds.push(pageId);
+
+        if (pageId === "meeting-page-1") {
+          firstRefreshStarted.resolve();
+          await releaseFirstRefresh.promise;
+        }
+
+        return {
+          status: "refreshed",
+          records: [sourceRevision(`meeting-notes-root:${pageId}`)],
+          completeness: "complete",
+          partialReasons: []
+        };
+      }
+    };
+    const runtime = createMeetingNotesObservationRuntime({
+      workspace,
+      refresher,
+      ingestion,
+      canonicalReconciliation: reconciliation
+    });
+
+    runtime.enqueue({
+      kind: "page",
+      deliveryId: "delivery-active-page",
+      pageId: "meeting-page-1",
+      occurredAt: "2026-08-10T11:44:00.000Z",
+      receivedAt: "2026-08-10T11:44:01.000Z"
+    });
+    const activeDrain = runtime.drain();
+    await firstRefreshStarted.promise;
+
+    runtime.enqueue({
+      kind: "page",
+      deliveryId: "delivery-later-page",
+      pageId: "meeting-page-2",
+      occurredAt: "2026-08-10T11:45:00.000Z",
+      receivedAt: "2026-08-10T11:45:01.000Z"
+    });
+    expect(runtime.drain()).toBe(activeDrain);
+
+    releaseFirstRefresh.resolve();
+    await activeDrain;
+
+    expect(runtime.status()).toMatchObject({
+      pendingPageCount: 0,
+      canonicalReconciliationPending: false
+    });
+    await runtime.drain();
+
+    expect(refreshedPageIds).toEqual(["meeting-page-1", "meeting-page-2"]);
+    expect(ingestion.records.map((record) => record.source.sourceObjectId)).toEqual([
+      "meeting-notes-root:meeting-page-1",
+      "meeting-notes-root:meeting-page-2"
+    ]);
+    expect(reconciliation.syncCalls).toBe(0);
+    expect(runtime.status()).toMatchObject({
+      pendingPageCount: 0,
+      canonicalReconciliationPending: false
     });
   });
 

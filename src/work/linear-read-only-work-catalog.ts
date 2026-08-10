@@ -7,6 +7,13 @@ const MAX_SEARCH_RESULTS = 10;
 const MAX_SEARCH_TEXT_LENGTH = 2_000;
 const MAX_ISSUE_SELECTOR_LENGTH = 256;
 const MAX_REMEMBERED_ISSUE_SELECTORS = 1_000;
+// These limits are deliberately enforced before a provider record becomes a
+// WorkItem, so reconciliation never persists a silently truncated record.
+const MAX_ISSUE_TITLE_CODE_UNITS = 1_024;
+const MAX_ISSUE_DESCRIPTION_CODE_UNITS = 64_000;
+const MAX_ISSUE_LABEL_COUNT = 50;
+const MAX_ISSUE_LABEL_CODE_UNITS = 256;
+const READ_ONLY_LABEL_FETCH_LIMIT = MAX_ISSUE_LABEL_COUNT + 1;
 
 export type LinearReadOnlyApiIssue = LinearApiIssue;
 
@@ -29,7 +36,19 @@ export type LinearReadOnlyWorkCatalogConfig = {
   apiKey?: string;
   apiUrl?: string;
   providerId?: string;
-  api?: LinearReadOnlyApi;
+};
+
+/**
+ * Deterministic test configuration only. Production construction never
+ * accepts an injected API, which keeps an ordinary writer-capable LinearApi
+ * out of the read-only adapter's production seam.
+ *
+ * This type is intentionally not exported from Luma's package entrypoint.
+ */
+export type LinearReadOnlyWorkCatalogTestConfig = {
+  teamId: string;
+  providerId?: string;
+  api: LinearReadOnlyApi;
 };
 
 export class LinearReadOnlyWorkCatalogError extends Error {
@@ -37,7 +56,8 @@ export class LinearReadOnlyWorkCatalogError extends Error {
     readonly code:
       | "linear-readonly-config-incomplete"
       | "linear-readonly-query-invalid"
-      | "linear-readonly-selector-invalid",
+      | "linear-readonly-selector-invalid"
+      | "linear-readonly-payload-too-large",
     message: string
   ) {
     super(message);
@@ -53,9 +73,28 @@ export class LinearReadOnlyWorkCatalogError extends Error {
 export function createLinearReadOnlyWorkCatalog(
   config: LinearReadOnlyWorkCatalogConfig
 ): WorkCatalog {
+  return createLinearReadOnlyWorkCatalogWithApi(
+    config,
+    createLinearReadOnlySdkApi(config)
+  );
+}
+
+/**
+ * Creates the catalog with a deterministic fake for tests. This is the only
+ * injection seam and must not be used to compose the production runtime.
+ */
+export function createLinearReadOnlyWorkCatalogForTest(
+  config: LinearReadOnlyWorkCatalogTestConfig
+): WorkCatalog {
+  return createLinearReadOnlyWorkCatalogWithApi(config, config.api);
+}
+
+function createLinearReadOnlyWorkCatalogWithApi(
+  config: Omit<LinearReadOnlyWorkCatalogTestConfig, "api">,
+  api: LinearReadOnlyApi
+): WorkCatalog {
   const teamId = requireConfigString(config.teamId, "LINEAR_TEAM_ID");
   const providerId = nonBlank(config.providerId) ?? "linear";
-  const api = config.api ?? createLinearReadOnlySdkApi(config);
   const permittedSelectors = new BoundedSelectorSet(MAX_REMEMBERED_ISSUE_SELECTORS);
 
   return {
@@ -65,6 +104,10 @@ export function createLinearReadOnlyWorkCatalog(
     async searchWorkItems(query) {
       const input = normalizeSearchQuery(query, teamId);
       const issues = (await api.searchIssues(input)).slice(0, input.limit);
+
+      for (const issue of issues) {
+        validateReadOnlyIssuePayload(issue);
+      }
 
       for (const issue of issues) {
         permittedSelectors.add(issue.id);
@@ -82,7 +125,9 @@ export function createLinearReadOnlyWorkCatalog(
         );
       }
 
-      return toLinearWorkItem(await api.getIssue(selector), providerId);
+      const issue = await api.getIssue(selector);
+      validateReadOnlyIssuePayload(issue);
+      return toLinearWorkItem(issue, providerId);
     }
   };
 }
@@ -131,22 +176,54 @@ class LinearSdkReadOnlyApi implements LinearReadOnlyApi {
     text: string;
     limit: number;
   }): Promise<LinearReadOnlyApiIssue[]> {
+    const limit = Math.min(input.limit, MAX_SEARCH_RESULTS);
     const result = await this.client.searchIssues(input.text, {
       teamId: input.teamId,
-      first: input.limit,
+      first: limit,
       includeArchived: false
     });
 
     return Promise.all(
-      result.nodes.map(async (issue) =>
-        linearSdkIssueToApiIssue(await this.client.issue(issue.id))
+      result.nodes.slice(0, limit).map(async (issue) =>
+        linearSdkIssueToApiIssue(await this.client.issue(issue.id), {
+          labelLimit: READ_ONLY_LABEL_FETCH_LIMIT
+        })
       )
     );
   }
 
-  getIssue(id: string): Promise<LinearReadOnlyApiIssue> {
-    return this.client.issue(id).then(linearSdkIssueToApiIssue);
+  async getIssue(id: string): Promise<LinearReadOnlyApiIssue> {
+    return linearSdkIssueToApiIssue(await this.client.issue(id), {
+      labelLimit: READ_ONLY_LABEL_FETCH_LIMIT
+    });
   }
+}
+
+function validateReadOnlyIssuePayload(issue: LinearReadOnlyApiIssue): void {
+  if (issue.title.length > MAX_ISSUE_TITLE_CODE_UNITS) {
+    throw payloadTooLarge("title");
+  }
+
+  if (issue.description.length > MAX_ISSUE_DESCRIPTION_CODE_UNITS) {
+    throw payloadTooLarge("description");
+  }
+
+  if (issue.labels.length > MAX_ISSUE_LABEL_COUNT) {
+    throw payloadTooLarge("labels");
+  }
+
+  if (issue.labels.some((label) => label.length > MAX_ISSUE_LABEL_CODE_UNITS)) {
+    throw payloadTooLarge("labels");
+  }
+}
+
+function payloadTooLarge(
+  field: "title" | "description" | "labels"
+): LinearReadOnlyWorkCatalogError {
+  return new LinearReadOnlyWorkCatalogError(
+    "linear-readonly-payload-too-large",
+    `Linear read-only ${field} payload exceeds its configured safety limit`
+  );
 }
 
 function normalizeSearchQuery(

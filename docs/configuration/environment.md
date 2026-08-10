@@ -78,9 +78,12 @@ LINEAR_TEAM_ID=63c160e7-ab70-4ef9-9822-0f85590ebb7f
 
 The read-only catalog never reads or falls back to `LINEAR_API_KEY`. It limits
 searches to ten results, fetches only selectors produced by one of those
-bounded searches, and exposes no create, update, comment, or delete method.
-It is an adapter foundation only: the current executable does not select it by
-default, and it does not authorize Notion writes or Discord execution.
+bounded searches, rejects over-limit title, description, or label payloads
+rather than truncating them, and exposes no create, update, comment, or delete
+method. It is an adapter foundation only: the current executable does not
+select it by default, and it does not authorize Notion writes or Discord
+execution. See [Linear WorkProvider](../integrations/linear.md#dedicated-least-privilege-read-only-catalog)
+for the exact read-payload limits.
 
 ## Notion Setup
 

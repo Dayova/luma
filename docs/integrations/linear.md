@@ -85,11 +85,25 @@ Linear's **Read** permission.
 
 The catalog implements only the existing read-only `WorkCatalog` operations:
 
-- team-scoped text search is hard-capped at ten results;
+- team-scoped text search is hard-capped at ten results, and an SDK response is
+  sliced to that cap before any individual issue is hydrated;
 - one issue may be fetched only after its opaque selector was returned by that
   catalog's bounded search; and
 - no generic list, create, update, comment, assignment, or delete operation is
   exposed.
+
+Before any Linear record becomes a `WorkItem` or reconciliation-facing data,
+the read-only catalog rejects (rather than truncates) a title over 1,024 UTF-16
+code units, a description over 64,000 UTF-16 code units, more than 50 labels,
+or a label over 256 UTF-16 code units. It requests at most 51 labels so a
+51st label proves the 50-label cap was exceeded. An oversized record produces a
+typed read-only catalog error and no partial search result is retained.
+
+Production construction accepts only the read-only credential configuration;
+it has no injectable API object. The deterministic API-injection seam is
+explicitly test-only and is not exported from Luma's package entrypoint, so a
+writer-capable Linear adapter cannot be supplied to the production catalog by
+structural typing.
 
 This slice does not wire the catalog into the executable server or authorize a
 native Notion agent. It is intentionally separate from the writer-capable

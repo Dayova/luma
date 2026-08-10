@@ -6,11 +6,15 @@ import type { LinearApiIssue } from "./linear-work-item.js";
  * Linear adapters use this read-only conversion; it does not know about a
  * writer-capable provider Interface.
  */
-export async function linearSdkIssueToApiIssue(issue: Issue): Promise<LinearApiIssue> {
+export async function linearSdkIssueToApiIssue(
+  issue: Issue,
+  options: { labelLimit?: number } = {}
+): Promise<LinearApiIssue> {
+  const labelLimit = options.labelLimit ?? 100;
   const [assignee, state, labels] = await Promise.all([
     issue.assignee ?? Promise.resolve(undefined),
     issue.state ?? Promise.resolve(undefined),
-    issue.labels({ first: 100 })
+    issue.labels({ first: labelLimit })
   ]);
 
   return {

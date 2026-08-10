@@ -52,3 +52,30 @@ export interface MeetingNotesCompleteScan {
 export interface MeetingNotesSource {
   scan(input: ScanMeetingNotesInput): Promise<MeetingNotesScan>;
 }
+
+/**
+ * A bounded reread requested by an event signal. The provider Adapter must
+ * re-establish that the page belongs to its canonical Meeting Notes source;
+ * a caller cannot turn a webhook page ID into a workspace-wide read.
+ */
+export type RefreshMeetingNotePageInput = {
+  workspaceId: string;
+  pageId: string;
+};
+
+export type MeetingNotesPageRefresh = {
+  /** The page was not an accessible canonical Meeting Note and yielded no Evidence. */
+  status: "ignored" | "refreshed";
+  records: ObservedSourceRevision[];
+  completeness: "complete" | "partial";
+  partialReasons: MeetingNotesScanPartialReason[];
+};
+
+/**
+ * Provider-neutral wake-up capability. It owns canonical-source membership
+ * validation and the observed-source ledger write; callers only provide the
+ * opaque page reference carried by a signed provider signal.
+ */
+export interface MeetingNotesPageRefresher {
+  refreshPage(input: RefreshMeetingNotePageInput): Promise<MeetingNotesPageRefresh>;
+}

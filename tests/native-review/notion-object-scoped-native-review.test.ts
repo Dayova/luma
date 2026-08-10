@@ -25,7 +25,7 @@ const workspace = {
   timezone: "Europe/Berlin"
 };
 const providerId = "notion";
-const pageId = "notion-page-product-sync";
+const pageId = "11111111-2222-4333-8444-555555555555";
 const neverOwnedOperationalOutcomeMarker: OperationalOutcomeMarkerVerifier = {
   isOwned: () => Promise.resolve(false)
 };
@@ -79,18 +79,18 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
     string,
     { blocks: NotionMeetingNotesBlock[]; nextCursor: string | null }
   > = {
-    "notion-page-product-sync:first": {
+    "11111111-2222-4333-8444-555555555555:first": {
       blocks: [
         block({
-          id: "meeting-notes-root",
+          id: "22222222-3333-4444-8555-666666666666",
           type: "meeting-notes",
           hasChildren: true,
           meetingNotes: {
             title: "Product sync",
             status: "notes_ready",
-            summaryBlockId: "summary-block",
-            notesBlockId: "notes-block",
-            transcriptBlockId: "transcript-block",
+            summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+            notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+            transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc",
             calendar: {
               startAt: "2026-08-10T08:00:00.000Z",
               endAt: "2026-08-10T08:30:00.000Z",
@@ -102,11 +102,19 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
       ],
       nextCursor: null
     },
-    "summary-block:first": {
+    "22222222-3333-4444-8555-666666666666:first": {
+      blocks: [
+        block({ id: "99999999-aaaa-4bbb-8ccc-dddddddddddd", type: "paragraph" }),
+        block({ id: "88888888-9999-4aaa-8bbb-cccccccccccc", type: "paragraph" }),
+        block({ id: "77777777-8888-4999-8aaa-bbbbbbbbbbbc", type: "paragraph" })
+      ],
+      nextCursor: null
+    },
+    "99999999-aaaa-4bbb-8ccc-dddddddddddd:first": {
       blocks: [block({ id: "summary-line", type: "paragraph", text: "Review work." })],
       nextCursor: null
     },
-    "notes-block:first": {
+    "88888888-9999-4aaa-8bbb-cccccccccccc:first": {
       blocks: [
         block({
           id: "action-item-1",
@@ -117,7 +125,7 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
       ],
       nextCursor: null
     },
-    "transcript-block:first": {
+    "77777777-8888-4999-8aaa-bbbbbbbbbbbc:first": {
       blocks: [
         block({
           id: "transcript-line",
@@ -226,7 +234,11 @@ describe("dormant source-bound native review composition", () => {
 
       expect(receipt).toMatchObject({
         workspaceId: workspace.workspaceId,
-        source: { providerId, sourceObjectId: "meeting-notes-root", revision: 1 },
+        source: {
+          providerId,
+          sourceObjectId: "22222222-3333-4444-8555-666666666666",
+          revision: 1
+        },
         outcome: {
           type: "reviewed",
           workReferences: [{ providerId: "linear", lookupId: "issue-301" }]
@@ -238,9 +250,9 @@ describe("dormant source-bound native review composition", () => {
       expect(reader.blockCalls).toEqual(
         expect.arrayContaining([
           { blockId: pageId },
-          { blockId: "summary-block" },
-          { blockId: "notes-block" },
-          { blockId: "transcript-block" }
+          { blockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd" },
+          { blockId: "88888888-9999-4aaa-8bbb-cccccccccccc" },
+          { blockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc" }
         ])
       );
       expect("listDataSourcePages" in reader).toBe(false);

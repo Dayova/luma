@@ -160,6 +160,55 @@ a Notion page. The reconciliation slice may only produce reviewable proposals
 until Human Judgment and an approved Follow-up Intent authorize a later
 execution.
 
+## Webhook wake-up foundation (not activated)
+
+LUM-29 adds an isolated observation seam for Notion webhooks. It is **not**
+wired into `startServer`, Discord, an HTTP listener, an environment flag, or a
+deployed Notion subscription. No verification token is read from environment or
+stored by this repository.
+
+When a future host explicitly composes it, the host must give
+`NotionWebhookWakeUpIngress` the exact raw request bytes and a verified
+subscription token. The ingress validates Notion's documented
+`X-Notion-Signature` HMAC-SHA256 over those raw bytes, checks the configured
+workspace (and optional subscription/integration IDs), accepts only normalized
+Notion UUID page IDs before any provider read, and emits only one of:
+
+- a bounded page wake-up for `page.created`, `page.content_updated`, or
+  `page.properties_updated`; or
+- a canonical reconciliation wake-up for `data_source.content_updated` on the
+  configured Meetings data source.
+
+It discards all webhook payload content. The resulting runtime re-fetches the
+current page through `NotionMeetingNotesSource.refreshPage(...)`, proves that
+the page is still in the configured canonical Meetings data source, and reuses
+the same snapshot capture and observed-source ledger as a normal scan. A
+direct refresh never infers a deletion or creates a tombstone. An unrelated,
+trashed, or no-longer-canonical page is ignored; only a completed canonical
+scan can establish source absence.
+
+Duplicate/retried and out-of-order signals are coalesced by delivery and page.
+A `data_source.content_updated` signal supersedes queued page reads with one
+full scan. The direct page queue is bounded; overflow promotes the batch to a
+single canonical scan and records overflow telemetry. The existing
+`MeetingNotesSync` schedule remains mandatory: it is the recovery path for
+missed events, not-ready/partial notes, terminal deletion races, endpoint
+failures, and later edits. Runtime telemetry exposes only arrival/wake-up
+times, bounded pending work, overflow, reconciliation success/partial failure,
+and non-canonical lag; webhook history is never source Evidence.
+
+The runtime receives a page refresher, `MeetingNotesIngestion`, and the
+existing canonical reconciliation capability—but never a WorkProvider writer,
+KnowledgeProvider writer, or Follow-up Execution capability. A behavioral
+database test proves an authenticated wake-up can record an Observation receipt
+with zero `follow_up_executions` rows.
+
+Before activation, a host still needs a publicly reachable TLS endpoint,
+explicit subscription configuration and one-time Notion verification-token
+handoff, a dedicated secret store, production persistence/observability, and a
+separate deployment review. Those are operational activation tasks, not a
+license to enable canonical Notion writes or Discord execution.
+
 ## Source-bound native review core
 
 `SourceBoundNativeReview` is a dormant, read-only core for a future native

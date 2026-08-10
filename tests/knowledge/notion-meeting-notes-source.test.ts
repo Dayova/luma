@@ -52,6 +52,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
       title: string | null;
       url: string;
       lastEditedAt: string | null;
+      inTrash: boolean;
     }>;
     nextCursor: string | null;
     incomplete: boolean;
@@ -63,13 +64,15 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
           id: "meeting-page-1",
           title: "Product sync",
           url: "https://notion.so/meeting-page-1",
-          lastEditedAt: "2026-08-07T08:31:00.000Z"
+          lastEditedAt: "2026-08-07T08:31:00.000Z",
+          inTrash: false
         },
         {
           id: "ordinary-page",
           title: "Ordinary knowledge",
           url: "https://notion.so/ordinary-page",
-          lastEditedAt: "2026-08-07T08:31:00.000Z"
+          lastEditedAt: "2026-08-07T08:31:00.000Z",
+          inTrash: false
         }
       ],
       nextCursor: "next-page",
@@ -568,77 +571,80 @@ describe("Notion Meeting Notes source", () => {
     }
   });
 
-  it("requires a matching durable ownership proof before stripping a valid Luma Operational Outcome section", async () => {
-    const rendered = renderedOperationalOutcome();
-    const expectedMarker: OperationalOutcomeMarkerVerificationInput = {
-      workspaceId: "workspace_dayova",
-      providerId: "notion",
-      pageExternalId: "meeting-page-1",
-      payloadDigest: rendered.payloadDigest,
-      contentDigest: rendered.contentDigest,
-      operationDigest: rendered.operationDigest
-    };
-    const unverifiedCases: Array<{
-      label: string;
-      verifier?: FakeOperationalOutcomeMarkerVerifier;
-      retryable: boolean;
-    }> = [
-      { label: "no configured verifier", retryable: false },
-      {
-        label: "wrong workspace binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+  it.each([
+    { label: "no configured verifier", retryable: false },
+    {
+      label: "wrong workspace binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.workspaceId === "workspace_other"
         ),
-        retryable: false
-      },
-      {
-        label: "wrong provider binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "wrong provider binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.providerId === "linear"
         ),
-        retryable: false
-      },
-      {
-        label: "wrong page binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "wrong page binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.pageExternalId === "another-page"
         ),
-        retryable: false
-      },
-      {
-        label: "wrong payload binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "wrong payload binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.payloadDigest === "f".repeat(64)
         ),
-        retryable: false
-      },
-      {
-        label: "wrong content binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "wrong content binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.contentDigest === "e".repeat(64)
         ),
-        retryable: false
-      },
-      {
-        label: "wrong operation binding",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "wrong operation binding",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           (input) => input.operationDigest === "d".repeat(64)
         ),
-        retryable: false
-      },
-      {
-        label: "verification dependency rejection",
-        verifier: new FakeOperationalOutcomeMarkerVerifier(
+      retryable: false
+    },
+    {
+      label: "verification dependency rejection",
+      createVerifier: () =>
+        new FakeOperationalOutcomeMarkerVerifier(
           new Error("durable verifier unavailable")
         ),
-        retryable: true
-      }
-    ];
-
-    for (const unverifiedCase of unverifiedCases) {
+      retryable: true
+    }
+  ])(
+    "requires a matching durable ownership proof before stripping a valid Luma Operational Outcome section: $label",
+    async ({ createVerifier, retryable }) => {
+      const rendered = renderedOperationalOutcome();
+      const expectedMarker: OperationalOutcomeMarkerVerificationInput = {
+        workspaceId: "workspace_dayova",
+        providerId: "notion",
+        pageExternalId: "meeting-page-1",
+        payloadDigest: rendered.payloadDigest,
+        contentDigest: rendered.contentDigest,
+        operationDigest: rendered.operationDigest
+      };
       const database = await createPgliteDatabase();
       const baseApi = new FakeNotionMeetingNotesApi();
       const ledger = createObservedSourceLedger({ database });
+      const verifier = createVerifier?.();
       let markdown = baseMeetingMarkdown;
       const api: NotionMeetingNotesApi = {
         async listDataSourcePages(input) {
@@ -653,9 +659,7 @@ describe("Notion Meeting Notes source", () => {
         api,
         ledger,
         meetingsDataSourceId: "dayova-meetings",
-        ...(unverifiedCase.verifier
-          ? { operationalOutcomeMarkerVerifier: unverifiedCase.verifier }
-          : {})
+        ...(verifier ? { operationalOutcomeMarkerVerifier: verifier } : {})
       });
 
       try {
@@ -663,7 +667,7 @@ describe("Notion Meeting Notes source", () => {
         const original = seeded.records[0];
 
         if (!original) {
-          throw new Error(`expected a seeded source for ${unverifiedCase.label}`);
+          throw new Error("expected a seeded source");
         }
 
         markdown = `${baseMeetingMarkdown}\n\n${rendered.section}`;
@@ -677,11 +681,11 @@ describe("Notion Meeting Notes source", () => {
           expect.objectContaining({
             code: "unreadable-meeting-note",
             sourceObjectId: original.source.sourceObjectId,
-            retryable: unverifiedCase.retryable
+            retryable
           })
         );
-        if (unverifiedCase.verifier) {
-          expect(unverifiedCase.verifier.calls).toEqual([expectedMarker]);
+        if (verifier) {
+          expect(verifier.calls).toEqual([expectedMarker]);
         }
         await expect(
           ledger.get({ workspaceId: "workspace_dayova", source: original.source })
@@ -690,7 +694,7 @@ describe("Notion Meeting Notes source", () => {
         await database.close();
       }
     }
-  });
+  );
 
   it("turns a root absent from a completed canonical scan into an immutable tombstone", async () => {
     const database = await createPgliteDatabase();
@@ -1545,6 +1549,60 @@ describe("Notion Meeting Notes source", () => {
       expect(first.records[0]).toMatchObject({ change: "new", revision: 1 });
       expect(second.records[0]).toMatchObject({ change: "unchanged", revision: 1 });
       expect(second.records[0]?.contentHash).toBe(first.records[0]?.contentHash);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails a canonical scan closed when root pagination exceeds its read bound", async () => {
+    const database = await createPgliteDatabase();
+    const baseApi = new FakeNotionMeetingNotesApi();
+    let rootPageCalls = 0;
+    const api: NotionMeetingNotesApi = {
+      listDataSourcePages: (input) => baseApi.listDataSourcePages(input),
+      listBlockChildren(input) {
+        if (input.blockId === "meeting-page-1") {
+          rootPageCalls += 1;
+          return Promise.resolve({
+            blocks: [],
+            nextCursor: `root-cursor-${rootPageCalls}`
+          });
+        }
+
+        return baseApi.listBlockChildren(input);
+      },
+      retrievePageMarkdown: (input) => baseApi.retrievePageMarkdown(input)
+    };
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: "dayova-meetings"
+    });
+
+    try {
+      const scan = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(rootPageCalls).toBe(100);
+      expect(scan.records).toEqual([]);
+      expect(scan.completeness).toBe("partial");
+      expect(scan.partialReasons).toContainEqual(
+        expect.objectContaining({
+          code: "unreadable-page",
+          pageId: "meeting-page-1",
+          retryable: false
+        })
+      );
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source: {
+            providerId: "notion",
+            sourceKind: "meeting-note",
+            sourceObjectId: "meeting-notes-block-1"
+          }
+        })
+      ).resolves.toBeNull();
     } finally {
       await database.close();
     }

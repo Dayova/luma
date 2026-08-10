@@ -80,6 +80,14 @@ export type {
   NotionMeetingNotesSourceConfig
 } from "./knowledge/notion-meeting-notes-source.js";
 export {
+  NotionObjectScopedMeetingNoteEvidenceSourceError,
+  createNotionObjectScopedMeetingNoteEvidenceSource
+} from "./knowledge/notion-object-scoped-meeting-note-evidence-source.js";
+export type {
+  NotionObjectScopedMeetingNoteEvidenceReader,
+  NotionObjectScopedMeetingNoteEvidenceSourceConfig
+} from "./knowledge/notion-object-scoped-meeting-note-evidence-source.js";
+export {
   NotionKnowledgeProviderError,
   createNotionKnowledgeProvider,
   createNotionKnowledgeProviderFromEnv

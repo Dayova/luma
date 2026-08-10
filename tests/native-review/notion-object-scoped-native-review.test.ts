@@ -324,6 +324,7 @@ describe("dormant source-bound native review composition", () => {
 
     try {
       const first = await harness.review.review(nativeReviewRequest());
+      const blockCallsAfterFirst = [...harness.reader.blockCalls];
       const snapshotsAfterFirst = await workspaceRowCount(
         harness.database,
         "observed_source_snapshots"
@@ -340,6 +341,7 @@ describe("dormant source-bound native review composition", () => {
       expect(replay).toEqual(first);
       expect(harness.reader.pageCalls).toEqual([pageId, pageId]);
       expect(harness.reader.markdownCalls).toEqual([{ pageId, includeTranscript: true }]);
+      expect(harness.reader.blockCalls).toEqual(blockCallsAfterFirst);
       expect(harness.linearApi.searchCalls).toHaveLength(2);
       expect(harness.linearApi.getCalls).toEqual(["issue-301"]);
       await expect(

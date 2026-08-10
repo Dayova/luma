@@ -12,6 +12,8 @@ import {
 
 const DEFAULT_BLOCK_CHILD_PAGE_SIZE = 100;
 const MAX_BLOCK_CHILD_PAGES_PER_PARENT = 100;
+const NOTION_PAGE_ID_PATTERN =
+  /^(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/iu;
 const requireNotionSdk = createRequire(import.meta.url);
 let cachedNotionSdk: NotionSdkModule | undefined;
 
@@ -22,7 +24,7 @@ type NotionSdkModule = Pick<
 
 /**
  * Production construction accepts only a separately configured native
- * read-only credential and one exact opaque page. It deliberately has no
+ * read-only credential and one exact Notion page UUID. It deliberately has no
  * `NOTION_API_TOKEN` fallback, client, fetch, base URL, data-source, search,
  * or mutation configuration surface.
  */
@@ -156,6 +158,7 @@ type CapabilityState = {
   exactPageVerified: boolean;
   allowedBlockIds: Set<string>;
   allowedCursorsByBlockId: Map<string, Set<string>>;
+  reservedCursorsByBlockId: Map<string, Set<string>>;
   blockReadCounts: Map<string, number>;
   rootCandidates: Array<{
     block: NotionMeetingNotesBlock;
@@ -172,6 +175,7 @@ function createBoundReader(
     exactPageVerified: false,
     allowedBlockIds: new Set(),
     allowedCursorsByBlockId: new Map(),
+    reservedCursorsByBlockId: new Map(),
     blockReadCounts: new Map(),
     rootCandidates: [],
     rootScanInProgress: false
@@ -182,6 +186,7 @@ function createBoundReader(
     state.allowedBlockIds.clear();
     state.allowedBlockIds.add(config.pageId);
     state.allowedCursorsByBlockId.clear();
+    state.reservedCursorsByBlockId.clear();
     state.blockReadCounts.clear();
     state.rootCandidates = [];
     state.rootScanInProgress = false;
@@ -191,6 +196,7 @@ function createBoundReader(
     state.exactPageVerified = false;
     state.allowedBlockIds.clear();
     state.allowedCursorsByBlockId.clear();
+    state.reservedCursorsByBlockId.clear();
     state.blockReadCounts.clear();
     state.rootCandidates = [];
     state.rootScanInProgress = false;
@@ -252,7 +258,7 @@ function createBoundReader(
       }
 
       const blockId = requireAllowedBlock(input, state);
-      const cursor = consumeAllowedCursor(input, blockId, state);
+      const cursor = requireRequestedCursor(input);
 
       if (blockId === config.pageId && cursor === undefined) {
         // A fresh direct-page list starts a fresh provider-derived root tree;
@@ -273,7 +279,9 @@ function createBoundReader(
         );
       }
 
+      requireAvailableCursor(blockId, cursor, state);
       consumeBlockReadBudget(blockId, state);
+      reserveAllowedCursor(blockId, cursor, state);
 
       try {
         const page = parseBlockChildrenPage(
@@ -283,6 +291,8 @@ function createBoundReader(
           }),
           { configuredPageId: config.pageId, expectedParentId: blockId }
         );
+
+        consumeReservedCursor(blockId, cursor, state);
 
         mintProviderDerivedCapabilities({
           configuredPageId: config.pageId,
@@ -296,6 +306,7 @@ function createBoundReader(
           nextCursor: page.nextCursor
         };
       } catch (error) {
+        releaseReservedCursor(blockId, cursor, state);
         throw toSafeReadError(error);
       }
     }
@@ -308,6 +319,7 @@ function clearDescendantsOfConfiguredPage(pageId: string, state: CapabilityState
   state.allowedBlockIds.clear();
   state.allowedBlockIds.add(pageId);
   state.allowedCursorsByBlockId.clear();
+  state.reservedCursorsByBlockId.clear();
   state.blockReadCounts.clear();
 }
 
@@ -420,11 +432,7 @@ function requireAllowedBlock(input: unknown, state: CapabilityState): string {
   return blockId;
 }
 
-function consumeAllowedCursor(
-  input: unknown,
-  blockId: string,
-  state: CapabilityState
-): string | undefined {
+function requireRequestedCursor(input: unknown): string | undefined {
   if (!isRecord(input) || !("cursor" in input) || input["cursor"] === undefined) {
     return undefined;
   }
@@ -438,16 +446,93 @@ function consumeAllowedCursor(
     );
   }
 
-  const cursors = state.allowedCursorsByBlockId.get(blockId);
+  return cursor;
+}
 
-  if (!cursors || !cursors.delete(cursor)) {
+function reserveAllowedCursor(
+  blockId: string,
+  cursor: string | undefined,
+  state: CapabilityState
+): void {
+  if (cursor === undefined) {
+    return;
+  }
+
+  requireAvailableCursor(blockId, cursor, state);
+
+  const reservedCursors = state.reservedCursorsByBlockId.get(blockId);
+
+  if (reservedCursors) {
+    reservedCursors.add(cursor);
+  } else {
+    state.reservedCursorsByBlockId.set(blockId, new Set([cursor]));
+  }
+}
+
+function requireAvailableCursor(
+  blockId: string,
+  cursor: string | undefined,
+  state: CapabilityState
+): void {
+  if (cursor === undefined) {
+    return;
+  }
+
+  const cursors = state.allowedCursorsByBlockId.get(blockId);
+  const reservedCursors = state.reservedCursorsByBlockId.get(blockId);
+
+  if (!cursors || !cursors.has(cursor) || reservedCursors?.has(cursor)) {
+    throw readerError(
+      "notion-object-scoped-reader-cursor-forbidden",
+      "The requested Meeting Note cursor is outside the provider-derived capability tree"
+    );
+  }
+}
+
+function consumeReservedCursor(
+  blockId: string,
+  cursor: string | undefined,
+  state: CapabilityState
+): void {
+  if (cursor === undefined) {
+    return;
+  }
+
+  const cursors = state.allowedCursorsByBlockId.get(blockId);
+  const reservedCursors = state.reservedCursorsByBlockId.get(blockId);
+
+  if (!cursors?.delete(cursor) || !reservedCursors?.delete(cursor)) {
     throw readerError(
       "notion-object-scoped-reader-cursor-forbidden",
       "The requested Meeting Note cursor is outside the provider-derived capability tree"
     );
   }
 
-  return cursor;
+  if (reservedCursors.size === 0) {
+    state.reservedCursorsByBlockId.delete(blockId);
+  }
+}
+
+function releaseReservedCursor(
+  blockId: string,
+  cursor: string | undefined,
+  state: CapabilityState
+): void {
+  if (cursor === undefined) {
+    return;
+  }
+
+  const reservedCursors = state.reservedCursorsByBlockId.get(blockId);
+
+  if (!reservedCursors) {
+    return;
+  }
+
+  reservedCursors.delete(cursor);
+
+  if (reservedCursors.size === 0) {
+    state.reservedCursorsByBlockId.delete(blockId);
+  }
 }
 
 function consumeBlockReadBudget(blockId: string, state: CapabilityState): void {
@@ -680,7 +765,7 @@ function validateConfig(
   const pageId = value["pageId"];
   const readOnlyApiToken = value["readOnlyApiToken"];
 
-  if (!isOpaqueIdentifier(pageId) || typeof readOnlyApiToken !== "string") {
+  if (!isNotionPageId(pageId) || typeof readOnlyApiToken !== "string") {
     throw configError("A fixed page ID and dedicated read-only token are required");
   }
 
@@ -837,8 +922,12 @@ function isOpaqueIdentifier(value: unknown): value is string {
   );
 }
 
+function isNotionPageId(value: unknown): value is string {
+  return typeof value === "string" && NOTION_PAGE_ID_PATTERN.test(value);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function plainText(value: unknown): string | null {

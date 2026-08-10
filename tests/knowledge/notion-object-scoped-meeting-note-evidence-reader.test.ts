@@ -7,7 +7,8 @@ import {
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
 import type { NotionObjectScopedMeetingNoteEvidenceReader } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import { NotionMeetingNotesReadError } from "../../src/knowledge/notion-meeting-notes-source.js";
-const pageId = "notion-page-product-sync";
+const pageId = "14d90a82-a4fb-4a97-8a3f-299a9dad204a";
+const otherPageId = "4e28a2a7-2b90-4566-bb3d-4e50c3f3519d";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -77,7 +78,7 @@ class RecordingExactPageTransport {
       has_more: boolean;
     }
   > = {
-    "notion-page-product-sync:first": {
+    [`${pageId}:first`]: {
       object: "list",
       type: "block",
       block: {},
@@ -291,7 +292,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function resolveTransportMaterial(value: unknown): Promise<unknown> {
-  return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+  const resolved = isTransportMaterialFactory(value) ? value() : value;
+
+  return resolved instanceof Error ? Promise.reject(resolved) : Promise.resolve(resolved);
+}
+
+function isTransportMaterialFactory(value: unknown): value is () => unknown {
+  return typeof value === "function";
 }
 
 function capturedSynchronousError(action: () => unknown): unknown {
@@ -381,7 +388,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     await expect(reader.listBlockChildren({ blockId: pageId })).rejects.toMatchObject({
       code: "notion-object-scoped-reader-page-unverified"
     });
-    await expect(reader.retrievePage({ pageId: "another-page" })).rejects.toMatchObject({
+    await expect(reader.retrievePage({ pageId: otherPageId })).rejects.toMatchObject({
       code: "notion-object-scoped-reader-page-forbidden"
     });
     expect(transport.pageCalls).toEqual([]);
@@ -390,7 +397,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
 
     await expect(reader.retrievePage({ pageId })).resolves.toMatchObject({ id: pageId });
     await expect(
-      reader.retrievePageMarkdown({ pageId: "another-page", includeTranscript: true })
+      reader.retrievePageMarkdown({ pageId: otherPageId, includeTranscript: true })
     ).rejects.toMatchObject({ code: "notion-object-scoped-reader-page-forbidden" });
     await expect(
       reader.retrievePageMarkdown({ pageId, includeTranscript: false })
@@ -741,6 +748,94 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       blockId: pageId,
       cursor: "root-page-99"
     });
+  });
+
+  it("keeps a provider-issued cursor available until its response parses successfully", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    let cursorAttempt = 0;
+    transport.blockMaterial.set(
+      `${pageId}:first`,
+      rawBlockList([rawMeetingNotesRoot()], { nextCursor: "root-cursor" })
+    );
+    transport.blockMaterial.set(`${pageId}:root-cursor`, () => {
+      cursorAttempt += 1;
+
+      if (cursorAttempt === 1) {
+        return new Error("temporary provider failure");
+      }
+
+      if (cursorAttempt === 2) {
+        return rawBlockList([], { nextCursor: "malformed-cursor", hasMore: false });
+      }
+
+      return rawBlockList([]);
+    });
+    const reader = createTestReader(transport);
+
+    await reader.retrievePage({ pageId });
+    await reader.listBlockChildren({ blockId: pageId });
+    await expect(
+      reader.listBlockChildren({ blockId: pageId, cursor: "root-cursor" })
+    ).rejects.toMatchObject({ code: "transient" });
+    await expect(
+      reader.listBlockChildren({ blockId: pageId, cursor: "root-cursor" })
+    ).rejects.toMatchObject({ code: "source-invalid" });
+    await expect(
+      reader.listBlockChildren({ blockId: pageId, cursor: "root-cursor" })
+    ).resolves.toMatchObject({ nextCursor: null });
+
+    expect(transport.blockCalls).toEqual([
+      { blockId: pageId },
+      { blockId: pageId, cursor: "root-cursor" },
+      { blockId: pageId, cursor: "root-cursor" },
+      { blockId: pageId, cursor: "root-cursor" }
+    ]);
+  });
+
+  it("rejects array-shaped provider objects instead of treating them as records", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    const pageWithArrayProperties = rawPage();
+    pageWithArrayProperties["properties"] = [];
+    transport.pageMaterial = pageWithArrayProperties;
+    const reader = createTestReader(transport);
+
+    await expect(reader.retrievePage({ pageId })).rejects.toMatchObject({
+      code: "source-invalid"
+    });
+    expect(transport.pageCalls).toEqual([pageId]);
+  });
+
+  it("requires an exact Notion UUID or 32-hex page identity before transport construction", () => {
+    const transport = new ProgrammableExactPageTransport();
+    const testTransport = createNotionObjectScopedMeetingNoteEvidenceTransportForTest(
+      (input) => transport.create(input)
+    );
+
+    for (const malformedPageId of ["notion-page-product-sync", "notion-page-1234", " "]) {
+      expect(
+        capturedSynchronousError(() =>
+          createNotionObjectScopedMeetingNoteEvidenceReaderForTest({
+            pageId: malformedPageId,
+            readOnlyApiToken: "native-read-only-token",
+            transport: testTransport
+          })
+        )
+      ).toMatchObject({ code: "notion-object-scoped-reader-config-invalid" });
+    }
+
+    createNotionObjectScopedMeetingNoteEvidenceReaderForTest({
+      pageId: pageId.replaceAll("-", ""),
+      readOnlyApiToken: "native-read-only-token",
+      transport: testTransport
+    });
+
+    expect(transport.initialization).toEqual([
+      {
+        auth: "native-read-only-token",
+        notionVersion: "2026-03-11",
+        retry: false
+      }
+    ]);
   });
 
   it("requires a separate read-only token and exposes no provider error detail", async () => {

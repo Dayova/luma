@@ -315,11 +315,7 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
   );
 
   if (answerEvidence.length === 0) {
-    if (
-      result.uncertainty === "insufficient-evidence" &&
-      result.facts.length === 0 &&
-      result.inferences.length === 0
-    ) {
+    if (result.uncertainty === "insufficient-evidence") {
       return renderInsufficientEvidenceResult(result);
     }
 
@@ -367,9 +363,9 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
 /**
  * Context Intelligence deliberately produces this no-answer shape for a
  * partial capture or a boundary with no available original text. Do not render
- * its answer text: unlike a normal answer it has no evidence. The renderer
- * owns the fixed explanation while retaining the core's labelled limitations
- * and recovery guidance.
+ * its answer text or any separately evidenced claims: unlike a normal answer
+ * it has no answer Evidence. The renderer owns the fixed explanation while
+ * retaining the core's labelled limitations and recovery guidance.
  */
 function renderInsufficientEvidenceResult(result: ContextInquiryResult): string {
   const lines = [

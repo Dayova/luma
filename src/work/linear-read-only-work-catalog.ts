@@ -99,6 +99,7 @@ export class LinearReadOnlyWorkCatalogError extends Error {
       | "linear-readonly-config-incomplete"
       | "linear-readonly-query-invalid"
       | "linear-readonly-selector-invalid"
+      | "linear-readonly-provider-scope-invalid"
       | "linear-readonly-payload-too-large",
     message: string
   ) {
@@ -148,7 +149,7 @@ function createLinearReadOnlyWorkCatalogWithApi(
       const issues = (await api.searchIssues(input)).slice(0, input.limit);
 
       for (const issue of issues) {
-        validateReadOnlyIssuePayload(issue);
+        validateReadOnlyIssuePayload(issue, teamId);
       }
 
       for (const issue of issues) {
@@ -168,7 +169,7 @@ function createLinearReadOnlyWorkCatalogWithApi(
       }
 
       const issue = await api.getIssue(selector);
-      validateReadOnlyIssuePayload(issue);
+      validateReadOnlyIssuePayload(issue, teamId);
       return toLinearWorkItem(issue, providerId);
     }
   };
@@ -243,7 +244,17 @@ class LinearSdkReadOnlyApi implements LinearReadOnlyApi {
   }
 }
 
-function validateReadOnlyIssuePayload(issue: LinearReadOnlyApiIssue): void {
+function validateReadOnlyIssuePayload(
+  issue: LinearReadOnlyApiIssue,
+  teamId: string
+): void {
+  if (issue.teamId !== teamId) {
+    throw new LinearReadOnlyWorkCatalogError(
+      "linear-readonly-provider-scope-invalid",
+      "Linear read-only issue must belong to the configured team scope"
+    );
+  }
+
   if (issue.title.length > MAX_ISSUE_TITLE_CODE_UNITS) {
     throw payloadTooLarge("title");
   }

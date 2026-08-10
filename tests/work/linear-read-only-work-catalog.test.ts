@@ -28,6 +28,7 @@ function linearIssue(
 ): LinearReadOnlyApiIssue {
   return {
     id: "issue-301",
+    teamId: "team-luma",
     identifier: "LUM-301",
     title: "Prepare the release checklist",
     description: "Prepare the release checklist.",
@@ -307,6 +308,47 @@ describe("LinearReadOnlyWorkCatalog", () => {
       externalId: "LUM-301"
     });
     expect(api.getCalls).toEqual(["issue-301"]);
+  });
+
+  it("fails closed when a previously selected issue no longer belongs to the configured team", async () => {
+    const api = new RecordingLinearReadOnlyApi();
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
+      teamId: "team-luma"
+    });
+
+    await catalog.searchWorkItems({
+      workspaceId: "team-luma",
+      text: "release checklist",
+      limit: 1
+    });
+    api.getResult = linearIssue({ teamId: "team-other" });
+
+    await expect(catalog.getWorkItem("issue-301")).rejects.toMatchObject({
+      code: "linear-readonly-provider-scope-invalid"
+    });
+    expect(api.getCalls).toEqual(["issue-301"]);
+  });
+
+  it("does not retain a selector returned outside the configured team scope", async () => {
+    const api = new RecordingLinearReadOnlyApi();
+    api.searchResult = [linearIssue({ teamId: "team-other" })];
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
+      teamId: "team-luma"
+    });
+
+    await expect(
+      catalog.searchWorkItems({
+        workspaceId: "team-luma",
+        text: "release checklist",
+        limit: 1
+      })
+    ).rejects.toMatchObject({ code: "linear-readonly-provider-scope-invalid" });
+    await expect(catalog.getWorkItem("issue-301")).rejects.toMatchObject({
+      code: "linear-readonly-selector-invalid"
+    });
+    expect(api.getCalls).toEqual([]);
   });
 
   it("enforces the bounded result limit before caching selectors from Linear", async () => {

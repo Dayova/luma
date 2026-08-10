@@ -19,6 +19,7 @@ export async function linearSdkIssueToApiIssue(
 
   return {
     id: issue.id,
+    teamId: issue.teamId ?? "",
     identifier: issue.identifier,
     title: issue.title,
     description: issue.description ?? "",

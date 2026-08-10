@@ -5,6 +5,7 @@ import type {
   StructuredReasoningRequest,
   StructuredReasoningResult
 } from "../../src/ai/reasoning-model.js";
+import { createWorkspaceBoundWorkCatalog } from "../../src/app/workspace-bound-work-catalog.js";
 import { createStaticIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import { createMeetingNotesIngestion } from "../../src/knowledge/meeting-notes-ingestion.js";
 import { createLedgerBackedImportedSourceVerifier } from "../../src/knowledge/ledger-backed-imported-source-verifier.js";
@@ -26,6 +27,11 @@ import {
 } from "../../src/native-review/source-bound-native-review.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import type { WorkCatalog, WorkItem, WorkQuery } from "../../src/work/interface.js";
+import {
+  createLinearReadOnlyApiForTest,
+  createLinearReadOnlyWorkCatalogForTest,
+  type LinearReadOnlyApiIssue
+} from "../../src/work/linear-read-only-work-catalog.js";
 import type { PersonIdentity } from "../../src/identity/interface.js";
 
 const workspace = {
@@ -104,6 +110,30 @@ class RecordingReadOnlyWorkCatalog implements WorkCatalog {
   }
 }
 
+class RecordingLinearReadOnlyApi {
+  readonly searchCalls: Array<{ teamId: string; text: string; limit: number }> = [];
+  readonly getCalls: string[] = [];
+
+  searchIssues(input: {
+    teamId: string;
+    text: string;
+    limit: number;
+  }): Promise<LinearReadOnlyApiIssue[]> {
+    this.searchCalls.push({ ...input });
+    return Promise.resolve([linearReadOnlyIssue()]);
+  }
+
+  getIssue(id: string): Promise<LinearReadOnlyApiIssue> {
+    this.getCalls.push(id);
+
+    if (id !== "issue-301") {
+      return Promise.reject(new Error(`unexpected work item ${id}`));
+    }
+
+    return Promise.resolve(linearReadOnlyIssue());
+  }
+}
+
 describe("SourceBoundNativeReview", () => {
   it("captures one exact page, pins its ledger revision, and returns only its durable reconciliation review", async () => {
     const harness = await createNativeReviewHarness();
@@ -159,6 +189,62 @@ describe("SourceBoundNativeReview", () => {
           [workspace.workspaceId]
         )
       ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    } finally {
+      await harness.database.close();
+    }
+  });
+
+  it("keeps a native review in its logical workspace while a bounded catalog uses its opaque provider scope", async () => {
+    const api = new RecordingLinearReadOnlyApi();
+    // This vertical composition deliberately uses LUM-19's concrete,
+    // separately credentialed read-only catalog rather than a narrowed writer.
+    const linearCatalog = createLinearReadOnlyWorkCatalogForTest({
+      teamId: "team-dayova",
+      api: createLinearReadOnlyApiForTest({
+        searchIssues: (input) => api.searchIssues(input),
+        getIssue: (id) => api.getIssue(id)
+      })
+    });
+    const catalog = createWorkspaceBoundWorkCatalog({
+      workspaceId: workspace.workspaceId,
+      providerScopeId: "team-dayova",
+      workCatalog: linearCatalog
+    });
+    const harness = await createNativeReviewHarnessWithCatalog(catalog);
+
+    try {
+      const receipt = await harness.review.review(nativeReviewRequest());
+
+      expect(receipt).toMatchObject({
+        workspaceId: workspace.workspaceId,
+        source: {
+          providerId: "notion",
+          sourceObjectId: "meeting-notes-root",
+          revision: 1
+        },
+        outcome: {
+          type: "reviewed",
+          workReferences: [{ providerId: "linear", lookupId: "issue-301" }]
+        }
+      });
+      expect(receipt.source?.contentHash).toMatch(/^sha256:/);
+      expect(receipt.outcome.reviewIds).toHaveLength(1);
+      expect(api.searchCalls).toEqual([
+        { teamId: "team-dayova", text: "LUM-301", limit: 10 },
+        {
+          teamId: "team-dayova",
+          text: "Jakob will review LUM-301 by Friday.",
+          limit: 10
+        }
+      ]);
+      expect(api.getCalls).toEqual(["issue-301"]);
+      expect(workspace.workspaceId).not.toBe("team-dayova");
+      expect(Object.hasOwn(linearCatalog, "createWorkItem")).toBe(false);
+      expect(Object.hasOwn(linearCatalog, "updateWorkItem")).toBe(false);
+      expect(Object.hasOwn(linearCatalog, "addComment")).toBe(false);
+      expect(Object.hasOwn(catalog, "createWorkItem")).toBe(false);
+      expect(Object.hasOwn(catalog, "updateWorkItem")).toBe(false);
+      expect(Object.hasOwn(catalog, "addComment")).toBe(false);
     } finally {
       await harness.database.close();
     }
@@ -712,9 +798,20 @@ async function createNativeReviewHarness(
     capture?: MeetingNoteEvidenceCapture;
   } = {}
 ) {
+  const catalog = new RecordingReadOnlyWorkCatalog();
+
+  return createNativeReviewHarnessWithCatalog(catalog, input);
+}
+
+async function createNativeReviewHarnessWithCatalog<Catalog extends WorkCatalog>(
+  catalog: Catalog,
+  input: {
+    people?: PersonIdentity[];
+    capture?: MeetingNoteEvidenceCapture;
+  } = {}
+) {
   const database = await createPgliteDatabase();
   const ledger = createObservedSourceLedger({ database });
-  const catalog = new RecordingReadOnlyWorkCatalog();
   const meetingIntelligence = createMeetingIntelligence({
     database,
     reasoningModel: new NoAnalysisReasoningModel(),
@@ -788,6 +885,25 @@ function nativeActorPerson(overrides: Partial<PersonIdentity> = {}): PersonIdent
     linearUserId: "linear-user-jakob",
     languagePreference: "auto",
     ...overrides
+  };
+}
+
+function linearReadOnlyIssue(): LinearReadOnlyApiIssue {
+  return {
+    id: "issue-301",
+    teamId: "team-dayova",
+    identifier: "LUM-301",
+    title: "Prepare the release checklist",
+    description: "Prepare the release checklist.",
+    stateType: "started",
+    stateName: "In Progress",
+    assignee: null,
+    dueDate: null,
+    labels: [],
+    projectId: null,
+    parentId: null,
+    url: "https://linear.app/dayova/issue/LUM-301",
+    updatedAt: "2026-08-09T09:00:00.000Z"
   };
 }
 

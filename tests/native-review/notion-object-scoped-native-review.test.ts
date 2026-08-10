@@ -236,7 +236,7 @@ describe("object-scoped Notion evidence through SourceBoundNativeReview", () => 
           { blockId: "transcript-block" }
         ])
       );
-      expect(Object.hasOwn(reader, "listDataSourcePages")).toBe(false);
+      expect("listDataSourcePages" in reader).toBe(false);
       expect(linearApi.searchCalls).toEqual([
         { teamId: "team-dayova", text: "LUM-301", limit: 10 },
         {
@@ -246,10 +246,10 @@ describe("object-scoped Notion evidence through SourceBoundNativeReview", () => 
         }
       ]);
       expect(linearApi.getCalls).toEqual(["issue-301"]);
-      expect(Object.hasOwn(linearCatalog, "createWorkItem")).toBe(false);
-      expect(Object.hasOwn(workCatalog, "createWorkItem")).toBe(false);
-      expect(Object.hasOwn(workCatalog, "updateWorkItem")).toBe(false);
-      expect(Object.hasOwn(workCatalog, "addComment")).toBe(false);
+      expect("createWorkItem" in linearCatalog).toBe(false);
+      expect("createWorkItem" in workCatalog).toBe(false);
+      expect("updateWorkItem" in workCatalog).toBe(false);
+      expect("addComment" in workCatalog).toBe(false);
       await expect(
         database.query<{ count: number }>(
           `SELECT COUNT(*)::int AS count

@@ -698,6 +698,11 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
       code: "meeting-note-root-unreadable",
       retryable: false
     });
+    expect(reader.summaryBlocksReturned).toBe(10_000);
+    expect(
+      reader.blockCalls.filter((call) => call.blockId === "summary-block")
+    ).toHaveLength(100);
+    expect(reader.blockCalls.some((call) => call.blockId === "notes-block")).toBe(false);
   });
 
   it.each([
@@ -996,19 +1001,24 @@ class ExcessiveSectionBlocksReader extends CompleteMeetingNoteReader {
 }
 
 class CumulativeSectionBlocksReader extends CompleteMeetingNoteReader {
+  summaryBlocksReturned = 0;
+
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
     if (input.blockId === "summary-block") {
       this.blockCalls.push({ ...input });
       const page = input.cursor ? Number(input.cursor.replace("summary-cursor-", "")) : 0;
 
+      const blocks = Array.from({ length: 100 }, (_, index) =>
+        block({
+          id: `summary-${page}-${index}`,
+          type: "paragraph",
+          text: "bounded"
+        })
+      );
+      this.summaryBlocksReturned += blocks.length;
+
       return Promise.resolve({
-        blocks: Array.from({ length: 100 }, (_, index) =>
-          block({
-            id: `summary-${page}-${index}`,
-            type: "paragraph",
-            text: "bounded"
-          })
-        ),
+        blocks,
         nextCursor: page === 99 ? null : `summary-cursor-${page + 1}`
       });
     }

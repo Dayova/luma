@@ -640,6 +640,9 @@ export async function captureNotionMeetingNoteSnapshot(
     page.id,
     ownership
   );
+  // One shared budget and sequential section reads bound this whole snapshot's
+  // aggregate block and provider reads; independent concurrent budgets would
+  // undermine that limit.
   const captureBudget: MeetingNoteCaptureBudget = {
     remainingBlocks: MAX_CAPTURED_MEETING_NOTE_BLOCKS,
     remainingBlockChildReads: MAX_MEETING_NOTE_BLOCK_CHILD_READS

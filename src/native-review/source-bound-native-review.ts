@@ -328,7 +328,7 @@ async function reviewNativeMeetingNote(
     ledger: input.ledger,
     workspace,
     page: request.page,
-    source: recorded.source,
+    expectedSource: validatedCapture.evidence.source,
     revision: recorded.revision,
     contentHash: recorded.contentHash
   });
@@ -668,7 +668,7 @@ async function readImmutableMeetingNoteRevision(input: {
   ledger: ObservedSourceLedger;
   workspace: WorkspaceConfig;
   page: ExactMeetingNotePage;
-  source: ObservedSourceIdentity<"meeting-note">;
+  expectedSource: ObservedSourceIdentity<"meeting-note">;
   revision: number;
   contentHash: string;
 }): Promise<
@@ -686,9 +686,9 @@ async function readImmutableMeetingNoteRevision(input: {
     immutable = await input.ledger.get({
       workspaceId: input.workspace.workspaceId,
       source: {
-        providerId: input.source.providerId,
+        providerId: input.expectedSource.providerId,
         sourceKind: "meeting-note",
-        sourceObjectId: input.source.sourceObjectId
+        sourceObjectId: input.expectedSource.sourceObjectId
       },
       revision: input.revision
     });
@@ -704,9 +704,13 @@ async function readImmutableMeetingNoteRevision(input: {
   if (
     !immutable ||
     immutable.contentHash !== input.contentHash ||
+    immutable.revision !== input.revision ||
+    immutable.source.providerId !== input.expectedSource.providerId ||
     immutable.source.providerId !== input.page.providerId ||
+    immutable.source.sourceObjectId !== input.expectedSource.sourceObjectId ||
+    immutable.source.parentObjectId !== input.expectedSource.parentObjectId ||
     immutable.source.parentObjectId !== input.page.pageId ||
-    immutable.source.sourceKind !== "meeting-note"
+    immutable.source.sourceKind !== input.expectedSource.sourceKind
   ) {
     return {
       status: "unavailable",
@@ -1096,7 +1100,7 @@ async function replayStoredReceipt(input: {
       ledger: input.ledger,
       workspace: input.workspace,
       page: receipt.page,
-      source: {
+      expectedSource: {
         providerId: receipt.source.providerId,
         sourceKind: "meeting-note",
         sourceObjectId: receipt.source.sourceObjectId,

@@ -10,6 +10,10 @@ import { createMeetingNotesIngestion } from "../../src/knowledge/meeting-notes-i
 import { createLedgerBackedImportedSourceVerifier } from "../../src/knowledge/ledger-backed-imported-source-verifier.js";
 import {
   createObservedSourceLedger,
+  type GetObservedSourceRevisionInput,
+  type ObservedSourceKind,
+  type ObservedSourceLedger,
+  type ObservedSourceSnapshot,
   type RawMeetingNoteSnapshot
 } from "../../src/knowledge/observed-source-ledger.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
@@ -155,6 +159,126 @@ describe("SourceBoundNativeReview", () => {
           [workspace.workspaceId]
         )
       ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    } finally {
+      await harness.database.close();
+    }
+  });
+
+  it("fails closed before ingestion when a ledger reread substitutes another root and revision", async () => {
+    const harness = await createNativeReviewHarness();
+    const request = nativeReviewRequest();
+    const substituteSource = {
+      ...completeMeetingNoteEvidence().source,
+      sourceObjectId: "meeting-notes-root-substitute",
+      parentObjectId: "other-notion-page"
+    };
+
+    try {
+      const firstSubstituteRevision = await harness.ledger.record({
+        workspaceId: workspace.workspaceId,
+        source: substituteSource,
+        providerVersion: "2026-08-10T09:00:00.000Z",
+        snapshot: completeMeetingNoteSnapshot(),
+        observedAt: "2026-08-10T09:00:30.000Z"
+      });
+      const substituteRevision = await harness.ledger.record({
+        workspaceId: workspace.workspaceId,
+        source: {
+          ...substituteSource,
+          parentObjectId: request.page.pageId
+        },
+        providerVersion: "2026-08-10T09:00:00.000Z",
+        snapshot: completeMeetingNoteSnapshot(),
+        observedAt: "2026-08-10T09:00:31.000Z"
+      });
+
+      function getSubstitutedRevision<
+        Input extends GetObservedSourceRevisionInput<ObservedSourceKind>
+      >(
+        input: Input
+      ): Promise<ObservedSourceSnapshot<Input["source"]["sourceKind"]> | null>;
+      function getSubstitutedRevision(
+        input: GetObservedSourceRevisionInput<ObservedSourceKind>
+      ): Promise<ObservedSourceSnapshot<ObservedSourceKind> | null> {
+        if (
+          input.source.sourceKind === "meeting-note" &&
+          input.source.providerId === request.page.providerId &&
+          input.source.sourceObjectId === "meeting-notes-root" &&
+          input.revision === 1
+        ) {
+          return Promise.resolve(substituteRevision);
+        }
+
+        return harness.ledger.get(input);
+      }
+
+      const substitutingLedger = {
+        ...harness.ledger,
+        get: getSubstitutedRevision
+      } satisfies ObservedSourceLedger;
+      const review = createSourceBoundNativeReview({
+        database: harness.database,
+        workspace,
+        ledger: substitutingLedger,
+        meetingIntelligence: harness.meetingIntelligence,
+        meetingNotesIngestion: harness.meetingNotesIngestion,
+        meetingNoteEvidenceSource: harness.source,
+        identityDirectory: harness.identityDirectory,
+        now: () => new Date("2026-08-10T09:02:00.000Z")
+      });
+
+      expect(substituteRevision).toMatchObject({
+        source: {
+          providerId: request.page.providerId,
+          sourceObjectId: "meeting-notes-root-substitute",
+          parentObjectId: request.page.pageId
+        },
+        revision: firstSubstituteRevision.revision + 1,
+        contentHash: firstSubstituteRevision.contentHash
+      });
+
+      const receipt = await review.review(request);
+
+      expect(receipt).toMatchObject({
+        source: null,
+        outcome: {
+          type: "needs-clarification",
+          code: "meeting-note-ledger-invalid",
+          retryable: false,
+          reviewIds: [],
+          workReferences: []
+        }
+      });
+      expect(harness.catalog.searches).toEqual([]);
+      expect(harness.catalog.gets).toEqual([]);
+      await expect(
+        harness.database.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count
+             FROM meeting_observations
+            WHERE workspace_id = $1`,
+          [workspace.workspaceId]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+      await expect(
+        harness.database.query<{
+          source_object_id: string | null;
+          source_revision: number | null;
+          source_content_hash: string | null;
+        }>(
+          `SELECT source_object_id, source_revision, source_content_hash
+             FROM source_bound_native_reviews
+            WHERE workspace_id = $1 AND native_run_id = $2`,
+          [workspace.workspaceId, request.nativeRunId]
+        )
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            source_object_id: null,
+            source_revision: null,
+            source_content_hash: null
+          }
+        ]
+      });
     } finally {
       await harness.database.close();
     }

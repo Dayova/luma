@@ -753,7 +753,7 @@ class NotionSdkMeetingNotesApi
       this.client.pages.retrieve({ page_id: input.pageId })
     );
 
-    if (!isFullPage(page)) {
+    if (!notionSdk().isFullPage(page)) {
       throw new NotionMeetingNotesReadError(
         "source-invalid",
         "Notion returned a partial page for a Meeting Notes wake-up"

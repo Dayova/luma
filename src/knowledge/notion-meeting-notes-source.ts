@@ -1,13 +1,11 @@
-import {
-  APIErrorCode,
+import { createRequire } from "node:module";
+import type {
+  BlockObjectResponse,
   Client,
-  isFullBlock,
-  isFullPage,
-  isNotionClientError,
-  type BlockObjectResponse,
-  type PageObjectResponse,
-  type PartialBlockObjectResponse
+  PageObjectResponse,
+  PartialBlockObjectResponse
 } from "@notionhq/client";
+import type * as NotionSdk from "@notionhq/client";
 import type {
   MeetingNotesCompleteScan,
   MeetingNotesScan,
@@ -40,6 +38,13 @@ const MAX_MEETING_NOTE_BLOCK_CHILD_READS = 1_000;
 const MAX_MEETING_NOTE_BLOCK_TREE_DEPTH = 100;
 const SCAN_SESSION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_SCAN_SESSIONS = 100;
+const requireNotionSdk = createRequire(import.meta.url);
+let cachedNotionSdk: NotionSdkModule | undefined;
+
+type NotionSdkModule = Pick<
+  typeof NotionSdk,
+  "APIErrorCode" | "Client" | "isFullBlock" | "isFullPage" | "isNotionClientError"
+>;
 
 export type NotionMeetingNotesPage = {
   id: string;
@@ -523,6 +528,7 @@ function createNotionSdkMeetingNotesApi(
     );
   }
 
+  const { Client } = notionSdk();
   return new NotionSdkMeetingNotesApi(
     new Client({ auth: config.token, notionVersion: NOTION_MEETING_NOTES_API_VERSION })
   );
@@ -550,7 +556,7 @@ class NotionSdkMeetingNotesApi implements NotionMeetingNotesApi {
       })
     );
 
-    const pages = result.results.filter(isFullPage);
+    const pages = result.results.filter(notionSdk().isFullPage);
     return {
       pages: pages.map(toMeetingNotesPage),
       nextCursor: result.next_cursor,
@@ -1276,7 +1282,7 @@ function toMeetingNotesPage(page: PageObjectResponse): NotionMeetingNotesPage {
 export function normalizeNotionMeetingNotesBlock(
   block: BlockObjectResponse | PartialBlockObjectResponse
 ): NotionMeetingNotesBlock {
-  if (!isFullBlock(block)) {
+  if (!notionSdk().isFullBlock(block)) {
     return {
       id: block.id,
       type: "unknown",
@@ -1419,6 +1425,8 @@ function toNotionMeetingNotesReadError(error: unknown): NotionMeetingNotesReadEr
     return error;
   }
 
+  const { APIErrorCode, isNotionClientError } = notionSdk();
+
   if (isNotionClientError(error)) {
     switch (error.code) {
       case APIErrorCode.ObjectNotFound:
@@ -1434,4 +1442,10 @@ function toNotionMeetingNotesReadError(error: unknown): NotionMeetingNotesReadEr
     "transient",
     error instanceof Error ? error.message : "Notion read failed"
   );
+}
+
+/** Provider SDK loading is deferred until the production Notion adapter runs. */
+function notionSdk(): NotionSdkModule {
+  cachedNotionSdk ??= requireNotionSdk("@notionhq/client") as NotionSdkModule;
+  return cachedNotionSdk;
 }

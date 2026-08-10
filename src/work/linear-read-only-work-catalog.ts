@@ -1,4 +1,6 @@
-import { LinearClient } from "@linear/sdk";
+import { createRequire } from "node:module";
+import type { LinearClient } from "@linear/sdk";
+import type * as LinearSdk from "@linear/sdk";
 import { linearSdkIssueToApiIssue } from "./linear-sdk-issue.js";
 import { toLinearWorkItem, type LinearApiIssue } from "./linear-work-item.js";
 import type { WorkCatalog, WorkQuery } from "./interface.js";
@@ -18,6 +20,18 @@ const READ_ONLY_LABEL_FETCH_LIMIT = MAX_ISSUE_LABEL_COUNT + 1;
 export type LinearReadOnlyApiIssue = LinearApiIssue;
 
 export const linearReadOnlyApiBrand: unique symbol = Symbol("LinearReadOnlyApi");
+/**
+ * Names the nominal read-only catalog contract for declaration emit. Runtime
+ * issuance still also requires membership in this module's private WeakSet.
+ */
+export const linearReadOnlyWorkCatalogBrand: unique symbol = Symbol(
+  "LinearReadOnlyWorkCatalog"
+);
+const constructedReadOnlyCatalogs = new WeakSet<object>();
+const requireLinearSdk = createRequire(import.meta.url);
+let cachedLinearSdk: LinearSdkModule | undefined;
+
+type LinearSdkModule = Pick<typeof LinearSdk, "LinearClient">;
 
 type LinearReadOnlyApiOperations = {
   searchIssues(input: {
@@ -41,6 +55,19 @@ export interface LinearReadOnlyApi extends LinearReadOnlyApiOperations {
    * explicit test factory below.
    */
   readonly [linearReadOnlyApiBrand]: true;
+}
+
+/**
+ * A catalog created by this module's separately credentialed read-only
+ * factories. The nominal brand, together with the private issuance registry,
+ * prevents a narrowed writer catalog from entering a composition seam merely
+ * by satisfying WorkCatalog structurally.
+ */
+export interface LinearReadOnlyWorkCatalog extends WorkCatalog {
+  readonly [linearReadOnlyWorkCatalogBrand]: true;
+  /** The fixed opaque provider scope issued alongside this catalog. */
+  readonly providerScopeId: string;
+  readonly supportsConditionalUpdates: false;
 }
 
 type LinearReadOnlyApiTestDouble = LinearReadOnlyApiOperations & {
@@ -115,7 +142,7 @@ export class LinearReadOnlyWorkCatalogError extends Error {
  */
 export function createLinearReadOnlyWorkCatalog(
   config: LinearReadOnlyWorkCatalogConfig
-): WorkCatalog {
+): LinearReadOnlyWorkCatalog {
   return createLinearReadOnlyWorkCatalogWithApi(
     config,
     createLinearReadOnlySdkApi(config)
@@ -128,20 +155,22 @@ export function createLinearReadOnlyWorkCatalog(
  */
 export function createLinearReadOnlyWorkCatalogForTest(
   config: LinearReadOnlyWorkCatalogTestConfig
-): WorkCatalog {
+): LinearReadOnlyWorkCatalog {
   return createLinearReadOnlyWorkCatalogWithApi(config, config.api);
 }
 
 function createLinearReadOnlyWorkCatalogWithApi(
   config: Omit<LinearReadOnlyWorkCatalogTestConfig, "api">,
   api: LinearReadOnlyApi
-): WorkCatalog {
+): LinearReadOnlyWorkCatalog {
   const teamId = requireConfigString(config.teamId, "LINEAR_TEAM_ID");
   const providerId = nonBlank(config.providerId) ?? "linear";
   const permittedSelectors = new BoundedSelectorSet(MAX_REMEMBERED_ISSUE_SELECTORS);
 
-  return {
+  const catalog: LinearReadOnlyWorkCatalog = {
+    [linearReadOnlyWorkCatalogBrand]: true,
     providerId,
+    providerScopeId: teamId,
     identityProviderId: "linear",
     supportsConditionalUpdates: false,
     async searchWorkItems(query) {
@@ -173,11 +202,14 @@ function createLinearReadOnlyWorkCatalogWithApi(
       return toLinearWorkItem(issue, providerId);
     }
   };
+
+  constructedReadOnlyCatalogs.add(catalog);
+  return Object.freeze(catalog);
 }
 
 export function createLinearReadOnlyWorkCatalogFromEnv(
   env: NodeJS.ProcessEnv = process.env
-): WorkCatalog {
+): LinearReadOnlyWorkCatalog {
   const readOnlyApiKey = requireConfigString(
     env["LINEAR_READONLY_API_KEY"],
     "LINEAR_READONLY_API_KEY"
@@ -198,10 +230,28 @@ export function createLinearReadOnlyWorkCatalogFromEnv(
   return createLinearReadOnlyWorkCatalog(config);
 }
 
+/**
+ * Lets app composition validate both the declaration-visible nominal brand
+ * and this module's private issuance registry. A type assertion or copied
+ * public brand token cannot turn a writer catalog into a separately
+ * constructed read-only catalog.
+ */
+export function isIssuedLinearReadOnlyWorkCatalog(
+  value: unknown
+): value is LinearReadOnlyWorkCatalog {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as LinearReadOnlyWorkCatalog)[linearReadOnlyWorkCatalogBrand] === true &&
+    constructedReadOnlyCatalogs.has(value)
+  );
+}
+
 function createLinearReadOnlySdkApi(
   config: LinearReadOnlyWorkCatalogConfig
 ): LinearReadOnlyApi {
   const apiKey = requireConfigString(config.readOnlyApiKey, "LINEAR_READONLY_API_KEY");
+  const { LinearClient } = linearSdk();
 
   return new LinearSdkReadOnlyApi(
     new LinearClient({
@@ -209,6 +259,12 @@ function createLinearReadOnlySdkApi(
       ...(config.apiUrl ? { apiUrl: config.apiUrl } : {})
     })
   );
+}
+
+function linearSdk(): LinearSdkModule {
+  cachedLinearSdk ??= requireLinearSdk("@linear/sdk") as LinearSdkModule;
+
+  return cachedLinearSdk;
 }
 
 class LinearSdkReadOnlyApi implements LinearReadOnlyApi {

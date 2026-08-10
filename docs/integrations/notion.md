@@ -187,6 +187,15 @@ the three required deployment properties:
 - a separately composed `LINEAR_READONLY_API_KEY` catalog, never
   `LINEAR_API_KEY` or a `WorkProvider` writer.
 
+`createDormantSourceBoundNativeReview` now owns the safe, inject-only assembly
+of the exact-page source, source ledger, workspace-scoped issued read-only
+Linear catalog, immutable-source verifier, durable Operational Outcome marker
+verifier, Meeting Intelligence, ingestion, and this core. It returns only
+`review(...)`; it has no environment factory, server registration, OAuth flow,
+provider SDK, or runtime export. Its catalog must be issued by the dedicated
+read-only Linear factory, so a narrowed writer catalog cannot accidentally
+enter this composition.
+
 Do not enable this surface through an environment flag alone. Production
 composition must supply evidence for all three properties first.
 

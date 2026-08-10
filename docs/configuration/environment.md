@@ -41,9 +41,9 @@ The current source-bound Linear settlement gate is deliberately strict:
 - generic `create-work-item` Intents are currently rejected until they carry
   the same durable ownership proof.
 
-LUM-6, LUM-7, and LUM-8 remain incomplete; this gate describes the safety
-contract for their current foundation, not a claim that the full settlement
-wedge is finished.
+LUM-7 and LUM-8 are complete safety foundations. LUM-6 remains incomplete
+pending LUM-11's canonical knowledge-writeback policy and implementation; this
+gate is not a claim that the full settlement wedge is finished.
 
 ## Linear Setup
 

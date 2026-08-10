@@ -52,6 +52,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
       title: string | null;
       url: string;
       lastEditedAt: string | null;
+      inTrash: boolean;
     }>;
     nextCursor: string | null;
     incomplete: boolean;
@@ -63,13 +64,15 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
           id: "meeting-page-1",
           title: "Product sync",
           url: "https://notion.so/meeting-page-1",
-          lastEditedAt: "2026-08-07T08:31:00.000Z"
+          lastEditedAt: "2026-08-07T08:31:00.000Z",
+          inTrash: false
         },
         {
           id: "ordinary-page",
           title: "Ordinary knowledge",
           url: "https://notion.so/ordinary-page",
-          lastEditedAt: "2026-08-07T08:31:00.000Z"
+          lastEditedAt: "2026-08-07T08:31:00.000Z",
+          inTrash: false
         }
       ],
       nextCursor: "next-page",
@@ -1545,6 +1548,60 @@ describe("Notion Meeting Notes source", () => {
       expect(first.records[0]).toMatchObject({ change: "new", revision: 1 });
       expect(second.records[0]).toMatchObject({ change: "unchanged", revision: 1 });
       expect(second.records[0]?.contentHash).toBe(first.records[0]?.contentHash);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("fails a canonical scan closed when root pagination exceeds its read bound", async () => {
+    const database = await createPgliteDatabase();
+    const baseApi = new FakeNotionMeetingNotesApi();
+    let rootPageCalls = 0;
+    const api: NotionMeetingNotesApi = {
+      listDataSourcePages: (input) => baseApi.listDataSourcePages(input),
+      listBlockChildren(input) {
+        if (input.blockId === "meeting-page-1") {
+          rootPageCalls += 1;
+          return Promise.resolve({
+            blocks: [],
+            nextCursor: `root-cursor-${rootPageCalls}`
+          });
+        }
+
+        return baseApi.listBlockChildren(input);
+      },
+      retrievePageMarkdown: (input) => baseApi.retrievePageMarkdown(input)
+    };
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: "dayova-meetings"
+    });
+
+    try {
+      const scan = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(rootPageCalls).toBe(100);
+      expect(scan.records).toEqual([]);
+      expect(scan.completeness).toBe("partial");
+      expect(scan.partialReasons).toContainEqual(
+        expect.objectContaining({
+          code: "unreadable-page",
+          pageId: "meeting-page-1",
+          retryable: false
+        })
+      );
+      await expect(
+        ledger.get({
+          workspaceId: "workspace_dayova",
+          source: {
+            providerId: "notion",
+            sourceKind: "meeting-note",
+            sourceObjectId: "meeting-notes-block-1"
+          }
+        })
+      ).resolves.toBeNull();
     } finally {
       await database.close();
     }

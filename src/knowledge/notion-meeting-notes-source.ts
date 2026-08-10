@@ -32,6 +32,12 @@ import {
 
 const NOTION_MEETING_NOTES_API_VERSION = "2026-03-11";
 const DEFAULT_PAGE_SIZE = 100;
+// Notion child-page reads use `DEFAULT_PAGE_SIZE`; exceeding either bound is
+// malformed provider material, never a reason to continue an unbounded scan.
+const MAX_BLOCK_CHILD_PAGES = 100;
+const MAX_CAPTURED_MEETING_NOTE_BLOCKS = 10_000;
+const MAX_MEETING_NOTE_BLOCK_CHILD_READS = 1_000;
+const MAX_MEETING_NOTE_BLOCK_TREE_DEPTH = 100;
 const SCAN_SESSION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_SCAN_SESSIONS = 100;
 
@@ -40,6 +46,7 @@ export type NotionMeetingNotesPage = {
   title: string | null;
   url: string;
   lastEditedAt: string | null;
+  inTrash: boolean;
 };
 
 export type NotionMeetingNotesBlock = {
@@ -87,6 +94,26 @@ export interface NotionMeetingNotesApi {
   }>;
 }
 
+/**
+ * The narrow read surface shared by canonical scans and exact-page evidence
+ * capture. It deliberately has no page enumeration or mutation capability.
+ */
+export type NotionMeetingNoteSnapshotReader = Pick<
+  NotionMeetingNotesApi,
+  "listBlockChildren" | "retrievePageMarkdown"
+>;
+
+export type NotionMeetingNoteSnapshotOwnership = {
+  workspaceId: string;
+  providerId: string;
+  operationalOutcomeMarkerVerifier?: OperationalOutcomeMarkerVerifier;
+};
+
+type MeetingNoteCaptureBudget = {
+  remainingBlocks: number;
+  remainingBlockChildReads: number;
+};
+
 export type NotionMeetingNotesSourceConfig = {
   meetingsDataSourceId: string;
   ledger: ObservedSourceLedger;
@@ -122,6 +149,7 @@ export type NotionMeetingNotesReadErrorCode =
   | "source-not-found"
   | "source-restricted"
   | "transient"
+  | "source-invalid"
   /** A Luma-owned writeback exists, but it cannot be proven safe to ignore. */
   | "unsafe-operational-outcome-markdown"
   | "unverified-operational-outcome-markdown"
@@ -143,12 +171,6 @@ type NotionMeetingNotesScanSession = {
   observedSourceObjectIds: Set<string>;
   fullyReadable: boolean;
   createdAtMs: number;
-};
-
-type OperationalOutcomeOwnershipContext = {
-  workspaceId: string;
-  providerId: string;
-  operationalOutcomeMarkerVerifier?: OperationalOutcomeMarkerVerifier;
 };
 
 export function createNotionMeetingNotesSource(
@@ -319,7 +341,7 @@ export function createNotionMeetingNotesSource(
         let rootBlocks: NotionMeetingNotesBlock[];
 
         try {
-          rootBlocks = await listAllBlockChildren(api, meetingPage.id);
+          rootBlocks = await listAllNotionBlockChildren(api, meetingPage.id);
         } catch (error) {
           partialReasons.push(pageReadFailureReason(meetingPage.id, error));
           continue;
@@ -339,22 +361,27 @@ export function createNotionMeetingNotesSource(
           });
         }
 
-        const sourceBlocks = rootBlocks.filter(isMeetingNotesBlock);
+        const sourceBlocks = rootBlocks.filter(isNotionMeetingNotesRoot);
 
         for (const sourceBlock of sourceBlocks) {
           let snapshot: RawMeetingNoteSnapshot;
 
           try {
-            snapshot = await captureMeetingNote(api, meetingPage, sourceBlock, {
-              workspaceId: input.workspaceId,
-              providerId,
-              ...(config.operationalOutcomeMarkerVerifier
-                ? {
-                    operationalOutcomeMarkerVerifier:
-                      config.operationalOutcomeMarkerVerifier
-                  }
-                : {})
-            });
+            snapshot = await captureNotionMeetingNoteSnapshot(
+              api,
+              meetingPage,
+              sourceBlock,
+              {
+                workspaceId: input.workspaceId,
+                providerId,
+                ...(config.operationalOutcomeMarkerVerifier
+                  ? {
+                      operationalOutcomeMarkerVerifier:
+                        config.operationalOutcomeMarkerVerifier
+                    }
+                  : {})
+              }
+            );
           } catch (error) {
             partialReasons.push(
               meetingNoteReadFailureReason(meetingPage.id, sourceBlock.id, error)
@@ -570,11 +597,11 @@ class NotionSdkMeetingNotesApi implements NotionMeetingNotesApi {
   }
 }
 
-async function captureMeetingNote(
-  api: NotionMeetingNotesApi,
+export async function captureNotionMeetingNoteSnapshot(
+  api: NotionMeetingNoteSnapshotReader,
   page: NotionMeetingNotesPage,
   sourceBlock: NotionMeetingNotesBlock,
-  ownership: OperationalOutcomeOwnershipContext
+  ownership: NotionMeetingNoteSnapshotOwnership
 ): Promise<RawMeetingNoteSnapshot> {
   const details = sourceBlock.meetingNotes;
 
@@ -613,11 +640,28 @@ async function captureMeetingNote(
     page.id,
     ownership
   );
-  const [summaryResult, actionItemsAndNotesResult, transcriptResult] = await Promise.all([
-    readSection(api, details.summaryBlockId, "summary"),
-    readSection(api, details.notesBlockId, "notes"),
-    readSection(api, details.transcriptBlockId, "transcript")
-  ]);
+  const captureBudget: MeetingNoteCaptureBudget = {
+    remainingBlocks: MAX_CAPTURED_MEETING_NOTE_BLOCKS,
+    remainingBlockChildReads: MAX_MEETING_NOTE_BLOCK_CHILD_READS
+  };
+  const summaryResult = await readSection(
+    api,
+    details.summaryBlockId,
+    "summary",
+    captureBudget
+  );
+  const actionItemsAndNotesResult = await readSection(
+    api,
+    details.notesBlockId,
+    "notes",
+    captureBudget
+  );
+  const transcriptResult = await readSection(
+    api,
+    details.transcriptBlockId,
+    "transcript",
+    captureBudget
+  );
   const reasons = [
     ...summaryResult.reasons,
     ...actionItemsAndNotesResult.reasons,
@@ -680,15 +724,24 @@ function failedSnapshot(message: string): RawMeetingNoteSnapshot {
 }
 
 async function readMarkdown(
-  api: NotionMeetingNotesApi,
+  api: Pick<NotionMeetingNotesApi, "retrievePageMarkdown">,
   pageId: string
 ): Promise<{
   markdown: { content: string; truncated: boolean; unknownBlockIds: string[] };
   unreadable: boolean;
 }> {
   try {
+    const markdown = await api.retrievePageMarkdown({ pageId, includeTranscript: true });
+
+    if (!isNotionMeetingNoteMarkdown(markdown)) {
+      throw new NotionMeetingNotesReadError(
+        "source-invalid",
+        "Notion returned invalid Meeting Note Markdown"
+      );
+    }
+
     return {
-      markdown: await api.retrievePageMarkdown({ pageId, includeTranscript: true }),
+      markdown,
       unreadable: false
     };
   } catch (error) {
@@ -703,10 +756,22 @@ async function readMarkdown(
   }
 }
 
+function isNotionMeetingNoteMarkdown(
+  value: unknown
+): value is { content: string; truncated: boolean; unknownBlockIds: string[] } {
+  return (
+    isRecord(value) &&
+    typeof value["content"] === "string" &&
+    typeof value["truncated"] === "boolean" &&
+    Array.isArray(value["unknownBlockIds"]) &&
+    value["unknownBlockIds"].every(isNonBlankOpaqueIdentifier)
+  );
+}
+
 async function canonicalMeetingNoteMarkdown(
   markdown: { content: string; truncated: boolean; unknownBlockIds: string[] },
   pageExternalId: string,
-  ownership: OperationalOutcomeOwnershipContext
+  ownership: NotionMeetingNoteSnapshotOwnership
 ): Promise<{ content: string; truncated: boolean; unknownBlockIds: string[] }> {
   const parsed = parseOperationalOutcomeSection(markdown.content);
 
@@ -771,9 +836,10 @@ async function canonicalMeetingNoteMarkdown(
 }
 
 async function readSection(
-  api: NotionMeetingNotesApi,
+  api: Pick<NotionMeetingNotesApi, "listBlockChildren">,
   blockId: string | null,
-  section: "summary" | "notes" | "transcript"
+  section: "summary" | "notes" | "transcript",
+  budget: MeetingNoteCaptureBudget
 ): Promise<{ section: RawMeetingNoteSection; reasons: SourcePartialReason[] }> {
   if (!blockId) {
     const reason = missingSectionReason(section);
@@ -781,7 +847,7 @@ async function readSection(
   }
 
   try {
-    const blocks = await captureBlockTree(api, blockId);
+    const blocks = await captureBlockTree(api, blockId, budget);
     const unknown = findUnknownBlocks(blocks);
 
     const reasons =
@@ -812,36 +878,222 @@ async function readSection(
   }
 }
 
-async function listAllBlockChildren(
-  api: NotionMeetingNotesApi,
+export async function listAllNotionBlockChildren(
+  api: Pick<NotionMeetingNotesApi, "listBlockChildren">,
   blockId: string
+): Promise<NotionMeetingNotesBlock[]> {
+  return listAllNotionBlockChildrenWithBudget(api, blockId);
+}
+
+async function listAllNotionBlockChildrenWithBudget(
+  api: Pick<NotionMeetingNotesApi, "listBlockChildren">,
+  blockId: string,
+  budget?: MeetingNoteCaptureBudget
 ): Promise<NotionMeetingNotesBlock[]> {
   const blocks: NotionMeetingNotesBlock[] = [];
   let cursor: string | undefined;
+  const seenCursors = new Set<string>();
 
-  do {
-    const page = await api.listBlockChildren({ blockId, ...(cursor ? { cursor } : {}) });
+  for (let pageCount = 0; pageCount < MAX_BLOCK_CHILD_PAGES; pageCount += 1) {
+    consumeBlockChildRead(budget);
+    const rawPage = await api.listBlockChildren({
+      blockId,
+      ...(cursor === undefined ? {} : { cursor })
+    });
+    const page = validateNotionBlockChildrenPage(rawPage);
     blocks.push(...page.blocks);
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
 
-  return blocks;
+    if (page.nextCursor === null) {
+      return blocks;
+    }
+
+    if (seenCursors.has(page.nextCursor)) {
+      throw new NotionMeetingNotesReadError(
+        "source-invalid",
+        "Notion repeated a block-children pagination cursor"
+      );
+    }
+
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+
+  throw new NotionMeetingNotesReadError(
+    "source-invalid",
+    "Notion exceeded the bounded block-children pagination limit"
+  );
+}
+
+function consumeBlockChildRead(budget: MeetingNoteCaptureBudget | undefined): void {
+  if (!budget) {
+    return;
+  }
+
+  if (budget.remainingBlockChildReads < 1) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion exceeded the bounded Meeting Note block-read limit"
+    );
+  }
+
+  budget.remainingBlockChildReads -= 1;
+}
+
+function validateNotionBlockChildrenPage(value: unknown): {
+  blocks: NotionMeetingNotesBlock[];
+  nextCursor: string | null;
+} {
+  if (!isRecord(value) || !Array.isArray(value["blocks"]) || !("nextCursor" in value)) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion returned an invalid block-children page"
+    );
+  }
+
+  const nextCursor = value["nextCursor"];
+
+  if (nextCursor !== null && !isNonBlankOpaqueIdentifier(nextCursor)) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion returned an invalid block-children pagination cursor"
+    );
+  }
+
+  if (
+    value["blocks"].length > DEFAULT_PAGE_SIZE ||
+    !value["blocks"].every(isNotionMeetingNotesBlockShape)
+  ) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion returned an invalid Meeting Note block"
+    );
+  }
+
+  return {
+    blocks: value["blocks"],
+    nextCursor
+  };
+}
+
+function isNotionMeetingNotesBlockShape(
+  value: unknown
+): value is NotionMeetingNotesBlock {
+  if (
+    !isRecord(value) ||
+    !isNonBlankOpaqueIdentifier(value["id"]) ||
+    !isNonBlankOpaqueIdentifier(value["type"]) ||
+    (value["text"] !== null && typeof value["text"] !== "string") ||
+    (value["checked"] !== null && typeof value["checked"] !== "boolean") ||
+    typeof value["hasChildren"] !== "boolean"
+  ) {
+    return false;
+  }
+
+  if (!("meetingNotes" in value) || value["meetingNotes"] === undefined) {
+    return true;
+  }
+
+  const meetingNotes = value["meetingNotes"];
+
+  return (
+    isRecord(meetingNotes) &&
+    (meetingNotes["title"] === null || typeof meetingNotes["title"] === "string") &&
+    (meetingNotes["status"] === null || typeof meetingNotes["status"] === "string") &&
+    isNullableOpaqueIdentifier(meetingNotes["summaryBlockId"]) &&
+    isNullableOpaqueIdentifier(meetingNotes["notesBlockId"]) &&
+    isNullableOpaqueIdentifier(meetingNotes["transcriptBlockId"]) &&
+    isNullableCalendar(meetingNotes["calendar"]) &&
+    isNullableRecording(meetingNotes["recording"])
+  );
+}
+
+function isNullableOpaqueIdentifier(value: unknown): boolean {
+  return value === null || isNonBlankOpaqueIdentifier(value);
+}
+
+function isNullableCalendar(value: unknown): boolean {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      typeof value["startAt"] === "string" &&
+      typeof value["endAt"] === "string" &&
+      Array.isArray(value["attendeeProviderUserIds"]) &&
+      value["attendeeProviderUserIds"].every((attendee) => typeof attendee === "string"))
+  );
+}
+
+function isNullableRecording(value: unknown): boolean {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      (value["startAt"] === null || typeof value["startAt"] === "string") &&
+      (value["endAt"] === null || typeof value["endAt"] === "string"))
+  );
+}
+
+function isNonBlankOpaqueIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.trim() === value &&
+    !/\s/u.test(value)
+  );
 }
 
 async function captureBlockTree(
-  api: NotionMeetingNotesApi,
-  blockId: string
+  api: Pick<NotionMeetingNotesApi, "listBlockChildren">,
+  blockId: string,
+  budget: MeetingNoteCaptureBudget,
+  ancestors = new Set<string>()
 ): Promise<CapturedMeetingNoteBlock[]> {
-  const blocks = await listAllBlockChildren(api, blockId);
-  return Promise.all(
-    blocks.map(async (block) => ({
+  if (ancestors.has(blockId)) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion returned a cyclic Meeting Note block tree"
+    );
+  }
+
+  if (ancestors.size >= MAX_MEETING_NOTE_BLOCK_TREE_DEPTH) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion exceeded the bounded Meeting Note block tree depth"
+    );
+  }
+
+  if (budget.remainingBlocks < 1) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion exceeded the bounded Meeting Note block capture limit"
+    );
+  }
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(blockId);
+  const blocks = await listAllNotionBlockChildrenWithBudget(api, blockId, budget);
+
+  if (blocks.length > budget.remainingBlocks) {
+    throw new NotionMeetingNotesReadError(
+      "source-invalid",
+      "Notion exceeded the bounded Meeting Note block capture limit"
+    );
+  }
+
+  budget.remainingBlocks -= blocks.length;
+  const captured: CapturedMeetingNoteBlock[] = [];
+
+  for (const block of blocks) {
+    captured.push({
       id: block.id,
       type: block.type,
       text: block.text,
       checked: block.checked,
-      children: block.hasChildren ? await captureBlockTree(api, block.id) : []
-    }))
-  );
+      children: block.hasChildren
+        ? await captureBlockTree(api, block.id, budget, nextAncestors)
+        : []
+    });
+  }
+
+  return captured;
 }
 
 function flattenCapturedBlocks(blocks: CapturedMeetingNoteBlock[]): string {
@@ -860,7 +1112,7 @@ function findUnknownBlocks(
   ]);
 }
 
-function isMeetingNotesBlock(block: NotionMeetingNotesBlock): boolean {
+export function isNotionMeetingNotesRoot(block: NotionMeetingNotesBlock): boolean {
   return block.type === "meeting-notes" || block.type === "transcription";
 }
 
@@ -1013,7 +1265,8 @@ function toMeetingNotesPage(page: PageObjectResponse): NotionMeetingNotesPage {
     id: page.id,
     title: readTitle(page),
     url: page.url,
-    lastEditedAt: page.last_edited_time
+    lastEditedAt: page.last_edited_time,
+    inTrash: page.in_trash
   };
 }
 

@@ -9,16 +9,27 @@ import {
   listAllNotionBlockChildren,
   NotionMeetingNotesReadError,
   type NotionMeetingNoteSnapshotReader,
+  type NotionMeetingNotesBlock,
   type NotionMeetingNotesPage
 } from "./notion-meeting-notes-source.js";
 import { canonicalNotionObjectId } from "./notion-object-id.js";
 
 /**
- * The exact-page reader exposes only the reads that one Meeting Note capture
- * needs. It cannot enumerate a data source, search Notion, or mutate Notion.
+ * The callback-scoped read surface needed by exactly one Meeting Note capture.
+ * A provider implementation revokes it once `capture` settles.
  */
-export interface NotionObjectScopedMeetingNoteEvidenceReader extends NotionMeetingNoteSnapshotReader {
+export interface NotionObjectScopedMeetingNoteEvidenceSession extends NotionMeetingNoteSnapshotReader {
   retrievePage(input: { pageId: string }): Promise<NotionMeetingNotesPage>;
+}
+
+/**
+ * The deep exact-page reader interface. It owns provider-derived capability
+ * state and exposes it only for the duration of one capture callback.
+ */
+export interface NotionObjectScopedMeetingNoteEvidenceReader {
+  capture<T>(
+    operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+  ): Promise<T>;
 }
 
 export type NotionObjectScopedMeetingNoteEvidenceSourceConfig = {
@@ -64,138 +75,159 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
         );
       }
 
-      const firstPage = await readConfiguredPage({
-        reader: bound.reader,
-        pageId: bound.pageId
-      });
+      // Provider-derived block authority is capture-local. The reader owns a
+      // fresh callback-scoped capability tree before any page read starts.
+      return bound.reader.capture(async (reader) => {
+        const firstPage = await readConfiguredPage({
+          reader,
+          pageId: bound.pageId
+        });
 
-      if (firstPage.status === "unavailable") {
-        return firstPage.capture;
-      }
+        if (firstPage.status === "unavailable") {
+          return firstPage.capture;
+        }
 
-      let rootBlocks;
+        let rootBlocks;
 
-      try {
-        rootBlocks = await listAllNotionBlockChildren(bound.reader, bound.pageId);
-      } catch (error) {
-        return rootUnavailable(error);
-      }
+        try {
+          rootBlocks = await listAllNotionBlockChildren(reader, bound.pageId);
+        } catch (error) {
+          return rootUnavailable(error);
+        }
 
-      if (rootBlocks.some(isUnreadableRootBlock)) {
-        return unavailable(
-          "meeting-note-root-unreadable",
-          "The configured Meeting Note root could not be read safely.",
-          false
-        );
-      }
-
-      const roots = rootBlocks.filter(isNotionMeetingNotesRoot);
-
-      if (roots.length === 0) {
-        return unavailable(
-          "meeting-note-root-missing",
-          "The configured page does not expose one readable Meeting Note root.",
-          false
-        );
-      }
-
-      if (roots.length !== 1) {
-        return unavailable(
-          "meeting-note-root-ambiguous",
-          "The configured page does not expose one readable Meeting Note root.",
-          false
-        );
-      }
-
-      const root = roots[0];
-      const rootId = root ? canonicalNotionObjectId(root.id) : null;
-
-      if (!root || !root.meetingNotes || !rootId) {
-        return unavailable(
-          "meeting-note-root-unreadable",
-          "The configured Meeting Note root could not be read safely.",
-          false
-        );
-      }
-
-      const canonicalRoot = { ...root, id: rootId };
-
-      try {
-        const snapshot = await captureNotionMeetingNoteSnapshot(
-          bound.reader,
-          firstPage.page,
-          canonicalRoot,
-          {
-            workspaceId: bound.workspaceId,
-            providerId: bound.providerId,
-            ...(bound.operationalOutcomeMarkerVerifier
-              ? {
-                  operationalOutcomeMarkerVerifier: bound.operationalOutcomeMarkerVerifier
-                }
-              : {})
-          }
-        );
-
-        if (snapshot.completeness.state !== "complete") {
-          // SourceBoundNativeReview persists and ingests a successful capture
-          // before it can inspect completeness. An exact-page native surface
-          // must therefore stop incomplete material at the provider boundary.
+        if (rootBlocks.some(isUnreadableRootBlock)) {
           return unavailable(
             "meeting-note-root-unreadable",
-            "The configured Meeting Note root is not completely readable.",
+            "The configured Meeting Note root could not be read safely.",
             false
           );
         }
 
-        // Notion does not offer one atomic snapshot across page metadata,
-        // blocks, and Markdown. This final version reread cannot eliminate
-        // that provider limitation, but it prevents labeling mixed material
-        // with a provider version that demonstrably changed during capture.
-        const finalPage = await readConfiguredPage({
-          reader: bound.reader,
-          pageId: bound.pageId
-        });
+        const roots = rootBlocks.filter(isNotionMeetingNotesRoot);
 
-        if (finalPage.status === "unavailable") {
-          return finalPage.capture;
+        if (roots.length === 0) {
+          return unavailable(
+            "meeting-note-root-missing",
+            "The configured page does not expose one readable Meeting Note root.",
+            false
+          );
         }
 
-        if (finalPage.page.lastEditedAt !== firstPage.page.lastEditedAt) {
+        if (roots.length !== 1) {
           return unavailable(
-            "meeting-note-page-unreadable",
-            "The configured Meeting Note page could not be verified.",
+            "meeting-note-root-ambiguous",
+            "The configured page does not expose one readable Meeting Note root.",
+            false
+          );
+        }
+
+        const root = roots[0];
+        const rootId = root ? canonicalNotionObjectId(root.id) : null;
+
+        if (!root || !root.meetingNotes || !rootId) {
+          return unavailable(
+            "meeting-note-root-unreadable",
+            "The configured Meeting Note root could not be read safely.",
+            false
+          );
+        }
+
+        if (hasNotReadyMeetingNotesLifecycle(root)) {
+          return unavailable(
+            "meeting-note-root-unreadable",
+            "The configured Meeting Note root could not be read safely.",
             true
           );
         }
 
-        const observedAt = observedAtFrom(bound.now);
-
-        if (!observedAt) {
+        if (!hasCompleteMeetingNotesSectionPointers(root)) {
           return unavailable(
-            "meeting-note-capture-unavailable",
-            "The configured Meeting Note evidence could not be captured safely.",
+            "meeting-note-root-unreadable",
+            "The configured Meeting Note root could not be read safely.",
             false
           );
         }
 
-        return {
-          status: "captured",
-          evidence: {
-            source: {
+        const canonicalRoot = { ...root, id: rootId };
+
+        try {
+          const snapshot = await captureNotionMeetingNoteSnapshot(
+            reader,
+            firstPage.page,
+            canonicalRoot,
+            {
+              workspaceId: bound.workspaceId,
               providerId: bound.providerId,
-              sourceKind: "meeting-note",
-              sourceObjectId: canonicalRoot.id,
-              parentObjectId: bound.pageId,
-              url: canonicalNotionPageUrl(bound.pageId)
-            },
-            providerVersion: firstPage.page.lastEditedAt,
-            snapshot,
-            observedAt
+              ...(bound.operationalOutcomeMarkerVerifier
+                ? {
+                    operationalOutcomeMarkerVerifier:
+                      bound.operationalOutcomeMarkerVerifier
+                  }
+                : {})
+            }
+          );
+
+          if (snapshot.completeness.state !== "complete") {
+            // SourceBoundNativeReview persists and ingests a successful capture
+            // before it can inspect completeness. An exact-page native surface
+            // must therefore stop incomplete material at the provider boundary.
+            return unavailable(
+              "meeting-note-root-unreadable",
+              "The configured Meeting Note root is not completely readable.",
+              true
+            );
           }
-        };
-      } catch (error) {
-        return rootUnavailable(error);
-      }
+
+          // Notion does not offer one atomic snapshot across page metadata,
+          // blocks, and Markdown. This final version reread cannot eliminate
+          // that provider limitation, but it prevents labeling mixed material
+          // with a provider version that demonstrably changed during capture.
+          const finalPage = await readConfiguredPage({
+            reader,
+            pageId: bound.pageId
+          });
+
+          if (finalPage.status === "unavailable") {
+            return finalPage.capture;
+          }
+
+          if (finalPage.page.lastEditedAt !== firstPage.page.lastEditedAt) {
+            return unavailable(
+              "meeting-note-page-unreadable",
+              "The configured Meeting Note page could not be verified.",
+              true
+            );
+          }
+
+          const observedAt = observedAtFrom(bound.now);
+
+          if (!observedAt) {
+            return unavailable(
+              "meeting-note-capture-unavailable",
+              "The configured Meeting Note evidence could not be captured safely.",
+              false
+            );
+          }
+
+          return {
+            status: "captured",
+            evidence: {
+              source: {
+                providerId: bound.providerId,
+                sourceKind: "meeting-note",
+                sourceObjectId: canonicalRoot.id,
+                parentObjectId: bound.pageId,
+                url: canonicalNotionPageUrl(bound.pageId)
+              },
+              providerVersion: firstPage.page.lastEditedAt,
+              snapshot,
+              observedAt
+            }
+          };
+        } catch (error) {
+          return rootUnavailable(error);
+        }
+      });
     }
   };
 }
@@ -265,12 +297,7 @@ function requiredOpaqueIdentifier(value: unknown, name: string): string {
 function isEvidenceReader(
   value: unknown
 ): value is NotionObjectScopedMeetingNoteEvidenceReader {
-  return (
-    isRecord(value) &&
-    typeof value["retrievePage"] === "function" &&
-    typeof value["listBlockChildren"] === "function" &&
-    typeof value["retrievePageMarkdown"] === "function"
-  );
+  return isRecord(value) && typeof value["capture"] === "function";
 }
 
 function isOperationalOutcomeMarkerVerifier(
@@ -309,8 +336,27 @@ function isUnreadableRootBlock(block: { type: string }): boolean {
   return block.type === "unknown" || block.type === "unsupported";
 }
 
+function hasNotReadyMeetingNotesLifecycle(root: NotionMeetingNotesBlock): boolean {
+  const status = root.meetingNotes?.status;
+
+  return (
+    typeof status === "string" && status.trim().length > 0 && status !== "notes_ready"
+  );
+}
+
+function hasCompleteMeetingNotesSectionPointers(root: NotionMeetingNotesBlock): boolean {
+  const details = root.meetingNotes;
+
+  return (
+    details !== undefined &&
+    [details.summaryBlockId, details.notesBlockId, details.transcriptBlockId].every(
+      (pointer) => canonicalNotionObjectId(pointer) !== null
+    )
+  );
+}
+
 async function readConfiguredPage(input: {
-  reader: NotionObjectScopedMeetingNoteEvidenceReader;
+  reader: NotionObjectScopedMeetingNoteEvidenceSession;
   pageId: string;
 }): Promise<
   | { status: "read"; page: NotionMeetingNotesPage & { lastEditedAt: string } }

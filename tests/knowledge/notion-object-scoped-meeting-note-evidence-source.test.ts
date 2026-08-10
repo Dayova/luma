@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   createNotionObjectScopedMeetingNoteEvidenceSource,
-  type NotionObjectScopedMeetingNoteEvidenceReader
+  type NotionObjectScopedMeetingNoteEvidenceReader,
+  type NotionObjectScopedMeetingNoteEvidenceSession
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import {
   NotionMeetingNotesReadError,
@@ -18,6 +19,38 @@ class CompleteMeetingNoteReader implements NotionObjectScopedMeetingNoteEvidence
   readonly pageCalls: string[] = [];
   readonly blockCalls: Array<{ blockId: string; cursor?: string }> = [];
   readonly markdownCalls: Array<{ pageId: string; includeTranscript: boolean }> = [];
+
+  async capture<T>(
+    operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+  ): Promise<T> {
+    let active = true;
+    const session = Object.freeze({
+      retrievePage: (input: { pageId: string }) =>
+        active
+          ? this.retrievePage(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            ),
+      listBlockChildren: (input: { blockId: string; cursor?: string }) =>
+        active
+          ? this.listBlockChildren(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            ),
+      retrievePageMarkdown: (input: { pageId: string; includeTranscript: boolean }) =>
+        active
+          ? this.retrievePageMarkdown(input)
+          : Promise.reject(
+              new Error("The deterministic exact-page reader session has expired")
+            )
+    } satisfies NotionObjectScopedMeetingNoteEvidenceSession);
+
+    try {
+      return await operation(session);
+    } finally {
+      active = false;
+    }
+  }
 
   retrievePage(input: { pageId: string }) {
     this.pageCalls.push(input.pageId);
@@ -95,6 +128,14 @@ class CompleteMeetingNoteReader implements NotionObjectScopedMeetingNoteEvidence
 }
 
 describe("object-scoped Notion Meeting Note evidence source", () => {
+  it("models callback sessions that expire after capture", async () => {
+    const reader = new CompleteMeetingNoteReader();
+    const escaped = await reader.capture((session) => Promise.resolve(session));
+
+    await expect(escaped.retrievePage({ pageId })).rejects.toThrow("session has expired");
+    expect(reader.pageCalls).toEqual([]);
+  });
+
   it("captures its one configured page as provider-derived immutable Meeting Note evidence", async () => {
     const reader = new CompleteMeetingNoteReader();
     const source = createNotionObjectScopedMeetingNoteEvidenceSource({
@@ -156,9 +197,11 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
 
     await expect(
       source.capture({ workspaceId, page: { providerId, pageId } })
-    ).resolves.toMatchObject({
+    ).resolves.toEqual({
       status: "unavailable",
-      code: "meeting-note-root-unreadable"
+      code: "meeting-note-root-unreadable",
+      message: "The configured Meeting Note root is not completely readable.",
+      retryable: true
     });
   });
 
@@ -488,6 +531,62 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
     });
   });
 
+  it("keeps a genuine not-ready lifecycle retryable without following unavailable pointers", async () => {
+    const reader = new RootBlocksReader([
+      meetingNotesBlock({
+        id: "22222222-3333-4444-8555-666666666666",
+        status: "transcribing",
+        summaryBlockId: null,
+        notesBlockId: null,
+        transcriptBlockId: null
+      })
+    ]);
+    const source = createNotionObjectScopedMeetingNoteEvidenceSource({
+      workspaceId,
+      providerId,
+      pageId,
+      reader
+    });
+
+    await expect(
+      source.capture({ workspaceId, page: { providerId, pageId } })
+    ).resolves.toEqual({
+      status: "unavailable",
+      code: "meeting-note-root-unreadable",
+      message: "The configured Meeting Note root could not be read safely.",
+      retryable: true
+    });
+    expect(reader.blockCalls).toEqual([{ blockId: pageId }]);
+    expect(reader.markdownCalls).toEqual([]);
+  });
+
+  it("keeps a cross-page section pointer nonretryable", async () => {
+    const reader = new RootBlocksReader([
+      meetingNotesBlock({
+        id: "22222222-3333-4444-8555-666666666666",
+        summaryBlockId: "66666666-7777-4888-8999-aaaaaaaaaaaa",
+        notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+        transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
+      })
+    ]);
+    const source = createNotionObjectScopedMeetingNoteEvidenceSource({
+      workspaceId,
+      providerId,
+      pageId,
+      reader
+    });
+
+    await expect(
+      source.capture({ workspaceId, page: { providerId, pageId } })
+    ).resolves.toEqual({
+      status: "unavailable",
+      code: "meeting-note-root-unreadable",
+      message: "The configured Meeting Note root could not be read safely.",
+      retryable: false
+    });
+    expect(reader.markdownCalls).toEqual([]);
+  });
+
   it.each([
     { label: "Markdown", reader: new UnreadableMarkdownReader() },
     { label: "a generated section", reader: new UnreadableSectionReader() }
@@ -504,7 +603,7 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
     ).resolves.toMatchObject({
       status: "unavailable",
       code: "meeting-note-root-unreadable",
-      retryable: false
+      retryable: true
     });
   });
 
@@ -1184,6 +1283,7 @@ function block(
 
 function meetingNotesBlock(input: {
   id: string;
+  status?: string | null;
   summaryBlockId: string | null;
   notesBlockId: string | null;
   transcriptBlockId: string | null;
@@ -1194,7 +1294,7 @@ function meetingNotesBlock(input: {
     hasChildren: true,
     meetingNotes: {
       title: "Product sync",
-      status: "notes_ready",
+      status: input.status ?? "notes_ready",
       summaryBlockId: input.summaryBlockId,
       notesBlockId: input.notesBlockId,
       transcriptBlockId: input.transcriptBlockId,

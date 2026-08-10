@@ -10,6 +10,7 @@ import { toWorkCatalog } from "../../src/work/interface.js";
 function linearIssue(overrides: Partial<LinearApiIssue> = {}): LinearApiIssue {
   return {
     id: "issue-301",
+    teamId: "team-dayova",
     identifier: "DAY-301",
     title: "Prepare the release checklist",
     description: "Prepare the release checklist.",

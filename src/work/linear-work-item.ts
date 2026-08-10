@@ -6,6 +6,8 @@ import type { WorkItem } from "./interface.js";
  */
 export type LinearApiIssue = {
   id: string;
+  /** Opaque Linear team scope used by the read-only catalog boundary. */
+  teamId: string;
   identifier: string;
   title: string;
   description: string;

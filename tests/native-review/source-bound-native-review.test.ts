@@ -891,6 +891,7 @@ function nativeActorPerson(overrides: Partial<PersonIdentity> = {}): PersonIdent
 function linearReadOnlyIssue(): LinearReadOnlyApiIssue {
   return {
     id: "issue-301",
+    teamId: "team-dayova",
     identifier: "LUM-301",
     title: "Prepare the release checklist",
     description: "Prepare the release checklist.",

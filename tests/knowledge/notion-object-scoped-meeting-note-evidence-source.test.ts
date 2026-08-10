@@ -12,7 +12,7 @@ import type { OperationalOutcomeMarkerVerifier } from "../../src/knowledge/opera
 
 const workspaceId = "workspace_dayova";
 const providerId = "notion";
-const pageId = "notion-page-product-sync";
+const pageId = "11111111-2222-4333-8444-555555555555";
 
 class CompleteMeetingNoteReader implements NotionObjectScopedMeetingNoteEvidenceReader {
   readonly pageCalls: string[] = [];
@@ -56,28 +56,36 @@ class CompleteMeetingNoteReader implements NotionObjectScopedMeetingNoteEvidence
     string,
     { blocks: NotionMeetingNotesBlock[]; nextCursor: string | null }
   > = {
-    "notion-page-product-sync:first": {
+    "11111111-2222-4333-8444-555555555555:first": {
       blocks: [
         meetingNotesBlock({
-          id: "meeting-notes-root",
-          summaryBlockId: "summary-block",
-          notesBlockId: "notes-block",
-          transcriptBlockId: "transcript-block"
+          id: "22222222-3333-4444-8555-666666666666",
+          summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+          notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+          transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
         })
       ],
       nextCursor: null
     },
-    "summary-block:first": {
+    "22222222-3333-4444-8555-666666666666:first": {
+      blocks: [
+        block({ id: "99999999-aaaa-4bbb-8ccc-dddddddddddd", type: "paragraph" }),
+        block({ id: "88888888-9999-4aaa-8bbb-cccccccccccc", type: "paragraph" }),
+        block({ id: "77777777-8888-4999-8aaa-bbbbbbbbbbbc", type: "paragraph" })
+      ],
+      nextCursor: null
+    },
+    "99999999-aaaa-4bbb-8ccc-dddddddddddd:first": {
       blocks: [block({ id: "summary-line", type: "paragraph", text: "Ship safely." })],
       nextCursor: null
     },
-    "notes-block:first": {
+    "88888888-9999-4aaa-8bbb-cccccccccccc:first": {
       blocks: [
         block({ id: "notes-line", type: "paragraph", text: "Keep it read-only." })
       ],
       nextCursor: null
     },
-    "transcript-block:first": {
+    "77777777-8888-4999-8aaa-bbbbbbbbbbbc:first": {
       blocks: [
         block({ id: "transcript-line", type: "paragraph", text: "Original speech." })
       ],
@@ -108,9 +116,9 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
         source: {
           providerId,
           sourceKind: "meeting-note",
-          sourceObjectId: "meeting-notes-root",
+          sourceObjectId: "22222222-3333-4444-8555-666666666666",
           parentObjectId: pageId,
-          url: "https://www.notion.so/notion-page-product-sync"
+          url: "https://www.notion.so/11111111-2222-4333-8444-555555555555"
         },
         providerVersion: "2026-08-10T09:00:00.000Z",
         observedAt: "2026-08-10T09:01:00.000Z",
@@ -130,9 +138,9 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
     expect(reader.blockCalls).toEqual(
       expect.arrayContaining([
         { blockId: pageId },
-        { blockId: "summary-block" },
-        { blockId: "notes-block" },
-        { blockId: "transcript-block" }
+        { blockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd" },
+        { blockId: "88888888-9999-4aaa-8bbb-cccccccccccc" },
+        { blockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc" }
       ])
     );
   });
@@ -248,15 +256,15 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
       blocks: [
         meetingNotesBlock({
           id: "first-root",
-          summaryBlockId: "summary-block",
-          notesBlockId: "notes-block",
-          transcriptBlockId: "transcript-block"
+          summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+          notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+          transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
         }),
         meetingNotesBlock({
           id: "second-root",
-          summaryBlockId: "summary-block",
-          notesBlockId: "notes-block",
-          transcriptBlockId: "transcript-block"
+          summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+          notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+          transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
         })
       ],
       code: "meeting-note-root-ambiguous"
@@ -265,10 +273,10 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
       label: "an unknown root block",
       blocks: [
         meetingNotesBlock({
-          id: "meeting-notes-root",
-          summaryBlockId: "summary-block",
-          notesBlockId: "notes-block",
-          transcriptBlockId: "transcript-block"
+          id: "22222222-3333-4444-8555-666666666666",
+          summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+          notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+          transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
         }),
         block({ id: "unknown-root", type: "unknown" })
       ],
@@ -276,7 +284,9 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
     },
     {
       label: "a root without readable Meeting Notes metadata",
-      blocks: [block({ id: "meeting-notes-root", type: "meeting-notes" })],
+      blocks: [
+        block({ id: "22222222-3333-4444-8555-666666666666", type: "meeting-notes" })
+      ],
       code: "meeting-note-root-unreadable"
     }
   ])("fails closed for $label", async ({ blocks, code }) => {
@@ -456,10 +466,10 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
   it("fails closed when a Meeting Note section is unavailable", async () => {
     const reader = new RootBlocksReader([
       meetingNotesBlock({
-        id: "meeting-notes-root",
+        id: "22222222-3333-4444-8555-666666666666",
         summaryBlockId: null,
-        notesBlockId: "notes-block",
-        transcriptBlockId: "transcript-block"
+        notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+        transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
       })
     ]);
     const source = createNotionObjectScopedMeetingNoteEvidenceSource({
@@ -700,9 +710,15 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
     });
     expect(reader.summaryBlocksReturned).toBe(10_000);
     expect(
-      reader.blockCalls.filter((call) => call.blockId === "summary-block")
+      reader.blockCalls.filter(
+        (call) => call.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd"
+      )
     ).toHaveLength(100);
-    expect(reader.blockCalls.some((call) => call.blockId === "notes-block")).toBe(false);
+    expect(
+      reader.blockCalls.some(
+        (call) => call.blockId === "88888888-9999-4aaa-8bbb-cccccccccccc"
+      )
+    ).toBe(false);
   });
 
   it.each([
@@ -753,6 +769,28 @@ describe("object-scoped Notion Meeting Note evidence source", () => {
           reader: new CompleteMeetingNoteReader()
         })
       ).toThrow(/opaque identifier without whitespace/);
+    }
+  );
+
+  it.each([
+    "11111111-2222-4333-8444-555555555555#unexpected-path",
+    "11111111-2222-4333-8444-555555555555/foreign-page"
+  ])(
+    "rejects an unsafe configured Notion page ID before any reader call",
+    (unsafePageId) => {
+      const reader = new CompleteMeetingNoteReader();
+
+      expect(() =>
+        createNotionObjectScopedMeetingNoteEvidenceSource({
+          workspaceId,
+          providerId,
+          pageId: unsafePageId,
+          reader
+        })
+      ).toThrow(/pageId must be a Notion UUID/);
+      expect(reader.pageCalls).toEqual([]);
+      expect(reader.blockCalls).toEqual([]);
+      expect(reader.markdownCalls).toEqual([]);
     }
   );
 });
@@ -911,12 +949,12 @@ class MalformedRootResultReader extends CompleteMeetingNoteReader {
 
 class CyclicSectionReader extends CompleteMeetingNoteReader {
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
-    if (input.blockId === "summary-block") {
+    if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
       this.blockCalls.push({ ...input });
       return Promise.resolve({
         blocks: [
           block({
-            id: "summary-block",
+            id: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
             type: "paragraph",
             hasChildren: true,
             text: "A cyclic child."
@@ -936,18 +974,29 @@ class WideDescendantReader extends CompleteMeetingNoteReader {
   private activeChildReads = 0;
 
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
-    if (input.blockId === "summary-block") {
+    if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
       this.blockCalls.push({ ...input });
       return Promise.resolve({
         blocks: [
-          block({ id: "summary-child-a", type: "paragraph", hasChildren: true }),
-          block({ id: "summary-child-b", type: "paragraph", hasChildren: true })
+          block({
+            id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            type: "paragraph",
+            hasChildren: true
+          }),
+          block({
+            id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            type: "paragraph",
+            hasChildren: true
+          })
         ],
         nextCursor: null
       });
     }
 
-    if (input.blockId === "summary-child-a" || input.blockId === "summary-child-b") {
+    if (
+      input.blockId === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" ||
+      input.blockId === "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    ) {
       this.blockCalls.push({ ...input });
       this.childReadCount += 1;
       this.activeChildReads += 1;
@@ -986,7 +1035,7 @@ class ExcessiveRootPaginationReader extends CompleteMeetingNoteReader {
 
 class ExcessiveSectionBlocksReader extends CompleteMeetingNoteReader {
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
-    if (input.blockId === "summary-block") {
+    if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
       this.blockCalls.push({ ...input });
       return Promise.resolve({
         blocks: Array.from({ length: 10_001 }, (_, index) =>
@@ -1004,7 +1053,7 @@ class CumulativeSectionBlocksReader extends CompleteMeetingNoteReader {
   summaryBlocksReturned = 0;
 
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
-    if (input.blockId === "summary-block") {
+    if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
       this.blockCalls.push({ ...input });
       const page = input.cursor ? Number(input.cursor.replace("summary-cursor-", "")) : 0;
 
@@ -1095,7 +1144,7 @@ class UnreadableMarkdownReader extends CompleteMeetingNoteReader {
 
 class UnreadableSectionReader extends CompleteMeetingNoteReader {
   override listBlockChildren(input: { blockId: string; cursor?: string }) {
-    if (input.blockId === "summary-block") {
+    if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
       this.blockCalls.push({ ...input });
       return Promise.reject(
         new NotionMeetingNotesReadError("source-restricted", "hidden")
@@ -1174,7 +1223,7 @@ function renderedOperationalOutcome() {
         {
           settlementIntentId: "settlement-1",
           source: {
-            sourceObjectId: "meeting-notes-root",
+            sourceObjectId: "22222222-3333-4444-8555-666666666666",
             sourceRevision: 1,
             sourceContentHash: "sha256:meeting-note-source"
           },

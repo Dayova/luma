@@ -4,6 +4,7 @@ import type {
 } from "@notionhq/client";
 import { describe, expect, it } from "vitest";
 import {
+  captureNotionMeetingNoteSnapshot,
   createNotionMeetingNotesSource,
   createNotionMeetingNotesSourceFromEnv,
   NotionMeetingNotesReadError,
@@ -37,6 +38,120 @@ function block(
   };
 }
 
+const sectionPointerBoundary = {
+  canonicalDataSourceId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  pageId: "11111111-2222-4333-8444-555555555555",
+  meetingNotesRootId: "22222222-3333-4444-8555-666666666666",
+  localSummaryId: "33333333-4444-4555-8666-777777777777",
+  localNotesId: "44444444-5555-4666-8777-888888888888",
+  localTranscriptId: "55555555-6666-4777-8888-999999999999",
+  foreignSectionId: "66666666-7777-4888-8999-aaaaaaaaaaaa",
+  malformedSectionId: "66666666-7777-4888-8999-aaaaaaaaaaaa#unexpected-path"
+} as const;
+
+type SectionPointerBoundaryScenario = {
+  summaryBlockId: string | null;
+  notesBlockId: string | null;
+  transcriptBlockId: string | null;
+  directRootChildren: NotionMeetingNotesBlock[];
+  dangerousBlockId: string;
+  sectionBlocks?: Record<string, NotionMeetingNotesBlock[]>;
+};
+
+function createSectionPointerBoundaryApi(scenario: SectionPointerBoundaryScenario): {
+  api: NotionMeetingNotesApi;
+  childReadIds: string[];
+} {
+  const childReadIds: string[] = [];
+
+  return {
+    childReadIds,
+    api: {
+      listDataSourcePages: () =>
+        Promise.resolve({
+          pages: [
+            {
+              id: sectionPointerBoundary.pageId,
+              title: "Product sync",
+              url: `https://notion.so/${sectionPointerBoundary.pageId}`,
+              lastEditedAt: "2026-08-10T10:00:00.000Z",
+              inTrash: false
+            }
+          ],
+          nextCursor: null,
+          incomplete: false
+        }),
+      listBlockChildren: ({ blockId }) => {
+        childReadIds.push(blockId);
+
+        if (blockId === sectionPointerBoundary.pageId) {
+          return Promise.resolve({
+            blocks: [
+              block({
+                id: sectionPointerBoundary.meetingNotesRootId,
+                type: "meeting-notes",
+                hasChildren: true,
+                meetingNotes: {
+                  title: "Product sync",
+                  status: "notes_ready",
+                  summaryBlockId: scenario.summaryBlockId,
+                  notesBlockId: scenario.notesBlockId,
+                  transcriptBlockId: scenario.transcriptBlockId,
+                  calendar: null,
+                  recording: null
+                }
+              })
+            ],
+            nextCursor: null
+          });
+        }
+
+        if (blockId === sectionPointerBoundary.meetingNotesRootId) {
+          return Promise.resolve({
+            blocks: scenario.directRootChildren,
+            nextCursor: null
+          });
+        }
+
+        if (blockId === scenario.dangerousBlockId) {
+          return Promise.resolve({
+            blocks: [
+              block({
+                id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+                type: "paragraph",
+                text: "EXTERNAL SECRET"
+              })
+            ],
+            nextCursor: null
+          });
+        }
+
+        const sectionBlocks = scenario.sectionBlocks?.[blockId];
+
+        if (sectionBlocks) {
+          return Promise.resolve({ blocks: sectionBlocks, nextCursor: null });
+        }
+
+        if (
+          blockId === sectionPointerBoundary.localSummaryId ||
+          blockId === sectionPointerBoundary.localNotesId ||
+          blockId === sectionPointerBoundary.localTranscriptId
+        ) {
+          return Promise.resolve({ blocks: [], nextCursor: null });
+        }
+
+        return Promise.reject(new Error(`Unexpected block read: ${blockId}`));
+      },
+      retrievePageMarkdown: () =>
+        Promise.resolve({
+          content: baseMeetingMarkdown,
+          truncated: false,
+          unknownBlockIds: []
+        })
+    }
+  };
+}
+
 class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
   readonly dataSourceCalls: Array<{
     dataSourceId: string;
@@ -64,16 +179,16 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
     return Promise.resolve({
       pages: [
         {
-          id: "meeting-page-1",
+          id: "11111111-2222-3333-4444-555555555555",
           title: "Product sync",
-          url: "https://notion.so/meeting-page-1",
+          url: "https://notion.so/11111111-2222-3333-4444-555555555555",
           lastEditedAt: "2026-08-07T08:31:00.000Z",
           inTrash: false
         },
         {
-          id: "ordinary-page",
+          id: "33333333-4444-4555-8666-777777777777",
           title: "Ordinary knowledge",
-          url: "https://notion.so/ordinary-page",
+          url: "https://notion.so/33333333-4444-4555-8666-777777777777",
           lastEditedAt: "2026-08-07T08:31:00.000Z",
           inTrash: false
         }
@@ -91,18 +206,18 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
       string,
       { blocks: NotionMeetingNotesBlock[]; nextCursor: string | null }
     > = {
-      "meeting-page-1:first": {
+      "11111111-2222-3333-4444-555555555555:first": {
         blocks: [
           block({
-            id: "meeting-notes-block-1",
+            id: "22222222-3333-4444-8555-666666666666",
             type: "meeting-notes",
             hasChildren: true,
             meetingNotes: {
               title: "Product sync",
               status: "notes_ready",
-              summaryBlockId: "summary-block",
-              notesBlockId: "notes-block",
-              transcriptBlockId: "transcript-block",
+              summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+              notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+              transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc",
               calendar: {
                 startAt: "2026-08-07T08:00:00.000Z",
                 endAt: "2026-08-07T08:30:00.000Z",
@@ -114,13 +229,21 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         ],
         nextCursor: null
       },
-      "ordinary-page:first": {
+      "33333333-4444-4555-8666-777777777777:first": {
         blocks: [
           block({ id: "ordinary-paragraph", type: "paragraph", text: "No meeting here." })
         ],
         nextCursor: null
       },
-      "summary-block:first": {
+      "22222222-3333-4444-8555-666666666666:first": {
+        blocks: [
+          block({ id: "99999999-aaaa-4bbb-8ccc-dddddddddddd", type: "paragraph" }),
+          block({ id: "88888888-9999-4aaa-8bbb-cccccccccccc", type: "paragraph" }),
+          block({ id: "77777777-8888-4999-8aaa-bbbbbbbbbbbc", type: "paragraph" })
+        ],
+        nextCursor: null
+      },
+      "99999999-aaaa-4bbb-8ccc-dddddddddddd:first": {
         blocks: [
           block({
             id: "summary-text",
@@ -130,7 +253,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         ],
         nextCursor: null
       },
-      "notes-block:first": {
+      "88888888-9999-4aaa-8bbb-cccccccccccc:first": {
         blocks: [
           block({
             id: "action-item",
@@ -141,10 +264,10 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         ],
         nextCursor: null
       },
-      "transcript-block:first": {
+      "77777777-8888-4999-8aaa-bbbbbbbbbbbc:first": {
         blocks: [
           block({
-            id: "transcript-first",
+            id: "44444444-5555-4666-8777-888888888888",
             type: "paragraph",
             text: "Wir prüfen die Quelle",
             hasChildren: true
@@ -152,7 +275,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         ],
         nextCursor: "transcript-cursor"
       },
-      "transcript-block:transcript-cursor": {
+      "77777777-8888-4999-8aaa-bbbbbbbbbbbc:transcript-cursor": {
         blocks: [
           block({
             id: "transcript-second",
@@ -162,7 +285,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         ],
         nextCursor: null
       },
-      "transcript-first:first": {
+      "44444444-5555-4666-8777-888888888888:first": {
         blocks: [
           block({
             id: "transcript-child",
@@ -173,9 +296,7 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         nextCursor: null
       }
     };
-    const lookupBlockId =
-      input.blockId === directRefreshMeetingPageId ? "meeting-page-1" : input.blockId;
-    const result = blocksByCursor[`${lookupBlockId}:${input.cursor ?? "first"}`];
+    const result = blocksByCursor[`${input.blockId}:${input.cursor ?? "first"}`];
 
     if (!result) {
       throw new Error(
@@ -233,13 +354,13 @@ function renderedOperationalOutcome() {
       scope: {
         workspaceId: "workspace_dayova",
         providerId: "notion",
-        pageExternalId: "meeting-page-1"
+        pageExternalId: "11111111-2222-3333-4444-555555555555"
       },
       entries: [
         {
           settlementIntentId: "settlement-1",
           source: {
-            sourceObjectId: "meeting-notes-block-1",
+            sourceObjectId: "22222222-3333-4444-8555-666666666666",
             sourceRevision: 1,
             sourceContentHash: "sha256:meeting-note-source"
           },
@@ -297,7 +418,7 @@ function sdkMeetingNotesBlock(
   type: "meeting_notes" | "transcription"
 ): MeetingNotesBlockObjectResponse | TranscriptionBlockObjectResponse {
   const common = {
-    parent: { type: "page_id" as const, page_id: "meeting-page-1" },
+    parent: { type: "page_id" as const, page_id: "11111111-2222-3333-4444-555555555555" },
     object: "block" as const,
     id: `${type}-block`,
     created_time: "2026-08-07T08:00:00.000Z",
@@ -312,9 +433,9 @@ function sdkMeetingNotesBlock(
     title: [],
     status: "notes_ready" as const,
     children: {
-      summary_block_id: "summary-block",
-      notes_block_id: "notes-block",
-      transcript_block_id: "transcript-block"
+      summary_block_id: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+      notes_block_id: "88888888-9999-4aaa-8bbb-cccccccccccc",
+      transcript_block_id: "77777777-8888-4999-8aaa-bbbbbbbbbbbc"
     },
     calendar_event: {
       start_time: "2026-08-07T08:00:00.000Z",
@@ -346,9 +467,9 @@ describe("Notion Meeting Notes source", () => {
       type: "meeting-notes",
       meetingNotes: {
         status: "notes_ready",
-        summaryBlockId: "summary-block",
-        notesBlockId: "notes-block",
-        transcriptBlockId: "transcript-block",
+        summaryBlockId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+        notesBlockId: "88888888-9999-4aaa-8bbb-cccccccccccc",
+        transcriptBlockId: "77777777-8888-4999-8aaa-bbbbbbbbbbbc",
         calendar: { attendeeProviderUserIds: ["notion-user-jakob"] }
       }
     });
@@ -390,7 +511,7 @@ describe("Notion Meeting Notes source", () => {
         { dataSourceId: "dayova-meetings", limit: 25 }
       ]);
       expect(api.markdownCalls).toEqual([
-        { pageId: "meeting-page-1", includeTranscript: true }
+        { pageId: "11111111-2222-3333-4444-555555555555", includeTranscript: true }
       ]);
       expect(scan.nextCursor).toBe("next-page");
       expect(scan.completeness).toBe("partial");
@@ -404,8 +525,8 @@ describe("Notion Meeting Notes source", () => {
         source: {
           providerId: "notion",
           sourceKind: "meeting-note",
-          sourceObjectId: "meeting-notes-block-1",
-          parentObjectId: "meeting-page-1"
+          sourceObjectId: "22222222-3333-4444-8555-666666666666",
+          parentObjectId: "11111111-2222-3333-4444-555555555555"
         },
         snapshot: {
           title: "Product sync",
@@ -434,6 +555,468 @@ describe("Notion Meeting Notes source", () => {
     } finally {
       await database.close();
     }
+  });
+
+  it("withholds a canonical scan when a Meeting Notes section pointer is outside its verified root", async () => {
+    const { api, childReadIds } = createSectionPointerBoundaryApi({
+      summaryBlockId: sectionPointerBoundary.foreignSectionId,
+      notesBlockId: sectionPointerBoundary.localNotesId,
+      transcriptBlockId: sectionPointerBoundary.localTranscriptId,
+      directRootChildren: [
+        block({ id: sectionPointerBoundary.localSummaryId, type: "paragraph" }),
+        block({ id: sectionPointerBoundary.localNotesId, type: "paragraph" }),
+        block({ id: sectionPointerBoundary.localTranscriptId, type: "paragraph" })
+      ],
+      dangerousBlockId: sectionPointerBoundary.foreignSectionId
+    });
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: sectionPointerBoundary.canonicalDataSourceId
+    });
+
+    try {
+      const scan = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(childReadIds).not.toContain(sectionPointerBoundary.foreignSectionId);
+      expect(scan).toMatchObject({ completeness: "partial", records: [] });
+      expect(scan.completeScan).toBeUndefined();
+      expect(scan.partialReasons).toContainEqual(
+        expect.objectContaining({ code: "unreadable-meeting-note" })
+      );
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          sourceKind: "meeting-note"
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("withholds a direct canonical-page refresh when a Meeting Notes section pointer is outside its verified root", async () => {
+    const { api, childReadIds } = createSectionPointerBoundaryApi({
+      summaryBlockId: sectionPointerBoundary.foreignSectionId,
+      notesBlockId: sectionPointerBoundary.localNotesId,
+      transcriptBlockId: sectionPointerBoundary.localTranscriptId,
+      directRootChildren: [
+        block({ id: sectionPointerBoundary.localSummaryId, type: "paragraph" }),
+        block({ id: sectionPointerBoundary.localNotesId, type: "paragraph" }),
+        block({ id: sectionPointerBoundary.localTranscriptId, type: "paragraph" })
+      ],
+      dangerousBlockId: sectionPointerBoundary.foreignSectionId
+    });
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: sectionPointerBoundary.canonicalDataSourceId,
+      pageReader: {
+        retrievePage: () =>
+          Promise.resolve({
+            page: {
+              id: sectionPointerBoundary.pageId,
+              title: "Product sync",
+              url: `https://notion.so/${sectionPointerBoundary.pageId}`,
+              lastEditedAt: "2026-08-10T10:00:00.000Z",
+              inTrash: false
+            },
+            parentDataSourceId: sectionPointerBoundary.canonicalDataSourceId
+          })
+      }
+    });
+
+    try {
+      const refresh = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: sectionPointerBoundary.pageId
+      });
+
+      expect(childReadIds).not.toContain(sectionPointerBoundary.foreignSectionId);
+      expect(refresh).toMatchObject({
+        status: "refreshed",
+        completeness: "partial",
+        records: []
+      });
+      expect(refresh.partialReasons).toContainEqual(
+        expect.objectContaining({ code: "unreadable-meeting-note", retryable: false })
+      );
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          sourceKind: "meeting-note"
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("withholds a direct canonical-page refresh when a Meeting Notes section pointer is unsafe for a provider path", async () => {
+    const { api, childReadIds } = createSectionPointerBoundaryApi({
+      summaryBlockId: sectionPointerBoundary.malformedSectionId,
+      notesBlockId: null,
+      transcriptBlockId: null,
+      directRootChildren: [
+        block({ id: sectionPointerBoundary.malformedSectionId, type: "paragraph" })
+      ],
+      dangerousBlockId: sectionPointerBoundary.malformedSectionId
+    });
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: sectionPointerBoundary.canonicalDataSourceId,
+      pageReader: {
+        retrievePage: () =>
+          Promise.resolve({
+            page: {
+              id: sectionPointerBoundary.pageId,
+              title: "Product sync",
+              url: `https://notion.so/${sectionPointerBoundary.pageId}`,
+              lastEditedAt: "2026-08-10T10:00:00.000Z",
+              inTrash: false
+            },
+            parentDataSourceId: sectionPointerBoundary.canonicalDataSourceId
+          })
+      }
+    });
+
+    try {
+      const refresh = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: sectionPointerBoundary.pageId
+      });
+
+      expect(childReadIds).not.toContain(sectionPointerBoundary.malformedSectionId);
+      expect(refresh).toMatchObject({
+        status: "refreshed",
+        completeness: "partial",
+        records: []
+      });
+      expect(refresh.partialReasons).toContainEqual(
+        expect.objectContaining({ code: "unreadable-meeting-note", retryable: false })
+      );
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          sourceKind: "meeting-note"
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("withholds a canonical scan when a Meeting Notes section pointer is unsafe for a provider path", async () => {
+    const { api, childReadIds } = createSectionPointerBoundaryApi({
+      summaryBlockId: sectionPointerBoundary.malformedSectionId,
+      notesBlockId: null,
+      transcriptBlockId: null,
+      directRootChildren: [
+        block({ id: sectionPointerBoundary.malformedSectionId, type: "paragraph" })
+      ],
+      dangerousBlockId: sectionPointerBoundary.malformedSectionId
+    });
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: sectionPointerBoundary.canonicalDataSourceId
+    });
+
+    try {
+      const scan = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(childReadIds).not.toContain(sectionPointerBoundary.malformedSectionId);
+      expect(scan).toMatchObject({ completeness: "partial", records: [] });
+      expect(scan.completeScan).toBeUndefined();
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          sourceKind: "meeting-note"
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it.each([
+    {
+      label: "page",
+      pageId: "11111111-2222-4333-8444-555555555555#unexpected-path",
+      rootId: sectionPointerBoundary.meetingNotesRootId
+    },
+    {
+      label: "Meeting Notes root",
+      pageId: sectionPointerBoundary.pageId,
+      rootId: "22222222-3333-4444-8555-666666666666#unexpected-path"
+    }
+  ])(
+    "refuses an unsafe provider $label ID before any provider read",
+    async ({ pageId, rootId }) => {
+      const childReadIds: string[] = [];
+      const markdownReadIds: string[] = [];
+
+      await expect(
+        captureNotionMeetingNoteSnapshot(
+          {
+            listBlockChildren: ({ blockId }) => {
+              childReadIds.push(blockId);
+              return Promise.reject(new Error("This provider read must not occur"));
+            },
+            retrievePageMarkdown: ({ pageId: markdownPageId }) => {
+              markdownReadIds.push(markdownPageId);
+              return Promise.reject(new Error("This provider read must not occur"));
+            }
+          },
+          {
+            id: pageId,
+            title: "Product sync",
+            url: `https://notion.so/${pageId}`,
+            lastEditedAt: "2026-08-10T10:00:00.000Z",
+            inTrash: false
+          },
+          block({
+            id: rootId,
+            type: "meeting-notes",
+            hasChildren: true,
+            meetingNotes: {
+              title: "Product sync",
+              status: "notes_ready",
+              summaryBlockId: sectionPointerBoundary.localSummaryId,
+              notesBlockId: null,
+              transcriptBlockId: null,
+              calendar: null,
+              recording: null
+            }
+          }),
+          { workspaceId: "workspace_dayova", providerId: "notion" }
+        )
+      ).rejects.toMatchObject({ code: "source-invalid" });
+      expect(childReadIds).toEqual([]);
+      expect(markdownReadIds).toEqual([]);
+    }
+  );
+
+  it("refuses a direct Meeting Notes section pointer to linked content", async () => {
+    const pageId = "11111111-2222-4333-8444-555555555555";
+    const meetingNotesRootId = "22222222-3333-4444-8555-666666666666";
+    const linkedSectionId = "66666666-7777-4888-8999-aaaaaaaaaaaa";
+    const childReadIds: string[] = [];
+
+    await expect(
+      captureNotionMeetingNoteSnapshot(
+        {
+          listBlockChildren: ({ blockId }) => {
+            childReadIds.push(blockId);
+
+            if (blockId === meetingNotesRootId) {
+              return Promise.resolve({
+                blocks: [
+                  block({
+                    id: linkedSectionId,
+                    type: "child_page",
+                    hasChildren: true
+                  })
+                ],
+                nextCursor: null
+              });
+            }
+
+            if (blockId === linkedSectionId) {
+              return Promise.resolve({
+                blocks: [
+                  block({
+                    id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+                    type: "paragraph",
+                    text: "EXTERNAL SECRET"
+                  })
+                ],
+                nextCursor: null
+              });
+            }
+
+            return Promise.reject(new Error(`Unexpected block read: ${blockId}`));
+          },
+          retrievePageMarkdown: () =>
+            Promise.resolve({
+              content: baseMeetingMarkdown,
+              truncated: false,
+              unknownBlockIds: []
+            })
+        },
+        {
+          id: pageId,
+          title: "Product sync",
+          url: `https://notion.so/${pageId}`,
+          lastEditedAt: "2026-08-10T10:00:00.000Z",
+          inTrash: false
+        },
+        block({
+          id: meetingNotesRootId,
+          type: "meeting-notes",
+          hasChildren: true,
+          meetingNotes: {
+            title: "Product sync",
+            status: "notes_ready",
+            summaryBlockId: linkedSectionId,
+            notesBlockId: null,
+            transcriptBlockId: null,
+            calendar: null,
+            recording: null
+          }
+        }),
+        { workspaceId: "workspace_dayova", providerId: "notion" }
+      )
+    ).rejects.toMatchObject({ code: "source-invalid" });
+    expect(childReadIds).not.toContain(linkedSectionId);
+  });
+
+  it("withholds a canonical scan when a section contains a linked descendant", async () => {
+    const linkedDescendantId = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
+    const { api, childReadIds } = createSectionPointerBoundaryApi({
+      summaryBlockId: sectionPointerBoundary.localSummaryId,
+      notesBlockId: null,
+      transcriptBlockId: null,
+      directRootChildren: [
+        block({
+          id: sectionPointerBoundary.localSummaryId,
+          type: "paragraph",
+          hasChildren: true
+        })
+      ],
+      dangerousBlockId: linkedDescendantId,
+      sectionBlocks: {
+        [sectionPointerBoundary.localSummaryId]: [
+          block({
+            id: linkedDescendantId,
+            type: "synced_block",
+            hasChildren: true
+          })
+        ]
+      }
+    });
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger,
+      meetingsDataSourceId: sectionPointerBoundary.canonicalDataSourceId
+    });
+
+    try {
+      const scan = await source.scan({ workspaceId: "workspace_dayova" });
+
+      expect(childReadIds).not.toContain(linkedDescendantId);
+      expect(scan).toMatchObject({ completeness: "partial", records: [] });
+      expect(scan.completeScan).toBeUndefined();
+      await expect(
+        ledger.listCurrent({
+          workspaceId: "workspace_dayova",
+          providerId: "notion",
+          sourceKind: "meeting-note"
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("refuses a malformed recursive section child before it becomes a provider path", async () => {
+    const malformedChildId = "77777777-8888-4999-8aaa-bbbbbbbbbbbb#unexpected-path";
+    const childReadIds: string[] = [];
+
+    await expect(
+      captureNotionMeetingNoteSnapshot(
+        {
+          listBlockChildren: ({ blockId }) => {
+            childReadIds.push(blockId);
+
+            if (blockId === sectionPointerBoundary.meetingNotesRootId) {
+              return Promise.resolve({
+                blocks: [
+                  block({
+                    id: sectionPointerBoundary.localSummaryId,
+                    type: "paragraph",
+                    hasChildren: true
+                  })
+                ],
+                nextCursor: null
+              });
+            }
+
+            if (blockId === sectionPointerBoundary.localSummaryId) {
+              return Promise.resolve({
+                blocks: [
+                  block({
+                    id: malformedChildId,
+                    type: "paragraph",
+                    hasChildren: true
+                  })
+                ],
+                nextCursor: null
+              });
+            }
+
+            if (blockId === malformedChildId) {
+              return Promise.resolve({
+                blocks: [
+                  block({
+                    id: "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+                    type: "paragraph",
+                    text: "EXTERNAL SECRET"
+                  })
+                ],
+                nextCursor: null
+              });
+            }
+
+            return Promise.reject(new Error(`Unexpected block read: ${blockId}`));
+          },
+          retrievePageMarkdown: () =>
+            Promise.resolve({
+              content: baseMeetingMarkdown,
+              truncated: false,
+              unknownBlockIds: []
+            })
+        },
+        {
+          id: sectionPointerBoundary.pageId,
+          title: "Product sync",
+          url: `https://notion.so/${sectionPointerBoundary.pageId}`,
+          lastEditedAt: "2026-08-10T10:00:00.000Z",
+          inTrash: false
+        },
+        block({
+          id: sectionPointerBoundary.meetingNotesRootId,
+          type: "meeting-notes",
+          hasChildren: true,
+          meetingNotes: {
+            title: "Product sync",
+            status: "notes_ready",
+            summaryBlockId: sectionPointerBoundary.localSummaryId,
+            notesBlockId: null,
+            transcriptBlockId: null,
+            calendar: null,
+            recording: null
+          }
+        }),
+        { workspaceId: "workspace_dayova", providerId: "notion" }
+      )
+    ).rejects.toMatchObject({ code: "source-invalid" });
+    expect(childReadIds).not.toContain(malformedChildId);
   });
 
   it("refreshes one canonical Meeting Note through the existing ledger without scanning or inferring absence", async () => {
@@ -486,7 +1069,7 @@ describe("Notion Meeting Notes source", () => {
           {
             change: "new",
             source: {
-              sourceObjectId: "meeting-notes-block-1",
+              sourceObjectId: "22222222-3333-4444-8555-666666666666",
               parentObjectId: directRefreshMeetingPageId
             }
           }
@@ -600,7 +1183,7 @@ describe("Notion Meeting Notes source", () => {
       (input) =>
         input.workspaceId === "workspace_dayova" &&
         input.providerId === "notion" &&
-        input.pageExternalId === "meeting-page-1" &&
+        input.pageExternalId === "11111111-2222-3333-4444-555555555555" &&
         input.payloadDigest === rendered.payloadDigest &&
         input.contentDigest === rendered.contentDigest &&
         input.operationDigest === rendered.operationDigest
@@ -649,7 +1232,7 @@ describe("Notion Meeting Notes source", () => {
         {
           workspaceId: "workspace_dayova",
           providerId: "notion",
-          pageExternalId: "meeting-page-1",
+          pageExternalId: "11111111-2222-3333-4444-555555555555",
           payloadDigest: rendered.payloadDigest,
           contentDigest: rendered.contentDigest,
           operationDigest: rendered.operationDigest
@@ -796,7 +1379,7 @@ describe("Notion Meeting Notes source", () => {
       const expectedMarker: OperationalOutcomeMarkerVerificationInput = {
         workspaceId: "workspace_dayova",
         providerId: "notion",
-        pageExternalId: "meeting-page-1",
+        pageExternalId: "11111111-2222-3333-4444-555555555555",
         payloadDigest: rendered.payloadDigest,
         contentDigest: rendered.contentDigest,
         operationDigest: rendered.operationDigest
@@ -900,7 +1483,7 @@ describe("Notion Meeting Notes source", () => {
           {
             change: "revised",
             revision: 2,
-            source: { sourceObjectId: "meeting-notes-block-1" },
+            source: { sourceObjectId: "22222222-3333-4444-8555-666666666666" },
             snapshot: {
               lifecycle: "removed",
               completeness: { state: "removed" },
@@ -1111,7 +1694,10 @@ describe("Notion Meeting Notes source", () => {
 
       await expect(finalPage.completeScan.reconcileAbsent()).resolves.toMatchObject({
         tombstones: [
-          { change: "revised", source: { sourceObjectId: "meeting-notes-block-1" } }
+          {
+            change: "revised",
+            source: { sourceObjectId: "22222222-3333-4444-8555-666666666666" }
+          }
         ],
         partialReasons: []
       });
@@ -1193,7 +1779,7 @@ describe("Notion Meeting Notes source", () => {
         return { ...(await baseApi.listDataSourcePages(input)), nextCursor: null };
       },
       async listBlockChildren(input) {
-        if (restricted && input.blockId === "meeting-page-1") {
+        if (restricted && input.blockId === "11111111-2222-3333-4444-555555555555") {
           return {
             blocks: [block({ id: "restricted-root", type: "unknown" })],
             nextCursor: null
@@ -1227,7 +1813,7 @@ describe("Notion Meeting Notes source", () => {
       expect(scan.partialReasons).toContainEqual(
         expect.objectContaining({
           code: "unreadable-page",
-          pageId: "meeting-page-1"
+          pageId: "11111111-2222-3333-4444-555555555555"
         })
       );
       await expect(
@@ -1249,14 +1835,17 @@ describe("Notion Meeting Notes source", () => {
       async listBlockChildren(input) {
         const result = await baseApi.listBlockChildren(input);
 
-        if (input.blockId !== "meeting-page-1") {
+        if (input.blockId !== "11111111-2222-3333-4444-555555555555") {
           return result;
         }
 
         return {
           ...result,
           blocks: result.blocks.map((entry) => {
-            if (entry.id !== "meeting-notes-block-1" || !entry.meetingNotes) {
+            if (
+              entry.id !== "22222222-3333-4444-8555-666666666666" ||
+              !entry.meetingNotes
+            ) {
               return entry;
             }
 
@@ -1309,7 +1898,7 @@ describe("Notion Meeting Notes source", () => {
       expect(scan.partialReasons).toContainEqual(
         expect.objectContaining({
           code: "source-record-incomplete",
-          sourceObjectId: "meeting-notes-block-1"
+          sourceObjectId: "22222222-3333-4444-8555-666666666666"
         })
       );
     } finally {
@@ -1325,14 +1914,17 @@ describe("Notion Meeting Notes source", () => {
       async listBlockChildren(input) {
         const result = await baseApi.listBlockChildren(input);
 
-        if (input.blockId !== "meeting-page-1") {
+        if (input.blockId !== "11111111-2222-3333-4444-555555555555") {
           return result;
         }
 
         return {
           ...result,
           blocks: result.blocks.map((entry) => {
-            if (entry.id !== "meeting-notes-block-1" || !entry.meetingNotes) {
+            if (
+              entry.id !== "22222222-3333-4444-8555-666666666666" ||
+              !entry.meetingNotes
+            ) {
               return entry;
             }
 
@@ -1383,14 +1975,17 @@ describe("Notion Meeting Notes source", () => {
       async listBlockChildren(input) {
         const result = await baseApi.listBlockChildren(input);
 
-        if (input.blockId !== "meeting-page-1") {
+        if (input.blockId !== "11111111-2222-3333-4444-555555555555") {
           return result;
         }
 
         return {
           ...result,
           blocks: result.blocks.map((entry) => {
-            if (entry.id !== "meeting-notes-block-1" || !entry.meetingNotes) {
+            if (
+              entry.id !== "22222222-3333-4444-8555-666666666666" ||
+              !entry.meetingNotes
+            ) {
               return entry;
             }
 
@@ -1478,7 +2073,7 @@ describe("Notion Meeting Notes source", () => {
       async listBlockChildren(input) {
         const result = await baseApi.listBlockChildren(input);
 
-        if (input.blockId !== "transcript-block") {
+        if (input.blockId !== "77777777-8888-4999-8aaa-bbbbbbbbbbbc") {
           return result;
         }
 
@@ -1518,7 +2113,7 @@ describe("Notion Meeting Notes source", () => {
     const api: NotionMeetingNotesApi = {
       listDataSourcePages: (input) => baseApi.listDataSourcePages(input),
       listBlockChildren(input) {
-        if (input.blockId === "ordinary-page") {
+        if (input.blockId === "33333333-4444-4555-8666-777777777777") {
           return Promise.reject(
             new NotionMeetingNotesReadError("source-restricted", "Page is not shared")
           );
@@ -1542,7 +2137,7 @@ describe("Notion Meeting Notes source", () => {
       expect(scan.partialReasons).toContainEqual(
         expect.objectContaining({
           code: "unreadable-page",
-          pageId: "ordinary-page",
+          pageId: "33333333-4444-4555-8666-777777777777",
           retryable: false
         })
       );
@@ -1571,7 +2166,7 @@ describe("Notion Meeting Notes source", () => {
     const sourceIdentity = {
       providerId: "notion",
       sourceKind: "meeting-note" as const,
-      sourceObjectId: "meeting-notes-block-1"
+      sourceObjectId: "22222222-3333-4444-8555-666666666666"
     };
 
     try {
@@ -1582,7 +2177,7 @@ describe("Notion Meeting Notes source", () => {
       expect(scan.partialReasons).toContainEqual(
         expect.objectContaining({
           code: "unreadable-meeting-note",
-          sourceObjectId: "meeting-notes-block-1",
+          sourceObjectId: "22222222-3333-4444-8555-666666666666",
           retryable: true
         })
       );
@@ -1635,7 +2230,7 @@ describe("Notion Meeting Notes source", () => {
       async listBlockChildren(input) {
         const result = await baseApi.listBlockChildren(input);
 
-        if (input.blockId !== "transcript-block") {
+        if (input.blockId !== "77777777-8888-4999-8aaa-bbbbbbbbbbbc") {
           return result;
         }
 
@@ -1674,7 +2269,7 @@ describe("Notion Meeting Notes source", () => {
     const api: NotionMeetingNotesApi = {
       listDataSourcePages: (input) => baseApi.listDataSourcePages(input),
       async listBlockChildren(input) {
-        if (input.blockId === "summary-block") {
+        if (input.blockId === "99999999-aaaa-4bbb-8ccc-dddddddddddd") {
           await wait(summaryDelay);
           throw new NotionMeetingNotesReadError(
             "source-restricted",
@@ -1682,7 +2277,7 @@ describe("Notion Meeting Notes source", () => {
           );
         }
 
-        if (input.blockId === "notes-block") {
+        if (input.blockId === "88888888-9999-4aaa-8bbb-cccccccccccc") {
           await wait(notesDelay);
           throw new NotionMeetingNotesReadError(
             "source-restricted",
@@ -1721,7 +2316,7 @@ describe("Notion Meeting Notes source", () => {
     const api: NotionMeetingNotesApi = {
       listDataSourcePages: (input) => baseApi.listDataSourcePages(input),
       listBlockChildren(input) {
-        if (input.blockId === "meeting-page-1") {
+        if (input.blockId === "11111111-2222-3333-4444-555555555555") {
           rootPageCalls += 1;
           return Promise.resolve({
             blocks: [],
@@ -1749,7 +2344,7 @@ describe("Notion Meeting Notes source", () => {
       expect(scan.partialReasons).toContainEqual(
         expect.objectContaining({
           code: "unreadable-page",
-          pageId: "meeting-page-1",
+          pageId: "11111111-2222-3333-4444-555555555555",
           retryable: false
         })
       );
@@ -1759,7 +2354,7 @@ describe("Notion Meeting Notes source", () => {
           source: {
             providerId: "notion",
             sourceKind: "meeting-note",
-            sourceObjectId: "meeting-notes-block-1"
+            sourceObjectId: "22222222-3333-4444-8555-666666666666"
           }
         })
       ).resolves.toBeNull();

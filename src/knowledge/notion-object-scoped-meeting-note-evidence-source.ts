@@ -11,6 +11,7 @@ import {
   type NotionMeetingNoteSnapshotReader,
   type NotionMeetingNotesPage
 } from "./notion-meeting-notes-source.js";
+import { canonicalNotionObjectId } from "./notion-object-id.js";
 
 /**
  * The exact-page reader exposes only the reads that one Meeting Note capture
@@ -25,7 +26,7 @@ export type NotionObjectScopedMeetingNoteEvidenceSourceConfig = {
   workspaceId: string;
   /** Opaque provider identity expected by the native review boundary. */
   providerId: string;
-  /** The one exact Notion page this adapter may read. */
+  /** The one exact Notion page UUID this adapter may read. */
   pageId: string;
   reader: NotionObjectScopedMeetingNoteEvidenceReader;
   /** Required to safely exclude a Luma-owned Operational Outcome marker. */
@@ -107,8 +108,9 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
       }
 
       const root = roots[0];
+      const rootId = root ? canonicalNotionObjectId(root.id) : null;
 
-      if (!root || !root.meetingNotes || !isOpaqueIdentifier(root.id)) {
+      if (!root || !root.meetingNotes || !rootId) {
         return unavailable(
           "meeting-note-root-unreadable",
           "The configured Meeting Note root could not be read safely.",
@@ -116,11 +118,13 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
         );
       }
 
+      const canonicalRoot = { ...root, id: rootId };
+
       try {
         const snapshot = await captureNotionMeetingNoteSnapshot(
           bound.reader,
           firstPage.page,
-          root,
+          canonicalRoot,
           {
             workspaceId: bound.workspaceId,
             providerId: bound.providerId,
@@ -180,7 +184,7 @@ export function createNotionObjectScopedMeetingNoteEvidenceSource(
             source: {
               providerId: bound.providerId,
               sourceKind: "meeting-note",
-              sourceObjectId: root.id,
+              sourceObjectId: canonicalRoot.id,
               parentObjectId: bound.pageId,
               url: canonicalNotionPageUrl(bound.pageId)
             },
@@ -225,13 +229,26 @@ function validateConfig(value: unknown): BoundEvidenceConfig {
   return {
     workspaceId: requiredOpaqueIdentifier(value["workspaceId"], "workspaceId"),
     providerId: requiredOpaqueIdentifier(value["providerId"], "providerId"),
-    pageId: requiredOpaqueIdentifier(value["pageId"], "pageId"),
+    pageId: requiredCanonicalNotionPageId(value["pageId"]),
     reader: value["reader"],
     ...(isOperationalOutcomeMarkerVerifier(value["operationalOutcomeMarkerVerifier"])
       ? { operationalOutcomeMarkerVerifier: value["operationalOutcomeMarkerVerifier"] }
       : {}),
     now: now === undefined ? () => new Date() : (now as () => Date)
   };
+}
+
+function requiredCanonicalNotionPageId(value: unknown): string {
+  const pageId = canonicalNotionObjectId(value);
+
+  if (!pageId) {
+    throw new NotionObjectScopedMeetingNoteEvidenceSourceError(
+      "notion-object-scoped-evidence-config-invalid",
+      "pageId must be a Notion UUID"
+    );
+  }
+
+  return pageId;
 }
 
 function requiredOpaqueIdentifier(value: unknown, name: string): string {
@@ -268,7 +285,7 @@ function matchesBoundCapture(value: unknown, bound: BoundEvidenceConfig): boolea
     value["workspaceId"] === bound.workspaceId &&
     isRecord(value["page"]) &&
     value["page"]["providerId"] === bound.providerId &&
-    value["page"]["pageId"] === bound.pageId
+    canonicalNotionObjectId(value["page"]["pageId"]) === bound.pageId
   );
 }
 
@@ -278,8 +295,7 @@ function isExactConfiguredPage(
 ): value is NotionMeetingNotesPage & { lastEditedAt: string } {
   return (
     isRecord(value) &&
-    value["id"] === pageId &&
-    isOpaqueIdentifier(value["id"]) &&
+    canonicalNotionObjectId(value["id"]) === pageId &&
     (value["title"] === null || typeof value["title"] === "string") &&
     isTrustedNotionPageUrl(value["url"]) &&
     typeof value["lastEditedAt"] === "string" &&
@@ -314,7 +330,7 @@ async function readConfiguredPage(input: {
       };
     }
 
-    return { status: "read", page };
+    return { status: "read", page: { ...page, id: input.pageId } };
   } catch (error) {
     return {
       status: "unavailable",

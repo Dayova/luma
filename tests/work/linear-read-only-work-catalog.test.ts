@@ -14,6 +14,8 @@ import type {
   LinearWorkProviderConfig
 } from "../../src/work/linear-work-provider.js";
 
+type LinearReadOnlyApiOperations = Pick<LinearReadOnlyApi, "searchIssues" | "getIssue">;
+
 type CapturedGraphqlRequest = {
   url: string;
   method: string;
@@ -65,6 +67,15 @@ class RecordingLinearReadOnlyApi {
     this.getCalls.push(id);
     return Promise.resolve(this.getResult);
   }
+}
+
+function readOnlyApiForTest(
+  api: RecordingLinearReadOnlyApi
+): LinearReadOnlyApiOperations {
+  return {
+    searchIssues: (input) => api.searchIssues(input),
+    getIssue: (id) => api.getIssue(id)
+  };
 }
 
 function responseJson(body: unknown): Response {
@@ -208,14 +219,14 @@ describe("LinearReadOnlyWorkCatalog", () => {
   it("uses a team-scoped, bounded search and maps provider-neutral Work Items", async () => {
     const api = new RecordingLinearReadOnlyApi();
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma",
       providerId: "linear-readonly"
     });
 
     await expect(
       catalog.searchWorkItems({
-        workspaceId: "workspace_luma",
+        workspaceId: "team-luma",
         text: "  release checklist  ",
         limit: 999
       })
@@ -252,10 +263,32 @@ describe("LinearReadOnlyWorkCatalog", () => {
     ]);
   });
 
+  it("rejects a mismatched nonblank workspace before reaching Linear or caching selectors", async () => {
+    const api = new RecordingLinearReadOnlyApi();
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
+      teamId: "team-luma"
+    });
+
+    await expect(
+      catalog.searchWorkItems({
+        workspaceId: "team-other",
+        text: "release checklist",
+        limit: 1
+      })
+    ).rejects.toMatchObject({ code: "linear-readonly-query-invalid" });
+
+    expect(api.searchCalls).toEqual([]);
+    await expect(catalog.getWorkItem("issue-301")).rejects.toMatchObject({
+      code: "linear-readonly-selector-invalid"
+    });
+    expect(api.getCalls).toEqual([]);
+  });
+
   it("only fetches an issue selector returned by its own bounded search", async () => {
     const api = new RecordingLinearReadOnlyApi();
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma"
     });
 
@@ -265,7 +298,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
     expect(api.getCalls).toEqual([]);
 
     await catalog.searchWorkItems({
-      workspaceId: "workspace_luma",
+      workspaceId: "team-luma",
       text: "release checklist",
       limit: 1
     });
@@ -285,13 +318,13 @@ describe("LinearReadOnlyWorkCatalog", () => {
       })
     );
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma"
     });
 
     await expect(
       catalog.searchWorkItems({
-        workspaceId: "workspace_luma",
+        workspaceId: "team-luma",
         text: "release checklist",
         limit: 10
       })
@@ -369,7 +402,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
 
     await expect(
       catalog.searchWorkItems({
-        workspaceId: "workspace_luma",
+        workspaceId: "team-luma",
         text: "release checklist",
         limit: 10
       })
@@ -426,13 +459,13 @@ describe("LinearReadOnlyWorkCatalog", () => {
         linearIssue({ id: "issue-oversized", ...oversized })
       ];
       const catalog = createLinearReadOnlyWorkCatalogForTest({
-        api: createLinearReadOnlyApiForTest(api),
+        api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
         teamId: "team-luma"
       });
 
       await expect(
         catalog.searchWorkItems({
-          workspaceId: "workspace_luma",
+          workspaceId: "team-luma",
           text: "release checklist",
           limit: 10
         })
@@ -451,12 +484,12 @@ describe("LinearReadOnlyWorkCatalog", () => {
       description: "x".repeat(64_001)
     });
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma"
     });
 
     await catalog.searchWorkItems({
-      workspaceId: "workspace_luma",
+      workspaceId: "team-luma",
       text: "release checklist",
       limit: 1
     });
@@ -474,23 +507,39 @@ describe("LinearReadOnlyWorkCatalog", () => {
       api: LinearApi;
     };
 
-    expectTypeOf<LinearReadOnlyWorkCatalogConfig>().toMatchTypeOf<{
+    expectTypeOf<LinearReadOnlyWorkCatalogConfig>().toExtend<{
       teamId: string;
       readOnlyApiKey: string;
       apiKey?: never;
       api?: never;
     }>();
-    expectTypeOf<WriterConfiguredLinearWorkProvider>().not.toMatchTypeOf<LinearReadOnlyWorkCatalogConfig>();
-    expectTypeOf<LinearApi>().not.toMatchTypeOf<
+    expectTypeOf<WriterConfiguredLinearWorkProvider>().not.toExtend<LinearReadOnlyWorkCatalogConfig>();
+    expectTypeOf<LinearApi>().not.toExtend<
       Parameters<typeof createLinearReadOnlyApiForTest>[0]
     >();
-    expectTypeOf<LinearApi>().not.toMatchTypeOf<LinearReadOnlyApi>();
+    expectTypeOf<LinearApi>().not.toExtend<LinearReadOnlyApi>();
+
+    const rejectWriterApi = (): LinearReadOnlyApi => {
+      const api = undefined as unknown as LinearApi;
+      // @ts-expect-error A writer-capable LinearApi is not an exact read-only test double.
+      return createLinearReadOnlyApiForTest(api);
+    };
+
+    function createApiThroughGenericWrapper<T extends LinearReadOnlyApiOperations>(
+      api: T
+    ): LinearReadOnlyApi {
+      // @ts-expect-error A generic read-operation constraint can conceal a writer API.
+      return createLinearReadOnlyApiForTest(api);
+    }
+
+    void rejectWriterApi;
+    void createApiThroughGenericWrapper;
   });
 
   it("exposes and invokes no mutation surface", async () => {
     const api = new RecordingLinearReadOnlyApi();
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma"
     });
 
@@ -506,7 +555,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
     expect(Object.hasOwn(catalog, "addComment")).toBe(false);
 
     await catalog.searchWorkItems({
-      workspaceId: "workspace_luma",
+      workspaceId: "team-luma",
       text: "release checklist",
       limit: 1
     });
@@ -519,20 +568,20 @@ describe("LinearReadOnlyWorkCatalog", () => {
   it("fails closed for malformed query input before reaching Linear", async () => {
     const api = new RecordingLinearReadOnlyApi();
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api: createLinearReadOnlyApiForTest(api),
+      api: createLinearReadOnlyApiForTest(readOnlyApiForTest(api)),
       teamId: "team-luma"
     });
 
     await expect(
       catalog.searchWorkItems({
-        workspaceId: "workspace_luma",
+        workspaceId: "team-luma",
         text: "   ",
         limit: 1
       })
     ).rejects.toMatchObject({ code: "linear-readonly-query-invalid" });
     await expect(
       catalog.searchWorkItems({
-        workspaceId: "workspace_luma",
+        workspaceId: "team-luma",
         text: "release checklist",
         limit: 0
       })

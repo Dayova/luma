@@ -17,7 +17,7 @@ const READ_ONLY_LABEL_FETCH_LIMIT = MAX_ISSUE_LABEL_COUNT + 1;
 
 export type LinearReadOnlyApiIssue = LinearApiIssue;
 
-const linearReadOnlyApiBrand: unique symbol = Symbol("LinearReadOnlyApi");
+export const linearReadOnlyApiBrand: unique symbol = Symbol("LinearReadOnlyApi");
 
 type LinearReadOnlyApiOperations = {
   searchIssues(input: {
@@ -36,8 +36,9 @@ type LinearReadOnlyApiOperations = {
 export interface LinearReadOnlyApi extends LinearReadOnlyApiOperations {
   /**
    * Nominally separates this constrained transport from the writer-capable
-   * LinearApi. Only this module's production adapter and explicit test
-   * factory can create the brand.
+   * LinearApi. It is exported solely so declaration emit can name this
+   * computed key; supported construction remains the production adapter and
+   * explicit test factory below.
    */
   readonly [linearReadOnlyApiBrand]: true;
 }
@@ -49,15 +50,18 @@ type LinearReadOnlyApiTestDouble = LinearReadOnlyApiOperations & {
   findIssueByIdempotencyKey?: never;
 };
 
+type NoExtraProperties<Expected, Actual extends Expected> = Actual &
+  Record<Exclude<keyof Actual, keyof Expected>, never>;
+
 /**
  * Brands a deterministic, query-only test double for the test catalog seam.
  * It is intentionally absent from the package entrypoint. The input rejects
- * the mutation surface of the writer-capable LinearApi before it can cross
- * this test-only boundary.
+ * mutation surfaces and captures the concrete input keys, so a generic
+ * wrapper cannot conceal a writer-capable LinearApi at this test-only boundary.
  */
-export function createLinearReadOnlyApiForTest(
-  api: LinearReadOnlyApiTestDouble
-): LinearReadOnlyApi {
+export function createLinearReadOnlyApiForTest<
+  Actual extends LinearReadOnlyApiTestDouble
+>(api: NoExtraProperties<LinearReadOnlyApiTestDouble, Actual>): LinearReadOnlyApi {
   return {
     [linearReadOnlyApiBrand]: true,
     searchIssues: (input) => api.searchIssues(input),
@@ -275,6 +279,7 @@ function normalizeSearchQuery(
 
   if (
     workspaceId.length === 0 ||
+    workspaceId !== teamId ||
     text.length === 0 ||
     text.length > MAX_SEARCH_TEXT_LENGTH ||
     !Number.isSafeInteger(query.limit) ||
@@ -282,7 +287,7 @@ function normalizeSearchQuery(
   ) {
     throw new LinearReadOnlyWorkCatalogError(
       "linear-readonly-query-invalid",
-      "Linear read-only search requires a bounded workspace, query, and positive limit"
+      "Linear read-only search requires the configured workspace, query, and positive limit"
     );
   }
 

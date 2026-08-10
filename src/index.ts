@@ -105,6 +105,7 @@ export {
 } from "./knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 export type {
   NotionObjectScopedMeetingNoteEvidenceReader,
+  NotionObjectScopedMeetingNoteEvidenceSession,
   NotionObjectScopedMeetingNoteEvidenceSourceConfig
 } from "./knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 export {

@@ -7,8 +7,10 @@ import {
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
 import {
   createNotionObjectScopedMeetingNoteEvidenceSource,
-  type NotionObjectScopedMeetingNoteEvidenceReader
+  type NotionObjectScopedMeetingNoteEvidenceReader,
+  type NotionObjectScopedMeetingNoteEvidenceSession
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
+import type { NotionObjectScopedMeetingNoteEvidenceSession as PublicNotionObjectScopedMeetingNoteEvidenceSession } from "../../src/index.js";
 import { NotionMeetingNotesReadError } from "../../src/knowledge/notion-meeting-notes-source.js";
 const pageId = "14d90a82-a4fb-4a97-8a3f-299a9dad204a";
 const otherPageId = "4e28a2a7-2b90-4566-bb3d-4e50c3f3519d";
@@ -415,6 +417,10 @@ function errorMessage(value: unknown): string {
 }
 
 describe("object-scoped Notion Meeting Note evidence reader", () => {
+  it("re-exports its callback session contract from the public barrel", () => {
+    expectTypeOf<PublicNotionObjectScopedMeetingNoteEvidenceSession>().toEqualTypeOf<NotionObjectScopedMeetingNoteEvidenceSession>();
+  });
+
   it("returns only an exact-page read surface and follows a provider-derived Meeting Notes path", async () => {
     const transport = new RecordingExactPageTransport();
     const reader = createNotionObjectScopedMeetingNoteEvidenceReaderForTest({

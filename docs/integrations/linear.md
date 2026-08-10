@@ -99,9 +99,10 @@ or a label over 256 UTF-16 code units. It requests at most 51 labels so a
 51st label proves the 50-label cap was exceeded. An oversized record produces a
 typed read-only catalog error and no partial search result is retained.
 
-Production construction accepts only the read-only credential configuration;
-it has no injectable API object. The deterministic API-injection seam is
-explicitly test-only and is not exported from Luma's package entrypoint, so a
+Production construction requires a distinct `readOnlyApiKey` configuration
+field, and its TypeScript configuration explicitly rules out writer `apiKey`
+and `api` fields; it has no injectable API object. The deterministic API-injection seam is explicitly
+test-only and is not exported from Luma's package entrypoint, so a
 writer-capable Linear adapter cannot be supplied to the production catalog by
 structural typing.
 

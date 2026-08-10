@@ -17,23 +17,61 @@ const READ_ONLY_LABEL_FETCH_LIMIT = MAX_ISSUE_LABEL_COUNT + 1;
 
 export type LinearReadOnlyApiIssue = LinearApiIssue;
 
-/**
- * The only Linear operations the dedicated read-only catalog may invoke.
- * Keep mutation methods out of this Interface rather than relying on an
- * allowlist at a caller or a narrowed writer-capable object.
- */
-export interface LinearReadOnlyApi {
+const linearReadOnlyApiBrand: unique symbol = Symbol("LinearReadOnlyApi");
+
+type LinearReadOnlyApiOperations = {
   searchIssues(input: {
     teamId: string;
     text: string;
     limit: number;
   }): Promise<LinearReadOnlyApiIssue[]>;
   getIssue(id: string): Promise<LinearReadOnlyApiIssue>;
+};
+
+/**
+ * The only Linear operations the dedicated read-only catalog may invoke.
+ * Keep mutation methods out of this Interface rather than relying on an
+ * allowlist at a caller or a narrowed writer-capable object.
+ */
+export interface LinearReadOnlyApi extends LinearReadOnlyApiOperations {
+  /**
+   * Nominally separates this constrained transport from the writer-capable
+   * LinearApi. Only this module's production adapter and explicit test
+   * factory can create the brand.
+   */
+  readonly [linearReadOnlyApiBrand]: true;
+}
+
+type LinearReadOnlyApiTestDouble = LinearReadOnlyApiOperations & {
+  createIssue?: never;
+  updateIssue?: never;
+  addComment?: never;
+  findIssueByIdempotencyKey?: never;
+};
+
+/**
+ * Brands a deterministic, query-only test double for the test catalog seam.
+ * It is intentionally absent from the package entrypoint. The input rejects
+ * the mutation surface of the writer-capable LinearApi before it can cross
+ * this test-only boundary.
+ */
+export function createLinearReadOnlyApiForTest(
+  api: LinearReadOnlyApiTestDouble
+): LinearReadOnlyApi {
+  return {
+    [linearReadOnlyApiBrand]: true,
+    searchIssues: (input) => api.searchIssues(input),
+    getIssue: (id) => api.getIssue(id)
+  };
 }
 
 export type LinearReadOnlyWorkCatalogConfig = {
   teamId: string;
-  apiKey?: string;
+  /** A dedicated Linear key constrained to read permission. */
+  readOnlyApiKey: string;
+  /** Writer credentials and APIs are incompatible with this production seam. */
+  apiKey?: never;
+  api?: never;
   apiUrl?: string;
   providerId?: string;
 };
@@ -135,12 +173,12 @@ function createLinearReadOnlyWorkCatalogWithApi(
 export function createLinearReadOnlyWorkCatalogFromEnv(
   env: NodeJS.ProcessEnv = process.env
 ): WorkCatalog {
-  const apiKey = requireConfigString(
+  const readOnlyApiKey = requireConfigString(
     env["LINEAR_READONLY_API_KEY"],
     "LINEAR_READONLY_API_KEY"
   );
   const teamId = requireConfigString(env["LINEAR_TEAM_ID"], "LINEAR_TEAM_ID");
-  const config: LinearReadOnlyWorkCatalogConfig = { apiKey, teamId };
+  const config: LinearReadOnlyWorkCatalogConfig = { readOnlyApiKey, teamId };
   const apiUrl = nonBlank(env["LINEAR_API_URL"]);
   const providerId = nonBlank(env["LUMA_LINEAR_PROVIDER_ID"]);
 
@@ -158,7 +196,7 @@ export function createLinearReadOnlyWorkCatalogFromEnv(
 function createLinearReadOnlySdkApi(
   config: LinearReadOnlyWorkCatalogConfig
 ): LinearReadOnlyApi {
-  const apiKey = requireConfigString(config.apiKey, "LINEAR_READONLY_API_KEY");
+  const apiKey = requireConfigString(config.readOnlyApiKey, "LINEAR_READONLY_API_KEY");
 
   return new LinearSdkReadOnlyApi(
     new LinearClient({
@@ -169,6 +207,8 @@ function createLinearReadOnlySdkApi(
 }
 
 class LinearSdkReadOnlyApi implements LinearReadOnlyApi {
+  readonly [linearReadOnlyApiBrand] = true as const;
+
   constructor(private readonly client: LinearClient) {}
 
   async searchIssues(input: {

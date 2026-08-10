@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
+  createLinearReadOnlyApiForTest,
   createLinearReadOnlyWorkCatalog,
   createLinearReadOnlyWorkCatalogForTest,
   createLinearReadOnlyWorkCatalogFromEnv,
@@ -8,6 +9,10 @@ import {
   type LinearReadOnlyApiIssue,
   type LinearReadOnlyWorkCatalogConfig
 } from "../../src/work/linear-read-only-work-catalog.js";
+import type {
+  LinearApi,
+  LinearWorkProviderConfig
+} from "../../src/work/linear-work-provider.js";
 
 type CapturedGraphqlRequest = {
   url: string;
@@ -41,10 +46,9 @@ function linearIssue(
   };
 }
 
-class RecordingLinearReadOnlyApi implements LinearReadOnlyApi {
+class RecordingLinearReadOnlyApi {
   readonly searchCalls: Array<{ teamId: string; text: string; limit: number }> = [];
   readonly getCalls: string[] = [];
-  readonly mutationRequests: string[] = [];
   searchResult: LinearReadOnlyApiIssue[] = [linearIssue()];
   getResult: LinearReadOnlyApiIssue = linearIssue();
 
@@ -60,23 +64,6 @@ class RecordingLinearReadOnlyApi implements LinearReadOnlyApi {
   getIssue(id: string): Promise<LinearReadOnlyApiIssue> {
     this.getCalls.push(id);
     return Promise.resolve(this.getResult);
-  }
-
-  createIssue(): Promise<never> {
-    return this.recordUnexpectedMutation("createIssue");
-  }
-
-  updateIssue(): Promise<never> {
-    return this.recordUnexpectedMutation("updateIssue");
-  }
-
-  addComment(): Promise<never> {
-    return this.recordUnexpectedMutation("addComment");
-  }
-
-  private recordUnexpectedMutation(operation: string): Promise<never> {
-    this.mutationRequests.push(operation);
-    return Promise.reject(new Error(`Unexpected Linear mutation: ${operation}`));
   }
 }
 
@@ -221,7 +208,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
   it("uses a team-scoped, bounded search and maps provider-neutral Work Items", async () => {
     const api = new RecordingLinearReadOnlyApi();
     const catalog = createLinearReadOnlyWorkCatalogForTest({
-      api,
+      api: createLinearReadOnlyApiForTest(api),
       teamId: "team-luma",
       providerId: "linear-readonly"
     });
@@ -267,7 +254,10 @@ describe("LinearReadOnlyWorkCatalog", () => {
 
   it("only fetches an issue selector returned by its own bounded search", async () => {
     const api = new RecordingLinearReadOnlyApi();
-    const catalog = createLinearReadOnlyWorkCatalogForTest({ api, teamId: "team-luma" });
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(api),
+      teamId: "team-luma"
+    });
 
     await expect(catalog.getWorkItem("issue-301")).rejects.toMatchObject({
       code: "linear-readonly-selector-invalid"
@@ -294,7 +284,10 @@ describe("LinearReadOnlyWorkCatalog", () => {
         identifier: `LUM-${index + 1}`
       })
     );
-    const catalog = createLinearReadOnlyWorkCatalogForTest({ api, teamId: "team-luma" });
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(api),
+      teamId: "team-luma"
+    });
 
     await expect(
       catalog.searchWorkItems({
@@ -369,7 +362,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
     vi.stubGlobal("fetch", fakeFetch);
 
     const catalog = createLinearReadOnlyWorkCatalog({
-      apiKey: "read-only-test-key",
+      readOnlyApiKey: "read-only-test-key",
       apiUrl: "https://linear.test/graphql",
       teamId: "team-luma"
     });
@@ -433,7 +426,7 @@ describe("LinearReadOnlyWorkCatalog", () => {
         linearIssue({ id: "issue-oversized", ...oversized })
       ];
       const catalog = createLinearReadOnlyWorkCatalogForTest({
-        api,
+        api: createLinearReadOnlyApiForTest(api),
         teamId: "team-luma"
       });
 
@@ -457,7 +450,10 @@ describe("LinearReadOnlyWorkCatalog", () => {
       id: "issue-301",
       description: "x".repeat(64_001)
     });
-    const catalog = createLinearReadOnlyWorkCatalogForTest({ api, teamId: "team-luma" });
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(api),
+      teamId: "team-luma"
+    });
 
     await catalog.searchWorkItems({
       workspaceId: "workspace_luma",
@@ -471,13 +467,32 @@ describe("LinearReadOnlyWorkCatalog", () => {
     expect(api.getCalls).toEqual(["issue-301"]);
   });
 
-  it("keeps API injection out of the production configuration", () => {
-    expectTypeOf<LinearReadOnlyWorkCatalogConfig>().not.toHaveProperty("api");
+  it("keeps writer configuration and APIs outside the read-only construction seams", () => {
+    type WriterConfiguredLinearWorkProvider = LinearWorkProviderConfig & {
+      readOnlyApiKey: string;
+      apiKey: string;
+      api: LinearApi;
+    };
+
+    expectTypeOf<LinearReadOnlyWorkCatalogConfig>().toMatchTypeOf<{
+      teamId: string;
+      readOnlyApiKey: string;
+      apiKey?: never;
+      api?: never;
+    }>();
+    expectTypeOf<WriterConfiguredLinearWorkProvider>().not.toMatchTypeOf<LinearReadOnlyWorkCatalogConfig>();
+    expectTypeOf<LinearApi>().not.toMatchTypeOf<
+      Parameters<typeof createLinearReadOnlyApiForTest>[0]
+    >();
+    expectTypeOf<LinearApi>().not.toMatchTypeOf<LinearReadOnlyApi>();
   });
 
   it("exposes and invokes no mutation surface", async () => {
     const api = new RecordingLinearReadOnlyApi();
-    const catalog = createLinearReadOnlyWorkCatalogForTest({ api, teamId: "team-luma" });
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(api),
+      teamId: "team-luma"
+    });
 
     expect(Object.keys(catalog).sort()).toEqual([
       "getWorkItem",
@@ -499,12 +514,14 @@ describe("LinearReadOnlyWorkCatalog", () => {
 
     expect(api.searchCalls).toHaveLength(1);
     expect(api.getCalls).toEqual(["issue-301"]);
-    expect(api.mutationRequests).toEqual([]);
   });
 
   it("fails closed for malformed query input before reaching Linear", async () => {
     const api = new RecordingLinearReadOnlyApi();
-    const catalog = createLinearReadOnlyWorkCatalogForTest({ api, teamId: "team-luma" });
+    const catalog = createLinearReadOnlyWorkCatalogForTest({
+      api: createLinearReadOnlyApiForTest(api),
+      teamId: "team-luma"
+    });
 
     await expect(
       catalog.searchWorkItems({

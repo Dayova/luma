@@ -428,7 +428,17 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     expectTypeOf<
       ReturnType<typeof createNotionObjectScopedMeetingNoteEvidenceReader>
     >().toEqualTypeOf<NotionObjectScopedMeetingNoteEvidenceReader>();
+    const productionReader = createNotionObjectScopedMeetingNoteEvidenceReader({
+      pageId,
+      readOnlyApiToken: "native-read-only-token"
+    });
+
+    expect(Object.keys(productionReader)).toEqual(["capture"]);
+    expect("retrievePage" in productionReader).toBe(false);
+    expect("retrievePageMarkdown" in productionReader).toBe(false);
+    expect("listBlockChildren" in productionReader).toBe(false);
     expect(Object.keys(reader).sort()).toEqual([
+      "capture",
       "listBlockChildren",
       "retrievePage",
       "retrievePageMarkdown"
@@ -599,6 +609,51 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
 
     rootPageGate.resolve();
     await expect(rootRead).resolves.toMatchObject({ nextCursor: null });
+  });
+
+  it("rejects a concurrent direct root scan before a second provider read", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    const rootPageGate = deferred();
+    transport.blockMaterial.set(
+      `${pageId}:first`,
+      rootPageGate.promise.then(() => rawBlockList([rawMeetingNotesRoot()]))
+    );
+    const reader = createTestReader(transport);
+
+    await reader.retrievePage({ pageId });
+    const firstRootRead = reader.listBlockChildren({ blockId: pageId });
+    await vi.waitFor(() => expect(transport.blockCalls).toEqual([{ blockId: pageId }]));
+    const secondRootRead = reader.listBlockChildren({ blockId: pageId });
+
+    try {
+      expect(transport.blockCalls).toEqual([{ blockId: pageId }]);
+      rootPageGate.resolve();
+      await expect(secondRootRead).rejects.toMatchObject({
+        code: "notion-object-scoped-reader-capture-in-progress"
+      });
+    } finally {
+      rootPageGate.resolve();
+    }
+
+    await expect(firstRootRead).resolves.toMatchObject({ nextCursor: null });
+  });
+
+  it("revokes an escaped callback session before it can issue another provider read", async () => {
+    const transport = new ProgrammableExactPageTransport();
+    const reader = createTestReader(transport);
+    const escapedSession = await reader.capture(async (session) => {
+      await session.retrievePage({ pageId });
+      return session;
+    });
+
+    await expect(
+      escapedSession.listBlockChildren({ blockId: pageId })
+    ).rejects.toMatchObject({
+      code: "notion-object-scoped-reader-session-expired"
+    });
+
+    expect(transport.pageCalls).toEqual([pageId]);
+    expect(transport.blockCalls).toEqual([]);
   });
 
   it("rejects out-of-order, mismatched, and forged direct reads before transport I/O", async () => {
@@ -1262,9 +1317,11 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       readOnlyApiToken: "native-read-only-token"
     });
 
-    await reader.retrievePage({ pageId });
-    await reader.retrievePageMarkdown({ pageId, includeTranscript: true });
-    await reader.listBlockChildren({ blockId: pageId });
+    await reader.capture(async (session) => {
+      await session.retrievePage({ pageId });
+      await session.retrievePageMarkdown({ pageId, includeTranscript: true });
+      await session.listBlockChildren({ blockId: pageId });
+    });
 
     expect(calls.map((call) => `${call.url.pathname}${call.url.search}`)).toEqual([
       `/v1/pages/${pageId}`,
@@ -1308,7 +1365,9 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
         pageId,
         readOnlyApiToken: "native-read-only-token"
       });
-      const error = await capturedRejectedError(reader.retrievePage({ pageId }));
+      const error = await capturedRejectedError(
+        reader.capture((session) => session.retrievePage({ pageId }))
+      );
 
       expect(error).toMatchObject({ code: expectedCode });
       expect(errorMessage(error)).not.toContain("provider-private diagnostic");

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   createNotionObjectScopedMeetingNoteEvidenceSource,
-  type NotionObjectScopedMeetingNoteEvidenceReader
+  type NotionObjectScopedMeetingNoteEvidenceReader,
+  type NotionObjectScopedMeetingNoteEvidenceSession
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import {
   NotionMeetingNotesReadError,
@@ -18,6 +19,12 @@ class CompleteMeetingNoteReader implements NotionObjectScopedMeetingNoteEvidence
   readonly pageCalls: string[] = [];
   readonly blockCalls: Array<{ blockId: string; cursor?: string }> = [];
   readonly markdownCalls: Array<{ pageId: string; includeTranscript: boolean }> = [];
+
+  capture<T>(
+    operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+  ): Promise<T> {
+    return operation(this);
+  }
 
   retrievePage(input: { pageId: string }) {
     this.pageCalls.push(input.pageId);

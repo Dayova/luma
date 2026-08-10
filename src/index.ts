@@ -110,8 +110,7 @@ export type {
 export {
   createNotionObjectScopedMeetingNoteEvidenceReader,
   createNotionObjectScopedMeetingNoteEvidenceReaderFromEnv,
-  NotionObjectScopedMeetingNoteEvidenceReaderError,
-  withNotionObjectScopedMeetingNoteEvidenceReaderSession
+  NotionObjectScopedMeetingNoteEvidenceReaderError
 } from "./knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
 export type { NotionObjectScopedMeetingNoteEvidenceReaderConfig } from "./knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
 export {

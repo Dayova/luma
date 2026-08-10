@@ -1,7 +1,10 @@
 import { createRequire } from "node:module";
 import type { BlockObjectResponse, Client, PageObjectResponse } from "@notionhq/client";
 import type * as NotionSdk from "@notionhq/client";
-import type { NotionObjectScopedMeetingNoteEvidenceReader } from "./notion-object-scoped-meeting-note-evidence-source.js";
+import type {
+  NotionObjectScopedMeetingNoteEvidenceReader,
+  NotionObjectScopedMeetingNoteEvidenceSession
+} from "./notion-object-scoped-meeting-note-evidence-source.js";
 import {
   NOTION_MEETING_NOTES_API_VERSION,
   normalizeNotionMeetingNotesBlock,
@@ -79,6 +82,7 @@ export class NotionObjectScopedMeetingNoteEvidenceReaderError extends Error {
       | "notion-object-scoped-reader-block-forbidden"
       | "notion-object-scoped-reader-cursor-forbidden"
       | "notion-object-scoped-reader-capture-in-progress"
+      | "notion-object-scoped-reader-session-expired"
       | "notion-object-scoped-reader-request-invalid"
       | "notion-object-scoped-reader-budget-exhausted",
     message: string
@@ -122,33 +126,27 @@ export function createNotionObjectScopedMeetingNoteEvidenceReaderFromEnv(
 /** Creates the same owned reader from a finite deterministic transport. */
 export function createNotionObjectScopedMeetingNoteEvidenceReaderForTest(
   config: NotionObjectScopedMeetingNoteEvidenceReaderTestConfig
-): NotionObjectScopedMeetingNoteEvidenceReader {
+): NotionObjectScopedMeetingNoteEvidenceReaderForTest {
   const bound = validateConfig(config, ["pageId", "readOnlyApiToken", "transport"]);
 
   if (!isTransportForTest(config.transport)) {
     throw configError("A finite exact-page Notion test transport is required");
   }
 
-  return createBoundReader(
+  return createBoundReaderForTest(
     bound,
     config.transport.create(transportInitialization(bound))
   );
 }
 
 /**
- * Runs one complete capture against a fresh, provider-derived capability
- * tree. Production composition owns this boundary, but callers that share an
- * exported reader must use it rather than interleaving the three raw methods.
- * Readers outside this factory retain their supplied interface unchanged.
+ * Test-only raw exact-page operations. This deterministic seam is deliberately
+ * absent from Luma's package entrypoint; production construction returns only
+ * the callback-scoped `capture` Interface.
  */
-export function withNotionObjectScopedMeetingNoteEvidenceReaderSession<T>(
-  reader: NotionObjectScopedMeetingNoteEvidenceReader,
-  operation: (sessionReader: NotionObjectScopedMeetingNoteEvidenceReader) => Promise<T>
-): Promise<T> {
-  const createSession = captureSessionFactories.get(reader);
-
-  return operation(createSession ? createSession() : reader);
-}
+export type NotionObjectScopedMeetingNoteEvidenceReaderForTest =
+  NotionObjectScopedMeetingNoteEvidenceReader &
+    NotionObjectScopedMeetingNoteEvidenceSession;
 
 /**
  * Brands no provider client: it only packages the three finite read
@@ -170,14 +168,10 @@ type BoundReaderConfig = {
   readOnlyApiToken: string;
 };
 
-type DirectCaptureGate = {
+type SessionLease = {
   active: boolean;
+  operationInProgress: boolean;
 };
-
-const captureSessionFactories = new WeakMap<
-  NotionObjectScopedMeetingNoteEvidenceReader,
-  () => NotionObjectScopedMeetingNoteEvidenceReader
->();
 
 type CapabilityState = {
   exactPageVerified: boolean;
@@ -201,19 +195,55 @@ function createBoundReader(
   config: BoundReaderConfig,
   transport: RawExactPageTransport
 ): NotionObjectScopedMeetingNoteEvidenceReader {
-  const directCaptureGate: DirectCaptureGate = { active: false };
-  const reader = createReaderSession(config, transport, directCaptureGate);
+  return Object.freeze({
+    async capture<T>(
+      operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+    ): Promise<T> {
+      if (typeof operation !== "function") {
+        throw readerError(
+          "notion-object-scoped-reader-request-invalid",
+          "Exact-page capture requires a callback"
+        );
+      }
 
-  captureSessionFactories.set(reader, () => createReaderSession(config, transport));
+      const lease: SessionLease = { active: true, operationInProgress: false };
+      const session = createReaderSession(config, transport, lease);
 
-  return reader;
+      try {
+        return await operation(session);
+      } finally {
+        lease.active = false;
+      }
+    }
+  });
+}
+
+function createBoundReaderForTest(
+  config: BoundReaderConfig,
+  transport: RawExactPageTransport
+): NotionObjectScopedMeetingNoteEvidenceReaderForTest {
+  const reader = createBoundReader(config, transport);
+  const testLease: SessionLease = { active: true, operationInProgress: false };
+  const testSession = createReaderSession(config, transport, testLease);
+  const testReader: NotionObjectScopedMeetingNoteEvidenceReaderForTest = {
+    capture: <T>(
+      operation: (session: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+    ): Promise<T> => reader.capture(operation),
+    retrievePage: (input: { pageId: string }) => testSession.retrievePage(input),
+    retrievePageMarkdown: (input: { pageId: string; includeTranscript: boolean }) =>
+      testSession.retrievePageMarkdown(input),
+    listBlockChildren: (input: { blockId: string; cursor?: string }) =>
+      testSession.listBlockChildren(input)
+  };
+
+  return Object.freeze(testReader);
 }
 
 function createReaderSession(
   config: BoundReaderConfig,
   transport: RawExactPageTransport,
-  directCaptureGate?: DirectCaptureGate
-): NotionObjectScopedMeetingNoteEvidenceReader {
+  lease: SessionLease
+): NotionObjectScopedMeetingNoteEvidenceSession {
   const state: CapabilityState = {
     exactPageVerified: false,
     allowedBlockIds: new Set(),
@@ -248,139 +278,178 @@ function createReaderSession(
     state.rootScanInProgress = false;
   };
 
-  const reader: NotionObjectScopedMeetingNoteEvidenceReader = {
+  const reader: NotionObjectScopedMeetingNoteEvidenceSession = {
     async retrievePage(input) {
-      requireConfiguredPage(input, config.pageId);
-      claimDirectCapture(directCaptureGate);
-      resetForPageAttempt();
+      return runSessionOperation(lease, async () => {
+        requireConfiguredPage(input, config.pageId);
+        resetForPageAttempt();
 
-      try {
-        const page = parseExactPage(
-          await transport.retrievePage({ pageId: config.pageId }),
-          config.pageId
-        );
-        resetForVerifiedPage();
-        return page;
-      } catch (error) {
-        releaseDirectCapture(directCaptureGate);
-        throw toSafeReadError(error);
-      }
+        let rawPage: unknown;
+
+        try {
+          rawPage = await transport.retrievePage({ pageId: config.pageId });
+        } catch (error) {
+          throw toSafeReadError(error);
+        }
+
+        requireActiveSession(lease);
+
+        try {
+          const page = parseExactPage(rawPage, config.pageId);
+          resetForVerifiedPage();
+          return page;
+        } catch (error) {
+          throw toSafeReadError(error);
+        }
+      });
     },
 
     async retrievePageMarkdown(input) {
-      requireConfiguredPage(input, config.pageId);
+      return runSessionOperation(lease, async () => {
+        requireConfiguredPage(input, config.pageId);
 
-      if (!state.exactPageVerified) {
-        throw readerError(
-          "notion-object-scoped-reader-page-unverified",
-          "The configured Meeting Note page must be verified before Markdown can be read"
-        );
-      }
+        if (!state.exactPageVerified) {
+          throw readerError(
+            "notion-object-scoped-reader-page-unverified",
+            "The configured Meeting Note page must be verified before Markdown can be read"
+          );
+        }
 
-      if (input.includeTranscript !== true) {
-        throw readerError(
-          "notion-object-scoped-reader-request-invalid",
-          "Exact-page Markdown reads require the complete transcript"
-        );
-      }
+        if (input.includeTranscript !== true) {
+          throw readerError(
+            "notion-object-scoped-reader-request-invalid",
+            "Exact-page Markdown reads require the complete transcript"
+          );
+        }
 
-      try {
-        return parseExactPageMarkdown(
-          await transport.retrievePageMarkdown({
+        let rawMarkdown: unknown;
+
+        try {
+          rawMarkdown = await transport.retrievePageMarkdown({
             pageId: config.pageId,
             includeTranscript: true
-          }),
-          config.pageId
-        );
-      } catch (error) {
-        throw toSafeReadError(error);
-      }
+          });
+        } catch (error) {
+          throw toSafeReadError(error);
+        }
+
+        requireActiveSession(lease);
+
+        try {
+          return parseExactPageMarkdown(rawMarkdown, config.pageId);
+        } catch (error) {
+          throw toSafeReadError(error);
+        }
+      });
     },
 
     async listBlockChildren(input) {
-      if (!state.exactPageVerified) {
-        throw readerError(
-          "notion-object-scoped-reader-page-unverified",
-          "The configured Meeting Note page must be verified before blocks can be read"
-        );
-      }
+      return runSessionOperation(lease, async () => {
+        if (!state.exactPageVerified) {
+          throw readerError(
+            "notion-object-scoped-reader-page-unverified",
+            "The configured Meeting Note page must be verified before blocks can be read"
+          );
+        }
 
-      const blockId = requireAllowedBlock(input, state);
-      const cursor = requireRequestedCursor(input);
+        const blockId = requireAllowedBlock(input, state);
+        const cursor = requireRequestedCursor(input);
 
-      if (blockId === config.pageId && cursor === undefined) {
-        // A fresh direct-page list starts a fresh provider-derived root tree;
-        // no pointer or descendant from an earlier read remains authoritative.
-        state.rootCandidates = [];
-        state.rootScanInProgress = true;
-        clearDescendantsOfConfiguredPage(config.pageId, state);
-      }
+        if (blockId === config.pageId && cursor === undefined) {
+          // A fresh direct-page list starts a fresh provider-derived root tree;
+          // no pointer or descendant from an earlier read remains authoritative.
+          state.rootCandidates = [];
+          state.rootScanInProgress = true;
+          clearDescendantsOfConfiguredPage(config.pageId, state);
+        }
 
-      if (
-        blockId === config.pageId &&
-        cursor !== undefined &&
-        !state.rootScanInProgress
-      ) {
-        throw readerError(
-          "notion-object-scoped-reader-cursor-forbidden",
-          "The configured Meeting Note root cursor is not active"
-        );
-      }
+        if (
+          blockId === config.pageId &&
+          cursor !== undefined &&
+          !state.rootScanInProgress
+        ) {
+          throw readerError(
+            "notion-object-scoped-reader-cursor-forbidden",
+            "The configured Meeting Note root cursor is not active"
+          );
+        }
 
-      requireAvailableCursor(blockId, cursor, state);
-      consumeBlockReadBudget(blockId, state);
-      reserveAllowedCursor(blockId, cursor, state);
+        requireAvailableCursor(blockId, cursor, state);
+        consumeBlockReadBudget(blockId, state);
+        reserveAllowedCursor(blockId, cursor, state);
 
-      try {
-        const page = parseBlockChildrenPage(
-          await transport.listBlockChildren({
+        let rawPage: unknown;
+
+        try {
+          rawPage = await transport.listBlockChildren({
             blockId,
             ...(cursor === undefined ? {} : { cursor })
-          }),
-          { configuredPageId: config.pageId, expectedParentId: blockId }
-        );
+          });
+        } catch (error) {
+          releaseReservedCursor(blockId, cursor, state);
+          throw toSafeReadError(error);
+        }
 
-        consumeReservedCursor(blockId, cursor, state);
+        requireActiveSession(lease);
 
-        mintProviderDerivedCapabilities({
-          configuredPageId: config.pageId,
-          parentBlockId: blockId,
-          page,
-          state
-        });
+        try {
+          const page = parseBlockChildrenPage(rawPage, {
+            configuredPageId: config.pageId,
+            expectedParentId: blockId
+          });
 
-        return {
-          blocks: page.blocks.map((item) => item.block),
-          nextCursor: page.nextCursor
-        };
-      } catch (error) {
-        releaseReservedCursor(blockId, cursor, state);
-        throw toSafeReadError(error);
-      }
+          consumeReservedCursor(blockId, cursor, state);
+
+          mintProviderDerivedCapabilities({
+            configuredPageId: config.pageId,
+            parentBlockId: blockId,
+            page,
+            state
+          });
+
+          return {
+            blocks: page.blocks.map((item) => item.block),
+            nextCursor: page.nextCursor
+          };
+        } catch (error) {
+          releaseReservedCursor(blockId, cursor, state);
+          throw toSafeReadError(error);
+        }
+      });
     }
   };
 
   return Object.freeze(reader);
 }
 
-function claimDirectCapture(gate: DirectCaptureGate | undefined): void {
-  if (!gate) {
-    return;
+function requireActiveSession(lease: SessionLease): void {
+  if (!lease.active) {
+    throw readerError(
+      "notion-object-scoped-reader-session-expired",
+      "The exact-page reader session is no longer active"
+    );
   }
+}
 
-  if (gate.active) {
+async function runSessionOperation<T>(
+  lease: SessionLease,
+  operation: () => Promise<T>
+): Promise<T> {
+  requireActiveSession(lease);
+
+  if (lease.operationInProgress) {
     throw readerError(
       "notion-object-scoped-reader-capture-in-progress",
-      "A direct exact-page capture is already active; concurrent captures require an isolated reader session"
+      "An exact-page reader session permits one operation at a time"
     );
   }
 
-  gate.active = true;
-}
+  lease.operationInProgress = true;
 
-function releaseDirectCapture(gate: DirectCaptureGate | undefined): void {
-  if (gate) {
-    gate.active = false;
+  try {
+    return await operation();
+  } finally {
+    lease.operationInProgress = false;
   }
 }
 

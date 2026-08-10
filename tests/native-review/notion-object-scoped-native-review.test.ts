@@ -11,7 +11,10 @@ import {
   createNotionObjectScopedMeetingNoteEvidenceReaderForTest,
   createNotionObjectScopedMeetingNoteEvidenceTransportForTest
 } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
-import type { NotionObjectScopedMeetingNoteEvidenceReader } from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
+import type {
+  NotionObjectScopedMeetingNoteEvidenceReader,
+  NotionObjectScopedMeetingNoteEvidenceSession
+} from "../../src/knowledge/notion-object-scoped-meeting-note-evidence-source.js";
 import type { NotionMeetingNotesBlock } from "../../src/knowledge/notion-meeting-notes-source.js";
 import type { OperationalOutcomeMarkerVerifier } from "../../src/knowledge/operational-outcome-writer.js";
 import type { SourceBoundNativeReviewRequest } from "../../src/native-review/source-bound-native-review.js";
@@ -56,6 +59,12 @@ class ExactPageReader implements NotionObjectScopedMeetingNoteEvidenceReader {
   readonly pageCalls: string[] = [];
   readonly blockCalls: Array<{ blockId: string; cursor?: string }> = [];
   readonly markdownCalls: Array<{ pageId: string; includeTranscript: boolean }> = [];
+
+  capture<T>(
+    operation: (reader: NotionObjectScopedMeetingNoteEvidenceSession) => Promise<T>
+  ): Promise<T> {
+    return operation(this);
+  }
 
   retrievePage(input: { pageId: string }) {
     this.pageCalls.push(input.pageId);

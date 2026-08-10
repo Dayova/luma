@@ -65,6 +65,24 @@ export type {
   MeetingNotesSyncResult,
   MeetingNotesSyncScheduler
 } from "./knowledge/meeting-notes-sync.js";
+export { createMeetingNotesObservationRuntime } from "./knowledge/meeting-notes-observation-runtime.js";
+export type {
+  CreateMeetingNotesObservationRuntimeInput,
+  MeetingNotesCanonicalReconciliation,
+  MeetingNotesObservationRuntime,
+  MeetingNotesObservationRuntimeDrain,
+  MeetingNotesObservationRuntimeStatus,
+  MeetingNotesPageWakeUpResult
+} from "./knowledge/meeting-notes-observation-runtime.js";
+export { createNotionWebhookWakeUpIngress } from "./knowledge/notion-webhook-wake-up.js";
+export type {
+  CreateNotionWebhookWakeUpIngressInput,
+  NotionWebhookDelivery,
+  NotionWebhookIngressResult,
+  NotionWebhookWakeUp,
+  NotionWebhookWakeUpIngress,
+  NotionWebhookWakeUpQueue
+} from "./knowledge/notion-webhook-wake-up.js";
 export {
   NotionMeetingNotesReadError,
   NotionMeetingNotesSourceError,
@@ -76,7 +94,9 @@ export type {
   NotionMeetingNotesApi,
   NotionMeetingNotesBlock,
   NotionMeetingNotesPage,
+  NotionMeetingNotesPageReader,
   NotionMeetingNotesReadErrorCode,
+  NotionMeetingNotesSource,
   NotionMeetingNotesSourceConfig
 } from "./knowledge/notion-meeting-notes-source.js";
 export {

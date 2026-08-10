@@ -21,6 +21,8 @@ import { createPgliteDatabase } from "../../src/persistence/db.js";
 
 const baseMeetingMarkdown =
   "# Product sync\n\nWir prüfen die Quelle before we create work.";
+const directRefreshMeetingPageId = "11111111-2222-3333-4444-555555555555";
+const directRefreshOutsidePageId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
 function block(
   overrides: Partial<NotionMeetingNotesBlock> &
@@ -170,7 +172,9 @@ class FakeNotionMeetingNotesApi implements NotionMeetingNotesApi {
         nextCursor: null
       }
     };
-    const result = blocksByCursor[`${input.blockId}:${input.cursor ?? "first"}`];
+    const lookupBlockId =
+      input.blockId === directRefreshMeetingPageId ? "meeting-page-1" : input.blockId;
+    const result = blocksByCursor[`${lookupBlockId}:${input.cursor ?? "first"}`];
 
     if (!result) {
       throw new Error(
@@ -425,6 +429,122 @@ describe("Notion Meeting Notes source", () => {
           },
           completeness: { state: "complete" }
         }
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("refreshes one canonical Meeting Note through the existing ledger without scanning or inferring absence", async () => {
+    const database = await createPgliteDatabase();
+    const api = new FakeNotionMeetingNotesApi();
+    const pageReaderCalls: string[] = [];
+    const source = createNotionMeetingNotesSource({
+      api,
+      ledger: createObservedSourceLedger({ database }),
+      meetingsDataSourceId: "dayova-meetings",
+      pageReader: {
+        retrievePage: ({ pageId }) => {
+          pageReaderCalls.push(pageId);
+          return Promise.resolve({
+            page: {
+              id: pageId,
+              title: "Product sync",
+              url: `https://notion.so/${pageId}`,
+              lastEditedAt: "2026-08-10T10:00:00.000Z",
+              inTrash: false
+            },
+            parentDataSourceId:
+              pageId === directRefreshMeetingPageId
+                ? "dayova-meetings"
+                : "another-data-source"
+          });
+        }
+      }
+    });
+
+    try {
+      const first = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: directRefreshMeetingPageId.replaceAll("-", "").toUpperCase()
+      });
+      const replay = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: directRefreshMeetingPageId
+      });
+      const outsideCanonicalMeetings = await source.refreshPage({
+        workspaceId: "workspace_dayova",
+        pageId: directRefreshOutsidePageId
+      });
+
+      expect(api.dataSourceCalls).toEqual([]);
+      expect(first).toMatchObject({
+        status: "refreshed",
+        completeness: "complete",
+        records: [
+          {
+            change: "new",
+            source: {
+              sourceObjectId: "meeting-notes-block-1",
+              parentObjectId: directRefreshMeetingPageId
+            }
+          }
+        ]
+      });
+      expect(replay.records).toMatchObject([{ change: "unchanged", revision: 1 }]);
+      expect(outsideCanonicalMeetings).toEqual({
+        status: "ignored",
+        records: [],
+        completeness: "complete",
+        partialReasons: []
+      });
+
+      await expect(
+        source.refreshPage({
+          workspaceId: "workspace_dayova",
+          pageId: `${directRefreshMeetingPageId}#unexpected-path`
+        })
+      ).rejects.toMatchObject({ code: "source-invalid" });
+      expect(pageReaderCalls).toEqual([
+        directRefreshMeetingPageId,
+        directRefreshMeetingPageId,
+        directRefreshOutsidePageId
+      ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("treats a deletion between a signed wake-up and the exact page read as non-tombstoning partial coverage", async () => {
+    const database = await createPgliteDatabase();
+    const source = createNotionMeetingNotesSource({
+      api: new FakeNotionMeetingNotesApi(),
+      ledger: createObservedSourceLedger({ database }),
+      meetingsDataSourceId: "dayova-meetings",
+      pageReader: {
+        retrievePage: () =>
+          Promise.reject(
+            new NotionMeetingNotesReadError("source-not-found", "The page was deleted")
+          )
+      }
+    });
+
+    try {
+      await expect(
+        source.refreshPage({
+          workspaceId: "workspace_dayova",
+          pageId: directRefreshMeetingPageId
+        })
+      ).resolves.toMatchObject({
+        status: "ignored",
+        records: [],
+        completeness: "partial",
+        partialReasons: [
+          expect.objectContaining({
+            code: "unreadable-page",
+            retryable: false
+          })
+        ]
       });
     } finally {
       await database.close();

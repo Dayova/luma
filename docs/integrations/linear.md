@@ -75,6 +75,41 @@ Linear owns the task. GitHub #20 describes the migration and DAY-39 is the canon
 
 The SDK is contained behind Luma's owned `LinearApi` facade and `WorkProvider` Interface.
 
+## Dedicated least-privilege read-only catalog
+
+`LinearReadOnlyWorkCatalog` is a separate production Adapter for an eventual
+source-bound review surface. It is configured with `LINEAR_READONLY_API_KEY`
+and `LINEAR_TEAM_ID`; it never reads or falls back to `LINEAR_API_KEY`, and it
+does not accept a `WorkProvider` instance. Create the read-only key with only
+Linear's **Read** permission.
+
+The catalog implements only the existing read-only `WorkCatalog` operations:
+
+- team-scoped text search is hard-capped at ten results, and an SDK response is
+  sliced to that cap before any individual issue is hydrated;
+- one issue may be fetched only after its opaque selector was returned by that
+  catalog's bounded search; and
+- no generic list, create, update, comment, assignment, or delete operation is
+  exposed.
+
+Before any Linear record becomes a `WorkItem` or reconciliation-facing data,
+the read-only catalog rejects (rather than truncates) a title over 1,024 UTF-16
+code units, a description over 64,000 UTF-16 code units, more than 50 labels,
+or a label over 256 UTF-16 code units. It requests at most 51 labels so a
+51st label proves the 50-label cap was exceeded. An oversized record produces a
+typed read-only catalog error and no partial search result is retained.
+
+Production construction requires a distinct `readOnlyApiKey` configuration
+field, and its TypeScript configuration explicitly rules out writer `apiKey`
+and `api` fields; it has no injectable API object. The deterministic API-injection seam is explicitly
+test-only and is not exported from Luma's package entrypoint, so a
+writer-capable Linear adapter cannot be supplied to the production catalog by
+structural typing.
+
+This slice does not wire the catalog into the executable server or authorize a
+native Notion agent. It is intentionally separate from the writer-capable
+`LinearWorkProvider` used by approved Follow-up Execution.
+
 ## Read-only reconciliation catalog
 
 Meeting Intelligence receives a narrowed `WorkCatalog` rather than a
@@ -114,4 +149,14 @@ set -a
 source .env
 set +a
 LUMA_LIVE_LINEAR_TESTS=1 pnpm test -- tests/work/linear-work-provider.live.test.ts
+```
+
+For the dedicated catalog, create a separate Read-permission key and run only
+the bounded search smoke test:
+
+```bash
+set -a
+source .env
+set +a
+LUMA_LIVE_LINEAR_READONLY_TESTS=1 pnpm exec vitest run tests/work/linear-read-only-work-catalog.live.test.ts
 ```

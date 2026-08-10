@@ -1,28 +1,12 @@
-import { LinearClient, type Issue } from "@linear/sdk";
+import { LinearClient } from "@linear/sdk";
 import type { ExternalReference } from "../domain/model.js";
 import type { UpdateWorkItemInput, WorkItem, WorkProvider } from "./interface.js";
+import { linearSdkIssueToApiIssue } from "./linear-sdk-issue.js";
+import { toLinearWorkItem, type LinearApiIssue } from "./linear-work-item.js";
+
+export type { LinearApiIssue } from "./linear-work-item.js";
 
 const IDEMPOTENCY_MARKER_PREFIX = "luma-idempotency-key:";
-
-export type LinearApiIssue = {
-  id: string;
-  identifier: string;
-  title: string;
-  description: string;
-  stateType: string;
-  stateName: string;
-  assignee: {
-    id: string;
-    displayName: string;
-    email: string;
-  } | null;
-  dueDate: string | null;
-  labels: string[];
-  projectId: string | null;
-  parentId: string | null;
-  url: string;
-  updatedAt: string;
-};
 
 export type LinearCreateIssueInput = {
   teamId: string;
@@ -91,8 +75,8 @@ export function createLinearWorkProvider(config: LinearWorkProviderConfig): Work
           text: query.text,
           limit: query.limit
         })
-      ).map((issue) => toWorkItem(issue, providerId)),
-    getWorkItem: async (id) => toWorkItem(await api.getIssue(id), providerId),
+      ).map((issue) => toLinearWorkItem(issue, providerId)),
+    getWorkItem: async (id) => toLinearWorkItem(await api.getIssue(id), providerId),
     async createWorkItem(input) {
       const existing = await api.findIssueByIdempotencyKey({
         teamId: config.teamId,
@@ -309,39 +293,9 @@ class LinearSdkApi implements LinearApi {
     return state.id;
   }
 
-  private async toApiIssue(issue: Issue): Promise<LinearApiIssue> {
-    const [assignee, state, labels] = await Promise.all([
-      issue.assignee ?? Promise.resolve(undefined),
-      issue.state ?? Promise.resolve(undefined),
-      issue.labels({ first: 100 })
-    ]);
-
-    return {
-      id: issue.id,
-      identifier: issue.identifier,
-      title: issue.title,
-      description: issue.description ?? "",
-      stateType: state?.type ?? "backlog",
-      stateName: state?.name ?? "Backlog",
-      assignee: assignee
-        ? {
-            id: assignee.id,
-            displayName: assignee.displayName,
-            email: assignee.email
-          }
-        : null,
-      dueDate: optionalString(issue.dueDate as unknown),
-      labels: labels.nodes.map((label) => label.name),
-      projectId: issue.projectId ?? null,
-      parentId: issue.parentId ?? null,
-      url: issue.url,
-      updatedAt: issue.updatedAt.toISOString()
-    };
+  private toApiIssue(issue: Parameters<typeof linearSdkIssueToApiIssue>[0]) {
+    return linearSdkIssueToApiIssue(issue);
   }
-}
-
-function optionalString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 function toLinearUpdateInput(
@@ -364,32 +318,6 @@ function toLinearUpdateInput(
   };
 }
 
-function toWorkItem(issue: LinearApiIssue, providerId: string): WorkItem {
-  return {
-    id: issue.id,
-    providerId,
-    externalId: issue.identifier,
-    title: issue.title,
-    description: issue.description,
-    status: normalizeLinearStatus(issue),
-    assignees: issue.assignee
-      ? [
-          {
-            id: issue.assignee.id,
-            displayName: issue.assignee.displayName,
-            username: issue.assignee.email
-          }
-        ]
-      : [],
-    dueDate: issue.dueDate,
-    labels: issue.labels,
-    projectId: issue.projectId,
-    parentId: issue.parentId,
-    url: issue.url,
-    updatedAt: issue.updatedAt
-  };
-}
-
 function toExternalReference(
   issue: LinearApiIssue,
   providerId: string
@@ -401,29 +329,6 @@ function toExternalReference(
     url: issue.url,
     version: issue.updatedAt
   };
-}
-
-function normalizeLinearStatus(issue: LinearApiIssue): WorkItem["status"] {
-  if (issue.labels.some((label) => label.toLowerCase() === "blocked")) {
-    return "blocked";
-  }
-
-  switch (issue.stateType) {
-    case "triage":
-    case "backlog":
-      return "backlog";
-    case "unstarted":
-      return "planned";
-    case "started":
-      return "active";
-    case "completed":
-      return "completed";
-    case "canceled":
-    case "duplicate":
-      return "cancelled";
-    default:
-      return "planned";
-  }
 }
 
 function linearStateType(status: WorkItem["status"]): string {

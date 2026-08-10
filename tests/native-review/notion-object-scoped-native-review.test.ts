@@ -30,6 +30,13 @@ const workspace = {
 };
 const providerId = "notion";
 const pageId = "11111111-2222-4333-8444-555555555555";
+const ownedReaderRootId = "a53cf699-7810-4de3-86e9-39c5ff27a901";
+const ownedReaderSummaryBlockId = "a53cf699-7810-4de3-86e9-39c5ff27a902";
+const ownedReaderNotesBlockId = "a53cf699-7810-4de3-86e9-39c5ff27a903";
+const ownedReaderTranscriptBlockId = "a53cf699-7810-4de3-86e9-39c5ff27a904";
+const ownedReaderSummaryLineId = "a53cf699-7810-4de3-86e9-39c5ff27a905";
+const ownedReaderActionItemId = "a53cf699-7810-4de3-86e9-39c5ff27a906";
+const ownedReaderTranscriptLineId = "a53cf699-7810-4de3-86e9-39c5ff27a907";
 const neverOwnedOperationalOutcomeMarker: OperationalOutcomeMarkerVerifier = {
   isOwned: () => Promise.resolve(false)
 };
@@ -181,31 +188,49 @@ function createFactoryBackedExactPageReader(): {
   const blockPages: Record<string, Record<string, unknown>> = {
     [`${pageId}:first`]: rawReaderBlockList([
       rawReaderMeetingNotesRoot({
-        summaryBlockId: "summary-block",
-        notesBlockId: "notes-block",
-        transcriptBlockId: "transcript-block"
+        id: ownedReaderRootId,
+        summaryBlockId: ownedReaderSummaryBlockId,
+        notesBlockId: ownedReaderNotesBlockId,
+        transcriptBlockId: ownedReaderTranscriptBlockId
       })
     ]),
-    "summary-block:first": rawReaderBlockList([
+    [`${ownedReaderRootId}:first`]: rawReaderBlockList([
       rawReaderChildBlock({
-        id: "summary-line",
-        parentBlockId: "summary-block",
+        id: ownedReaderSummaryBlockId,
+        parentBlockId: ownedReaderRootId,
+        text: ""
+      }),
+      rawReaderChildBlock({
+        id: ownedReaderNotesBlockId,
+        parentBlockId: ownedReaderRootId,
+        text: ""
+      }),
+      rawReaderChildBlock({
+        id: ownedReaderTranscriptBlockId,
+        parentBlockId: ownedReaderRootId,
+        text: ""
+      })
+    ]),
+    [`${ownedReaderSummaryBlockId}:first`]: rawReaderBlockList([
+      rawReaderChildBlock({
+        id: ownedReaderSummaryLineId,
+        parentBlockId: ownedReaderSummaryBlockId,
         text: "Review only the exact meeting."
       })
     ]),
-    "notes-block:first": rawReaderBlockList([
+    [`${ownedReaderNotesBlockId}:first`]: rawReaderBlockList([
       rawReaderChildBlock({
-        id: "action-item-1",
-        parentBlockId: "notes-block",
+        id: ownedReaderActionItemId,
+        parentBlockId: ownedReaderNotesBlockId,
         type: "to_do",
         text: "Jakob will review LUM-301 by Friday.",
         checked: false
       })
     ]),
-    "transcript-block:first": rawReaderBlockList([
+    [`${ownedReaderTranscriptBlockId}:first`]: rawReaderBlockList([
       rawReaderChildBlock({
-        id: "transcript-line",
-        parentBlockId: "transcript-block",
+        id: ownedReaderTranscriptLineId,
+        parentBlockId: ownedReaderTranscriptBlockId,
         text: "Original speech stays canonical."
       })
     ])
@@ -267,13 +292,14 @@ function rawReaderBlockList(results: Record<string, unknown>[]): Record<string, 
 }
 
 function rawReaderMeetingNotesRoot(input: {
+  id: string;
   summaryBlockId: string;
   notesBlockId: string;
   transcriptBlockId: string;
 }): Record<string, unknown> {
   return {
     object: "block",
-    id: "meeting-notes-root",
+    id: input.id,
     type: "meeting_notes",
     has_children: true,
     in_trash: false,
@@ -460,7 +486,7 @@ describe("dormant source-bound native review composition", () => {
 
       expect(receipt).toMatchObject({
         workspaceId: workspace.workspaceId,
-        source: { providerId, sourceObjectId: "meeting-notes-root", revision: 1 },
+        source: { providerId, sourceObjectId: ownedReaderRootId, revision: 1 },
         outcome: {
           type: "reviewed",
           workReferences: [{ providerId: "linear", lookupId: "issue-301" }]
@@ -479,9 +505,10 @@ describe("dormant source-bound native review composition", () => {
       ]);
       expect(exactPageReader.blockCalls).toEqual([
         { blockId: pageId },
-        { blockId: "summary-block" },
-        { blockId: "notes-block" },
-        { blockId: "transcript-block" }
+        { blockId: ownedReaderRootId },
+        { blockId: ownedReaderSummaryBlockId },
+        { blockId: ownedReaderNotesBlockId },
+        { blockId: ownedReaderTranscriptBlockId }
       ]);
       expect("listDataSourcePages" in exactPageReader.reader).toBe(false);
       expect(linearApi.searchCalls).toEqual([

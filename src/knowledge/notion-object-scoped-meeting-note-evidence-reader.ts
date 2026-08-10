@@ -164,6 +164,11 @@ type CapabilityState = {
     block: NotionMeetingNotesBlock;
     raw: Record<string, unknown>;
   }>;
+  meetingNotesRoot: {
+    id: string;
+    sectionPointerIds: Set<string>;
+    verifiedSectionPointerIds: Set<string>;
+  } | null;
   rootScanInProgress: boolean;
 };
 
@@ -178,6 +183,7 @@ function createBoundReader(
     reservedCursorsByBlockId: new Map(),
     blockReadCounts: new Map(),
     rootCandidates: [],
+    meetingNotesRoot: null,
     rootScanInProgress: false
   };
 
@@ -189,6 +195,7 @@ function createBoundReader(
     state.reservedCursorsByBlockId.clear();
     state.blockReadCounts.clear();
     state.rootCandidates = [];
+    state.meetingNotesRoot = null;
     state.rootScanInProgress = false;
   };
 
@@ -199,6 +206,7 @@ function createBoundReader(
     state.reservedCursorsByBlockId.clear();
     state.blockReadCounts.clear();
     state.rootCandidates = [];
+    state.meetingNotesRoot = null;
     state.rootScanInProgress = false;
   };
 
@@ -321,6 +329,7 @@ function clearDescendantsOfConfiguredPage(pageId: string, state: CapabilityState
   state.allowedCursorsByBlockId.clear();
   state.reservedCursorsByBlockId.clear();
   state.blockReadCounts.clear();
+  state.meetingNotesRoot = null;
 }
 
 function mintProviderDerivedCapabilities(input: {
@@ -341,8 +350,10 @@ function mintProviderDerivedCapabilities(input: {
 
     if (page.nextCursor === null) {
       state.rootScanInProgress = false;
-      mintMeetingNotesSectionPointers(configuredPageId, state);
+      mintVerifiedMeetingNotesRoot(configuredPageId, state);
     }
+  } else if (parentBlockId === state.meetingNotesRoot?.id) {
+    mintVerifiedMeetingNotesSectionPointers(parentBlockId, page, state);
   } else {
     for (const item of page.blocks) {
       if (mayTraverseReturnedBlock(item.raw, item.block)) {
@@ -363,7 +374,7 @@ function mintProviderDerivedCapabilities(input: {
   }
 }
 
-function mintMeetingNotesSectionPointers(
+function mintVerifiedMeetingNotesRoot(
   configuredPageId: string,
   state: CapabilityState
 ): void {
@@ -373,7 +384,7 @@ function mintMeetingNotesSectionPointers(
 
   const root = state.rootCandidates[0]?.block;
 
-  if (!root || !root.meetingNotes || !isOpaqueIdentifier(root.id)) {
+  if (!root || !root.meetingNotes || !isNotionObjectId(root.id)) {
     return;
   }
 
@@ -383,15 +394,68 @@ function mintMeetingNotesSectionPointers(
     root.meetingNotes.transcriptBlockId
   ];
 
-  if (!pointers.every((pointer) => pointer === null || isOpaqueIdentifier(pointer))) {
+  if (!pointers.every((pointer) => pointer === null || isNotionObjectId(pointer))) {
     return;
   }
 
-  for (const pointer of pointers) {
-    if (pointer && pointer !== configuredPageId && pointer !== root.id) {
+  const sectionPointerIds = new Set(
+    pointers.filter((pointer): pointer is string => pointer !== null)
+  );
+
+  if (root.id !== configuredPageId) {
+    // A raw parent check has established that this root is a direct child of
+    // the configured page. Its own children must still verify the provider's
+    // section pointers before any pointer can become a capability.
+    state.allowedBlockIds.add(root.id);
+    state.meetingNotesRoot = {
+      id: root.id,
+      sectionPointerIds,
+      verifiedSectionPointerIds: new Set()
+    };
+  }
+}
+
+function mintVerifiedMeetingNotesSectionPointers(
+  rootId: string,
+  page: ParsedBlockChildrenPage,
+  state: CapabilityState
+): void {
+  const root = state.meetingNotesRoot;
+
+  if (!root || root.id !== rootId) {
+    return;
+  }
+
+  for (const item of page.blocks) {
+    if (
+      root.sectionPointerIds.has(item.block.id) &&
+      mayReadProviderDerivedSectionPointer(item.raw, item.block)
+    ) {
+      root.verifiedSectionPointerIds.add(item.block.id);
+    }
+  }
+
+  if (
+    page.nextCursor === null &&
+    root.verifiedSectionPointerIds.size === root.sectionPointerIds.size
+  ) {
+    for (const pointer of root.verifiedSectionPointerIds) {
       state.allowedBlockIds.add(pointer);
     }
   }
+}
+
+function mayReadProviderDerivedSectionPointer(
+  raw: Record<string, unknown>,
+  block: NotionMeetingNotesBlock
+): boolean {
+  return (
+    block.type !== "unknown" &&
+    block.type !== "unsupported" &&
+    raw["type"] !== "child_page" &&
+    raw["type"] !== "child_database" &&
+    raw["type"] !== "synced_block"
+  );
 }
 
 function mayTraverseReturnedBlock(
@@ -413,7 +477,7 @@ function mayTraverseReturnedBlock(
 }
 
 function requireAllowedBlock(input: unknown, state: CapabilityState): string {
-  if (!isRecord(input) || !isOpaqueIdentifier(input["blockId"])) {
+  if (!isRecord(input) || !isNotionObjectId(input["blockId"])) {
     throw readerError(
       "notion-object-scoped-reader-block-forbidden",
       "The requested Meeting Note block is outside the provider-derived capability tree"
@@ -607,7 +671,7 @@ function requireFullBlockWithExpectedParent(
   }
 
   if (
-    !isOpaqueIdentifier(value["id"]) ||
+    !isNotionObjectId(value["id"]) ||
     typeof value["has_children"] !== "boolean" ||
     value["in_trash"] !== false ||
     ((value["type"] === "meeting_notes" || value["type"] === "transcription") &&
@@ -631,13 +695,15 @@ function hasExpectedRawParent(
   }
 
   return input.expectedParentId === input.configuredPageId
-    ? parent["type"] === "page_id" && parent["page_id"] === input.configuredPageId
-    : parent["type"] === "block_id" && parent["block_id"] === input.expectedParentId;
+    ? parent["type"] === "page_id" &&
+        hasSameNotionObjectId(parent["page_id"], input.configuredPageId)
+    : parent["type"] === "block_id" &&
+        hasSameNotionObjectId(parent["block_id"], input.expectedParentId);
 }
 
 function isValidNormalizedBlock(value: NotionMeetingNotesBlock): boolean {
   if (
-    !isOpaqueIdentifier(value.id) ||
+    !isNotionObjectId(value.id) ||
     typeof value.type !== "string" ||
     typeof value.hasChildren !== "boolean" ||
     (value.text !== null && typeof value.text !== "string") ||
@@ -656,9 +722,9 @@ function isValidNormalizedBlock(value: NotionMeetingNotesBlock): boolean {
     metadata !== undefined &&
     nullableString(metadata.title) &&
     nullableString(metadata.status) &&
-    nullableOpaqueIdentifier(metadata.summaryBlockId) &&
-    nullableOpaqueIdentifier(metadata.notesBlockId) &&
-    nullableOpaqueIdentifier(metadata.transcriptBlockId) &&
+    nullableNotionObjectId(metadata.summaryBlockId) &&
+    nullableNotionObjectId(metadata.notesBlockId) &&
+    nullableNotionObjectId(metadata.transcriptBlockId) &&
     nullableCalendar(metadata.calendar) &&
     nullableRecording(metadata.recording)
   );
@@ -690,8 +756,7 @@ function parseExactPage(value: unknown, pageId: string): NotionMeetingNotesPage 
   }
 
   if (
-    value["id"] !== pageId ||
-    !isOpaqueIdentifier(value["id"]) ||
+    !hasSameNotionObjectId(value["id"], pageId) ||
     typeof value["url"] !== "string" ||
     value["url"].trim() !== value["url"] ||
     value["url"].length === 0 ||
@@ -729,7 +794,7 @@ function parseExactPageMarkdown(
   if (
     !isRecord(value) ||
     value["object"] !== "page_markdown" ||
-    value["id"] !== pageId ||
+    !hasSameNotionObjectId(value["id"], pageId) ||
     typeof value["markdown"] !== "string" ||
     typeof value["truncated"] !== "boolean" ||
     !Array.isArray(value["unknown_block_ids"]) ||
@@ -765,7 +830,7 @@ function validateConfig(
   const pageId = value["pageId"];
   const readOnlyApiToken = value["readOnlyApiToken"];
 
-  if (!isNotionPageId(pageId) || typeof readOnlyApiToken !== "string") {
+  if (!isNotionObjectId(pageId) || typeof readOnlyApiToken !== "string") {
     throw configError("A fixed page ID and dedicated read-only token are required");
   }
 
@@ -905,8 +970,8 @@ function configError(message: string): NotionObjectScopedMeetingNoteEvidenceRead
   return readerError("notion-object-scoped-reader-config-invalid", message);
 }
 
-function nullableOpaqueIdentifier(value: unknown): boolean {
-  return value === null || isOpaqueIdentifier(value);
+function nullableNotionObjectId(value: unknown): boolean {
+  return value === null || isNotionObjectId(value);
 }
 
 function nullableString(value: unknown): boolean {
@@ -922,8 +987,25 @@ function isOpaqueIdentifier(value: unknown): value is string {
   );
 }
 
-function isNotionPageId(value: unknown): value is string {
+function isNotionObjectId(value: unknown): value is string {
   return typeof value === "string" && NOTION_PAGE_ID_PATTERN.test(value);
+}
+
+function hasSameNotionObjectId(value: unknown, expected: string): boolean {
+  const actual = canonicalNotionObjectId(value);
+  const canonicalExpected = canonicalNotionObjectId(expected);
+
+  return actual !== null && canonicalExpected !== null && actual === canonicalExpected;
+}
+
+function canonicalNotionObjectId(value: unknown): string | null {
+  if (!isNotionObjectId(value)) {
+    return null;
+  }
+
+  const compact = value.replaceAll("-", "").toLowerCase();
+
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

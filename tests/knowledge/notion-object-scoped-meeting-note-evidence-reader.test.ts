@@ -9,6 +9,18 @@ import type { NotionObjectScopedMeetingNoteEvidenceReader } from "../../src/know
 import { NotionMeetingNotesReadError } from "../../src/knowledge/notion-meeting-notes-source.js";
 const pageId = "14d90a82-a4fb-4a97-8a3f-299a9dad204a";
 const otherPageId = "4e28a2a7-2b90-4566-bb3d-4e50c3f3519d";
+const meetingNotesRootId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993201";
+const summaryBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993202";
+const notesBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993203";
+const transcriptBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993204";
+const summaryLineId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993205";
+const safeSummaryDescendantId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993206";
+const ordinaryPageSiblingId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993207";
+const nestedPageId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993208";
+const nestedDatabaseId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993209";
+const externalSyncedBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993210";
+const wrongParentChildId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993211";
+const anotherSummaryBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993212";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,7 +97,7 @@ class RecordingExactPageTransport {
       results: [
         {
           object: "block",
-          id: "meeting-notes-root",
+          id: meetingNotesRootId,
           type: "meeting_notes",
           has_children: true,
           in_trash: false,
@@ -94,9 +106,9 @@ class RecordingExactPageTransport {
             title: [{ plain_text: "Product sync" }],
             status: "notes_ready",
             children: {
-              summary_block_id: "summary-block",
-              notes_block_id: "notes-block",
-              transcript_block_id: "transcript-block"
+              summary_block_id: summaryBlockId,
+              notes_block_id: notesBlockId,
+              transcript_block_id: transcriptBlockId
             }
           }
         }
@@ -104,18 +116,54 @@ class RecordingExactPageTransport {
       next_cursor: null,
       has_more: false
     },
-    "summary-block:first": {
+    [`${meetingNotesRootId}:first`]: {
       object: "list",
       type: "block",
       block: {},
       results: [
         {
           object: "block",
-          id: "summary-line",
+          id: summaryBlockId,
+          type: "paragraph",
+          has_children: true,
+          in_trash: false,
+          parent: { type: "block_id", block_id: meetingNotesRootId },
+          paragraph: { rich_text: [] }
+        },
+        {
+          object: "block",
+          id: notesBlockId,
+          type: "paragraph",
+          has_children: true,
+          in_trash: false,
+          parent: { type: "block_id", block_id: meetingNotesRootId },
+          paragraph: { rich_text: [] }
+        },
+        {
+          object: "block",
+          id: transcriptBlockId,
+          type: "paragraph",
+          has_children: true,
+          in_trash: false,
+          parent: { type: "block_id", block_id: meetingNotesRootId },
+          paragraph: { rich_text: [] }
+        }
+      ],
+      next_cursor: null,
+      has_more: false
+    },
+    [`${summaryBlockId}:first`]: {
+      object: "list",
+      type: "block",
+      block: {},
+      results: [
+        {
+          object: "block",
+          id: summaryLineId,
           type: "paragraph",
           has_children: false,
           in_trash: false,
-          parent: { type: "block_id", block_id: "summary-block" },
+          parent: { type: "block_id", block_id: summaryBlockId },
           paragraph: { rich_text: [{ plain_text: "Review only the exact meeting." }] }
         }
       ],
@@ -137,6 +185,29 @@ class ProgrammableExactPageTransport {
   pageMaterial: unknown = rawPage();
   markdownMaterial: unknown = rawMarkdown();
   readonly blockMaterial = new Map<string, unknown>();
+
+  constructor() {
+    this.blockMaterial.set(
+      `${meetingNotesRootId}:first`,
+      rawBlockList([
+        rawChildBlock({
+          id: summaryBlockId,
+          parentBlockId: meetingNotesRootId,
+          hasChildren: true
+        }),
+        rawChildBlock({
+          id: notesBlockId,
+          parentBlockId: meetingNotesRootId,
+          hasChildren: true
+        }),
+        rawChildBlock({
+          id: transcriptBlockId,
+          parentBlockId: meetingNotesRootId,
+          hasChildren: true
+        })
+      ])
+    );
+  }
 
   create(input: { auth: string; notionVersion: string; retry: false }) {
     this.initialization.push({ ...input });
@@ -239,7 +310,7 @@ function rawMeetingNotesRoot(
 
   return {
     object: "block",
-    id: input.id ?? "meeting-notes-root",
+    id: input.id ?? meetingNotesRootId,
     type,
     has_children: true,
     in_trash: input.inTrash ?? false,
@@ -248,9 +319,9 @@ function rawMeetingNotesRoot(
       title: [{ plain_text: "Product sync" }],
       status: "notes_ready",
       children: {
-        summary_block_id: input.summaryBlockId ?? "summary-block",
-        notes_block_id: input.notesBlockId ?? "notes-block",
-        transcript_block_id: input.transcriptBlockId ?? "transcript-block"
+        summary_block_id: input.summaryBlockId ?? summaryBlockId,
+        notes_block_id: input.notesBlockId ?? notesBlockId,
+        transcript_block_id: input.transcriptBlockId ?? transcriptBlockId
       },
       ...(input.calendarEvent === undefined
         ? {}
@@ -357,7 +428,10 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       nextCursor: null
     });
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block" })
+      reader.listBlockChildren({ blockId: meetingNotesRootId })
+    ).resolves.toMatchObject({ nextCursor: null });
+    await expect(
+      reader.listBlockChildren({ blockId: summaryBlockId })
     ).resolves.toMatchObject({
       nextCursor: null
     });
@@ -374,7 +448,8 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     expect(transport.markdownCalls).toEqual([{ pageId, includeTranscript: true }]);
     expect(transport.blockCalls).toEqual([
       { blockId: pageId },
-      { blockId: "summary-block" }
+      { blockId: meetingNotesRootId },
+      { blockId: summaryBlockId }
     ]);
   });
 
@@ -427,7 +502,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
         rawMeetingNotesRoot(),
         {
           ...rawChildBlock({
-            id: "ordinary-page-sibling",
+            id: ordinaryPageSiblingId,
             parentBlockId: pageId,
             hasChildren: true
           }),
@@ -436,34 +511,34 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       ])
     );
     transport.blockMaterial.set(
-      "summary-block:first",
+      `${summaryBlockId}:first`,
       rawBlockList([
         rawChildBlock({
-          id: "safe-summary-descendant",
-          parentBlockId: "summary-block",
+          id: safeSummaryDescendantId,
+          parentBlockId: summaryBlockId,
           hasChildren: true
         }),
         rawChildBlock({
-          id: "nested-page",
-          parentBlockId: "summary-block",
+          id: nestedPageId,
+          parentBlockId: summaryBlockId,
           type: "child_page",
           hasChildren: true
         }),
         rawChildBlock({
-          id: "nested-database",
-          parentBlockId: "summary-block",
+          id: nestedDatabaseId,
+          parentBlockId: summaryBlockId,
           type: "child_database",
           hasChildren: true
         }),
         rawChildBlock({
-          id: "external-synced-block",
-          parentBlockId: "summary-block",
+          id: externalSyncedBlockId,
+          parentBlockId: summaryBlockId,
           type: "synced_block",
           hasChildren: true
         })
       ])
     );
-    transport.blockMaterial.set("safe-summary-descendant:first", rawBlockList([]));
+    transport.blockMaterial.set(`${safeSummaryDescendantId}:first`, rawBlockList([]));
     const reader = createTestReader(transport);
 
     await reader.retrievePage({ pageId });
@@ -475,8 +550,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     await reader.listBlockChildren({ blockId: pageId });
 
     for (const blockId of [
-      "meeting-notes-root",
-      "ordinary-page-sibling",
+      ordinaryPageSiblingId,
       "markdown-unknown-block",
       "arbitrary-block"
     ]) {
@@ -485,10 +559,11 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       });
     }
 
-    await reader.listBlockChildren({ blockId: "summary-block" });
-    await reader.listBlockChildren({ blockId: "safe-summary-descendant" });
+    await reader.listBlockChildren({ blockId: meetingNotesRootId });
+    await reader.listBlockChildren({ blockId: summaryBlockId });
+    await reader.listBlockChildren({ blockId: safeSummaryDescendantId });
 
-    for (const blockId of ["nested-page", "nested-database", "external-synced-block"]) {
+    for (const blockId of [nestedPageId, nestedDatabaseId, externalSyncedBlockId]) {
       await expect(reader.listBlockChildren({ blockId })).rejects.toMatchObject({
         code: "notion-object-scoped-reader-block-forbidden"
       });
@@ -496,9 +571,62 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
 
     expect(transport.blockCalls).toEqual([
       { blockId: pageId },
-      { blockId: "summary-block" },
-      { blockId: "safe-summary-descendant" }
+      { blockId: meetingNotesRootId },
+      { blockId: summaryBlockId },
+      { blockId: safeSummaryDescendantId }
     ]);
+  });
+
+  it("requires each Meeting Notes section pointer to appear below the verified root", async () => {
+    const foreignBlockId = "f7f30c2a-7c4d-4f27-9f22-0a4b76993213";
+    const transport = new ProgrammableExactPageTransport();
+    transport.blockMaterial.set(
+      `${pageId}:first`,
+      rawBlockList([rawMeetingNotesRoot({ summaryBlockId: foreignBlockId })])
+    );
+    transport.blockMaterial.set(
+      `${meetingNotesRootId}:first`,
+      rawBlockList([
+        rawChildBlock({
+          id: notesBlockId,
+          parentBlockId: meetingNotesRootId,
+          hasChildren: true
+        }),
+        rawChildBlock({
+          id: transcriptBlockId,
+          parentBlockId: meetingNotesRootId,
+          hasChildren: true
+        })
+      ])
+    );
+    const reader = createTestReader(transport);
+
+    await reader.retrievePage({ pageId });
+    await reader.listBlockChildren({ blockId: pageId });
+    await reader.listBlockChildren({ blockId: meetingNotesRootId });
+    await expect(
+      reader.listBlockChildren({ blockId: foreignBlockId })
+    ).rejects.toMatchObject({
+      code: "notion-object-scoped-reader-block-forbidden"
+    });
+
+    expect(transport.blockCalls).toEqual([
+      { blockId: pageId },
+      { blockId: meetingNotesRootId }
+    ]);
+
+    const malformedPointerTransport = new ProgrammableExactPageTransport();
+    malformedPointerTransport.blockMaterial.set(
+      `${pageId}:first`,
+      rawBlockList([rawMeetingNotesRoot({ summaryBlockId: `${foreignBlockId}#` })])
+    );
+    const malformedPointerReader = createTestReader(malformedPointerTransport);
+
+    await malformedPointerReader.retrievePage({ pageId });
+    await expect(
+      malformedPointerReader.listBlockChildren({ blockId: pageId })
+    ).rejects.toMatchObject({ code: "source-invalid" });
+    expect(malformedPointerTransport.blockCalls).toEqual([{ blockId: pageId }]);
   });
 
   it("accepts a validated legacy transcription root as a documented pointer source", async () => {
@@ -507,13 +635,14 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       `${pageId}:first`,
       rawBlockList([rawMeetingNotesRoot({ type: "transcription" })])
     );
-    transport.blockMaterial.set("summary-block:first", rawBlockList([]));
+    transport.blockMaterial.set(`${summaryBlockId}:first`, rawBlockList([]));
     const reader = createTestReader(transport);
 
     await reader.retrievePage({ pageId });
     await reader.listBlockChildren({ blockId: pageId });
+    await reader.listBlockChildren({ blockId: meetingNotesRootId });
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block" })
+      reader.listBlockChildren({ blockId: summaryBlockId })
     ).resolves.toMatchObject({
       nextCursor: null
     });
@@ -548,7 +677,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
         code: "source-invalid"
       });
       await expect(
-        reader.listBlockChildren({ blockId: "summary-block" })
+        reader.listBlockChildren({ blockId: summaryBlockId })
       ).rejects.toMatchObject({
         code: "notion-object-scoped-reader-block-forbidden"
       });
@@ -573,7 +702,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     });
     expect(errorMessage(error)).not.toContain("Cannot read");
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block" })
+      reader.listBlockChildren({ blockId: summaryBlockId })
     ).rejects.toMatchObject({
       code: "notion-object-scoped-reader-block-forbidden"
     });
@@ -594,7 +723,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       code: "source-invalid"
     });
     await expect(
-      wrongRootParentReader.listBlockChildren({ blockId: "summary-block" })
+      wrongRootParentReader.listBlockChildren({ blockId: summaryBlockId })
     ).rejects.toMatchObject({ code: "notion-object-scoped-reader-block-forbidden" });
     expect(wrongRootParent.blockCalls).toEqual([{ blockId: pageId }]);
 
@@ -604,11 +733,11 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       rawBlockList([rawMeetingNotesRoot()])
     );
     wrongDescendantParent.blockMaterial.set(
-      "summary-block:first",
+      `${summaryBlockId}:first`,
       rawBlockList([
         rawChildBlock({
-          id: "wrong-parent-child",
-          parentBlockId: "another-summary-block",
+          id: wrongParentChildId,
+          parentBlockId: anotherSummaryBlockId,
           hasChildren: true
         })
       ])
@@ -617,15 +746,17 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
 
     await wrongDescendantParentReader.retrievePage({ pageId });
     await wrongDescendantParentReader.listBlockChildren({ blockId: pageId });
+    await wrongDescendantParentReader.listBlockChildren({ blockId: meetingNotesRootId });
     await expect(
-      wrongDescendantParentReader.listBlockChildren({ blockId: "summary-block" })
+      wrongDescendantParentReader.listBlockChildren({ blockId: summaryBlockId })
     ).rejects.toMatchObject({ code: "source-invalid" });
     await expect(
-      wrongDescendantParentReader.listBlockChildren({ blockId: "wrong-parent-child" })
+      wrongDescendantParentReader.listBlockChildren({ blockId: wrongParentChildId })
     ).rejects.toMatchObject({ code: "notion-object-scoped-reader-block-forbidden" });
     expect(wrongDescendantParent.blockCalls).toEqual([
       { blockId: pageId },
-      { blockId: "summary-block" }
+      { blockId: meetingNotesRootId },
+      { blockId: summaryBlockId }
     ]);
 
     const trashedRoot = new ProgrammableExactPageTransport();
@@ -678,7 +809,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       `${pageId}:root-cursor`,
       rawBlockList([], { nextCursor: null })
     );
-    transport.blockMaterial.set("summary-block:first", rawBlockList([]));
+    transport.blockMaterial.set(`${summaryBlockId}:first`, rawBlockList([]));
     const reader = createTestReader(transport);
 
     await reader.retrievePage({ pageId });
@@ -686,7 +817,7 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
       nextCursor: "root-cursor"
     });
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block" })
+      reader.listBlockChildren({ blockId: summaryBlockId })
     ).rejects.toMatchObject({
       code: "notion-object-scoped-reader-block-forbidden"
     });
@@ -697,24 +828,25 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
     await expect(
       reader.listBlockChildren({ blockId: pageId, cursor: "root-cursor" })
     ).resolves.toMatchObject({ nextCursor: null });
+    await reader.listBlockChildren({ blockId: meetingNotesRootId });
     await expect(
       reader.listBlockChildren({ blockId: pageId, cursor: "root-cursor" })
     ).rejects.toMatchObject({ code: "notion-object-scoped-reader-cursor-forbidden" });
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block", cursor: "root-cursor" })
+      reader.listBlockChildren({ blockId: summaryBlockId, cursor: "root-cursor" })
     ).rejects.toMatchObject({ code: "notion-object-scoped-reader-cursor-forbidden" });
 
     for (let index = 0; index < 100; index += 1) {
-      await reader.listBlockChildren({ blockId: "summary-block" });
+      await reader.listBlockChildren({ blockId: summaryBlockId });
     }
 
     await expect(
-      reader.listBlockChildren({ blockId: "summary-block" })
+      reader.listBlockChildren({ blockId: summaryBlockId })
     ).rejects.toMatchObject({
       code: "notion-object-scoped-reader-budget-exhausted"
     });
     expect(
-      transport.blockCalls.filter((call) => call.blockId === "summary-block")
+      transport.blockCalls.filter((call) => call.blockId === summaryBlockId)
     ).toHaveLength(100);
   });
 
@@ -836,6 +968,40 @@ describe("object-scoped Notion Meeting Note evidence reader", () => {
         retry: false
       }
     ]);
+  });
+
+  it("accepts a compact configured page ID with canonical provider responses", async () => {
+    const compactPageId = pageId.replaceAll("-", "");
+    const transport = new ProgrammableExactPageTransport();
+    transport.blockMaterial.set(
+      `${compactPageId}:first`,
+      rawBlockList([rawMeetingNotesRoot()])
+    );
+    const reader = createNotionObjectScopedMeetingNoteEvidenceReaderForTest({
+      pageId: compactPageId,
+      readOnlyApiToken: "native-read-only-token",
+      transport: createNotionObjectScopedMeetingNoteEvidenceTransportForTest((input) =>
+        transport.create(input)
+      )
+    });
+
+    await expect(reader.retrievePage({ pageId: compactPageId })).resolves.toMatchObject({
+      id: compactPageId
+    });
+    await expect(
+      reader.retrievePageMarkdown({ pageId: compactPageId, includeTranscript: true })
+    ).resolves.toMatchObject({ content: "# Product sync" });
+    await expect(
+      reader.listBlockChildren({ blockId: compactPageId })
+    ).resolves.toMatchObject({
+      nextCursor: null
+    });
+
+    expect(transport.pageCalls).toEqual([compactPageId]);
+    expect(transport.markdownCalls).toEqual([
+      { pageId: compactPageId, includeTranscript: true }
+    ]);
+    expect(transport.blockCalls).toEqual([{ blockId: compactPageId }]);
   });
 
   it("requires a separate read-only token and exposes no provider error detail", async () => {

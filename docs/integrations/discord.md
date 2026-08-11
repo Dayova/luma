@@ -40,6 +40,31 @@ Not implemented in this slice:
 
 With OpenAI configured, typed notes are analyzed through the production ReasoningModel Adapter. Without it, Luma still persists the original note and reports that analysis is deferred rather than producing unsupported claims.
 
+## LUM-4 Activation Gate
+
+This guide describes the current code and its technical configuration; it is
+not authorization to enable a live Dayova Discord collection surface. Do not
+turn on Context Ask, Message Content, broad content capture, lifecycle
+observation, cross-channel retrieval, or execution merely because the
+following setup is available.
+
+Before any live Discord content use, the LUM-4 owner must record decisions
+for all of the following:
+
+1. approved channel/role scope, deterministic capture boundaries, and
+   participant notice or consent;
+2. raw-text retention, deletion or redaction, tombstones, downtime gaps, and
+   downstream invalidation;
+3. retrieval permissions, roles, redaction, and audience intersection across
+   Discord, Notion, Linear, and GitHub; and
+4. explicit cross-source association rules that never auto-merge Discord
+   conversations into Meeting Notes.
+
+Message Content, technical allowlists, and a valid token are prerequisites,
+not policy approval. Until the LUM-4 activation gate is satisfied (the owner
+has recorded all four decisions and the required follow-up implementation is
+delivered), use deterministic fixtures and programmable adapters only.
+
 ## Discord Application Setup
 
 Create separate Discord Applications for development and production. Suggested names:
@@ -61,7 +86,10 @@ In the [Discord Developer Portal](https://discord.com/developers/applications):
    `Guilds`, `GuildMessages`, and `MessageContent`; it does not request member,
    presence, reaction, or DM intents.
 
-The bot registers `/meeting` as a guild command at startup. Guild commands update immediately and are appropriate for the current private Dayova deployment. Discord documents command registration and guild scoping in its [Application Commands reference](https://docs.discord.com/developers/interactions/application-commands).
+The bot registers `/meeting` as a guild command at startup. These technical
+details apply only after the [LUM-4 activation gate](#lum-4-activation-gate)
+is satisfied; they do not override it. Discord documents
+command registration and guild scoping in its [Application Commands reference](https://docs.discord.com/developers/interactions/application-commands).
 
 ## Installation Scopes And Permissions
 
@@ -86,9 +114,8 @@ Manage Messages. The standard Meeting bot slice uses no privileged intents.
 For the optional Context Ask slice, `Message Content` is the one exception:
 Discord applies it to both Gateway events and message-history reads. The bot
 still needs only View Channels, Read Message History, and Send Messages in
-Threads in the explicitly allowlisted channels. Do not enable Context Ask until
-the Application's Message Content setting is active and its reviewed channel
-and user scopes are configured.
+Threads in the explicitly allowlisted channels. These technical bounds do not
+lift the [LUM-4 activation gate](#lum-4-activation-gate).
 
 ## Environment
 
@@ -124,7 +151,7 @@ LUMA_PGLITE_DATA_DIR=.luma/pglite
 
 `DISCORD_TOKEN` is a secret. Never commit it, paste it into issues, or reuse the same token across development and production. Before any live Discord rollout, follow the [credential-rotation runbook](../configuration/discord-token-rotation.md) and record only its non-secret proof on the rollout ticket.
 
-## Running The Development Bot
+## Running The Development Bot (After The Activation Gate)
 
 ```bash
 cp .env.example .env
@@ -132,6 +159,11 @@ pnpm dev
 ```
 
 `pnpm dev` builds TypeScript, loads `.env`, registers the guild command, connects the Discord Gateway, and prints a single connection message. Stop with `Ctrl+C`; Luma closes the Gateway and local database cleanly.
+
+Do not use this command with a Dayova or shared Discord Application before the
+[LUM-4 activation gate](#lum-4-activation-gate) is satisfied. Until then, use
+the deterministic test suite and programmable adapters without Discord
+credentials.
 
 ## Commands
 
@@ -191,6 +223,10 @@ Resolves the active Meeting from the current thread or its parent channel and re
 
 ### Context Ask (opt-in)
 
+The bounded implementation exists, but it is not currently authorized for
+live Dayova content. The [LUM-4 activation gate](#lum-4-activation-gate) must
+be satisfied before this section can be used as a rollout procedure.
+
 In an allowlisted **public thread**, an allowlisted person can write:
 
 ```text
@@ -245,7 +281,11 @@ The Discord Module renders provider-independent `MeetingIntelligenceEvent` value
 
 External links are rendered from provider-neutral `ExternalReference` values. Discord IDs are resolved by the Identity Directory. Messages set `allowed_mentions.parse` to an empty list and explicitly allow only the resolved user IDs, preventing generated text from triggering `@everyone`, roles, or unintended users.
 
-## Live Smoke Test
+## Development Smoke Test (After The Activation Gate)
+
+Do not perform this while the [LUM-4 activation gate](#lum-4-activation-gate)
+applies. Until it is satisfied, use the deterministic test suite and
+programmable adapters without Discord credentials.
 
 After the development Application is installed and `.env` is populated:
 
@@ -255,11 +295,16 @@ After the development Application is installed and `.env` is populated:
 4. Run `/meeting start` in a normal text channel.
 5. Confirm Luma creates a public thread and replies privately with its link.
 6. Run `/meeting note` in the thread and confirm the original note is saved.
-7. With OpenAI configured, copy a proposed Intent ID and run `/meeting approve` or `/meeting reject`.
-8. Confirm approved work appears once in Linear or the Meeting record appears once in Notion.
-9. Run `/meeting catchup` and confirm the response is private.
-10. Run `/meeting stop` and confirm the Conclusion appears in the thread.
-11. Restart the bot and confirm `.luma/pglite` preserves thread and execution records.
+7. Run `/meeting reject` for any proposed Intent and confirm it performs no
+   provider mutation.
+8. Run `/meeting catchup` and confirm the response is private.
+
+Do not use this development smoke test to exercise approval, Linear, or Notion
+mutations. Those require their own source-bound authorization and rollout
+evidence outside this dormant Discord documentation path.
+
+9. Run `/meeting stop` and confirm the Conclusion appears in the thread.
+10. Restart the bot and confirm `.luma/pglite` preserves thread and execution records.
 
 ## Architecture
 

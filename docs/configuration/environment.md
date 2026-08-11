@@ -8,12 +8,19 @@ Provider configuration belongs at Adapter boundaries. Meeting Intelligence never
 cp .env.example .env
 corepack enable
 pnpm install --frozen-lockfile
-pnpm dev
+pnpm verify
 ```
 
-`.env` is ignored by git. `pnpm dev` builds the application and loads it with Node's `--env-file=.env` support. Configure separate `.env` values and separate provider Applications for development and production.
+`.env` is ignored by git. After the LUM-4 activation gate is satisfied,
+`pnpm dev` builds the application and loads it with Node's `--env-file=.env`
+support. Configure separate `.env` values and separate provider Applications
+for development and production.
 
 The Discord variables are required to start the executable bot. Linear, Notion, and OpenAI are optional capability groups: omitting a whole group leaves that capability unavailable. Setting only part of a group fails startup with the missing variable name.
+
+Configuring a Discord token does not authorize live Dayova Discord content
+use. The [LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate)
+applies in addition to every technical startup requirement.
 
 ## System Ownership And Current Write Gate
 
@@ -156,9 +163,14 @@ implemented, read-only `@Luma question` slice in specifically reviewed
 **public threads**, not a Meeting command and not a server-wide listener. It
 is a bounded implementation limitation, not Luma's permanent product
 boundary: Verify, Reconcile, and Execute remain future shared-core work.
-Enable it only after the
-Application's **Message Content** privileged Gateway intent has been enabled
-(and approved if Discord requires it for the Application):
+
+Do not set `LUMA_DISCORD_CONTEXT_ASK_ENABLED=1` in a live Dayova environment
+until the [LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate)
+is satisfied: its owner has recorded all four policy decisions and the
+required follow-up implementation is delivered.
+The Application's **Message Content** privileged Gateway intent, Discord's
+own approval where required, and the technical allowlists below are necessary
+prerequisites, not authorization:
 
 ```dotenv
 LUMA_DISCORD_CONTEXT_ASK_ENABLED=1
@@ -252,6 +264,8 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 - Before a live Discord rollout, complete the [Discord credential-rotation
   runbook](discord-token-rotation.md); it intentionally records only non-secret
   rotation proof.
+- The credential-rotation runbook and technical configuration do not lift the
+  [LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate).
 - Do not log provider request headers or complete environment objects.
 - Keep development and production credentials separate.
 - Grant only the provider access documented for the active capability.

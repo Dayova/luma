@@ -51,14 +51,16 @@ export type NotionWebhookIngressResult =
     };
 
 export type CreateNotionWebhookWakeUpIngressInput = {
-  workspaceId: string;
+  /** Notion provider UUID matched against the webhook's `workspace_id`. */
+  notionWorkspaceId: string;
   canonicalMeetingsDataSourceId: string;
   /** Notion's verified subscription token; inject it, never read it here. */
   verificationToken: string;
   queue: NotionWebhookWakeUpQueue;
-  /** Optional defense-in-depth restrictions for the activated subscription. */
-  subscriptionId?: string;
-  integrationId?: string;
+  /** Required binding for the activated subscription, never a generic workspace listener. */
+  subscriptionId: string;
+  /** Required binding for the activated integration, never inferred from event content. */
+  integrationId: string;
   now?: () => Date;
 };
 
@@ -99,17 +101,17 @@ const PAGE_WAKE_UP_EVENT_TYPES = new Set([
 export function createNotionWebhookWakeUpIngress(
   input: CreateNotionWebhookWakeUpIngressInput
 ): NotionWebhookWakeUpIngress {
-  const workspaceId = requiredOpaqueIdentifier(input.workspaceId, "workspaceId");
-  const configuredMeetingsDataSourceId = requiredOpaqueIdentifier(
+  const notionWorkspaceId = requiredNotionObjectId(
+    input.notionWorkspaceId,
+    "notionWorkspaceId"
+  );
+  const canonicalMeetingsDataSourceId = requiredNotionObjectId(
     input.canonicalMeetingsDataSourceId,
     "canonicalMeetingsDataSourceId"
   );
-  const canonicalMeetingsDataSourceId =
-    canonicalNotionObjectId(configuredMeetingsDataSourceId) ??
-    configuredMeetingsDataSourceId;
   const verificationToken = requiredSecret(input.verificationToken, "verificationToken");
-  const subscriptionId = optionalOpaqueIdentifier(input.subscriptionId, "subscriptionId");
-  const integrationId = optionalOpaqueIdentifier(input.integrationId, "integrationId");
+  const subscriptionId = requiredNotionObjectId(input.subscriptionId, "subscriptionId");
+  const integrationId = requiredNotionObjectId(input.integrationId, "integrationId");
   const now = input.now ?? (() => new Date());
 
   return {
@@ -130,15 +132,15 @@ export function createNotionWebhookWakeUpIngress(
         return { status: "ignored", reason: "malformed-event" };
       }
 
-      if (event.workspaceId !== workspaceId) {
+      if (event.workspaceId !== notionWorkspaceId) {
         return { status: "ignored", reason: "workspace-mismatch" };
       }
 
-      if (subscriptionId && event.subscriptionId !== subscriptionId) {
+      if (event.subscriptionId !== subscriptionId) {
         return { status: "ignored", reason: "subscription-mismatch" };
       }
 
-      if (integrationId && event.integrationId !== integrationId) {
+      if (event.integrationId !== integrationId) {
         return { status: "ignored", reason: "integration-mismatch" };
       }
 
@@ -234,21 +236,21 @@ function parseWebhookEvent(rawBody: Uint8Array): NotionWebhookEvent | null {
     return null;
   }
 
-  const id = parsed["id"];
+  const id = canonicalNotionObjectId(parsed["id"]);
   const timestamp = parsed["timestamp"];
-  const workspaceId = parsed["workspace_id"];
-  const subscriptionId = parsed["subscription_id"];
-  const integrationId = parsed["integration_id"];
+  const workspaceId = canonicalNotionObjectId(parsed["workspace_id"]);
+  const subscriptionId = canonicalNotionObjectId(parsed["subscription_id"]);
+  const integrationId = canonicalNotionObjectId(parsed["integration_id"]);
   const type = parsed["type"];
   const entityId = parsed["entity"]["id"];
   const entityType = parsed["entity"]["type"];
 
   if (
-    !isOpaqueIdentifier(id) ||
+    id === null ||
     !isTimestamp(timestamp) ||
-    !isOpaqueIdentifier(workspaceId) ||
-    !isOpaqueIdentifier(subscriptionId) ||
-    !isOpaqueIdentifier(integrationId) ||
+    workspaceId === null ||
+    subscriptionId === null ||
+    integrationId === null ||
     !isOpaqueIdentifier(type) ||
     !isOpaqueIdentifier(entityId) ||
     !isOpaqueIdentifier(entityType)
@@ -271,13 +273,24 @@ function headerValue(
   headers: Readonly<Record<string, string | undefined>>,
   expectedName: string
 ): string | null {
+  let matched: string | null = null;
+
   for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() === expectedName && typeof value === "string") {
-      return value;
+    if (name.toLowerCase() !== expectedName) {
+      continue;
     }
+
+    // The Node adapter already rejects raw duplicate headers. Preserve the
+    // same fail-closed boundary for alternative adapters that construct the
+    // provider-neutral delivery object themselves.
+    if (typeof value !== "string" || matched !== null) {
+      return null;
+    }
+
+    matched = value;
   }
 
-  return null;
+  return matched;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -297,23 +310,14 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
-function requiredOpaqueIdentifier(value: string, name: string): string {
-  if (!isOpaqueIdentifier(value)) {
-    throw new Error(`Notion webhook ${name} must be a non-blank opaque identifier`);
+function requiredNotionObjectId(value: string, name: string): string {
+  const canonical = canonicalNotionObjectId(value);
+
+  if (!canonical) {
+    throw new Error(`Notion webhook ${name} must be a Notion UUID`);
   }
 
-  return value;
-}
-
-function optionalOpaqueIdentifier(
-  value: string | undefined,
-  name: string
-): string | null {
-  if (value === undefined) {
-    return null;
-  }
-
-  return requiredOpaqueIdentifier(value, name);
+  return canonical;
 }
 
 function requiredSecret(value: string, name: string): string {

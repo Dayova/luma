@@ -160,32 +160,48 @@ a Notion page. The reconciliation slice may only produce reviewable proposals
 until Human Judgment and an approved Follow-up Intent authorize a later
 execution.
 
-## Webhook wake-up foundation (not activated)
+## Automatic Meeting Notes observation host (code-ready, not deployed)
 
-LUM-29 adds an isolated observation seam for Notion webhooks. It is **not**
-wired into `startServer`, Discord, an HTTP listener, an environment flag, or a
-deployed Notion subscription. No verification token is read from environment or
-stored by this repository.
+LUM-29 supplies a separate Notion-only executable:
 
-When a future host explicitly composes it, the host must give
-`NotionWebhookWakeUpIngress` the exact raw request bytes and a verified
-subscription token. The ingress validates Notion's documented
-`X-Notion-Signature` HMAC-SHA256 over those raw bytes, checks the configured
-workspace (and optional subscription/integration IDs), accepts only normalized
-Notion UUID page IDs before any provider read, and emits only one of:
+```bash
+pnpm dev:notion-observation
+# or, after a build:
+pnpm start:notion-observation
+```
+
+It is intentionally separate from `startServer` and the Discord executable.
+Starting this process requires its own complete observation configuration; it
+does not activate from `NOTION_API_TOKEN`, `LINEAR_API_KEY`, Discord, or the
+LUM-30 exact-page reader configuration.
+
+For local preparation it loads only `.env.notion-observation`, created from
+`.env.notion-observation.example`; it never loads the ordinary `.env` used by
+the Discord process. The observer rejects the presence of the standard Notion
+writer token, Linear writer key, Discord token, and LUM-30 native-reader token
+before it opens a state store or listener.
+
+The host gives `NotionWebhookWakeUpIngress` only exact raw request bytes and a
+deployment-injected subscription verification token. The ingress validates
+Notion's documented `X-Notion-Signature` HMAC-SHA256 over those raw bytes,
+matches the configured Notion workspace, subscription, and integration UUIDs,
+and accepts only normalized Notion UUID page IDs before any provider read. It
+emits only one of:
 
 - a bounded page wake-up for `page.created`, `page.content_updated`, or
   `page.properties_updated`; or
 - a canonical reconciliation wake-up for `data_source.content_updated` on the
   configured Meetings data source.
 
-It discards all webhook payload content. The resulting runtime re-fetches the
-current page through `NotionMeetingNotesSource.refreshPage(...)`, proves that
-the page is still in the configured canonical Meetings data source, and reuses
-the same snapshot capture and observed-source ledger as a normal scan. A
-direct refresh never infers a deletion or creates a tombstone. An unrelated,
-trashed, or no-longer-canonical page is ignored; only a completed canonical
-scan can establish source absence.
+It discards all webhook payload content. Optional or unfamiliar webhook
+metadata is never evidence or a version fence: the next source read is the
+only current authority. The resulting runtime re-fetches the current page
+through `NotionMeetingNotesSource.refreshPage(...)`, proves that the page is
+still in the configured canonical Meetings data source, and reuses the same
+snapshot capture and observed-source ledger as a normal scan. A direct refresh
+never infers a deletion or creates a tombstone. An unrelated, trashed, or
+no-longer-canonical page is ignored; only a completed canonical scan can
+establish source absence.
 
 Duplicate/retried and out-of-order signals are coalesced by delivery and page.
 A `data_source.content_updated` signal supersedes queued page reads with one
@@ -197,17 +213,55 @@ failures, and later edits. Runtime telemetry exposes only arrival/wake-up
 times, bounded pending work, overflow, reconciliation success/partial failure,
 and non-canonical lag; webhook history is never source Evidence.
 
-The runtime receives a page refresher, `MeetingNotesIngestion`, and the
-existing canonical reconciliation capability—but never a WorkProvider writer,
-KnowledgeProvider writer, or Follow-up Execution capability. A behavioral
-database test proves an authenticated wake-up can record an Observation receipt
-with zero `follow_up_executions` rows.
+The observation composition receives a broad canonical source reader,
+`MeetingNotesIngestion`, the existing scan scheduler, and an issued
+`LinearReadOnlyWorkCatalog` bound to Luma's logical workspace. It never
+receives a WorkProvider writer, KnowledgeProvider writer, Follow-up Execution,
+Notion writer, Discord transport, native-review reader, or GitHub adapter. A
+behavioral database test proves an authenticated wake-up can record an
+Observation receipt with zero `follow_up_executions` rows.
 
-Before activation, a host still needs a publicly reachable TLS endpoint,
-explicit subscription configuration and one-time Notion verification-token
-handoff, a dedicated secret store, production persistence/observability, and a
-separate deployment review. Those are operational activation tasks, not a
-license to enable canonical Notion writes or Discord execution.
+The HTTP adapter accepts only an exact `POST` path with JSON/identity-encoded
+raw bytes, one signature header, and a bounded body. It acknowledges accepted
+signals before provider work, rejects duplicate signatures and malformed
+requests without refreshing Notion, bounds slow request bodies, and exposes
+only content-free host status. Shutdown first quiesces admission, then aborts
+incomplete HTTP bodies and settles already accepted observation work.
+
+### Deployment gate
+
+The executable is code-ready, but is **not deployed or subscribed**. Before
+any activation, obtain Jakob's fresh action-time confirmation for the exact
+secret, Notion connection/share, public TLS endpoint, and subscription scope.
+Then ensure all of the following are true:
+
+- a separate Notion integration has `read_content` only and is shared directly
+  with the canonical Meetings data source; configure it only through
+  `LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN`;
+- a separate Linear key has **Read** permission for the configured team and is
+  present only as `LINEAR_READONLY_API_KEY`;
+- the process owns a dedicated durable
+  `LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR` and is the **one active canonical
+  Meeting Notes source owner** for its logical workspace, Notion provider, and
+  Meetings data source. Do not run it beside a legacy `startServer` source
+  owner or point both processes at one PGlite directory: that would split (or
+  unsafely share) the observed-source ledger, reconciliation state, and marker
+  proof. The deployment review must attest disjoint process environments and
+  this exclusive-owner invariant. If an existing canonical ledger, Meeting
+  Intelligence reconciliation state, or Operational Outcome marker settlement
+  lives in another store, do not activate until it is deliberately migrated or
+  reconciled into the sole observer store; otherwise valid historical markers
+  correctly fail closed and the source remains partial; and
+- a public TLS reverse proxy forwards only the configured path, and the
+  one-time bootstrap verification-token handoff goes directly to deployment
+  tooling and the secret store. The normal delivery host never treats that
+  bootstrap exchange as source Evidence; and
+- production observability and a deployment review verify that the process is
+  observation-only. Notion webhook retries, misses, delay, and ordering remain
+  harmless because the canonical scan is still the completeness backstop.
+
+These operational steps do not authorize canonical Notion writes, Linear
+writes, or Discord execution.
 
 ## Source-bound native review core
 

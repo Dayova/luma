@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "pnpm build && node --env-file=.env dist/src/app/main.js",
     "start": "node dist/src/app/main.js",
+    "dev:notion-observation": "pnpm build && node --env-file=.env.notion-observation dist/src/app/notion-meeting-notes-observation-main.js",
+    "start:notion-observation": "node dist/src/app/notion-meeting-notes-observation-main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

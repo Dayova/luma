@@ -63,7 +63,8 @@ export type {
   MeetingNotesSync,
   MeetingNotesSyncLogger,
   MeetingNotesSyncResult,
-  MeetingNotesSyncScheduler
+  MeetingNotesSyncScheduler,
+  MeetingNotesSyncStatus
 } from "./knowledge/meeting-notes-sync.js";
 export { createMeetingNotesObservationRuntime } from "./knowledge/meeting-notes-observation-runtime.js";
 export type {
@@ -170,6 +171,26 @@ export {
   SourceBoundNativeReviewError,
   createSourceBoundNativeReview
 } from "./native-review/source-bound-native-review.js";
+export { createNotionMeetingNotesObservationHost } from "./app/notion-meeting-notes-observation-host.js";
+export type {
+  CreateNotionMeetingNotesObservationHostInput,
+  NotionMeetingNotesObservationHost,
+  NotionMeetingNotesObservationHostReceipt,
+  NotionMeetingNotesObservationHostStatus,
+  NotionObservationSubscription,
+  SafeMeetingNotesObservationRuntimeStatus
+} from "./app/notion-meeting-notes-observation-host.js";
+export { createNotionWebhookHttpServer } from "./app/notion-webhook-http-server.js";
+export type {
+  CreateNotionWebhookHttpServerInput,
+  NotionWebhookHttpServer,
+  NotionWebhookHttpServerAddress
+} from "./app/notion-webhook-http-server.js";
+export {
+  NotionMeetingNotesObservationServerError,
+  startNotionMeetingNotesObservationServer
+} from "./app/notion-meeting-notes-observation-server.js";
+export type { RunningNotionMeetingNotesObservationServer } from "./app/notion-meeting-notes-observation-server.js";
 export type {
   CapturedMeetingNoteEvidence,
   CreateSourceBoundNativeReviewInput,

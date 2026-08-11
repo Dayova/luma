@@ -7,10 +7,13 @@ import {
 } from "../../src/knowledge/notion-webhook-wake-up.js";
 
 const verificationToken = "secret_luma_notion_webhook_verification_token";
-const workspaceId = "workspace_dayova";
-const canonicalMeetingsDataSourceId = "dayova-meetings";
-const canonicalMeetingsDataSourceUuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const notionWorkspaceId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const canonicalMeetingsDataSourceId = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+const canonicalMeetingsDataSourceUuid = "cccccccc-dddd-eeee-ffff-000000000000";
+const subscriptionId = "dddddddd-eeee-ffff-0000-111111111111";
+const integrationId = "eeeeeeee-ffff-0000-1111-222222222222";
 const meetingPageId = "11111111-2222-3333-4444-555555555555";
+const deliveryId = "99999999-aaaa-4bbb-8ccc-dddddddddddd";
 
 class RecordingWakeUpQueue implements NotionWebhookWakeUpQueue {
   readonly wakeUps: NotionWebhookWakeUp[] = [];
@@ -23,11 +26,11 @@ class RecordingWakeUpQueue implements NotionWebhookWakeUpQueue {
 
 function webhookEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id: "event-page-content-updated-1",
+    id: deliveryId,
     timestamp: "2026-08-10T11:30:00.000Z",
-    workspace_id: workspaceId,
-    subscription_id: "subscription-dayova-meetings",
-    integration_id: "integration-luma",
+    workspace_id: notionWorkspaceId,
+    subscription_id: subscriptionId,
+    integration_id: integrationId,
     api_version: "2026-03-11",
     attempt_number: 1,
     type: "page.content_updated",
@@ -53,9 +56,11 @@ describe("Notion webhook wake-up ingress", () => {
   it("authenticates the raw delivery then emits only a bounded page wake-up", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue,
       now: () => new Date("2026-08-10T11:31:00.000Z")
     });
@@ -67,7 +72,7 @@ describe("Notion webhook wake-up ingress", () => {
       wakeUp: {
         kind: "page",
         pageId: meetingPageId,
-        deliveryId: "event-page-content-updated-1",
+        deliveryId,
         occurredAt: "2026-08-10T11:30:00.000Z",
         receivedAt: "2026-08-10T11:31:00.000Z"
       }
@@ -84,9 +89,11 @@ describe("Notion webhook wake-up ingress", () => {
   it("normalizes a compact uppercase Notion page UUID before queueing it", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue
     });
 
@@ -101,12 +108,41 @@ describe("Notion webhook wake-up ingress", () => {
     ).toMatchObject({ status: "queued", wakeUp: { pageId: meetingPageId } });
   });
 
+  it("treats an event API version as non-authoritative delivery metadata", () => {
+    const queue = new RecordingWakeUpQueue();
+    const ingress = createNotionWebhookWakeUpIngress({
+      notionWorkspaceId,
+      canonicalMeetingsDataSourceId,
+      verificationToken,
+      subscriptionId,
+      integrationId,
+      queue
+    });
+
+    expect(
+      ingress.receive(signedDelivery(webhookEvent({ api_version: undefined })))
+    ).toMatchObject({ status: "queued", wakeUp: { kind: "page" } });
+    expect(
+      ingress.receive(
+        signedDelivery(
+          webhookEvent({
+            id: "99999999-aaaa-4bbb-8ccc-ddddddddddde",
+            api_version: "2025-09-03"
+          })
+        )
+      )
+    ).toMatchObject({ status: "queued", wakeUp: { kind: "page" } });
+    expect(queue.wakeUps).toHaveLength(2);
+  });
+
   it("rejects missing, malformed, and tampered signatures before parsing a wake-up", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue
     });
     const delivery = signedDelivery(webhookEvent());
@@ -133,23 +169,53 @@ describe("Notion webhook wake-up ingress", () => {
     expect(queue.wakeUps).toEqual([]);
   });
 
+  it("rejects duplicate signature spellings at the provider-neutral ingress seam", () => {
+    const queue = new RecordingWakeUpQueue();
+    const ingress = createNotionWebhookWakeUpIngress({
+      notionWorkspaceId,
+      canonicalMeetingsDataSourceId,
+      verificationToken,
+      subscriptionId,
+      integrationId,
+      queue
+    });
+    const delivery = signedDelivery(webhookEvent());
+
+    expect(
+      ingress.receive({
+        rawBody: delivery.rawBody,
+        headers: {
+          "x-notion-signature": delivery.headers["x-notion-signature"],
+          "X-Notion-Signature": delivery.headers["x-notion-signature"]
+        }
+      })
+    ).toMatchObject({ status: "rejected", reason: "signature-missing" });
+    expect(queue.wakeUps).toEqual([]);
+  });
+
   it("ignores authenticated events outside the configured workspace and event scope", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
       queue,
-      subscriptionId: "subscription-dayova-meetings",
-      integrationId: "integration-luma"
+      subscriptionId,
+      integrationId
     });
 
     expect(
-      ingress.receive(signedDelivery(webhookEvent({ workspace_id: "other-workspace" })))
+      ingress.receive(
+        signedDelivery(
+          webhookEvent({ workspace_id: "ffffffff-0000-1111-2222-333333333333" })
+        )
+      )
     ).toMatchObject({ status: "ignored", reason: "workspace-mismatch" });
     expect(
       ingress.receive(
-        signedDelivery(webhookEvent({ subscription_id: "other-subscription" }))
+        signedDelivery(
+          webhookEvent({ subscription_id: "ffffffff-0000-1111-2222-333333333333" })
+        )
       )
     ).toMatchObject({ status: "ignored", reason: "subscription-mismatch" });
     expect(
@@ -178,9 +244,11 @@ describe("Notion webhook wake-up ingress", () => {
   it("ignores a signed page event with an unsafe entity ID before it can become a page read", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue
     });
 
@@ -197,19 +265,38 @@ describe("Notion webhook wake-up ingress", () => {
     expect(queue.wakeUps).toEqual([]);
   });
 
+  it("ignores a signed event with an unsafe delivery ID before it reaches the bounded queue", () => {
+    const queue = new RecordingWakeUpQueue();
+    const ingress = createNotionWebhookWakeUpIngress({
+      notionWorkspaceId,
+      canonicalMeetingsDataSourceId,
+      verificationToken,
+      subscriptionId,
+      integrationId,
+      queue
+    });
+
+    expect(
+      ingress.receive(signedDelivery(webhookEvent({ id: "delivery#untrusted-path" })))
+    ).toMatchObject({ status: "ignored", reason: "malformed-event" });
+    expect(queue.wakeUps).toEqual([]);
+  });
+
   it("turns an authenticated canonical data-source signal into a reconciliation wake-up", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId,
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue
     });
 
     const result = ingress.receive(
       signedDelivery(
         webhookEvent({
-          id: "event-canonical-data-source-1",
+          id: "99999999-aaaa-4bbb-8ccc-dddddddddddf",
           type: "data_source.content_updated",
           entity: {
             id: canonicalMeetingsDataSourceId,
@@ -231,11 +318,13 @@ describe("Notion webhook wake-up ingress", () => {
   it("recognizes equivalent Notion data-source UUID spellings as canonical", () => {
     const queue = new RecordingWakeUpQueue();
     const ingress = createNotionWebhookWakeUpIngress({
-      workspaceId,
+      notionWorkspaceId,
       canonicalMeetingsDataSourceId: canonicalMeetingsDataSourceUuid
         .replaceAll("-", "")
         .toUpperCase(),
       verificationToken,
+      subscriptionId,
+      integrationId,
       queue
     });
 
@@ -243,7 +332,7 @@ describe("Notion webhook wake-up ingress", () => {
       ingress.receive(
         signedDelivery(
           webhookEvent({
-            id: "event-canonical-data-source-uuid",
+            id: "99999999-aaaa-4bbb-8ccc-ddddddddddea",
             type: "data_source.content_updated",
             entity: { id: canonicalMeetingsDataSourceUuid, type: "data_source" }
           })

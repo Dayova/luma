@@ -25,6 +25,10 @@ const workspace: WorkspaceConfig = {
   workspaceId: "workspace_dayova",
   timezone: "Europe/Berlin"
 };
+const notionWorkspaceId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const canonicalMeetingsDataSourceId = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+const subscriptionId = "cccccccc-dddd-eeee-ffff-000000000000";
+const integrationId = "dddddddd-eeee-ffff-0000-111111111111";
 const notionPageId = "11111111-2222-3333-4444-555555555555";
 
 function deferred<T>(): {
@@ -532,11 +536,11 @@ describe("Meeting Notes observation runtime", () => {
     try {
       const rawBody = Buffer.from(
         JSON.stringify({
-          id: "observation-only-delivery",
+          id: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
           timestamp: "2026-08-10T13:00:00.000Z",
-          workspace_id: workspace.workspaceId,
-          subscription_id: "subscription-dayova-meetings",
-          integration_id: "integration-luma",
+          workspace_id: notionWorkspaceId,
+          subscription_id: subscriptionId,
+          integration_id: integrationId,
           api_version: "2026-03-11",
           attempt_number: 1,
           type: "page.content_updated",
@@ -546,9 +550,11 @@ describe("Meeting Notes observation runtime", () => {
       );
       const verificationToken = "secret_luma_observation_only";
       const ingress = createNotionWebhookWakeUpIngress({
-        workspaceId: workspace.workspaceId,
-        canonicalMeetingsDataSourceId: "dayova-meetings",
+        notionWorkspaceId,
+        canonicalMeetingsDataSourceId,
         verificationToken,
+        subscriptionId,
+        integrationId,
         queue: runtime,
         now: () => new Date("2026-08-10T13:00:01.000Z")
       });

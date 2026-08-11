@@ -14,8 +14,7 @@ import type {
   KnowledgeDocument,
   KnowledgeProvider,
   KnowledgeQuery,
-  KnowledgeResult,
-  UpdateDocumentInput
+  KnowledgeResult
 } from "../../src/knowledge/interface.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
@@ -143,12 +142,6 @@ class NotionKnowledgeProvider implements KnowledgeProvider {
       externalId: "notion-page-product-meeting",
       url: "https://notion.so/product-meeting"
     });
-  }
-
-  updateDocument(_id: string, _input: UpdateDocumentInput): Promise<ExternalReference> {
-    void _id;
-    void _input;
-    return Promise.reject(new Error("not needed"));
   }
 
   listChanges(_cursor?: string): Promise<ChangePage> {

@@ -90,8 +90,15 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 
 See `docs/configuration/environment.md` for the full variable reference.
 
-With the Discord variables configured, start the development bot with:
+Run deterministic local verification with:
 
 ```bash
-pnpm dev
+pnpm verify
 ```
+
+The networked Discord bot is deliberately not a current Dayova setup step. Do
+not configure or start `pnpm dev` with a Dayova or shared Discord Application
+until the [LUM-4 activation gate](docs/integrations/discord.md#lum-4-activation-gate)
+is satisfied: its owner has recorded all four policy decisions and the required
+follow-up implementation is delivered. Technical configuration, gateway
+intents, and allowlists are necessary controls, not authorization.

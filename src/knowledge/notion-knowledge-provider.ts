@@ -12,8 +12,7 @@ import type {
   KnowledgeDocument,
   KnowledgeProvider,
   KnowledgeQuery,
-  KnowledgeResult,
-  UpdateDocumentInput
+  KnowledgeResult
 } from "./interface.js";
 
 const IDEMPOTENCY_MARKER_PREFIX = "Luma execution key:";
@@ -50,11 +49,6 @@ export interface NotionApi {
   }): Promise<NotionApiDocument[]>;
   getDocument(input: { id: string; titleProperty: string }): Promise<NotionApiDocument>;
   createDocument(input: NotionCreateDocumentInput): Promise<NotionApiDocument>;
-  updateDocument(input: {
-    id: string;
-    titleProperty: string;
-    contentMarkdown: string;
-  }): Promise<NotionApiDocument>;
   listChanges(input: {
     dataSourceId: string;
     titleProperty: string;
@@ -141,20 +135,6 @@ export function createNotionKnowledgeProvider(
         titleProperty
       });
       return existing ? toExternalReference(existing, providerId) : null;
-    },
-    async updateDocument(
-      id: string,
-      input: UpdateDocumentInput
-    ): Promise<ExternalReference> {
-      const document = await api.updateDocument({
-        id,
-        titleProperty,
-        contentMarkdown: withIdempotencyMarker(
-          input.contentMarkdown,
-          input.idempotencyKey
-        )
-      });
-      return toExternalReference(document, providerId);
     },
     async listChanges(cursor?: string): Promise<ChangePage> {
       const result = await api.listChanges({
@@ -319,22 +299,6 @@ class NotionSdkApi implements NotionApi {
     }
 
     return this.toApiDocument(page, input.titleProperty);
-  }
-
-  async updateDocument(input: {
-    id: string;
-    titleProperty: string;
-    contentMarkdown: string;
-  }): Promise<NotionApiDocument> {
-    await this.client.pages.updateMarkdown({
-      page_id: input.id,
-      type: "replace_content",
-      replace_content: {
-        new_str: input.contentMarkdown,
-        allow_deleting_content: true
-      }
-    });
-    return this.getDocument({ id: input.id, titleProperty: input.titleProperty });
   }
 
   async listChanges(input: {

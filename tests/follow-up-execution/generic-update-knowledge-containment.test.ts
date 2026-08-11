@@ -13,8 +13,7 @@ import type {
   KnowledgeDocument,
   KnowledgeProvider,
   KnowledgeQuery,
-  KnowledgeResult,
-  UpdateDocumentInput
+  KnowledgeResult
 } from "../../src/knowledge/interface.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
@@ -69,7 +68,6 @@ class GenericKnowledgeUpdateReasoningModel implements ReasoningModel {
 class RecordingKnowledgeProvider implements KnowledgeProvider {
   readonly providerId = "notion-meetings";
   readonly createCalls: CreateDocumentInput[] = [];
-  readonly updateCalls: Array<{ id: string; input: UpdateDocumentInput }> = [];
   readonly markerLookups: string[] = [];
   marker: ExternalReference | null = null;
 
@@ -93,11 +91,6 @@ class RecordingKnowledgeProvider implements KnowledgeProvider {
   ): Promise<ExternalReference | null> {
     this.markerLookups.push(idempotencyKey);
     return Promise.resolve(this.marker);
-  }
-
-  updateDocument(id: string, input: UpdateDocumentInput): Promise<ExternalReference> {
-    this.updateCalls.push({ id, input });
-    return Promise.reject(new Error("generic knowledge updates must not update"));
   }
 
   listChanges(_cursor?: string): Promise<ChangePage> {
@@ -382,7 +375,6 @@ describe("legacy generic update-knowledge containment", () => {
       });
       expect(knowledgeProvider.markerLookups).toEqual([]);
       expect(knowledgeProvider.createCalls).toEqual([]);
-      expect(knowledgeProvider.updateCalls).toEqual([]);
       expect(
         (await snapshotFor(context)).followUpIntentions.find(
           (candidate) => candidate.id === intent.id
@@ -428,7 +420,6 @@ describe("legacy generic update-knowledge containment", () => {
       expect(result.observation.outcome.summary).toContain("Recovered historic");
       expect(knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
       expect(knowledgeProvider.createCalls).toEqual([]);
-      expect(knowledgeProvider.updateCalls).toEqual([]);
       expect(
         (await snapshotFor(context)).followUpIntentions.find(
           (candidate) => candidate.id === intent.id
@@ -469,7 +460,6 @@ describe("legacy generic update-knowledge containment", () => {
       expect(result.observation.outcome.message).toContain("will not create or update");
       expect(knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
       expect(knowledgeProvider.createCalls).toEqual([]);
-      expect(knowledgeProvider.updateCalls).toEqual([]);
       expect(
         (await snapshotFor(context)).followUpIntentions.find(
           (candidate) => candidate.id === intent.id
@@ -505,7 +495,6 @@ describe("legacy generic update-knowledge containment", () => {
       expect(recovered.observation.outcome.summary).toContain("Recovered historic");
       expect(knowledgeProvider.markerLookups).toEqual([idempotencyKey, idempotencyKey]);
       expect(knowledgeProvider.createCalls).toEqual([]);
-      expect(knowledgeProvider.updateCalls).toEqual([]);
     } finally {
       await context.database.close();
     }
@@ -546,7 +535,6 @@ describe("legacy generic update-knowledge containment", () => {
       expect(result.observation.outcome.summary).toContain("Recovered historic");
       expect(knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
       expect(knowledgeProvider.createCalls).toEqual([]);
-      expect(knowledgeProvider.updateCalls).toEqual([]);
       expect(
         (await snapshotFor(context)).followUpIntentions.find(
           (candidate) => candidate.id === intent.id

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   assertCompleteNotionMarkdown,
   createNotionKnowledgeProvider,
@@ -7,6 +7,7 @@ import {
   type NotionApiDocument,
   type NotionCreateDocumentInput
 } from "../../src/knowledge/notion-knowledge-provider.js";
+import type { KnowledgeProvider } from "../../src/knowledge/interface.js";
 
 function notionDocument(overrides: Partial<NotionApiDocument> = {}): NotionApiDocument {
   return {
@@ -49,16 +50,23 @@ class FakeNotionApi implements NotionApi {
     );
   }
 
-  updateDocument(): Promise<NotionApiDocument> {
-    return Promise.resolve(notionDocument());
-  }
-
   listChanges(): Promise<{ documents: NotionApiDocument[]; nextCursor: string | null }> {
     return Promise.resolve({ documents: [], nextCursor: null });
   }
 }
 
 describe("Notion KnowledgeProvider", () => {
+  it("does not expose a generic whole-page update capability", () => {
+    expectTypeOf<KnowledgeProvider>().not.toHaveProperty("updateDocument");
+    expectTypeOf<NotionApi>().not.toHaveProperty("updateDocument");
+
+    const provider = createNotionKnowledgeProvider({
+      api: new FakeNotionApi(),
+      meetingsDataSourceId: "meetings"
+    });
+    expect(provider).not.toHaveProperty("updateDocument");
+  });
+
   it("creates an idempotent Meeting record in the configured data source", async () => {
     const api = new FakeNotionApi();
     const provider = createNotionKnowledgeProvider({

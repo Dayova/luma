@@ -45,12 +45,6 @@ export type CreateDocumentInput = {
   idempotencyKey: string;
 };
 
-export type UpdateDocumentInput = {
-  contentMarkdown: string;
-  expectedVersion?: string;
-  idempotencyKey: string;
-};
-
 export interface KnowledgeProvider {
   readonly providerId: string;
   readonly identityProviderId?: string;
@@ -65,6 +59,5 @@ export interface KnowledgeProvider {
   findCreatedDocumentByIdempotencyKey?(
     idempotencyKey: string
   ): Promise<ExternalReference | null>;
-  updateDocument(id: string, input: UpdateDocumentInput): Promise<ExternalReference>;
   listChanges(cursor?: string): Promise<ChangePage>;
 }

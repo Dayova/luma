@@ -167,9 +167,6 @@ async function startHttpListener(
     const bound = created.address();
 
     if (!bound || typeof bound === "string") {
-      await close(created);
-      input.clearServer();
-      await input.observationHost.stop();
       throw new Error("Notion webhook HTTP server did not expose a TCP address");
     }
 
@@ -177,9 +174,31 @@ async function startHttpListener(
     input.assignAddress(address);
     return address;
   } catch (error) {
-    input.clearServer();
-    await input.observationHost.stop();
+    await cleanUpFailedListenerStart(created, input);
     throw error;
+  }
+}
+
+async function cleanUpFailedListenerStart(
+  created: Server,
+  input: Pick<StartHttpListenerInput, "clearServer" | "observationHost">
+): Promise<void> {
+  if (created.listening) {
+    try {
+      await close(created);
+    } catch {
+      // The listener-start failure is the useful failure for the caller; a
+      // best-effort cleanup must not replace it or leave host admission open.
+    }
+  }
+
+  input.clearServer();
+
+  try {
+    await input.observationHost.stop();
+  } catch {
+    // `stop()` is still fail-safe for normal shutdown. During an unsuccessful
+    // listener start, retain the original bind/address error for the caller.
   }
 }
 

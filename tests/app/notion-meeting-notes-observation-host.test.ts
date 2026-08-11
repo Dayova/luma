@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { request as httpRequest } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { connect as connectSocket } from "node:net";
 import { describe, expect, it } from "vitest";
 import type {
@@ -660,6 +660,75 @@ describe("Notion Meeting Notes observation host", () => {
       expect(serialized).not.toContain(verificationToken);
     } finally {
       await host.stop();
+    }
+  });
+
+  it("preserves a listener startup failure when host cleanup also fails", async () => {
+    let stopCalls = 0;
+    const failingStopHost: NotionMeetingNotesObservationHost = {
+      start: () => undefined,
+      receive: () => ({ status: "unavailable" }),
+      status: () => ({
+        acceptingDeliveries: false,
+        backgroundDrainActive: false,
+        runtime: {
+          drainActive: false,
+          pendingPageCount: 0,
+          canonicalReconciliationPending: false,
+          pageWakeUpOverflowCount: 0,
+          lastPageWakeUpOverflowAt: null,
+          lastWebhookReceivedAt: null,
+          lastWakeUpAt: null,
+          lastSuccessfulCanonicalReconciliationAt: null,
+          wakeUpLagMs: null,
+          lastFailure: null
+        },
+        canonicalRecovery: {
+          active: false,
+          scheduled: false,
+          lastStartedAt: null,
+          lastFinishedAt: null,
+          lastOutcome: null
+        }
+      }),
+      stop: () => {
+        stopCalls += 1;
+        return Promise.reject(new Error("synthetic host cleanup failure"));
+      }
+    };
+    const occupiedListener = createServer();
+    const address = await new Promise<{ port: number }>((resolve, reject) => {
+      occupiedListener.once("error", reject);
+      occupiedListener.listen(0, "127.0.0.1", () => {
+        const bound = occupiedListener.address();
+        if (!bound || typeof bound === "string") {
+          reject(new Error("test listener did not bind a TCP port"));
+          return;
+        }
+
+        resolve({ port: bound.port });
+      });
+    });
+    const server = createNotionWebhookHttpServer({
+      observationHost: failingStopHost,
+      hostname: "127.0.0.1",
+      port: address.port
+    });
+
+    try {
+      await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+      expect(stopCalls).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        occupiedListener.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
     }
   });
 

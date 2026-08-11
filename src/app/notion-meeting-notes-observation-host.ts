@@ -165,8 +165,13 @@ export function createNotionMeetingNotesObservationHost(
       // A host adapter closes its listener first. This drains only work which
       // was accepted before shutdown and then lets the existing sync own its
       // own in-flight scheduled scan shutdown before persistence is closed.
-      await (scheduledDrain ?? settleRuntimeDrain());
-      await runtime.stopCanonicalRecovery();
+      try {
+        await (scheduledDrain ?? settleRuntimeDrain());
+      } finally {
+        // No failed wake-up drain may leave the recurring canonical recovery
+        // timer behind after its host has stopped accepting deliveries.
+        await runtime.stopCanonicalRecovery();
+      }
     }
   };
 }

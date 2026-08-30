@@ -446,6 +446,261 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         source_provider_id, source_document_id, source_object_id
       );
 
+    -- Logical Meetings are Luma-owned, provider-neutral bindings over
+    -- independently archived captures. They intentionally sit beside the
+    -- source-specific observed-source ledger: they retain only normalized
+    -- identity/capability metadata and immutable source pointers, never raw
+    -- Meeting Note or transcript content.
+    CREATE TABLE IF NOT EXISTS logical_meeting_workspace_locks (
+      workspace_id TEXT PRIMARY KEY
+    );
+
+    CREATE TABLE IF NOT EXISTS logical_meetings (
+      workspace_id TEXT NOT NULL,
+      logical_meeting_id TEXT NOT NULL,
+      -- LUM-35 will deliberately select an anchor. LUM-33 must leave this
+      -- null rather than implicitly promoting a provider capture to canonical.
+      canonical_anchor_ref_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, logical_meeting_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_captures (
+      workspace_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      -- Opaque per-user/per-workspace source scope; never a credential.
+      provider_connection_id TEXT NOT NULL,
+      external_capture_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, capture_id),
+      UNIQUE (
+        workspace_id,
+        provider_id,
+        provider_connection_id,
+        external_capture_id,
+        source_kind
+      )
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_capture_revisions (
+      workspace_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      content_hash TEXT NOT NULL,
+      provider_version TEXT,
+      captured_at TEXT NOT NULL,
+      eligibility_json TEXT NOT NULL,
+      availability TEXT NOT NULL CHECK (
+        availability IN ('complete', 'partial', 'not-ready', 'failed', 'removed')
+      ),
+      capabilities_json TEXT NOT NULL,
+      identity_facts_json TEXT NOT NULL,
+      materials_json TEXT NOT NULL,
+      external_reference_json TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, capture_id, source_revision),
+      FOREIGN KEY (workspace_id, capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS meeting_capture_revisions_latest_idx
+      ON meeting_capture_revisions (workspace_id, capture_id, source_revision DESC);
+
+    -- An importable withheld revision records only its opaque provider address,
+    -- immutable revision/hash, and eligibility decision. It deliberately
+    -- stores no source descriptors or matching facts; private/policy decisions
+    -- instead receive the stronger append-only terminal fence below.
+    CREATE TABLE IF NOT EXISTS meeting_capture_eligibility_watermarks (
+      workspace_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      provider_connection_id TEXT NOT NULL,
+      external_capture_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      content_hash TEXT NOT NULL,
+      eligibility_state TEXT NOT NULL CHECK (
+        eligibility_state IN ('excluded', 'requires-human-import')
+      ),
+      eligibility_reason TEXT,
+      captured_at TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (
+        workspace_id, provider_id, provider_connection_id,
+        external_capture_id, source_kind, source_revision
+      )
+    );
+
+    CREATE INDEX IF NOT EXISTS meeting_capture_eligibility_watermarks_latest_idx
+      ON meeting_capture_eligibility_watermarks (
+        workspace_id, provider_id, provider_connection_id,
+        external_capture_id, source_kind, source_revision DESC
+      );
+
+    -- A terminal privacy/policy withdrawal is a separate append-only fact.
+    -- It must be able to fence a previously importable revision without
+    -- rewriting that prior decision or its Human import audit record. Like the
+    -- ordinary watermark, it retains no provider descriptors or source text.
+    CREATE TABLE IF NOT EXISTS meeting_capture_terminal_eligibility_withdrawals (
+      workspace_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      provider_connection_id TEXT NOT NULL,
+      external_capture_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      content_hash TEXT NOT NULL,
+      eligibility_reason TEXT NOT NULL CHECK (
+        eligibility_reason IN ('private', 'policy')
+      ),
+      captured_at TEXT NOT NULL,
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (
+        workspace_id, provider_id, provider_connection_id,
+        external_capture_id, source_kind, source_revision,
+        content_hash, eligibility_reason
+      )
+    );
+
+    CREATE INDEX IF NOT EXISTS meeting_capture_terminal_eligibility_withdrawals_latest_idx
+      ON meeting_capture_terminal_eligibility_withdrawals (
+        workspace_id, provider_id, provider_connection_id,
+        external_capture_id, source_kind, source_revision DESC, recorded_at DESC
+      );
+
+    -- An explicit Human import can admit only a matching withheld revision.
+    -- The original provider eligibility remains immutable on the revision;
+    -- this separate append-only record is the authorization that makes it
+    -- available to the organizational binding layer.
+    CREATE TABLE IF NOT EXISTS logical_meeting_capture_import_judgments (
+      workspace_id TEXT NOT NULL,
+      judgment_id TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      provider_connection_id TEXT NOT NULL,
+      external_capture_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      content_hash TEXT NOT NULL,
+      revision_digest TEXT NOT NULL,
+      actor_person_id TEXT NOT NULL,
+      reason TEXT,
+      observed_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, judgment_id),
+      UNIQUE (
+        workspace_id, provider_id, provider_connection_id,
+        external_capture_id, source_kind, source_revision
+      )
+    );
+
+    -- Binding history is append-only. The separate head table makes the
+    -- normal caller cheap while preserving Human correction provenance.
+    CREATE TABLE IF NOT EXISTS logical_meeting_capture_binding_history (
+      workspace_id TEXT NOT NULL,
+      binding_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      logical_meeting_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (
+        state IN (
+          'bound-high-confidence', 'candidate-match', 'ambiguous',
+          'separate', 'human-bound'
+        )
+      ),
+      origin TEXT NOT NULL CHECK (origin IN ('automatic', 'human')),
+      match_evidence_json TEXT NOT NULL,
+      -- Digest of normalized matching facts, never raw content or names.
+      match_facts_digest TEXT,
+      policy_version TEXT NOT NULL,
+      supersedes_binding_id TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, binding_id),
+      FOREIGN KEY (workspace_id, capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id),
+      FOREIGN KEY (workspace_id, logical_meeting_id)
+        REFERENCES logical_meetings (workspace_id, logical_meeting_id),
+      FOREIGN KEY (workspace_id, supersedes_binding_id)
+        REFERENCES logical_meeting_capture_binding_history (workspace_id, binding_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS logical_meeting_capture_binding_heads (
+      workspace_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      binding_id TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, capture_id),
+      FOREIGN KEY (workspace_id, capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id),
+      FOREIGN KEY (workspace_id, binding_id)
+        REFERENCES logical_meeting_capture_binding_history (workspace_id, binding_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS logical_meeting_capture_binding_heads_meeting_idx
+      ON logical_meeting_capture_binding_history (
+        workspace_id, logical_meeting_id, created_at
+      );
+
+    -- Candidate assessments are durable audit material. A candidate is not
+    -- membership and it cannot trigger an execution path in LUM-33.
+    CREATE TABLE IF NOT EXISTS logical_meeting_match_assessments (
+      workspace_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      candidate_logical_meeting_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('high-confidence', 'candidate')),
+      evidence_json TEXT NOT NULL,
+      match_facts_digest TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (
+        workspace_id,
+        capture_id,
+        source_revision,
+        candidate_logical_meeting_id
+      ),
+      FOREIGN KEY (workspace_id, capture_id, source_revision)
+        REFERENCES meeting_capture_revisions (workspace_id, capture_id, source_revision),
+      FOREIGN KEY (workspace_id, candidate_logical_meeting_id)
+        REFERENCES logical_meetings (workspace_id, logical_meeting_id)
+    );
+
+    -- A Human separation has pairwise scope, so a later automatic matcher
+    -- cannot recreate exactly the relation that was deliberately rejected.
+    CREATE TABLE IF NOT EXISTS logical_meeting_capture_exclusions (
+      workspace_id TEXT NOT NULL,
+      left_capture_id TEXT NOT NULL,
+      right_capture_id TEXT NOT NULL,
+      human_judgment_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, left_capture_id, right_capture_id),
+      CHECK (left_capture_id < right_capture_id),
+      FOREIGN KEY (workspace_id, left_capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id),
+      FOREIGN KEY (workspace_id, right_capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS logical_meeting_capture_binding_judgments (
+      workspace_id TEXT NOT NULL,
+      judgment_id TEXT NOT NULL,
+      capture_id TEXT NOT NULL,
+      actor_person_id TEXT NOT NULL,
+      judgment_type TEXT NOT NULL CHECK (
+        judgment_type IN ('bind', 'make-separate')
+      ),
+      requested_logical_meeting_id TEXT NOT NULL,
+      reason TEXT,
+      observed_at TEXT NOT NULL,
+      binding_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, judgment_id),
+      FOREIGN KEY (workspace_id, capture_id)
+        REFERENCES meeting_captures (workspace_id, capture_id),
+      FOREIGN KEY (workspace_id, requested_logical_meeting_id)
+        REFERENCES logical_meetings (workspace_id, logical_meeting_id),
+      FOREIGN KEY (workspace_id, binding_id)
+        REFERENCES logical_meeting_capture_binding_history (workspace_id, binding_id)
+    );
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS start_message_sent_at TEXT;
 

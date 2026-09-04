@@ -9,6 +9,7 @@ import {
 } from "../../src/logical-meetings/logical-meetings.js";
 import type {
   CaptureRevisionVerifier,
+  HumanCaptureBindingJudgment,
   LogicalMeetingBindingResult,
   MeetingCaptureRevision
 } from "../../src/logical-meetings/interface.js";
@@ -132,6 +133,175 @@ describe("LogicalMeetings", () => {
       });
       expect(granola.matchFactsDigest).toMatch(/^sha256:/);
       expect(granola.logicalMeeting.captureRefs).toHaveLength(2);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it.each([
+    {
+      kind: "shared-calendar-event",
+      stronger: { calendarEventKeys: ["calendar:ranked"] },
+      weaker: { conferenceKeys: ["conference:ranked"] }
+    },
+    {
+      kind: "shared-conference",
+      stronger: { conferenceKeys: ["conference:ranked"] },
+      weaker: {
+        interval: interval("2026-08-30T09:00:00.000Z", "2026-08-30T10:00:00.000Z"),
+        attendeePersonIds: ["person:jakob", "person:fabius"]
+      }
+    }
+  ])(
+    "prefers $kind over a weaker identity match on discovery and revision",
+    async ({ kind, stronger, weaker }) => {
+      const database = await createPgliteDatabase();
+
+      try {
+        const logicalMeetings = create(database, logicalVerifier());
+        const weak = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({ externalCaptureId: "weak-target", ...weaker })
+          })
+        );
+        const strong = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({ externalCaptureId: "strong-target", ...stronger })
+          })
+        );
+        const address = { providerId: "granola", externalCaptureId: "ranked-capture" };
+        const original = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({ ...address, ...stronger, ...weaker })
+          })
+        );
+        expect(original).toMatchObject({
+          state: "bound-high-confidence",
+          logicalMeeting: { id: strong.logicalMeeting.id },
+          matchEvidence: [{ kind }]
+        });
+
+        const revised = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({ ...address, sourceRevision: 2, ...weaker })
+          })
+        );
+        expect(revised.logicalMeeting.id).toBe(weak.logicalMeeting.id);
+
+        const restored = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              ...address,
+              sourceRevision: 3,
+              ...stronger,
+              ...weaker
+            })
+          })
+        );
+        expect(restored).toMatchObject({
+          effect: "revised",
+          state: "bound-high-confidence",
+          logicalMeeting: { id: strong.logicalMeeting.id },
+          matchEvidence: [{ kind }]
+        });
+      } finally {
+        await database.close();
+      }
+    }
+  );
+
+  it("keeps equally strong matches ambiguous after ranking all captures in each meeting", async () => {
+    const database = await createPgliteDatabase();
+
+    try {
+      const logicalMeetings = create(database, logicalVerifier());
+      const conference = accepted(
+        await logicalMeetings.resolveCapture({
+          workspaceId,
+          revision: captureRevision({
+            externalCaptureId: "ranked-conference",
+            conferenceKeys: ["conference:tie"]
+          })
+        })
+      );
+      const calendar = accepted(
+        await logicalMeetings.resolveCapture({
+          workspaceId,
+          revision: captureRevision({
+            externalCaptureId: "ranked-calendar",
+            calendarEventKeys: ["calendar:tie-a"]
+          })
+        })
+      );
+      accepted(
+        await logicalMeetings.recordBindingJudgment({
+          judgmentId: "bind-ranked-captures",
+          workspaceId,
+          actorPersonId: "person:jakob",
+          captureId: calendar.captureId,
+          observedAt: "2026-08-30T12:00:00.000Z",
+          reason: "Independent captures of the same meeting.",
+          judgment: { type: "bind", logicalMeetingId: conference.logicalMeeting.id }
+        })
+      );
+      const other = accepted(
+        await logicalMeetings.resolveCapture({
+          workspaceId,
+          revision: captureRevision({
+            externalCaptureId: "other-ranked-calendar",
+            calendarEventKeys: ["calendar:tie-b"]
+          })
+        })
+      );
+      for (const sourceRevision of [1, 2, 3]) {
+        const result = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "ranked-tie",
+              sourceRevision,
+              conferenceKeys: ["conference:tie"],
+              calendarEventKeys:
+                sourceRevision === 2
+                  ? ["calendar:tie-a"]
+                  : ["calendar:tie-a", "calendar:tie-b"]
+            })
+          })
+        );
+        if (sourceRevision === 2) {
+          expect(result).toMatchObject({
+            state: "bound-high-confidence",
+            logicalMeeting: { id: conference.logicalMeeting.id },
+            matchEvidence: [{ kind: "shared-calendar-event" }]
+          });
+        } else {
+          expect(result).toMatchObject({
+            state: "ambiguous",
+            matchEvidence: [],
+            matchFactsDigest: null
+          });
+          expect(result.logicalMeeting.id).not.toBe(conference.logicalMeeting.id);
+          expect(result.logicalMeeting.id).not.toBe(other.logicalMeeting.id);
+          expect(result.logicalMeeting.captureRefs).toHaveLength(1);
+          expect(result.candidates).toEqual(
+            expect.arrayContaining([
+              {
+                logicalMeetingId: conference.logicalMeeting.id,
+                evidence: [{ kind: "shared-calendar-event" }]
+              },
+              {
+                logicalMeetingId: other.logicalMeeting.id,
+                evidence: [{ kind: "shared-calendar-event" }]
+              }
+            ])
+          );
+        }
+      }
     } finally {
       await database.close();
     }
@@ -344,6 +514,85 @@ describe("LogicalMeetings", () => {
     }
   });
 
+  it.each([
+    { initialState: "candidate-match", targetCount: 1 },
+    { initialState: "ambiguous", targetCount: 2 }
+  ])(
+    "clears an automatic $initialState when revised evidence has no candidates",
+    async ({ initialState, targetCount }) => {
+      const database = await createPgliteDatabase();
+
+      try {
+        const logicalMeetings = create(database, logicalVerifier());
+        const softFacts = {
+          interval: interval("2026-08-30T09:00:00.000Z", "2026-08-30T10:00:00.000Z"),
+          titleFingerprint: "title:architecture",
+          contextKeys: ["project:luma"]
+        };
+
+        for (let index = 0; index < targetCount; index += 1) {
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: `notion-stale-candidate-${index}`,
+              ...softFacts
+            })
+          });
+        }
+
+        const address = {
+          providerId: "granola",
+          providerConnectionId: "granola:jakob",
+          externalCaptureId: "granola-stale-candidate"
+        };
+        const original = captureRevision({ ...address, ...softFacts });
+        const first = accepted(
+          await logicalMeetings.resolveCapture({ workspaceId, revision: original })
+        );
+        expect(first.state).toBe(initialState);
+        expect(first.candidates).toHaveLength(targetCount);
+
+        const corrected = captureRevision({ ...address, sourceRevision: 2 });
+        const revised = accepted(
+          await logicalMeetings.resolveCapture({ workspaceId, revision: corrected })
+        );
+        const expectedBinding = {
+          captureId: first.captureId,
+          state: "separate",
+          origin: "automatic",
+          candidates: [],
+          matchEvidence: [],
+          matchFactsDigest: null,
+          logicalMeeting: { id: first.logicalMeeting.id }
+        };
+
+        expect(revised).toMatchObject({ ...expectedBinding, effect: "revised" });
+        expect(
+          await logicalMeetings.get({ workspaceId, captureId: first.captureId })
+        ).toMatchObject({
+          id: first.logicalMeeting.id,
+          captureRefs: [
+            {
+              id: first.captureId,
+              latestRevision: { sourceRevision: 2 },
+              binding: { state: "separate", origin: "automatic" }
+            }
+          ]
+        });
+
+        for (const revision of [corrected, original]) {
+          const replay = accepted(
+            await logicalMeetings.resolveCapture({ workspaceId, revision })
+          );
+          expect(replay).toMatchObject({ ...expectedBinding, effect: "unchanged" });
+          expect(replay.logicalMeeting.captureRefs).toHaveLength(1);
+        }
+      } finally {
+        await database.close();
+      }
+    }
+  );
+
   it("records candidate matches without silently binding, then preserves a Human bind across revisions", async () => {
     const database = await createPgliteDatabase();
 
@@ -429,6 +678,76 @@ describe("LogicalMeetings", () => {
     }
   });
 
+  it("replays the current Human binding after an earlier judgment has been superseded", async () => {
+    const database = await createPgliteDatabase();
+
+    try {
+      const logicalMeetings = create(database, logicalVerifier());
+      const target = accepted(
+        await logicalMeetings.resolveCapture({
+          workspaceId,
+          revision: captureRevision({ externalCaptureId: "notion-human-replay" })
+        })
+      );
+      const revision = captureRevision({
+        providerId: "granola",
+        externalCaptureId: "granola-human-replay"
+      });
+      const capture = accepted(
+        await logicalMeetings.resolveCapture({ workspaceId, revision })
+      );
+      const bind: HumanCaptureBindingJudgment = {
+        judgmentId: "bind-before-correction",
+        workspaceId,
+        actorPersonId: "person:jakob",
+        captureId: capture.captureId,
+        observedAt: "2026-08-30T10:00:00.000Z",
+        reason: null,
+        judgment: { type: "bind", logicalMeetingId: target.logicalMeeting.id }
+      };
+      await logicalMeetings.recordBindingJudgment(bind);
+      const separate = accepted(
+        await logicalMeetings.recordBindingJudgment({
+          ...bind,
+          judgmentId: "separate-after-correction",
+          observedAt: "2026-08-30T10:05:00.000Z",
+          judgment: {
+            type: "make-separate",
+            rejectedLogicalMeetingId: target.logicalMeeting.id
+          }
+        })
+      );
+      const replay = accepted(await logicalMeetings.recordBindingJudgment(bind));
+
+      expect(replay).toMatchObject({
+        effect: "unchanged",
+        state: "separate",
+        origin: "human",
+        captureId: capture.captureId,
+        logicalMeeting: {
+          id: separate.logicalMeeting.id,
+          captureRefs: [
+            { id: capture.captureId, binding: { state: "separate", origin: "human" } }
+          ]
+        }
+      });
+      expect(
+        await logicalMeetings.get({ workspaceId, captureId: capture.captureId })
+      ).toEqual(replay.logicalMeeting);
+
+      await logicalMeetings.resolveCapture({
+        workspaceId,
+        revision: { ...revision, eligibility: { state: "excluded", reason: "private" } }
+      });
+      expect(await logicalMeetings.recordBindingJudgment(bind)).toMatchObject({
+        status: "rejected",
+        code: "ineligible-capture"
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
   it("persists a named Human separation and prevents that capture pair from re-merging", async () => {
     const database = await createPgliteDatabase();
 
@@ -493,6 +812,173 @@ describe("LogicalMeetings", () => {
       await database.close();
     }
   });
+
+  it.each([false, true])(
+    "preserves Human separation through a third capture (excluded member withheld: %s)",
+    async (withheld) => {
+      const database = await createPgliteDatabase();
+
+      try {
+        const logicalMeetings = create(database, logicalVerifier());
+        const first = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "separation-a",
+              calendarEventKeys: ["calendar:separation"],
+              conferenceKeys: ["conference:separation"]
+            })
+          })
+        );
+        const second = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "separation-b",
+              calendarEventKeys: ["calendar:separation"]
+            })
+          })
+        );
+        expect(second.logicalMeeting.id).toBe(first.logicalMeeting.id);
+        const separated = accepted(
+          await logicalMeetings.recordBindingJudgment({
+            judgmentId: "separate-a-from-b",
+            workspaceId,
+            actorPersonId: "person:jakob",
+            captureId: first.captureId,
+            observedAt: "2026-08-30T12:00:00.000Z",
+            reason: "These are different meetings despite the shared calendar reference.",
+            judgment: {
+              type: "make-separate",
+              rejectedLogicalMeetingId: first.logicalMeeting.id
+            }
+          })
+        );
+        const bridge = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "separation-c",
+              conferenceKeys: ["conference:separation"]
+            })
+          })
+        );
+        expect(bridge.logicalMeeting.id).toBe(separated.logicalMeeting.id);
+        if (withheld) {
+          expect(
+            await logicalMeetings.resolveCapture({
+              workspaceId,
+              revision: {
+                ...captureRevision({
+                  externalCaptureId: "separation-a",
+                  sourceRevision: 2
+                }),
+                eligibility: { state: "excluded", reason: "private" }
+              }
+            })
+          ).toMatchObject({ status: "excluded" });
+        }
+        const later = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "separation-b",
+              sourceRevision: 2,
+              calendarEventKeys: ["calendar:separation"],
+              conferenceKeys: ["conference:separation"]
+            })
+          })
+        );
+        expect(later.state).toBe("separate");
+        expect(later.logicalMeeting.id).not.toBe(bridge.logicalMeeting.id);
+        expect(later.logicalMeeting.captureRefs.map((capture) => capture.id)).toEqual([
+          second.captureId
+        ]);
+        expect(
+          (
+            await logicalMeetings.get({ workspaceId, captureId: bridge.captureId })
+          )?.captureRefs.map((capture) => capture.id)
+        ).not.toContain(second.captureId);
+      } finally {
+        await database.close();
+      }
+    }
+  );
+
+  it.each(["separate", "candidate-match", "ambiguous"] as const)(
+    "isolates a founding capture when its identity degrades to %s",
+    async (expectedState) => {
+      const database = await createPgliteDatabase();
+
+      try {
+        const logicalMeetings = create(database, logicalVerifier());
+        const softFacts = {
+          titleFingerprint: "planning",
+          contextKeys: ["project:luma"],
+          interval: interval("2026-08-30T09:00:00.000Z", "2026-08-30T10:00:00.000Z")
+        };
+        const first = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "founder",
+              calendarEventKeys: ["calendar:founder"],
+              ...softFacts
+            })
+          })
+        );
+        const second = accepted(
+          await logicalMeetings.resolveCapture({
+            workspaceId,
+            revision: captureRevision({
+              externalCaptureId: "follower",
+              calendarEventKeys: ["calendar:founder"],
+              ...softFacts
+            })
+          })
+        );
+        expect(first.state).toBe("separate");
+        expect(second.logicalMeeting.id).toBe(first.logicalMeeting.id);
+        if (expectedState === "ambiguous") {
+          accepted(
+            await logicalMeetings.resolveCapture({
+              workspaceId,
+              revision: captureRevision({
+                externalCaptureId: "other-soft-candidate",
+                ...softFacts
+              })
+            })
+          );
+        }
+        const revision = captureRevision({
+          externalCaptureId: "founder",
+          sourceRevision: 2,
+          ...(expectedState === "separate" ? {} : softFacts)
+        });
+        const revised = accepted(
+          await logicalMeetings.resolveCapture({ workspaceId, revision })
+        );
+        expect(revised.state).toBe(expectedState);
+        expect(revised.logicalMeeting.id).not.toBe(second.logicalMeeting.id);
+        expect(revised.logicalMeeting.captureRefs.map((capture) => capture.id)).toEqual([
+          first.captureId
+        ]);
+        expect(
+          (
+            await logicalMeetings.get({ workspaceId, captureId: second.captureId })
+          )?.captureRefs.map((capture) => capture.id)
+        ).toEqual([second.captureId]);
+        expect(
+          accepted(await logicalMeetings.resolveCapture({ workspaceId, revision }))
+        ).toMatchObject({
+          effect: "unchanged",
+          logicalMeeting: { id: revised.logicalMeeting.id }
+        });
+      } finally {
+        await database.close();
+      }
+    }
+  );
 
   it("keeps capture and logical identities workspace-scoped and fails closed on fidelity violations", async () => {
     const database = await createPgliteDatabase();

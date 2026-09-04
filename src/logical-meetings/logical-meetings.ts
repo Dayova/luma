@@ -536,9 +536,7 @@ export function createLogicalMeetings(
           capturedAt
         );
 
-        const strongCandidates = assessments.filter(
-          (assessment) => assessment.category === "high-confidence"
-        );
+        const strongCandidates = strongestIdentityCandidates(assessments);
         const candidateAssessments = assessments.filter(
           (assessment) => assessment.category === "candidate"
         );
@@ -631,30 +629,11 @@ export function createLogicalMeetings(
           judgment.judgmentId
         );
 
-        if (existing) {
-          if (!sameHumanJudgment(existing, judgment)) {
-            return rejected(
-              "conflicting-human-judgment",
-              "A Human binding judgment ID is already bound to different content.",
-              false
-            );
-          }
-
-          const binding = await bindingById(
-            transaction,
-            judgment.workspaceId,
-            existing.binding_id
-          );
-
-          if (!binding) {
-            throw new Error("A persisted Human judgment is missing its binding");
-          }
-
-          return accepted(
-            await decisionForBinding(transaction, judgment.workspaceId, binding, {
-              effect: "unchanged",
-              candidates: []
-            })
+        if (existing && !sameHumanJudgment(existing, judgment)) {
+          return rejected(
+            "conflicting-human-judgment",
+            "A Human binding judgment ID is already bound to different content.",
+            false
           );
         }
 
@@ -696,6 +675,15 @@ export function createLogicalMeetings(
 
         if (!current) {
           throw new Error("A persisted capture is missing its binding head");
+        }
+
+        if (existing) {
+          return accepted(
+            await decisionForBinding(transaction, judgment.workspaceId, current, {
+              effect: "unchanged",
+              candidates: []
+            })
+          );
         }
 
         const createdAt = now().toISOString();
@@ -1057,9 +1045,7 @@ async function reassessAutomaticBinding(
     createOpaqueId: () => string;
   }
 ): Promise<BindingRow> {
-  const strongCandidates = input.assessments.filter(
-    (assessment) => assessment.category === "high-confidence"
-  );
+  const strongCandidates = strongestIdentityCandidates(input.assessments);
   const candidateAssessments = input.assessments.filter(
     (assessment) => assessment.category === "candidate"
   );
@@ -1108,14 +1094,17 @@ async function reassessAutomaticBinding(
   const candidate = candidateAssessments[0];
 
   if (!candidate) {
-    if (input.current.state === "bound-high-confidence") {
-      const logicalMeetingId = await safeAutomaticLogicalMeeting(
-        database,
-        input.workspaceId,
-        input.current,
-        input.createdAt,
-        input.createOpaqueId
-      );
+    const logicalMeetingId = await safeAutomaticLogicalMeeting(
+      database,
+      input.workspaceId,
+      input.current,
+      input.createdAt,
+      input.createOpaqueId
+    );
+    if (
+      input.current.state !== "separate" ||
+      logicalMeetingId !== input.current.logical_meeting_id
+    ) {
       return appendBinding(database, {
         workspaceId: input.workspaceId,
         captureId: input.captureId,
@@ -1160,7 +1149,19 @@ async function safeAutomaticLogicalMeeting(
   createdAt: string,
   createOpaqueId: () => string
 ): Promise<LogicalMeetingId> {
-  if (current.state !== "bound-high-confidence") {
+  // The founding capture may still say "separate" after other captures joined it.
+  const otherMembers = await database.query<{ capture_id: string }>(
+    `SELECT head.capture_id
+       FROM logical_meeting_capture_binding_heads AS head
+       JOIN logical_meeting_capture_binding_history AS binding
+         ON binding.workspace_id = head.workspace_id
+        AND binding.binding_id = head.binding_id
+      WHERE head.workspace_id = $1 AND binding.logical_meeting_id = $2
+        AND head.capture_id <> $3
+      LIMIT 1`,
+    [workspaceId, current.logical_meeting_id, current.capture_id]
+  );
+  if (otherMembers.rows.length === 0) {
     return current.logical_meeting_id;
   }
 
@@ -2061,23 +2062,6 @@ async function bindingHead(
   return result.rows[0] ?? null;
 }
 
-async function bindingById(
-  database: DatabaseQuery,
-  workspaceId: string,
-  bindingId: string
-): Promise<BindingRow | null> {
-  const result = await database.query<BindingRow>(
-    `SELECT binding_id, capture_id, logical_meeting_id, state, origin,
-            match_evidence_json, match_facts_digest, created_at
-       FROM logical_meeting_capture_binding_history
-      WHERE workspace_id = $1 AND binding_id = $2
-      FOR UPDATE`,
-    [workspaceId, bindingId]
-  );
-
-  return result.rows[0] ?? null;
-}
-
 async function appendBinding(
   database: DatabaseQuery,
   input: {
@@ -2147,13 +2131,17 @@ async function assessCandidates(
   }
 
   const matchingCaptures = await activeCapturesForMatching(database, workspaceId);
-  const exclusions = await exclusionsForWorkspace(database, workspaceId);
+  const excludedMeetings = await excludedLogicalMeetings(
+    database,
+    workspaceId,
+    captureId
+  );
   const byLogicalMeeting = new Map<string, CandidateAssessment>();
 
   for (const existing of matchingCaptures) {
     if (
       existing.captureId === captureId ||
-      exclusions.has(capturePairKey(captureId, existing.captureId)) ||
+      excludedMeetings.has(existing.logicalMeetingId) ||
       !ACTIVE_CAPTURE_AVAILABILITY.has(existing.revision.availability)
     ) {
       continue;
@@ -2310,7 +2298,35 @@ function isStrongerAssessment(
   next: MatchAssessment,
   previous: CandidateAssessment
 ): boolean {
-  return next.category === "high-confidence" && previous.category !== "high-confidence";
+  return identityRank(next) > identityRank(previous);
+}
+
+function strongestIdentityCandidates(
+  assessments: readonly CandidateAssessment[]
+): CandidateAssessment[] {
+  const strong = assessments.filter(
+    (assessment) => assessment.category === "high-confidence"
+  );
+  const strongestRank = Math.max(0, ...strong.map(identityRank));
+  return strong.filter((assessment) => identityRank(assessment) === strongestRank);
+}
+
+function identityRank(assessment: MatchAssessment): number {
+  return Math.max(
+    0,
+    ...assessment.evidence.map((evidence) => {
+      switch (evidence.kind) {
+        case "shared-calendar-event":
+          return 4;
+        case "shared-conference":
+          return 3;
+        case "time-and-attendees":
+          return 2;
+        case "title-time-context":
+          return 1;
+      }
+    })
+  );
 }
 
 function shares(left: readonly string[], right: readonly string[]): boolean {
@@ -2424,27 +2440,28 @@ function toCandidates(
   }));
 }
 
-async function exclusionsForWorkspace(
+async function excludedLogicalMeetings(
   database: DatabaseQuery,
-  workspaceId: string
+  workspaceId: string,
+  captureId: MeetingCaptureId
 ): Promise<Set<string>> {
-  const result = await database.query<{
-    left_capture_id: string;
-    right_capture_id: string;
-  }>(
-    `SELECT left_capture_id, right_capture_id
-       FROM logical_meeting_capture_exclusions
-      WHERE workspace_id = $1`,
-    [workspaceId]
+  // Use binding heads, including withheld captures, so a third capture cannot
+  // bypass a Human separation by providing fresh identity evidence.
+  const result = await database.query<{ logical_meeting_id: string }>(
+    `SELECT DISTINCT binding.logical_meeting_id
+       FROM logical_meeting_capture_exclusions AS exclusion
+       JOIN logical_meeting_capture_binding_heads AS head
+         ON head.workspace_id = exclusion.workspace_id
+        AND ((exclusion.left_capture_id = $2 AND head.capture_id = exclusion.right_capture_id)
+          OR (exclusion.right_capture_id = $2 AND head.capture_id = exclusion.left_capture_id))
+       JOIN logical_meeting_capture_binding_history AS binding
+         ON binding.workspace_id = head.workspace_id
+        AND binding.binding_id = head.binding_id
+      WHERE exclusion.workspace_id = $1`,
+    [workspaceId, captureId]
   );
 
-  return new Set(
-    result.rows.map((row) => capturePairKey(row.left_capture_id, row.right_capture_id))
-  );
-}
-
-function capturePairKey(left: string, right: string): string {
-  return [left, right].sort((first, second) => first.localeCompare(second)).join("|");
+  return new Set(result.rows.map((row) => row.logical_meeting_id));
 }
 
 async function addHumanSeparationExclusions(

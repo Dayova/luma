@@ -13,6 +13,22 @@ sources and interaction surfaces over the shared Luma core.
 A time-bounded team conversation whose evidence and follow-up can continue evolving after the live call ends.
 _Avoid_: Call, recording, session
 
+**Logical Meeting**:
+A Luma-owned, provider-neutral identity for one real-world Meeting that can relate independently observed Meeting Captures without making any provider capture canonical.
+_Avoid_: Provider meeting, source page, transcript
+
+**Meeting Capture**:
+A connection-scoped, provider-specific record of material observed about a Meeting, retaining its capability, availability, eligibility, and source provenance across immutable Capture Revisions.
+_Avoid_: Logical Meeting, merged transcript, universal meeting record
+
+**Capture Revision**:
+An immutable version of a Meeting Capture whose content, capability, availability, eligibility, and source provenance describe exactly what that provider exposed at that time. A later private/policy eligibility withdrawal is an append-only admission fence, not a rewrite of that revision.
+_Avoid_: Rewritten source, inferred transcript, current truth
+
+**Capture Binding**:
+A durable Luma relationship between a Meeting Capture and a Logical Meeting, carrying deterministic matching evidence or Human Judgment and never rewriting the capture's provider source.
+_Avoid_: Automatic merge, source rewrite, deduplication guess
+
 **Conversation**:
 An ordered, bounded, provider-native discussion that Luma can preserve as Evidence without treating it as a Meeting or creating a Meeting Note.
 _Avoid_: Meeting, transcript dump, chat log
@@ -81,13 +97,17 @@ _Avoid_: Automatic task creation, duplicate detector
 The current, revisable understanding of a Meeting at a specific Revision.
 _Avoid_: Projection, snapshot
 
+**Luma Synthesis**:
+A provider-neutral, Evidence-grounded understanding of a Logical Meeting that retains each contributing capture's provenance, capability gaps, and uncertainty rather than fabricating a combined raw transcript.
+_Avoid_: Transcript merge, source replacement, Operational Outcome
+
 **Revision**:
 A monotonically increasing version of committed Meeting understanding.
 _Avoid_: Version, checkpoint
 
 **Conclusion**:
-A versioned post-Meeting representation containing summaries, decisions, action items, questions, risks, participant briefs, and follow-up intentions.
-_Avoid_: Summary, minutes
+A versioned post-Meeting representation containing summaries, decisions, action items, questions, risks, participant briefs, and follow-up intentions, which may be informed by a Luma Synthesis.
+_Avoid_: Raw source note, Operational Outcome, minutes
 
 **Follow-up Intent**:
 A provider-independent description of an external mutation the system recommends or is approved to perform.
@@ -96,6 +116,10 @@ _Avoid_: Tool call, provider request
 **Execution Record**:
 The recorded outcome of attempting an approved Follow-up Intent.
 _Avoid_: Result, receipt
+
+**Operational Outcome**:
+A compact Luma-owned record of authorized reconciliation and execution against canonical organizational surfaces, distinct from raw Meeting Captures and a Luma Synthesis.
+_Avoid_: Meeting Notes, source evidence, synthesis
 
 **External Activity**:
 A provider-normalized event connected to a Meeting Item, external object, or Follow-up.

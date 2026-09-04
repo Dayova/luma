@@ -46,6 +46,21 @@ export type * from "./knowledge/interface.js";
 export type * from "./knowledge/meeting-notes-source.js";
 export type * from "./knowledge/observed-source-ledger.js";
 export { createObservedSourceLedger } from "./knowledge/observed-source-ledger.js";
+export type * from "./logical-meetings/interface.js";
+export {
+  createLogicalMeetings,
+  type CreateLogicalMeetingsInput
+} from "./logical-meetings/logical-meetings.js";
+export { meetingCaptureTitleFingerprint } from "./knowledge/meeting-capture-title-fingerprint.js";
+export {
+  observedNotionMeetingCapture,
+  type ObservedNotionMeetingCaptureInput
+} from "./knowledge/notion-meeting-capture.js";
+export {
+  createLedgerBackedNotionCaptureRevisionVerifier,
+  type CreateLedgerBackedNotionCaptureRevisionVerifierInput,
+  type LedgerBackedNotionAttendeeIdentityProjection
+} from "./knowledge/ledger-backed-notion-capture-revision-verifier.js";
 export {
   createMeetingNotesIngestion,
   observedMeetingNoteToObservation

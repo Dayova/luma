@@ -184,6 +184,68 @@ describe("Notion Meeting capture projection", () => {
 });
 
 describe("ledger-backed Notion capture revision verification", () => {
+  it("preserves locale-independent attendee ordering through projection, storage, and replay", async () => {
+    const database = await createPgliteDatabase();
+    const ledger = createObservedSourceLedger({ database });
+
+    try {
+      const source = await ledger.record({
+        workspaceId,
+        source: sourceIdentity,
+        providerVersion: "2026-08-07T09:31:00.000Z",
+        snapshot: completeSnapshot,
+        observedAt: "2026-08-07T09:32:00.000Z"
+      });
+      const attendeePersonIds = [
+        "person:ä",
+        "person:a",
+        " person:Z ",
+        "person:A",
+        "person:a"
+      ];
+      const expectedIds = ["person:A", "person:Z", "person:a", "person:ä"];
+      const capture = observedNotionMeetingCapture({
+        source,
+        canonicalSourceScopeId: "notion-canonical-source",
+        attendeePersonIds
+      });
+      expect(capture.identityFacts.attendeePersonIds).toEqual(expectedIds);
+      const verifier = createLedgerBackedNotionCaptureRevisionVerifier({
+        ledger,
+        canonicalSourceScopeId: "notion-canonical-source",
+        attendeePersonIdsForLedgerSource: () => attendeePersonIds
+      });
+      const logicalMeetings = createLogicalMeetings({
+        database,
+        captureRevisionVerifier: verifier
+      });
+      const result = await logicalMeetings.resolveCapture({
+        workspaceId,
+        revision: capture
+      });
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") {
+        throw new Error("Expected the verified capture to be admitted");
+      }
+      const stored = result.decision.logicalMeeting.captureRefs[0]?.latestRevision;
+      expect(stored?.identityFacts.attendeePersonIds).toEqual(expectedIds);
+      if (!stored) {
+        throw new Error("Expected the admitted capture revision to be persisted");
+      }
+      await expect(verifier.verify({ workspaceId, revision: stored })).resolves.toEqual({
+        status: "verified"
+      });
+      await expect(
+        logicalMeetings.resolveCapture({ workspaceId, revision: stored })
+      ).resolves.toMatchObject({
+        status: "accepted",
+        decision: { effect: "unchanged", captureId: result.decision.captureId }
+      });
+    } finally {
+      await database.close();
+    }
+  });
+
   it("accepts only the exact immutable ledger projection", async () => {
     const database = await createPgliteDatabase();
     const ledger = createObservedSourceLedger({ database });

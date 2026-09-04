@@ -325,5 +325,5 @@ function normalizedPersonIds(values: readonly PersonId[] | undefined): PersonId[
     throw new Error("A canonical attendee Person identity may not be blank");
   }
 
-  return [...new Set(normalized)].sort((left, right) => left.localeCompare(right));
+  return [...new Set(normalized)].sort();
 }

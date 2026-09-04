@@ -2710,9 +2710,7 @@ function normalizeIdentityFacts(facts: MeetingIdentityFacts): MeetingIdentityFac
 }
 
 function normalizedStringSet(values: readonly string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort(
-    (left, right) => left.localeCompare(right)
-  );
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
 }
 
 function validateCaptureRevision(revision: MeetingCaptureRevision): string | null {

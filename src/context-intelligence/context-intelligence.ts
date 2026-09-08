@@ -1,3 +1,4 @@
+import { AiServiceError } from "../ai/ai-service-error.js";
 import { createHash } from "node:crypto";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
@@ -129,7 +130,7 @@ async function inquire(
       ...cloneCapturedConversation(captured)
     });
   } catch (error: unknown) {
-    if (error instanceof ContextIntelligenceError) {
+    if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
       throw error;
     }
 
@@ -178,7 +179,7 @@ async function captureConversationEvidence(
       subject: { ...inquiry.subject }
     });
   } catch (error: unknown) {
-    if (error instanceof ContextIntelligenceError) {
+    if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
       throw error;
     }
 
@@ -268,7 +269,7 @@ async function answerInquiry(
     });
     validateContextAnswerResult(answer, CONTEXT_ASK_PROMPT_VERSION);
   } catch (error: unknown) {
-    if (error instanceof ContextIntelligenceError) {
+    if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
       throw error;
     }
 

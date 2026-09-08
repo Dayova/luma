@@ -568,9 +568,10 @@ describe("Discord meeting bot", () => {
     };
 
     await bot.start();
-    await expect(transport.execute(command)).rejects.toThrow(
-      "temporary persistence failure"
-    );
+    await expect(transport.execute(command)).resolves.toEqual({
+      content:
+        "Luma could not answer this request right now. Please try again later. You can check /meeting usage without an AI call."
+    });
     expect(transport.createdThreads).toHaveLength(0);
     await expect(
       database.query<{ meeting_observed_at: string | null; thread_id: string | null }>(
@@ -1114,7 +1115,8 @@ describe("Discord meeting bot", () => {
     });
 
     expect(response).toEqual({
-      content: "Luma could not answer this thread right now. Please try again later.",
+      content:
+        "Luma could not answer this request right now. Please try again later. You can check /meeting usage without an AI call.",
       idempotencyKey: "discord:message_provider_failure:context-ask:reply"
     });
   });

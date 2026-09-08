@@ -4,6 +4,8 @@ import type { ReasoningModel } from "../../src/ai/reasoning-model.js";
 import type { ContextAnswerer } from "../../src/context-intelligence/context-answerer.js";
 import type { DiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 import type { LumaDatabase } from "../../src/persistence/db.js";
+import type { OpenAIReasoningModelConfig } from "../../src/ai/openai-reasoning-model.js";
+import type { OpenAIContextAnswererConfig } from "../../src/context-intelligence/openai-context-answerer.js";
 
 type StartServerDependencies = NonNullable<Parameters<typeof startServer>[1]>;
 
@@ -26,6 +28,46 @@ const scenarios = [
 ] as const;
 
 describe("startServer OpenAI model composition", () => {
+  it("shares one budget and bounded request policy across both model capabilities", async () => {
+    const harness = createServerHarness();
+    const app = await startServer(serverEnv(undefined), harness.dependencies);
+    try {
+      const meeting = harness.meetingConfigs[0];
+      const context = harness.contextConfigs[0];
+      expect(meeting?.budget).toBeDefined();
+      expect(meeting?.budget).toBe(context?.budget);
+      expect(meeting?.limits).toEqual({
+        maxInputTokens: 100_000,
+        maxOutputTokens: 8_192,
+        timeoutMs: 60_000
+      });
+      expect(meeting?.limits).toBe(context?.limits);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it.each(["-1", "NaN", "30 dollars"])(
+    "rejects invalid monthly budget %s before allocating resources",
+    async (value) => {
+      const harness = createServerHarness();
+      let opened = false;
+      await expect(
+        startServer(
+          { ...serverEnv(undefined), LUMA_AI_MONTHLY_LIMIT_USD: value },
+          {
+            ...harness.dependencies,
+            createDatabase: () => {
+              opened = true;
+              return Promise.reject(new Error("resource allocation reached"));
+            }
+          }
+        )
+      ).rejects.toThrow();
+      expect(opened).toBe(false);
+    }
+  );
+
   it.each([
     "779381502311137301",
     "726409024894926869",
@@ -91,9 +133,13 @@ function createServerHarness(): {
   dependencies: StartServerDependencies;
   meetingModels: string[];
   contextAskModels: string[];
+  meetingConfigs: OpenAIReasoningModelConfig[];
+  contextConfigs: OpenAIContextAnswererConfig[];
 } {
   const meetingModels: string[] = [];
   const contextAskModels: string[] = [];
+  const meetingConfigs: OpenAIReasoningModelConfig[] = [];
+  const contextConfigs: OpenAIContextAnswererConfig[] = [];
   const database = {
     close: () => Promise.resolve()
   } as unknown as LumaDatabase;
@@ -123,6 +169,7 @@ function createServerHarness(): {
       createDatabase: () => Promise.resolve(database),
       createDiscordTransport: () => transport,
       createOpenAIReasoningModel: (config) => {
+        meetingConfigs.push(config);
         if (!config.model) {
           throw new Error("expected startServer to resolve a Meeting analysis model");
         }
@@ -131,6 +178,7 @@ function createServerHarness(): {
         return unavailableReasoningModel;
       },
       createOpenAIContextAnswerer: (config) => {
+        contextConfigs.push(config);
         if (!config.model) {
           throw new Error("expected startServer to resolve a Context Ask model");
         }
@@ -140,7 +188,9 @@ function createServerHarness(): {
       }
     },
     meetingModels,
-    contextAskModels
+    contextAskModels,
+    meetingConfigs,
+    contextConfigs
   };
 }
 

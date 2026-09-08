@@ -1,4 +1,13 @@
 import OpenAI from "openai";
+import { AiServiceError } from "./ai-service-error.js";
+import type { AiUsageBudget } from "./ai-usage-budget.js";
+import {
+  normalizedOpenAiUsage,
+  resolveAiRequestLimits,
+  runBudgetedAiRequest,
+  type AiRequestLimits,
+  type AiResponse
+} from "./ai-request.js";
 import { z } from "zod";
 import type {
   MeetingAnalysisProposalBatch,
@@ -152,16 +161,20 @@ export type OpenAIResponseRequest = {
   schemaName: string;
   schema: Record<string, unknown>;
   strict: true;
+  maxOutputTokens: number;
+  signal?: AbortSignal;
 };
 
 export interface OpenAIResponseClient {
-  create(request: OpenAIResponseRequest): Promise<{ outputText: string }>;
+  create(request: OpenAIResponseRequest): Promise<AiResponse>;
 }
 
 export type OpenAIReasoningModelConfig = {
   model?: string;
   apiKey?: string;
   client?: OpenAIResponseClient;
+  budget?: AiUsageBudget;
+  limits?: Partial<AiRequestLimits>;
 };
 
 export class OpenAIReasoningModelError extends Error {
@@ -178,7 +191,8 @@ export function createOpenAIReasoningModel(
   config: OpenAIReasoningModelConfig
 ): ReasoningModel {
   const model = config.model ?? DEFAULT_OPENAI_REASONING_MODEL;
-  const client = config.client ?? createOpenAISdkResponseClient(config.apiKey);
+  const limits = resolveAiRequestLimits(config.limits);
+  const client = config.client ?? createOpenAISdkResponseClient(config.apiKey, limits);
 
   return {
     async generateStructured<T>(
@@ -191,7 +205,13 @@ export function createOpenAIReasoningModel(
         );
       }
 
-      const response = await client.create({
+      if (!config.client && !config.budget) {
+        throw new AiServiceError(
+          "not-configured",
+          "A durable AI usage budget is required before paid requests."
+        );
+      }
+      const outbound = {
         model,
         instructions: MEETING_INTELLIGENCE_INSTRUCTIONS,
         input: JSON.stringify({
@@ -204,7 +224,20 @@ export function createOpenAIReasoningModel(
         }),
         schemaName: request.schemaName,
         schema: meetingAnalysisJsonSchema,
-        strict: true
+        strict: true as const,
+        maxOutputTokens: limits.maxOutputTokens
+      };
+      const response = await runBudgetedAiRequest({
+        ...(config.budget ? { budget: config.budget } : {}),
+        workspaceId: request.workspaceId,
+        workflow: { model, ...request },
+        capability: `meeting-${request.purpose}`,
+        model,
+        instructions: outbound.instructions,
+        input: outbound.input,
+        schema: outbound.schema,
+        limits,
+        invoke: (signal) => client.create({ ...outbound, signal })
       });
 
       if (!response.outputText) {
@@ -232,15 +265,20 @@ export function createOpenAIReasoningModel(
 }
 
 export function createOpenAIReasoningModelFromEnv(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { budget: AiUsageBudget; limits?: Partial<AiRequestLimits> }
 ): ReasoningModel {
   return createOpenAIReasoningModel({
     apiKey: requireEnv(env, "OPENAI_API_KEY"),
-    model: openAIReasoningModelNameFromEnv(env)
+    model: openAIReasoningModelNameFromEnv(env),
+    ...options
   });
 }
 
-function createOpenAISdkResponseClient(apiKey: string | undefined): OpenAIResponseClient {
+function createOpenAISdkResponseClient(
+  apiKey: string | undefined,
+  limits: AiRequestLimits
+): OpenAIResponseClient {
   if (!apiKey) {
     throw new OpenAIReasoningModelError(
       "openai-api-key-missing",
@@ -248,25 +286,43 @@ function createOpenAISdkResponseClient(apiKey: string | undefined): OpenAIRespon
     );
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({ apiKey, maxRetries: 0, timeout: limits.timeoutMs });
 
   return {
     async create(request) {
-      const response = await client.responses.create({
-        model: request.model,
-        instructions: request.instructions,
-        input: request.input,
-        store: false,
-        text: {
-          format: {
-            type: "json_schema",
-            name: request.schemaName,
-            schema: request.schema,
-            strict: request.strict
+      const response = await client.responses.create(
+        {
+          model: request.model,
+          instructions: request.instructions,
+          input: request.input,
+          store: false,
+          service_tier: "default",
+          prompt_cache_options: { ttl: "30m" },
+          max_output_tokens: request.maxOutputTokens,
+          text: {
+            format: {
+              type: "json_schema",
+              name: request.schemaName,
+              schema: request.schema,
+              strict: request.strict
+            }
           }
-        }
-      });
-      return { outputText: response.output_text };
+        },
+        { signal: request.signal }
+      );
+      const usage = normalizedOpenAiUsage(response.usage);
+      return {
+        outputText: response.output_text,
+        providerResponseId: response.id,
+        ...(response._request_id ? { providerRequestId: response._request_id } : {}),
+        model: response.model,
+        ...(response.status ? { status: response.status } : {}),
+        ...(response.incomplete_details?.reason
+          ? { incompleteReason: response.incomplete_details.reason }
+          : {}),
+        ...(response.service_tier ? { serviceTier: response.service_tier } : {}),
+        ...(usage ? { usage } : {})
+      };
     }
   };
 }

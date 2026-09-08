@@ -135,7 +135,9 @@ LUMA_REASONING_MODEL_PROVIDER=openai
 LUMA_REASONING_MODEL_NAME=gpt-5.6-luna
 ```
 
-The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model; override it per environment when a different quality/cost point is required. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default.
+The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default. A model override requires a verified price configuration before paid requests are admitted.
+
+Both capabilities share a durable provisional $30/month AI allowance, explicit request bounds and cost accounting. `/meeting usage` remains available without a model call. See [AI usage and the exploratory budget](ai-usage.md) for limits, warnings, recovery behavior, estimation assumptions and live billing prerequisites.
 
 When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and reports analysis as deferred. Set `LUMA_REASONING_MODEL_PROVIDER=disabled` to make that behavior explicit.
 

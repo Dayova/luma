@@ -1049,6 +1049,21 @@ export type MeetingIntelligenceError =
       retryable: true;
     }
   | {
+      code:
+        | "analysis-budget-exhausted"
+        | "analysis-provider-quota"
+        | "analysis-rate-limited"
+        | "analysis-timeout"
+        | "analysis-unavailable"
+        | "analysis-not-configured"
+        | "analysis-request-too-large"
+        | "analysis-request-indeterminate";
+      retryable: boolean;
+      limitScope?: "month" | "day" | "workflow";
+      resetAt?: string;
+      retryAfterSeconds?: number;
+    }
+  | {
       code: "source-verification-unavailable";
       observationId: ObservationId;
       message: string;

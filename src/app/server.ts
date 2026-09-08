@@ -5,6 +5,14 @@ import type {
 } from "../ai/reasoning-model.js";
 import { createOpenAIReasoningModel } from "../ai/openai-reasoning-model.js";
 import { openAIReasoningModelNameFromEnv } from "../ai/openai-model-config.js";
+import {
+  aiUsageBudgetSettingsFromEnv,
+  createAiUsageBudget,
+  isAiModelPriced,
+  type AiUsageBudget
+} from "../ai/ai-usage-budget.js";
+import { aiRequestLimitsFromEnv } from "../ai/ai-request.js";
+import { AiServiceError } from "../ai/ai-service-error.js";
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
 import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
@@ -60,6 +68,9 @@ export async function startServer(
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
   const openAIReasoningModelName = openAIReasoningModelNameFromEnv(env);
+  // Validate operating limits before acquiring database or transport resources.
+  const aiBudgetSettings = aiUsageBudgetSettingsFromEnv(env);
+  const aiRequestLimits = aiRequestLimitsFromEnv(env);
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
@@ -87,6 +98,15 @@ export async function startServer(
   }
 
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
+  const aiUsage = createAiUsageBudget({
+    ...aiBudgetSettings,
+    database,
+    configured:
+      isAiModelPriced(openAIReasoningModelName) &&
+      hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
+      (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
+        discordContextAskConfig !== undefined)
+  });
   const workProvider = optionalLinearWorkProvider(env);
   const observedSourceLedger = createObservedSourceLedger({ database });
   const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
@@ -105,7 +125,9 @@ export async function startServer(
     reasoningModel: reasoningModelFromEnv(
       env,
       openAIReasoningModelName,
-      createReasoningModel
+      createReasoningModel,
+      aiUsage,
+      aiRequestLimits
     ),
     ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
     ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
@@ -172,7 +194,9 @@ export async function startServer(
         conversationEvidenceSource: discordTransport,
         answerer: createContextAnswerer({
           apiKey: requireEnv(env, "OPENAI_API_KEY"),
-          model: openAIReasoningModelName
+          model: openAIReasoningModelName,
+          budget: aiUsage,
+          limits: aiRequestLimits
         })
       })
     : undefined;
@@ -185,6 +209,7 @@ export async function startServer(
     transport: discordTransport,
     workspace,
     guildId,
+    aiUsage,
     ...(discordContextAskConfig && contextIntelligence
       ? {
           contextAsk: {
@@ -220,7 +245,7 @@ const unavailableReasoningModel: ReasoningModel = {
   ): Promise<StructuredReasoningResult<T>> {
     void _request;
     return Promise.reject(
-      new Error("The production ReasoningModel Adapter is not configured")
+      new AiServiceError("not-configured", "Meeting analysis is not configured")
     );
   }
 };
@@ -228,7 +253,9 @@ const unavailableReasoningModel: ReasoningModel = {
 function reasoningModelFromEnv(
   env: NodeJS.ProcessEnv,
   model: string,
-  createReasoningModel: typeof createOpenAIReasoningModel
+  createReasoningModel: typeof createOpenAIReasoningModel,
+  budget: AiUsageBudget,
+  limits: ReturnType<typeof aiRequestLimitsFromEnv>
 ): ReasoningModel {
   const provider = env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() || "openai";
 
@@ -242,7 +269,9 @@ function reasoningModelFromEnv(
 
   return createReasoningModel({
     apiKey: requireEnv(env, "OPENAI_API_KEY"),
-    model
+    model,
+    budget,
+    limits
   });
 }
 

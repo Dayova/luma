@@ -17,6 +17,32 @@ The current local development mapping is:
 
 Discord usernames are useful for human-readable identity matching. Discord bot mentions use the numeric Discord user IDs and render as `<@discordUserId>`.
 
+## Current Access Policy
+
+Luma currently serves only Dayova's four founders: Jakob, Fabius, Philipp, and
+Julius. Support use and additional users are outside the current scope.
+The executable supplies these four Person IDs as an explicit authorized set;
+the Discord bot requires an authorized set from every caller. Identity mapping,
+Meeting participation, source sharing, and mention eligibility do not grant access.
+
+Every Discord command and Context Ask request must resolve its authenticated
+Discord account to exactly one authorized Person in the configured workspace.
+Unmapped, ambiguous, unauthorized, and unavailable identity lookups deny access
+before Meeting data, conversation capture, or model work. Context Ask also
+retains its separate channel and user restrictions. Its configured user IDs
+must uniquely map to authorized founders, or startup fails before allocating
+database or transport resources.
+
+This controls who may ask Luma to act. Thread readers still depend on Discord
+channel permissions, and provider output readers depend on destination sharing.
+Before live rollout, verify that all selected parent channels and output
+destinations are visible only to the founders and required integration accounts.
+Do not infer that proof from a successful actor-admission test.
+
+The native review module remains dormant. Before exposing a native ingress,
+apply the same independent admission policy before both fresh review and durable
+receipt replay; uniquely mapping a native actor is insufficient authorization.
+
 ## Linear Assignment And Subscribers
 
 Approved work creation resolves `assigneeId` to a Linear user ID and `mentionPersonIds` to Linear subscriber IDs. This lets the bot notify team members without embedding provider identities in Meeting State.
@@ -50,10 +76,14 @@ When Discord-facing code needs to tag people, the Identity Directory renders num
 
 Discord usernames should not be used for bot mentions.
 
-## Adding People
+## Maintaining Identity Mappings
 
 Set `LUMA_IDENTITY_PEOPLE_JSON` to a JSON array. Entries extend the built-in team;
-using a built-in `personId` overrides that Person's mapping:
+using a built-in `personId` overrides that Person's mapping. Additional entries
+can describe source identities or mentions but do not expand the executable's
+authorized founder set. Changing a founder's provider account mapping changes
+which authenticated account represents that founder and must use a verified
+account binding:
 
 ```bash
 LUMA_IDENTITY_PEOPLE_JSON='[

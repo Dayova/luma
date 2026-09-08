@@ -26,6 +26,49 @@ const scenarios = [
 ] as const;
 
 describe("startServer OpenAI model composition", () => {
+  it.each([
+    "779381502311137301",
+    "726409024894926869",
+    "1492911575806251219",
+    "1376219174723911841"
+  ])(
+    "admits founder account %s to the production Context Ask configuration",
+    async (providerUserId) => {
+      const harness = createServerHarness();
+      const app = await startServer(
+        {
+          ...serverEnv(undefined),
+          LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: providerUserId
+        },
+        harness.dependencies
+      );
+      await app.stop();
+    }
+  );
+
+  it("rejects nonfounder Context Ask configuration before allocating resources", async () => {
+    const harness = createServerHarness();
+    let databaseOpened = false;
+    await expect(
+      startServer(
+        {
+          ...serverEnv(undefined),
+          LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "unmapped_user"
+        },
+        {
+          ...harness.dependencies,
+          createDatabase: () => {
+            databaseOpened = true;
+            return Promise.reject(new Error("resource allocation reached"));
+          }
+        }
+      )
+    ).rejects.toThrow(
+      "Context Ask users must each uniquely map to an authorized Luma founder"
+    );
+    expect(databaseOpened).toBe(false);
+  });
+
   for (const scenario of scenarios) {
     it(`forwards ${scenario.name} to Meeting analysis and Context Ask`, async () => {
       const harness = createServerHarness();
@@ -109,7 +152,7 @@ function serverEnv(configuredModel: string | undefined): NodeJS.ProcessEnv {
     OPENAI_API_KEY: "openai-test-key",
     LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
     LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "channel_test",
-    LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "user_test",
+    LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301",
     ...(configuredModel === undefined
       ? {}
       : { LUMA_REASONING_MODEL_NAME: configuredModel })

@@ -12,6 +12,10 @@ import type {
   FollowUpExecution
 } from "../follow-up-execution/interface.js";
 import type { IdentityDirectory } from "../identity/interface.js";
+import {
+  createWorkspaceAccessPolicy,
+  type WorkspaceAccessPolicy
+} from "../access/workspace-access-policy.js";
 import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
@@ -115,6 +119,8 @@ export type CreateDiscordMeetingBotInput = {
   meetingIntelligence: MeetingIntelligence;
   followUpExecution?: FollowUpExecution;
   identityDirectory: IdentityDirectory;
+  /** Explicit workspace admission; identity mappings and participants grant no access. */
+  authorizedPersonIds: readonly PersonId[];
   transport: DiscordTransport;
   workspace: WorkspaceConfig;
   guildId: string;
@@ -133,6 +139,11 @@ export function createDiscordMeetingBot(
   input: CreateDiscordMeetingBotInput
 ): DiscordMeetingBot {
   const now = input.now ?? (() => new Date());
+  const accessPolicy = createWorkspaceAccessPolicy({
+    workspaceId: input.workspace.workspaceId,
+    authorizedPersonIds: input.authorizedPersonIds,
+    identityDirectory: input.identityDirectory
+  });
   const startLocks = new Map<string, Promise<void>>();
 
   return {
@@ -140,16 +151,18 @@ export function createDiscordMeetingBot(
       input.transport.connect(
         (command) => {
           if (command.type !== "start") {
-            return handleCommand(input, command, now);
+            return handleCommand(input, command, now, accessPolicy);
           }
 
           return withStartLock(
             startLocks,
             `${command.guildId}:${command.channelId}`,
-            () => handleCommand(input, command, now)
+            () => handleCommand(input, command, now, accessPolicy)
           );
         },
-        input.contextAsk ? (ask) => answerConversationThread(input, ask) : undefined
+        input.contextAsk
+          ? (ask) => answerConversationThread(input, ask, accessPolicy)
+          : undefined
       ),
     stop: () => input.transport.disconnect(),
     publishMeetingEvents: (publishInput) => publishMeetingEvents(input, publishInput)
@@ -158,7 +171,8 @@ export function createDiscordMeetingBot(
 
 async function answerConversationThread(
   input: CreateDiscordMeetingBotInput,
-  ask: DiscordContextAskMention
+  ask: DiscordContextAskMention,
+  accessPolicy: WorkspaceAccessPolicy
 ): Promise<DiscordContextAskResponse | null> {
   const contextAsk = input.contextAsk;
 
@@ -166,7 +180,12 @@ async function answerConversationThread(
     !contextAsk ||
     ask.guildId !== input.guildId ||
     !contextAsk.config.parentChannelIds.includes(ask.parentChannelId) ||
-    !contextAsk.config.allowedDiscordUserIds.includes(ask.actorDiscordUserId)
+    !contextAsk.config.allowedDiscordUserIds.includes(ask.actorDiscordUserId) ||
+    !(await accessPolicy.authorize({
+      workspaceId: input.workspace.workspaceId,
+      providerId: "discord",
+      providerUserId: ask.actorDiscordUserId
+    }))
   ) {
     return null;
   }
@@ -277,12 +296,23 @@ async function publishMeetingEvents(
 async function handleCommand(
   input: CreateDiscordMeetingBotInput,
   command: DiscordCommand,
-  now: () => Date
+  now: () => Date,
+  accessPolicy: WorkspaceAccessPolicy
 ): Promise<DiscordCommandResponse> {
   if (command.guildId !== input.guildId) {
     return {
       content: "Luma is not configured for this Discord server."
     };
+  }
+
+  if (
+    !(await accessPolicy.authorize({
+      workspaceId: input.workspace.workspaceId,
+      providerId: "discord",
+      providerUserId: command.actorDiscordUserId
+    }))
+  ) {
+    return { content: "You do not have access to Luma in this workspace." };
   }
 
   switch (command.type) {

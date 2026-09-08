@@ -14,6 +14,8 @@ Intelligence events back into persistent Discord threads.
 
 Implemented now:
 
+- founder-only admission for every Meeting command and Context Ask; provider
+  accounts must uniquely map to the executable's explicit authorized Person set
 - guild-scoped `/meeting` slash command registration
 - `/meeting start`, `/meeting note`, `/meeting approve`, `/meeting reject`, `/meeting stop`, `/meeting ask`, and `/meeting catchup`
 - one persistent public Discord thread per Meeting
@@ -112,7 +114,18 @@ LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS=60000
 ```
 
 An enabled Context Ask configuration needs an OpenAI key and every allowlist
-variable. Invalid or incomplete values fail startup before the bot connects.
+variable. Each configured user must uniquely map to one of the four authorized
+founders. Invalid or incomplete values fail startup before database allocation
+or connection. The allowlist can narrow founder access but cannot admit other
+People, including People added through identity configuration.
+
+The current internal users are Jakob, Fabius, Philipp, and Julius. Before a live
+rollout, verify that selected parent channels are restricted to these founders
+and required integration accounts: public threads inherit their parent channel's
+audience. Actor admission alone does not limit who can read thread replies.
+The Context Ask user allowlist restricts question authors; it does not filter
+other human messages out of the selected thread's bounded evidence capture.
+See the [access policy](../configuration/identity.md#current-access-policy).
 
 Recommended local settings:
 

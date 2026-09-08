@@ -181,13 +181,28 @@ relevant mapped People.
 
 Records Human rejection and performs no provider mutation. Rejected Intents cannot later be approved without a new proposal.
 
+### Recover
+
+```text
+/meeting recover intent_id:"intent_create_release_checklist"
+```
+
+Resumes an eligible Follow-up through its existing recovery policy and durable
+execution records. Approval, rejection, and recovery remain available in the
+Meeting's exact thread after `/meeting stop`; mapped participant identity and
+the existing ownership and execution gates still apply. In a parent channel,
+these commands target only its currently active Meeting.
+
 ### Ask
 
 ```text
 /meeting ask question:"What did we decide about the release?"
 ```
 
-Resolves the active Meeting from the current thread or its parent channel and returns a private, evidence-aware answer. Known Discord user IDs are resolved to internal People so participant-specific Action Items can be selected.
+Resolves the Meeting saved for the exact current thread, including an ended
+Meeting, and returns a private, evidence-aware answer. In a parent channel it
+resolves only the currently active Meeting. Known Discord user IDs are resolved
+to internal People so participant-specific Action Items can be selected.
 
 ### Context Ask (opt-in)
 
@@ -222,6 +237,8 @@ Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/
 ```
 
 Returns a private grounded update from the requested Meeting Revision. The revision defaults to `0` when omitted.
+Like Ask, it remains available in an ended Meeting's exact thread, including
+after a bot restart or when the parent channel has a newer Meeting.
 
 ### Stop
 
@@ -230,6 +247,8 @@ Returns a private grounded update from the requested Meeting Revision. The revis
 ```
 
 Records a `meeting-ended` Observation, obtains a versioned Conclusion through Meeting Intelligence, posts the brief summary in the Meeting thread, and closes the active thread mapping.
+The saved thread remains available for Ask, Catch Up, and Follow-up review and
+recovery. Note and Stop still require an active Meeting.
 
 ## Follow-up Receipts
 

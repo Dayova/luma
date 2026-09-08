@@ -21,6 +21,7 @@ import type {
   ContextInquiry,
   ContextInquiryResult
 } from "../../src/context-intelligence/interface.js";
+import type { DiscordChannelSurface } from "../../src/discord/discord-channel-scope.js";
 import type { DiscordContextAskMention } from "../../src/discord/discord-context-ask-runtime.js";
 import {
   createIdentityDirectoryFromEnv,
@@ -124,6 +125,35 @@ class ProgrammableDiscordTransport implements DiscordTransport {
   private contextAskHandler:
     | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
     | null = null;
+  protected readonly channels = new Map<string, DiscordChannelSurface>([
+    [
+      "channel_meeting_notes",
+      {
+        id: "channel_meeting_notes",
+        guildId: "guild_dayova",
+        kind: "text-channel",
+        parentChannelId: null
+      }
+    ],
+    [
+      "channel_context",
+      {
+        id: "channel_context",
+        guildId: "guild_dayova",
+        kind: "text-channel",
+        parentChannelId: null
+      }
+    ],
+    [
+      "thread_context",
+      {
+        id: "thread_context",
+        guildId: "guild_dayova",
+        kind: "public-thread",
+        parentChannelId: "channel_context"
+      }
+    ]
+  ]);
   private readonly threads = new Map<string, DiscordThread>();
   private readonly deliveredMessageKeys = new Set<string>();
 
@@ -142,6 +172,10 @@ class ProgrammableDiscordTransport implements DiscordTransport {
     return Promise.resolve();
   }
 
+  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null> {
+    return Promise.resolve(this.channels.get(input.channelId) ?? null);
+  }
+
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread> {
     const key = this.threadKey(input);
     const existing = this.threads.get(key);
@@ -158,6 +192,12 @@ class ProgrammableDiscordTransport implements DiscordTransport {
       url: `https://discord.com/channels/guild_dayova/thread_product${suffix}`
     };
     this.threads.set(key, thread);
+    this.channels.set(thread.id, {
+      id: thread.id,
+      guildId: "guild_dayova",
+      kind: "public-thread",
+      parentChannelId: input.parentChannelId
+    });
 
     return Promise.resolve(thread);
   }
@@ -168,6 +208,12 @@ class ProgrammableDiscordTransport implements DiscordTransport {
     thread: DiscordThread;
   }): void {
     this.threads.set(this.threadKey(input), input.thread);
+    this.channels.set(input.thread.id, {
+      id: input.thread.id,
+      guildId: "guild_dayova",
+      kind: "public-thread",
+      parentChannelId: input.parentChannelId
+    });
   }
 
   sendMessage(input: {
@@ -219,10 +265,17 @@ class ConcurrentDiscordTransport extends ProgrammableDiscordTransport {
     this.createdThreads.push(input);
     const sequence = this.createdThreads.length;
 
-    return Promise.resolve({
+    const thread = {
       id: `thread_product_${sequence}`,
       url: `https://discord.com/channels/guild_dayova/thread_product_${sequence}`
+    };
+    this.channels.set(thread.id, {
+      id: thread.id,
+      guildId: "guild_dayova",
+      kind: "public-thread",
+      parentChannelId: input.parentChannelId
     });
+    return Promise.resolve(thread);
   }
 }
 
@@ -233,6 +286,7 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const makeBot = () =>
       createDiscordMeetingBot({
+        allowedParentChannelIds: ["channel_meeting_notes"],
         authorizedPersonIds: [
           "person_jakob",
           "person_fabius",
@@ -412,6 +466,7 @@ describe("Discord meeting bot", () => {
         return Promise.reject(new Error("Unauthorized Follow-up execution"));
       };
       const bot = createDiscordMeetingBot({
+        allowedParentChannelIds: ["channel_meeting_notes"],
         authorizedPersonIds: [
           "person_jakob",
           "person_fabius",
@@ -539,6 +594,7 @@ describe("Discord meeting bot", () => {
     };
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -650,6 +706,7 @@ describe("Discord meeting bot", () => {
       }
     });
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -710,6 +767,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ConcurrentDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -770,6 +828,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -842,6 +901,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -900,6 +960,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -954,6 +1015,7 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const contextIntelligence = new RecordingContextIntelligence();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_context"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1022,6 +1084,7 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const contextIntelligence = new RecordingContextIntelligence();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_context"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1071,6 +1134,7 @@ describe("Discord meeting bot", () => {
     const database = await createPgliteDatabase();
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_context"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1130,6 +1194,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1183,6 +1248,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1269,6 +1335,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -1342,6 +1409,7 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_meeting_notes"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",

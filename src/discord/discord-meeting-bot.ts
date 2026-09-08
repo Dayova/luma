@@ -1,3 +1,8 @@
+import {
+  createDiscordChannelScope,
+  DiscordChannelAccessError,
+  type DiscordChannelSurface
+} from "./discord-channel-scope.js";
 import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
 import {
   renderDeferredAnalysis,
@@ -102,6 +107,7 @@ export interface DiscordTransport {
     ) => Promise<DiscordContextAskResponse | null>
   ): Promise<void>;
   disconnect(): Promise<void>;
+  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null>;
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
   sendMessage(input: {
     channelId: string;
@@ -133,6 +139,8 @@ export type CreateDiscordMeetingBotInput = {
   transport: DiscordTransport;
   workspace: WorkspaceConfig;
   guildId: string;
+  /** Reviewed text parents; an empty set denies every Discord content surface. */
+  allowedParentChannelIds: readonly string[];
   /**
    * A separate, opt-in read-only conversation surface. It intentionally has
    * no Meeting ID, Follow-up operation, or Meeting Intelligence dependency.
@@ -145,9 +153,37 @@ export type CreateDiscordMeetingBotInput = {
   now?: () => Date;
 };
 
+type ScopedDiscordMeetingBotInput = CreateDiscordMeetingBotInput & {
+  channelScope: ReturnType<typeof createDiscordChannelScope>;
+};
+
 export function createDiscordMeetingBot(
-  input: CreateDiscordMeetingBotInput
+  configuration: CreateDiscordMeetingBotInput
 ): DiscordMeetingBot {
+  const channelScope = createDiscordChannelScope({
+    guildId: configuration.guildId,
+    allowedParentChannelIds: configuration.allowedParentChannelIds,
+    resolveChannel: (surface) => configuration.transport.resolveChannel(surface)
+  });
+  // Recheck each destination at the publication boundary, including deferred receipts.
+  const input: ScopedDiscordMeetingBotInput = {
+    channelScope,
+    ...configuration,
+    transport: {
+      connect: (handler, contextHandler) =>
+        configuration.transport.connect(handler, contextHandler),
+      disconnect: () => configuration.transport.disconnect(),
+      resolveChannel: (surface) => configuration.transport.resolveChannel(surface),
+      async createThread(thread) {
+        await channelScope.requireChannel(thread.parentChannelId, "text-channel");
+        return configuration.transport.createThread(thread);
+      },
+      async sendMessage(message) {
+        await channelScope.requireChannel(message.channelId, "public-thread");
+        return configuration.transport.sendMessage(message);
+      }
+    }
+  };
   const now = input.now ?? (() => new Date());
   const accessPolicy = createWorkspaceAccessPolicy({
     workspaceId: input.workspace.workspaceId,
@@ -169,13 +205,13 @@ export function createDiscordMeetingBot(
       input.transport.connect(
         (command) => {
           if (command.type !== "start") {
-            return handleCommand(input, command, now, accessPolicy);
+            return handleCommand(input, command, now, accessPolicy, channelScope);
           }
 
           return withStartLock(
             startLocks,
             `${command.guildId}:${command.channelId}`,
-            () => handleCommand(input, command, now, accessPolicy)
+            () => handleCommand(input, command, now, accessPolicy, channelScope)
           );
         },
         input.contextAsk
@@ -184,6 +220,7 @@ export function createDiscordMeetingBot(
                 input,
                 ask,
                 accessPolicy,
+                channelScope,
                 contextRateLimiter,
                 seenContextMessages,
                 now
@@ -196,9 +233,10 @@ export function createDiscordMeetingBot(
 }
 
 async function answerConversationThread(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   ask: DiscordContextAskMention,
   accessPolicy: WorkspaceAccessPolicy,
+  channelScope: ReturnType<typeof createDiscordChannelScope>,
   rateLimiter: ReturnType<typeof createDiscordContextAskRateLimiter> | undefined,
   seenMessages: Map<string, number>,
   now: () => Date
@@ -219,10 +257,21 @@ async function answerConversationThread(
     return null;
   }
 
-  const reply = (content: string): DiscordContextAskResponse => ({
-    content,
-    idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
-  });
+  const allowedSurface = async (): Promise<boolean> => {
+    const surface = await channelScope.resolveAllowedChannel(ask.channelId);
+    return (
+      surface?.kind === "public-thread" && surface.parentChannelId === ask.parentChannelId
+    );
+  };
+  if (!(await allowedSurface())) return null;
+
+  const reply = async (content: string): Promise<DiscordContextAskResponse | null> =>
+    (await allowedSurface())
+      ? {
+          content,
+          idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
+        }
+      : null;
   const currentTime = now().getTime();
   for (const [messageId, expiresAt] of seenMessages) {
     if (expiresAt <= currentTime) seenMessages.delete(messageId);
@@ -291,7 +340,7 @@ async function withStartLock(
 }
 
 async function publishMeetingEvents(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   publishInput: {
     workspaceId: string;
     meetingId: string;
@@ -309,6 +358,16 @@ async function publishMeetingEvents(
   if (!meetingThread?.thread_id) {
     throw new Error("Cannot publish Discord events without an attached Meeting thread");
   }
+
+  const surface = await input.channelScope.requireChannel(
+    meetingThread.thread_id,
+    "public-thread"
+  );
+  if (
+    surface.parentChannelId !== meetingThread.parent_channel_id ||
+    surface.guildId !== meetingThread.guild_id
+  )
+    throw new DiscordChannelAccessError();
 
   const mentions = await resolveDiscordMentions({
     identityDirectory: input.identityDirectory,
@@ -343,10 +402,11 @@ async function publishMeetingEvents(
 }
 
 async function handleCommand(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: DiscordCommand,
   now: () => Date,
-  accessPolicy: WorkspaceAccessPolicy
+  accessPolicy: WorkspaceAccessPolicy,
+  channelScope: ReturnType<typeof createDiscordChannelScope>
 ): Promise<DiscordCommandResponse> {
   if (command.guildId !== input.guildId) {
     return {
@@ -364,14 +424,28 @@ async function handleCommand(
     return { content: "You do not have access to Luma in this workspace." };
   }
 
-  if (command.type === "usage") {
-    return { content: await readAiUsage(input) };
+  const surface = await channelScope.resolveAllowedChannel(command.channelId);
+  if (!surface || (command.type === "start" && surface.kind !== "text-channel")) {
+    return { content: new DiscordChannelAccessError().message };
   }
   try {
-    const result = await executeAdmittedCommand(input, command, now);
-    return { content: await appendAiUsageWarning(input, result.content) };
+    const content =
+      command.type === "usage"
+        ? await readAiUsage(input)
+        : await appendAiUsageWarning(
+            input,
+            (await executeAdmittedCommand(input, command, now)).content
+          );
+    await channelScope.requireChannel(command.channelId);
+    return { content };
   } catch (error: unknown) {
-    return { content: renderAiServiceFailure(error) };
+    return {
+      content:
+        error instanceof DiscordChannelAccessError ||
+        !(await channelScope.resolveAllowedChannel(command.channelId))
+          ? new DiscordChannelAccessError().message
+          : renderAiServiceFailure(error)
+    };
   }
 }
 
@@ -388,7 +462,7 @@ async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string>
 }
 
 async function appendAiUsageWarning(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   content: string
 ): Promise<string> {
   if (!input.aiUsage) return content;
@@ -404,7 +478,7 @@ async function appendAiUsageWarning(
 }
 
 async function executeAdmittedCommand(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Exclude<DiscordCommand, { type: "usage" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -429,7 +503,7 @@ async function executeAdmittedCommand(
 }
 
 async function recordMeetingNote(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "note" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -488,7 +562,7 @@ async function recordMeetingNote(
 }
 
 async function approveFollowUp(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "approve" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -598,7 +672,7 @@ async function approveFollowUp(
 }
 
 async function recoverFollowUp(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "recover" }>
 ): Promise<DiscordCommandResponse> {
   const context = await resolveMeetingActor(input, command, "include-ended-thread");
@@ -685,7 +759,7 @@ async function recoverFollowUp(
 }
 
 async function rejectFollowUp(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "reject" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -729,12 +803,12 @@ async function rejectFollowUp(
 }
 
 async function stopMeeting(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "stop" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
   const meetingThread = await findMeetingThreadForChannel(
-    input.database,
+    input,
     command.guildId,
     command.channelId,
     "active"
@@ -811,12 +885,12 @@ async function stopMeeting(
 }
 
 async function startMeeting(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "start" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
   const existing = await findMeetingThreadForChannel(
-    input.database,
+    input,
     command.guildId,
     command.channelId,
     "active"
@@ -925,11 +999,11 @@ async function startMeeting(
 }
 
 async function catchUpMeeting(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "catchup" }>
 ): Promise<DiscordCommandResponse> {
   const meetingThread = await findMeetingThreadForChannel(
-    input.database,
+    input,
     command.guildId,
     command.channelId,
     "include-ended-thread"
@@ -963,11 +1037,11 @@ async function catchUpMeeting(
 }
 
 async function answerMeetingQuestion(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "ask" }>
 ): Promise<DiscordCommandResponse> {
   const meetingThread = await findMeetingThreadForChannel(
-    input.database,
+    input,
     command.guildId,
     command.channelId,
     "include-ended-thread"
@@ -1012,6 +1086,8 @@ async function answerMeetingQuestion(
 }
 
 type DiscordMeetingThreadRow = {
+  guild_id: string;
+  parent_channel_id: string;
   workspace_id: string;
   meeting_id: string;
   meeting_title: string;
@@ -1029,7 +1105,7 @@ type DiscordMeetingThreadRow = {
 type MeetingThreadScope = "active" | "include-ended-thread";
 
 async function resolveMeetingActor(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   command: DiscordCommandBase,
   scope: MeetingThreadScope
 ): Promise<
@@ -1042,7 +1118,7 @@ async function resolveMeetingActor(
   | { response: DiscordCommandResponse }
 > {
   const meetingThread = await findMeetingThreadForChannel(
-    input.database,
+    input,
     command.guildId,
     command.channelId,
     scope
@@ -1071,7 +1147,7 @@ async function resolveMeetingActor(
 }
 
 async function queryMeetingSnapshot(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   meetingThread: DiscordMeetingThreadRow
 ): Promise<MeetingState> {
   const result = await input.meetingIntelligence.query({
@@ -1119,7 +1195,7 @@ async function findMeetingThread(
   meetingId: string
 ): Promise<DiscordMeetingThreadRow | null> {
   const result = await database.query<DiscordMeetingThreadRow>(
-    `SELECT workspace_id, meeting_id, meeting_title, thread_name, language_mode,
+    `SELECT guild_id, parent_channel_id, workspace_id, meeting_id, meeting_title, thread_name, language_mode,
             actor_discord_user_id, started_at, meeting_observed_at, thread_id, thread_url,
             start_message_sent_at, conclusion_message_sent_at
        FROM discord_meeting_threads
@@ -1132,13 +1208,13 @@ async function findMeetingThread(
 }
 
 async function findMeetingThreadForChannel(
-  database: LumaDatabase,
+  input: ScopedDiscordMeetingBotInput,
   guildId: string,
   channelId: string,
   scope: MeetingThreadScope
 ): Promise<DiscordMeetingThreadRow | null> {
-  const result = await database.query<DiscordMeetingThreadRow>(
-    `SELECT workspace_id, meeting_id, meeting_title, thread_name, language_mode,
+  const result = await input.database.query<DiscordMeetingThreadRow>(
+    `SELECT guild_id, parent_channel_id, workspace_id, meeting_id, meeting_title, thread_name, language_mode,
             actor_discord_user_id, started_at, meeting_observed_at, thread_id, thread_url,
             start_message_sent_at, conclusion_message_sent_at
        FROM discord_meeting_threads
@@ -1152,7 +1228,19 @@ async function findMeetingThreadForChannel(
     [guildId, channelId, scope === "include-ended-thread"]
   );
 
-  return result.rows[0] ?? null;
+  const meetingThread = result.rows[0] ?? null;
+  if (meetingThread?.thread_id) {
+    const surface = await input.channelScope.requireChannel(
+      meetingThread.thread_id,
+      "public-thread"
+    );
+    if (
+      surface.parentChannelId !== meetingThread.parent_channel_id ||
+      surface.guildId !== meetingThread.guild_id
+    )
+      throw new DiscordChannelAccessError();
+  }
+  return meetingThread;
 }
 
 async function markMeetingThreadEnded(
@@ -1373,7 +1461,7 @@ async function attachMeetingThread(
 }
 
 async function postMeetingStartedMessage(
-  input: CreateDiscordMeetingBotInput,
+  input: ScopedDiscordMeetingBotInput,
   message: {
     workspaceId: string;
     meetingId: string;

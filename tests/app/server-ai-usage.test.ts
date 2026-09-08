@@ -6,6 +6,7 @@ import type {
   DiscordCommand,
   DiscordCommandResponse
 } from "../../src/discord/discord-meeting-bot.js";
+import type { DiscordChannelSurface } from "../../src/discord/discord-channel-scope.js";
 import type { DiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 
 describe("production AI usage composition", () => {
@@ -14,17 +15,36 @@ describe("production AI usage composition", () => {
     let dispatches = 0;
     let handler:
       ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | undefined;
+    const channels = new Map<string, DiscordChannelSurface>([
+      [
+        "100000000000000002",
+        {
+          id: "100000000000000002",
+          guildId: "guild_budget",
+          kind: "text-channel",
+          parentChannelId: null
+        }
+      ]
+    ]);
     const transport: DiscordJsTransport = {
       connect: (commandHandler) => {
         handler = commandHandler;
         return Promise.resolve();
       },
       disconnect: () => Promise.resolve(),
-      createThread: () =>
-        Promise.resolve({
+      resolveChannel: ({ channelId }) => Promise.resolve(channels.get(channelId) ?? null),
+      createThread: ({ parentChannelId }) => {
+        channels.set("thread_budget", {
+          id: "thread_budget",
+          guildId: "guild_budget",
+          kind: "public-thread",
+          parentChannelId
+        });
+        return Promise.resolve({
           id: "thread_budget",
           url: "https://discord.com/channels/guild_budget/thread_budget"
-        }),
+        });
+      },
       sendMessage: () => Promise.resolve(),
       capture: () => Promise.reject(new Error("No capture expected for this command"))
     };
@@ -34,7 +54,8 @@ describe("production AI usage composition", () => {
         DISCORD_CLIENT_ID: "client_budget",
         DISCORD_GUILD_ID: "guild_budget",
         OPENAI_API_KEY: "test-only",
-        LUMA_AI_MONTHLY_LIMIT_USD: "0"
+        LUMA_AI_MONTHLY_LIMIT_USD: "0",
+        LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: "100000000000000002"
       },
       {
         createDatabase: () => Promise.resolve(database),
@@ -55,7 +76,7 @@ describe("production AI usage composition", () => {
     );
     const base = {
       guildId: "guild_budget",
-      channelId: "channel_budget",
+      channelId: "100000000000000002",
       actorDiscordUserId: "779381502311137301",
       occurredAt: "2026-09-08T19:00:00.000Z"
     };

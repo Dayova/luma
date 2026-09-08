@@ -24,6 +24,33 @@ vi.mock("discord.js", async (importOriginal) => {
     ...original,
     Client: class extends EventEmitter {
       user = { id: "bot_luma" };
+      channels = {
+        fetch: (channelId: string) =>
+          Promise.resolve(
+            new Map([
+              [
+                "parent",
+                {
+                  id: "parent",
+                  guildId: "guild",
+                  type: original.ChannelType.GuildText,
+                  parentId: null,
+                  permissionsFor: () => ({ has: () => true })
+                }
+              ],
+              [
+                "thread",
+                {
+                  id: "thread",
+                  guildId: "guild",
+                  type: original.ChannelType.PublicThread,
+                  parentId: "parent",
+                  permissionsFor: () => ({ has: () => true })
+                }
+              ]
+            ]).get(channelId) ?? null
+          )
+      };
       constructor() {
         super();
         sdk.emit = this.emit.bind(this);
@@ -53,6 +80,7 @@ function transport() {
     token: "test-token",
     clientId: "client",
     guildId: "guild",
+    allowedParentChannelIds: ["parent"],
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],

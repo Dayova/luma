@@ -43,6 +43,22 @@ type StartServerDependencies = {
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
 };
 
+const legacyMeetingNotesSourceEnvironment = [
+  "NOTION_API_TOKEN",
+  "NOTION_MEETINGS_DATA_SOURCE_ID"
+] as const;
+
+const notionObservationTopologyEnvironment = [
+  "LUMA_OBSERVATION_WORKSPACE_ID",
+  "LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN",
+  "LUMA_NOTION_OBSERVATION_MEETINGS_DATA_SOURCE_ID",
+  "LUMA_NOTION_OBSERVATION_WORKSPACE_ID",
+  "LUMA_NOTION_OBSERVATION_SUBSCRIPTION_ID",
+  "LUMA_NOTION_OBSERVATION_INTEGRATION_ID",
+  "LUMA_NOTION_OBSERVATION_WEBHOOK_VERIFICATION_TOKEN",
+  "LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR"
+] as const;
+
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
   dependencies: StartServerDependencies = {}
@@ -55,6 +71,7 @@ export async function startServer(
   const createContextAnswerer =
     dependencies.createOpenAIContextAnswerer ?? createOpenAIContextAnswerer;
   const config = loadAppConfigFromEnv(env);
+  rejectConflictingNotionMeetingNotesTopology(env);
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
   const openAIReasoningModelName = openAIReasoningModelNameFromEnv(env);
@@ -297,6 +314,30 @@ function hasAnyEnv(env: NodeJS.ProcessEnv, keys: string[]): boolean {
     const value = env[key];
     return Boolean(value && value.trim().length > 0);
   });
+}
+
+function hasAllEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): boolean {
+  return keys.every((key) => {
+    const value = env[key];
+    return Boolean(value && value.trim().length > 0);
+  });
+}
+
+/**
+ * The legacy Discord process and the dedicated observer create independent
+ * observed-source ledgers and marker verifiers. They cannot observe the same
+ * canonical Meeting Notes source from one environment or PGlite ownership
+ * would split. A deployed observer must be the sole source owner instead.
+ */
+function rejectConflictingNotionMeetingNotesTopology(env: NodeJS.ProcessEnv): void {
+  if (
+    hasAllEnv(env, legacyMeetingNotesSourceEnvironment) &&
+    hasAllEnv(env, notionObservationTopologyEnvironment)
+  ) {
+    throw new Error(
+      "Legacy Notion Meeting Notes sync and the Notion observation server cannot share one process environment"
+    );
+  }
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, key: string): string {

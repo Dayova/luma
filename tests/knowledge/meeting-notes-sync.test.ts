@@ -129,6 +129,40 @@ const quietLogger: MeetingNotesSyncLogger = {
 };
 
 describe("Meeting Notes sync", () => {
+  it("exposes content-free completion status for the canonical recovery owner", async () => {
+    const sync = createMeetingNotesSync({
+      workspace,
+      source: {
+        scan: () =>
+          Promise.resolve({
+            records: [],
+            nextCursor: null,
+            completeness: "complete" as const,
+            partialReasons: []
+          })
+      },
+      ingestion: new RecordingIngestion(),
+      logger: quietLogger
+    });
+
+    expect(sync.status()).toEqual({
+      active: false,
+      scheduled: false,
+      lastStartedAt: null,
+      lastFinishedAt: null,
+      lastOutcome: null
+    });
+
+    await sync.syncOnce();
+
+    const status = sync.status();
+    expect(status.active).toBe(false);
+    expect(status.scheduled).toBe(false);
+    expect(typeof status.lastStartedAt).toBe("string");
+    expect(typeof status.lastFinishedAt).toBe("string");
+    expect(status.lastOutcome).toBe("complete");
+  });
+
   it("drains every source cursor and replays unchanged records safely after ledger capture", async () => {
     const calls: Array<string | undefined> = [];
     const source: MeetingNotesSource = {

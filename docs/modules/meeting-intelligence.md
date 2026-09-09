@@ -127,6 +127,42 @@ The current implementation analyzes only new/revised Evidence supplied to an `ob
 - Add model SDKs behind ReasoningModel.
 - Add richer Organizational Context retrieval behind the OrganizationalContext Interface.
 
+## Scoped Meeting questions
+
+The `freeform` query supports a deliberately bounded set of
+English and German questions over this Meeting's retained state. Examples:
+
+- `What did we decide?` / `Was haben wir entschieden?`
+- `Show decision history` / `Zeige Entscheidungshistorie`
+- `What questions are still open?` / `Welche Fragen sind noch offen?`
+- `What are our action items?` / `Was sind unsere Aufgaben?`
+- `What are my action items?` / `Was sind meine Aufgaben?`
+
+Append `about <topic>` in English or `zu <topic>` in German to narrow by a
+literal phrase in the item's original wording. This does not translate or
+semantically expand the topic. Unsupported, combined, or ambiguous question
+forms receive an explicit fallback. Named-person requests are unsupported;
+`participantId` identifies the requester and filters only first-person work
+questions, never shared decisions or another person's name in the question.
+
+Current decisions include confirmed items without a recorded successor;
+rejected/superseded decisions remain accessible through explicit history.
+Shared work excludes completed/cancelled items and labels provisional
+ownership; personal work requires confirmed ownership. Low or medium recorded
+confidence is displayed and keeps the answer qualified, even if an extracted
+item has confirmed status. Open questions retain
+their unresolved status. An old still-current decision does not expire.
+
+Selection prefers Human-reviewed items and then their latest Revision. Answers
+contain at most eight whole items, 1,600 text characters, and 24 supporting
+Evidence references; omissions and uncertainty remain visible. Only active
+supporting Evidence is returned, without copying original speech into the
+answer's reference payload. Discord separately bounds displayed references
+without cutting claims or conditions. Full retained state, source history and
+Human Judgment are never changed or deleted by a query. These queries perform
+no model calls and do not activate cross-Meeting or Organizational Context
+retrieval.
+
 ## Non-goals
 
 - Discord command handling.

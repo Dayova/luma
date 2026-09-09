@@ -152,7 +152,7 @@ function questionScope(text: string): QuestionScope | null {
     ],
     [
       "actions",
-      /^(?:what are (?:our|the) (?:current |open )?(?:action items|tasks)|(?:show|list) (?:our|the) (?:current |open )?(?:action items|tasks))(?: about (.+))?$/u
+      /^(?:what are (?:our|the) (?:current |open )?(?:action items|tasks)|which (?:action items|tasks) remain|(?:show|list) (?:our|the) (?:current |open )?(?:action items|tasks))(?: about (.+))?$/u
     ],
     [
       "actions",

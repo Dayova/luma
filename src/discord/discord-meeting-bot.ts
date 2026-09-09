@@ -1,3 +1,10 @@
+import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
+import {
+  renderDeferredAnalysis,
+  renderAiServiceFailure,
+  renderAiUsageStatus,
+  renderAiUsageWarning
+} from "./discord-ai-status.js";
 import type {
   FollowUpIntent,
   MeetingIntelligenceEvent,
@@ -21,6 +28,7 @@ import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { ContextIntelligence } from "../context-intelligence/interface.js";
 import {
+  createDiscordContextAskRateLimiter,
   renderDiscordContextAskResult,
   type DiscordContextAskConfig,
   type DiscordContextAskMention
@@ -68,7 +76,8 @@ export type DiscordCommand =
     })
   | (DiscordCommandBase & {
       type: "stop";
-    });
+    })
+  | (DiscordCommandBase & { type: "usage" });
 
 export type DiscordCommandResponse = {
   content: string;
@@ -132,6 +141,7 @@ export type CreateDiscordMeetingBotInput = {
     contextIntelligence: ContextIntelligence;
     config: DiscordContextAskConfig;
   };
+  aiUsage?: Pick<AiUsageBudget, "getStatus">;
   now?: () => Date;
 };
 
@@ -145,6 +155,14 @@ export function createDiscordMeetingBot(
     identityDirectory: input.identityDirectory
   });
   const startLocks = new Map<string, Promise<void>>();
+  const contextRateLimiter = input.contextAsk
+    ? createDiscordContextAskRateLimiter({
+        minIntervalMs: input.contextAsk.config.minIntervalMs,
+        now: () => now().getTime()
+      })
+    : undefined;
+  // A second Gateway delivery must not become a second cooldown/status reply.
+  const seenContextMessages = new Map<string, number>();
 
   return {
     start: () =>
@@ -161,7 +179,15 @@ export function createDiscordMeetingBot(
           );
         },
         input.contextAsk
-          ? (ask) => answerConversationThread(input, ask, accessPolicy)
+          ? (ask) =>
+              answerConversationThread(
+                input,
+                ask,
+                accessPolicy,
+                contextRateLimiter,
+                seenContextMessages,
+                now
+              )
           : undefined
       ),
     stop: () => input.transport.disconnect(),
@@ -172,7 +198,10 @@ export function createDiscordMeetingBot(
 async function answerConversationThread(
   input: CreateDiscordMeetingBotInput,
   ask: DiscordContextAskMention,
-  accessPolicy: WorkspaceAccessPolicy
+  accessPolicy: WorkspaceAccessPolicy,
+  rateLimiter: ReturnType<typeof createDiscordContextAskRateLimiter> | undefined,
+  seenMessages: Map<string, number>,
+  now: () => Date
 ): Promise<DiscordContextAskResponse | null> {
   const contextAsk = input.contextAsk;
 
@@ -190,6 +219,30 @@ async function answerConversationThread(
     return null;
   }
 
+  const reply = (content: string): DiscordContextAskResponse => ({
+    content,
+    idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
+  });
+  const currentTime = now().getTime();
+  for (const [messageId, expiresAt] of seenMessages) {
+    if (expiresAt <= currentTime) seenMessages.delete(messageId);
+  }
+  if (seenMessages.has(ask.messageId)) return null;
+  seenMessages.set(ask.messageId, currentTime + 86_400_000);
+  if (seenMessages.size > 10_000) {
+    const oldest = seenMessages.keys().next().value;
+    if (oldest) seenMessages.delete(oldest);
+  }
+  if (/^(?:usage|status)$/iu.test(ask.question.trim())) {
+    return reply(await readAiUsage(input));
+  }
+  const retryAfterSeconds = rateLimiter?.acquire(ask) ?? 0;
+  if (retryAfterSeconds > 0) {
+    return reply(
+      `Luma is cooling down in this thread. Try again in ${retryAfterSeconds} seconds. You can still use @Luma usage or /meeting usage; no AI call was made.`
+    );
+  }
+
   try {
     const result = await contextAsk.contextIntelligence.inquire({
       type: "ask",
@@ -204,15 +257,11 @@ async function answerConversationThread(
       }
     });
 
-    return {
-      content: renderDiscordContextAskResult(result),
-      idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
-    };
-  } catch {
-    return {
-      content: "Luma could not answer this thread right now. Please try again later.",
-      idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
-    };
+    return reply(
+      await appendAiUsageWarning(input, renderDiscordContextAskResult(result))
+    );
+  } catch (error: unknown) {
+    return reply(renderAiServiceFailure(error));
   }
 }
 
@@ -315,6 +364,50 @@ async function handleCommand(
     return { content: "You do not have access to Luma in this workspace." };
   }
 
+  if (command.type === "usage") {
+    return { content: await readAiUsage(input) };
+  }
+  try {
+    const result = await executeAdmittedCommand(input, command, now);
+    return { content: await appendAiUsageWarning(input, result.content) };
+  } catch (error: unknown) {
+    return { content: renderAiServiceFailure(error) };
+  }
+}
+
+async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string> {
+  if (!input.aiUsage)
+    return "AI usage tracking is not configured. A founder needs to check the AI provider and pricing configuration before paid AI use.";
+  try {
+    return renderAiUsageStatus(
+      await input.aiUsage.getStatus(input.workspace.workspaceId)
+    );
+  } catch {
+    return "Luma could not read AI usage right now. Please try /meeting usage again later.";
+  }
+}
+
+async function appendAiUsageWarning(
+  input: CreateDiscordMeetingBotInput,
+  content: string
+): Promise<string> {
+  if (!input.aiUsage) return content;
+  try {
+    const warning = renderAiUsageWarning(
+      await input.aiUsage.getStatus(input.workspace.workspaceId)
+    );
+    return warning ? `${content}\n\n${warning}` : content;
+  } catch {
+    // A status read must not turn an accepted action into an apparent failure.
+    return content;
+  }
+}
+
+async function executeAdmittedCommand(
+  input: CreateDiscordMeetingBotInput,
+  command: Exclude<DiscordCommand, { type: "usage" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
   switch (command.type) {
     case "start":
       return startMeeting(input, command, now);
@@ -371,17 +464,13 @@ async function recordMeetingNote(
       }
     ]
   });
+  if (update.analysisStatus === "deferred") {
+    return { content: renderDeferredAnalysis(update.errors) };
+  }
   const snapshot = await queryMeetingSnapshot(input, context.meetingThread);
   const suggestedIntents = snapshot.followUpIntentions.filter(
     (intent) => intent.status === "suggested"
   );
-
-  if (update.analysisStatus === "deferred") {
-    return {
-      content:
-        "Note saved. Analysis is temporarily deferred; the original evidence is safe."
-    };
-  }
 
   return {
     content:
@@ -559,11 +648,10 @@ async function recoverFollowUp(
       meetingId: context.meetingThread.meeting_id,
       intentId: intent.id
     });
-  } catch (error) {
+  } catch {
     return {
-      content: `Follow-up recovery could not run: ${
-        error instanceof Error ? error.message : "unknown recovery error"
-      }`
+      content:
+        "Follow-up recovery could not run. Its provider outcome is still unconfirmed; please try recovery again later."
     };
   }
 

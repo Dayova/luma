@@ -41,6 +41,7 @@ import type {
   WorkspaceId
 } from "../domain/model.js";
 import { opaqueIdentifierSegment } from "../domain/opaque-id.js";
+import { AiServiceError } from "../ai/ai-service-error.js";
 import {
   ownershipCanMutateCanonicalWork,
   sameActionItemOwnership
@@ -496,12 +497,25 @@ async function observeMeeting(
         // superseded Evidence or overwrite Human Judgment.
         analysisStatus = "deferred";
       }
-    } catch {
+    } catch (error: unknown) {
       analysisStatus = "deferred";
-      errors.push({
-        code: "analysis-temporarily-unavailable",
-        retryable: true
-      });
+      if (error instanceof AiServiceError) {
+        errors.push({
+          code: `analysis-${error.code}`,
+          retryable: ["rate-limited", "timeout", "unavailable"].includes(error.code),
+          ...(error.limitScope ? { limitScope: error.limitScope } : {}),
+          ...(error.resetAt ? { resetAt: error.resetAt } : {}),
+          ...(error.timezone ? { timezone: error.timezone } : {}),
+          ...(error.retryAfterSeconds !== undefined
+            ? { retryAfterSeconds: error.retryAfterSeconds }
+            : {})
+        });
+      } else {
+        errors.push({
+          code: "analysis-temporarily-unavailable",
+          retryable: true
+        });
+      }
     }
   }
 

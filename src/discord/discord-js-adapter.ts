@@ -29,7 +29,6 @@ import {
   type DiscordConversationThread
 } from "./discord-conversation-evidence-source.js";
 import {
-  createDiscordContextAskRateLimiter,
   discordContextAskConfigFromEnv,
   discordContextAskMentionFromCandidate,
   type DiscordContextAskConfig,
@@ -77,11 +76,6 @@ export function createDiscordJsTransport(
   let contextAskHandler:
     | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
     | null = null;
-  const contextAskRateLimiter = config.contextAsk
-    ? createDiscordContextAskRateLimiter({
-        minIntervalMs: config.contextAsk.minIntervalMs
-      })
-    : null;
   const conversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
         reader: createDiscordJsConversationReader(client),
@@ -96,12 +90,10 @@ export function createDiscordJsTransport(
       return;
     }
 
-    void handleInteraction(interaction, config.guildId, commandHandler).catch(
-      async (error: unknown) => {
+    void handleInteraction(interaction, config.guildId, commandHandler)
+      .catch(async () => {
         const content =
-          error instanceof Error
-            ? `Luma could not process the command: ${error.message}`
-            : "Luma could not process the command.";
+          "Luma could not process the command right now. Please try again later.";
 
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply({ content });
@@ -112,8 +104,14 @@ export function createDiscordJsTransport(
           content,
           flags: MessageFlags.Ephemeral
         });
-      }
-    );
+      })
+      .catch(() => {
+        reportDiscordDeliveryFailure({
+          code: "discord-command-reply-failed",
+          channelId: interaction.channelId,
+          sourceId: interaction.id
+        });
+      });
   });
 
   client.on(Events.MessageCreate, (message) => {
@@ -121,7 +119,7 @@ export function createDiscordJsTransport(
     const contextAsk = config.contextAsk;
     const botUserId = client.user?.id;
 
-    if (!handler || !contextAsk || !botUserId || !contextAskRateLimiter) {
+    if (!handler || !contextAsk || !botUserId) {
       return;
     }
 
@@ -132,7 +130,7 @@ export function createDiscordJsTransport(
       config: contextAsk
     });
 
-    if (!ask || !contextAskRateLimiter.tryAcquire(ask)) {
+    if (!ask) {
       return;
     }
 
@@ -140,7 +138,13 @@ export function createDiscordJsTransport(
       message,
       handler,
       ask
-    }).catch(() => undefined);
+    }).catch(() => {
+      reportDiscordDeliveryFailure({
+        code: "discord-context-ask-reply-failed",
+        channelId: message.channelId,
+        sourceId: message.id
+      });
+    });
   });
 
   return {
@@ -319,18 +323,17 @@ async function handleContextAskMention(input: {
   handler: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>;
   ask: DiscordContextAskMention;
 }): Promise<void> {
+  let response: DiscordContextAskResponse | null;
   try {
-    const response = await input.handler(input.ask);
-
-    if (response) {
-      await replyToContextAskMessage(input.message, response);
-    }
+    response = await input.handler(input.ask);
   } catch {
-    await replyToContextAskMessage(input.message, {
+    response = {
       content: "Luma could not answer this thread right now. Please try again later.",
       idempotencyKey: `discord:${input.message.id}:context-ask:reply`
-    });
+    };
   }
+  // A failed or ambiguous send must not trigger a second, contradictory reply.
+  if (response) await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(
@@ -547,6 +550,8 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         title: interaction.options.getString("title", true),
         languageMode: readLanguageMode(interaction.options.getString("language"))
       };
+    case "usage":
+      return { ...base, type: "usage" };
     case "stop":
       return {
         ...base,
@@ -707,6 +712,9 @@ const meetingCommand = new SlashCommandBuilder()
   .setName("meeting")
   .setDescription("Run a Luma Meeting in Discord")
   .addSubcommand((command) =>
+    command.setName("usage").setDescription("Show shared AI usage, budget and reset time")
+  )
+  .addSubcommand((command) =>
     command
       .setName("start")
       .setDescription("Start a Meeting and create its persistent thread")
@@ -820,3 +828,12 @@ const meetingCommand = new SlashCommandBuilder()
           .setMinValue(0)
       )
   );
+
+function reportDiscordDeliveryFailure(event: {
+  code: "discord-command-reply-failed" | "discord-context-ask-reply-failed";
+  channelId: string;
+  sourceId: string;
+}): void {
+  // Operational IDs aid delivery diagnosis; never log exceptions or message text.
+  console.error("Luma Discord delivery failed", event);
+}

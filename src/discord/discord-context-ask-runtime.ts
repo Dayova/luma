@@ -271,6 +271,10 @@ export function createDiscordContextAskRateLimiter(config: {
   tryAcquire(
     input: Pick<DiscordContextAskMention, "channelId" | "actorDiscordUserId">
   ): boolean;
+  /** Zero means admitted; otherwise the bounded cooldown remaining in seconds. */
+  acquire(
+    input: Pick<DiscordContextAskMention, "channelId" | "actorDiscordUserId">
+  ): number;
 } {
   if (
     !Number.isSafeInteger(config.minIntervalMs) ||
@@ -288,16 +292,21 @@ export function createDiscordContextAskRateLimiter(config: {
 
   return {
     tryAcquire(input) {
+      return this.acquire(input) === 0;
+    },
+    acquire(input) {
       const key = `${input.channelId}:${input.actorDiscordUserId}`;
       const currentTime = now();
       const nextAllowedAt = nextAllowedAtByActorThread.get(key) ?? 0;
 
       if (currentTime < nextAllowedAt) {
-        return false;
+        return Math.ceil((nextAllowedAt - currentTime) / 1_000);
       }
-
+      for (const [entryKey, expiresAt] of nextAllowedAtByActorThread) {
+        if (expiresAt <= currentTime) nextAllowedAtByActorThread.delete(entryKey);
+      }
       nextAllowedAtByActorThread.set(key, currentTime + config.minIntervalMs);
-      return true;
+      return 0;
     }
   };
 }

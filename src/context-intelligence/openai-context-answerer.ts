@@ -1,4 +1,13 @@
 import OpenAI from "openai";
+import { AiServiceError } from "../ai/ai-service-error.js";
+import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
+import {
+  normalizedOpenAiUsage,
+  resolveAiRequestLimits,
+  runBudgetedAiRequest,
+  type AiRequestLimits,
+  type AiResponse
+} from "../ai/ai-request.js";
 import { z } from "zod";
 import type {
   ContextAnswerer,
@@ -37,17 +46,21 @@ export type OpenAIContextAnswererResponseRequest = {
   schemaName: string;
   schema: Record<string, unknown>;
   strict: true;
+  maxOutputTokens: number;
+  signal?: AbortSignal;
 };
 
 /** Minimal provider seam used to test the OpenAI adapter without the SDK. */
 export interface OpenAIContextAnswererResponseClient {
-  create(request: OpenAIContextAnswererResponseRequest): Promise<{ outputText: string }>;
+  create(request: OpenAIContextAnswererResponseRequest): Promise<AiResponse>;
 }
 
 export type OpenAIContextAnswererConfig = {
   model?: string;
   apiKey?: string;
   client?: OpenAIContextAnswererResponseClient;
+  budget?: AiUsageBudget;
+  limits?: Partial<AiRequestLimits>;
 };
 
 export class OpenAIContextAnswererError extends Error {
@@ -73,12 +86,19 @@ export function createOpenAIContextAnswerer(
   config: OpenAIContextAnswererConfig
 ): ContextAnswerer {
   const model = config.model ?? DEFAULT_OPENAI_REASONING_MODEL;
+  const limits = resolveAiRequestLimits(config.limits);
   const client =
-    config.client ?? createOpenAIContextAnswererResponseClient(config.apiKey);
+    config.client ?? createOpenAIContextAnswererResponseClient(config.apiKey, limits);
 
   return {
     async answer(request: ContextAnswerRequest): Promise<ContextAnswerResult> {
-      const response = await client.create({
+      if (!config.client && !config.budget) {
+        throw new AiServiceError(
+          "not-configured",
+          "A durable AI usage budget is required before paid requests."
+        );
+      }
+      const outbound = {
         model,
         instructions: CONTEXT_ASK_INSTRUCTIONS,
         input: JSON.stringify({
@@ -90,7 +110,20 @@ export function createOpenAIContextAnswerer(
         }),
         schemaName: "ContextAskAnswer",
         schema: contextAskAnswerJsonSchema,
-        strict: true
+        strict: true as const,
+        maxOutputTokens: limits.maxOutputTokens
+      };
+      const response = await runBudgetedAiRequest({
+        ...(config.budget ? { budget: config.budget } : {}),
+        workspaceId: request.workspaceId,
+        workflow: { model, ...request },
+        capability: "context-ask",
+        model,
+        instructions: outbound.instructions,
+        input: outbound.input,
+        schema: outbound.schema,
+        limits,
+        invoke: (signal) => client.create({ ...outbound, signal })
       });
 
       if (response.outputText.trim().length === 0) {
@@ -116,7 +149,8 @@ export function createOpenAIContextAnswerer(
 }
 
 function createOpenAIContextAnswererResponseClient(
-  apiKey: string | undefined
+  apiKey: string | undefined,
+  limits: AiRequestLimits
 ): OpenAIContextAnswererResponseClient {
   if (!apiKey || apiKey.trim().length === 0) {
     throw new OpenAIContextAnswererError(
@@ -125,26 +159,44 @@ function createOpenAIContextAnswererResponseClient(
     );
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({ apiKey, maxRetries: 0, timeout: limits.timeoutMs });
 
   return {
     async create(request) {
-      const response = await client.responses.create({
-        model: request.model,
-        instructions: request.instructions,
-        input: request.input,
-        store: false,
-        text: {
-          format: {
-            type: "json_schema",
-            name: request.schemaName,
-            schema: request.schema,
-            strict: request.strict
+      const response = await client.responses.create(
+        {
+          model: request.model,
+          instructions: request.instructions,
+          input: request.input,
+          store: false,
+          service_tier: "default",
+          prompt_cache_options: { ttl: "30m" },
+          max_output_tokens: request.maxOutputTokens,
+          text: {
+            format: {
+              type: "json_schema",
+              name: request.schemaName,
+              schema: request.schema,
+              strict: request.strict
+            }
           }
-        }
-      });
+        },
+        { signal: request.signal }
+      );
 
-      return { outputText: response.output_text };
+      const usage = normalizedOpenAiUsage(response.usage);
+      return {
+        outputText: response.output_text,
+        providerResponseId: response.id,
+        ...(response._request_id ? { providerRequestId: response._request_id } : {}),
+        model: response.model,
+        ...(response.status ? { status: response.status } : {}),
+        ...(response.incomplete_details?.reason
+          ? { incompleteReason: response.incomplete_details.reason }
+          : {}),
+        ...(response.service_tier ? { serviceTier: response.service_tier } : {}),
+        ...(usage ? { usage } : {})
+      };
     }
   };
 }

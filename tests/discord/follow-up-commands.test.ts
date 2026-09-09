@@ -392,8 +392,10 @@ async function seedHistoricLegacyGenericKnowledgeExecution(
   return { intent, idempotencyKey };
 }
 
+const meetingStatuses = ["active", "ended"] as const;
+
 describe("Discord follow-up commands", () => {
-  it("preserves typed evidence and fails closed for an unbound generic Linear intent", async () => {
+  it.each(meetingStatuses)("enforces ownership in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const meetingIntelligence = createMeetingIntelligence({
@@ -445,6 +447,9 @@ describe("Discord follow-up commands", () => {
       text: "Ich übernehme die release checklist bis Montag.",
       language: "mixed"
     });
+    if (status === "ended") {
+      await endMeeting(transport);
+    }
     const approveResponse = await transport.execute({
       type: "approve",
       interactionId: "approve_release",
@@ -498,7 +503,7 @@ describe("Discord follow-up commands", () => {
     );
   });
 
-  it("rejects a suggested intent without mutating a provider", async () => {
+  it.each(meetingStatuses)("rejects safely in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const meetingIntelligence = createMeetingIntelligence({
@@ -547,6 +552,21 @@ describe("Discord follow-up commands", () => {
       text: "Create a release checklist task.",
       language: "en"
     });
+    if (status === "ended") {
+      await endMeeting(transport);
+      const unmappedResponse = await transport.execute({
+        type: "reject",
+        interactionId: "reject_unmapped",
+        guildId: "guild_dayova",
+        channelId: "thread_product",
+        actorDiscordUserId: "unmapped_user",
+        occurredAt: "2026-07-16T09:06:00.000Z",
+        intentId: "intent_linear_release"
+      });
+      expect(unmappedResponse.content).toBe(
+        "Only a mapped Luma participant can record or judge Meeting evidence."
+      );
+    }
     const response = await transport.execute({
       type: "reject",
       interactionId: "reject_release",
@@ -574,7 +594,7 @@ describe("Discord follow-up commands", () => {
     expect(snapshot.state.followUpIntentions[0]?.status).toBe("rejected");
   });
 
-  it("recovers a stranded execution through a positive provider marker without writing again", async () => {
+  it.each(meetingStatuses)("recovers without rewrites in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const workspace = {
@@ -645,6 +665,10 @@ describe("Discord follow-up commands", () => {
       ]
     });
     expect(approval.errors).toEqual([]);
+
+    if (status === "ended") {
+      await endMeeting(transport);
+    }
 
     const idempotencyKey = JSON.stringify([
       workspace.workspaceId,
@@ -783,3 +807,17 @@ describe("Discord follow-up commands", () => {
     }
   });
 });
+
+async function endMeeting(transport: TestDiscordTransport): Promise<void> {
+  const response = await transport.execute({
+    type: "stop",
+    interactionId: "stop_before_follow_up",
+    guildId: "guild_dayova",
+    channelId: "thread_product",
+    actorDiscordUserId: "779381502311137301",
+    occurredAt: "2026-07-16T09:06:00.000Z"
+  });
+  expect(response.content).toBe(
+    "Meeting ended. The Conclusion was posted in the Meeting thread."
+  );
+}

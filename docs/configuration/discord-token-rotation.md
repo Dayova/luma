@@ -25,6 +25,12 @@ before it is used for a first live rollout.
 
 Do not enable a live Discord rollout until all of the following are true:
 
+- The [LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate)
+  is satisfied: its owner has recorded the required Discord observation,
+  retention, deletion, retrieval/audience, and cross-source-association
+  decisions, and the required follow-up implementation is delivered. Token
+  rotation and technical configuration are not authorization to collect live
+  Discord content.
 - The current token was generated during the approved rollout window or after
   the most recent suspected exposure.
 - It exists only in the deployment secret store or the intended ignored local

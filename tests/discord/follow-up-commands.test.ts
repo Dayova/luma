@@ -20,8 +20,7 @@ import type {
   KnowledgeDocument,
   KnowledgeProvider,
   KnowledgeQuery,
-  KnowledgeResult,
-  UpdateDocumentInput
+  KnowledgeResult
 } from "../../src/knowledge/interface.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
@@ -124,7 +123,6 @@ class LinearWorkProvider implements WorkProvider {
 class RecordingKnowledgeProvider implements KnowledgeProvider {
   readonly providerId = "notion-meetings";
   readonly createCalls: CreateDocumentInput[] = [];
-  readonly updateCalls: Array<{ id: string; input: UpdateDocumentInput }> = [];
   readonly markerLookups: string[] = [];
   marker: ExternalReference | null = null;
 
@@ -148,11 +146,6 @@ class RecordingKnowledgeProvider implements KnowledgeProvider {
   ): Promise<ExternalReference | null> {
     this.markerLookups.push(idempotencyKey);
     return Promise.resolve(this.marker);
-  }
-
-  updateDocument(id: string, input: UpdateDocumentInput): Promise<ExternalReference> {
-    this.updateCalls.push({ id, input });
-    return Promise.reject(new Error("legacy generic knowledge must not update"));
   }
 
   listChanges(_cursor?: string): Promise<ChangePage> {
@@ -399,8 +392,10 @@ async function seedHistoricLegacyGenericKnowledgeExecution(
   return { intent, idempotencyKey };
 }
 
+const meetingStatuses = ["active", "ended"] as const;
+
 describe("Discord follow-up commands", () => {
-  it("preserves typed evidence and fails closed for an unbound generic Linear intent", async () => {
+  it.each(meetingStatuses)("enforces ownership in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const meetingIntelligence = createMeetingIntelligence({
@@ -452,6 +447,9 @@ describe("Discord follow-up commands", () => {
       text: "Ich übernehme die release checklist bis Montag.",
       language: "mixed"
     });
+    if (status === "ended") {
+      await endMeeting(transport);
+    }
     const approveResponse = await transport.execute({
       type: "approve",
       interactionId: "approve_release",
@@ -505,7 +503,7 @@ describe("Discord follow-up commands", () => {
     );
   });
 
-  it("rejects a suggested intent without mutating a provider", async () => {
+  it.each(meetingStatuses)("rejects safely in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const meetingIntelligence = createMeetingIntelligence({
@@ -554,6 +552,21 @@ describe("Discord follow-up commands", () => {
       text: "Create a release checklist task.",
       language: "en"
     });
+    if (status === "ended") {
+      await endMeeting(transport);
+      const unmappedResponse = await transport.execute({
+        type: "reject",
+        interactionId: "reject_unmapped",
+        guildId: "guild_dayova",
+        channelId: "thread_product",
+        actorDiscordUserId: "unmapped_user",
+        occurredAt: "2026-07-16T09:06:00.000Z",
+        intentId: "intent_linear_release"
+      });
+      expect(unmappedResponse.content).toBe(
+        "Only a mapped Luma participant can record or judge Meeting evidence."
+      );
+    }
     const response = await transport.execute({
       type: "reject",
       interactionId: "reject_release",
@@ -581,7 +594,7 @@ describe("Discord follow-up commands", () => {
     expect(snapshot.state.followUpIntentions[0]?.status).toBe("rejected");
   });
 
-  it("recovers a stranded execution through a positive provider marker without writing again", async () => {
+  it.each(meetingStatuses)("recovers without rewrites in %s Meetings", async (status) => {
     const database = await createPgliteDatabase();
     const identityDirectory = createLumaTeamIdentityDirectory();
     const workspace = {
@@ -653,6 +666,10 @@ describe("Discord follow-up commands", () => {
     });
     expect(approval.errors).toEqual([]);
 
+    if (status === "ended") {
+      await endMeeting(transport);
+    }
+
     const idempotencyKey = JSON.stringify([
       workspace.workspaceId,
       meetingId,
@@ -716,7 +733,6 @@ describe("Discord follow-up commands", () => {
       expect(response.content).toContain("will not create or update");
       expect(context.knowledgeProvider.markerLookups).toEqual([]);
       expect(context.knowledgeProvider.createCalls).toEqual([]);
-      expect(context.knowledgeProvider.updateCalls).toEqual([]);
       expect((await currentMeetingState(context)).followUpIntentions).toContainEqual(
         expect.objectContaining({ id: intent.id, status: "suggested" })
       );
@@ -755,7 +771,6 @@ describe("Discord follow-up commands", () => {
         expect(response.content).toBe(`Follow-up recovered: ${url}`);
         expect(context.knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
         expect(context.knowledgeProvider.createCalls).toEqual([]);
-        expect(context.knowledgeProvider.updateCalls).toEqual([]);
       } finally {
         await context.database.close();
       }
@@ -784,7 +799,6 @@ describe("Discord follow-up commands", () => {
       expect(response.content).toContain("will not create or update");
       expect(context.knowledgeProvider.markerLookups).toEqual([idempotencyKey]);
       expect(context.knowledgeProvider.createCalls).toEqual([]);
-      expect(context.knowledgeProvider.updateCalls).toEqual([]);
       expect((await currentMeetingState(context)).followUpIntentions).toContainEqual(
         expect.objectContaining({ id: intent.id, status: "requires-manual-recovery" })
       );
@@ -793,3 +807,17 @@ describe("Discord follow-up commands", () => {
     }
   });
 });
+
+async function endMeeting(transport: TestDiscordTransport): Promise<void> {
+  const response = await transport.execute({
+    type: "stop",
+    interactionId: "stop_before_follow_up",
+    guildId: "guild_dayova",
+    channelId: "thread_product",
+    actorDiscordUserId: "779381502311137301",
+    occurredAt: "2026-07-16T09:06:00.000Z"
+  });
+  expect(response.content).toBe(
+    "Meeting ended. The Conclusion was posted in the Meeting thread."
+  );
+}

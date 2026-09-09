@@ -310,7 +310,7 @@ async function recordMeetingNote(
   command: Extract<DiscordCommand, { type: "note" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
-  const context = await resolveActiveMeetingActor(input, command);
+  const context = await resolveMeetingActor(input, command, "active");
 
   if ("response" in context) {
     return context.response;
@@ -373,7 +373,7 @@ async function approveFollowUp(
   command: Extract<DiscordCommand, { type: "approve" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
-  const context = await resolveActiveMeetingActor(input, command);
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
 
   if ("response" in context) {
     return context.response;
@@ -482,7 +482,7 @@ async function recoverFollowUp(
   input: CreateDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "recover" }>
 ): Promise<DiscordCommandResponse> {
-  const context = await resolveActiveMeetingActor(input, command);
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
 
   if ("response" in context) {
     return context.response;
@@ -571,7 +571,7 @@ async function rejectFollowUp(
   command: Extract<DiscordCommand, { type: "reject" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
-  const context = await resolveActiveMeetingActor(input, command);
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
 
   if ("response" in context) {
     return context.response;
@@ -615,10 +615,11 @@ async function stopMeeting(
   command: Extract<DiscordCommand, { type: "stop" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
-  const meetingThread = await findActiveMeetingThread(
+  const meetingThread = await findMeetingThreadForChannel(
     input.database,
     command.guildId,
-    command.channelId
+    command.channelId,
+    "active"
   );
 
   if (!meetingThread) {
@@ -696,10 +697,11 @@ async function startMeeting(
   command: Extract<DiscordCommand, { type: "start" }>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
-  const existing = await findActiveMeetingThread(
+  const existing = await findMeetingThreadForChannel(
     input.database,
     command.guildId,
-    command.channelId
+    command.channelId,
+    "active"
   );
 
   const meetingId = existing?.meeting_id ?? `discord_${command.interactionId}`;
@@ -808,10 +810,11 @@ async function catchUpMeeting(
   input: CreateDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "catchup" }>
 ): Promise<DiscordCommandResponse> {
-  const meetingThread = await findActiveMeetingThread(
+  const meetingThread = await findMeetingThreadForChannel(
     input.database,
     command.guildId,
-    command.channelId
+    command.channelId,
+    "include-ended-thread"
   );
 
   if (!meetingThread) {
@@ -845,10 +848,11 @@ async function answerMeetingQuestion(
   input: CreateDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "ask" }>
 ): Promise<DiscordCommandResponse> {
-  const meetingThread = await findActiveMeetingThread(
+  const meetingThread = await findMeetingThreadForChannel(
     input.database,
     command.guildId,
-    command.channelId
+    command.channelId,
+    "include-ended-thread"
   );
 
   if (!meetingThread) {
@@ -904,9 +908,12 @@ type DiscordMeetingThreadRow = {
   conclusion_message_sent_at: string | null;
 };
 
-async function resolveActiveMeetingActor(
+type MeetingThreadScope = "active" | "include-ended-thread";
+
+async function resolveMeetingActor(
   input: CreateDiscordMeetingBotInput,
-  command: DiscordCommandBase
+  command: DiscordCommandBase,
+  scope: MeetingThreadScope
 ): Promise<
   | {
       meetingThread: DiscordMeetingThreadRow;
@@ -916,10 +923,11 @@ async function resolveActiveMeetingActor(
     }
   | { response: DiscordCommandResponse }
 > {
-  const meetingThread = await findActiveMeetingThread(
+  const meetingThread = await findMeetingThreadForChannel(
     input.database,
     command.guildId,
-    command.channelId
+    command.channelId,
+    scope
   );
 
   if (!meetingThread) {
@@ -1005,10 +1013,11 @@ async function findMeetingThread(
   return result.rows[0] ?? null;
 }
 
-async function findActiveMeetingThread(
+async function findMeetingThreadForChannel(
   database: LumaDatabase,
   guildId: string,
-  channelId: string
+  channelId: string,
+  scope: MeetingThreadScope
 ): Promise<DiscordMeetingThreadRow | null> {
   const result = await database.query<DiscordMeetingThreadRow>(
     `SELECT workspace_id, meeting_id, meeting_title, thread_name, language_mode,
@@ -1016,11 +1025,13 @@ async function findActiveMeetingThread(
             start_message_sent_at, conclusion_message_sent_at
        FROM discord_meeting_threads
       WHERE guild_id = $1
-        AND ended_at IS NULL
-        AND (parent_channel_id = $2 OR thread_id = $2)
+        AND (
+          (parent_channel_id = $2 AND ended_at IS NULL)
+          OR (thread_id = $2 AND (ended_at IS NULL OR $3))
+        )
       ORDER BY created_at DESC
       LIMIT 1`,
-    [guildId, channelId]
+    [guildId, channelId, scope === "include-ended-thread"]
   );
 
   return result.rows[0] ?? null;

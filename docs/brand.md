@@ -1,6 +1,14 @@
 # Luma Brand
 
-Luma is a Discord-native AI meeting intelligence product. The brand idea is conversations becoming clarity, decisions, and tracked impact.
+Luma is Dayova's organizational context and execution agent. Its product
+scope connects Notion and Granola meeting captures and Discord conversations
+with canonical work in Linear, knowledge in Notion, and implementation
+evidence in GitHub. The brand idea is conversations becoming clarity,
+decisions, and tracked impact.
+
+Brand positioning describes the product direction. The
+[current delivery boundary](../README.md#current-delivery-boundary) records
+which capabilities are implemented and which still require delivery.
 
 ![Luma brand board](../assets/brand/luma-brand-board.png)
 

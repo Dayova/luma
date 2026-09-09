@@ -42,6 +42,38 @@ describe("startServer OpenAI model composition", () => {
       }
     });
   }
+
+  it("rejects a legacy Meeting Notes source beside a complete observer topology", async () => {
+    let openedDatabase = false;
+
+    await expect(
+      startServer(
+        {
+          DISCORD_TOKEN: "discord-test-token",
+          DISCORD_CLIENT_ID: "discord-test-client",
+          DISCORD_GUILD_ID: "guild_test",
+          NOTION_API_TOKEN: "legacy-notion-token",
+          NOTION_MEETINGS_DATA_SOURCE_ID: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+          LUMA_OBSERVATION_WORKSPACE_ID: "workspace_dayova",
+          LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN: "observer-notion-token",
+          LUMA_NOTION_OBSERVATION_MEETINGS_DATA_SOURCE_ID:
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+          LUMA_NOTION_OBSERVATION_WORKSPACE_ID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          LUMA_NOTION_OBSERVATION_SUBSCRIPTION_ID: "cccccccc-dddd-eeee-ffff-000000000000",
+          LUMA_NOTION_OBSERVATION_INTEGRATION_ID: "dddddddd-eeee-ffff-0000-111111111111",
+          LUMA_NOTION_OBSERVATION_WEBHOOK_VERIFICATION_TOKEN: "observer-webhook-token",
+          LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR: ".luma/notion-observer"
+        },
+        {
+          createDatabase() {
+            openedDatabase = true;
+            return Promise.reject(new Error("database must not open"));
+          }
+        }
+      )
+    ).rejects.toThrow("cannot share one process environment");
+    expect(openedDatabase).toBe(false);
+  });
 });
 
 function createServerHarness(): {

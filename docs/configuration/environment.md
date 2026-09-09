@@ -344,6 +344,7 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `DISCORD_TOKEN`                                      | For bot           | Discord Adapter          | Secret Gateway and REST token.                                               |
 | `DISCORD_CLIENT_ID`                                  | For bot           | Discord Adapter          | Discord Application ID.                                                      |
 | `DISCORD_GUILD_ID`                                   | For bot           | Discord Adapter          | Server receiving guild-scoped commands.                                      |
+| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.               |
 | `LUMA_DISCORD_CONTEXT_ASK_ENABLED`                   | No; exact `1`     | Discord Context Ask      | Enables the separately scoped, read-only thread Ask runtime.                 |
 | `LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS`        | With Context Ask  | Discord Context Ask      | Comma-separated parent-channel allowlist for public threads.                 |
 | `LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS`  | With Context Ask  | Discord Context Ask      | Comma-separated Discord-user allowlist for mentions.                         |
@@ -362,7 +363,6 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `LUMA_LIVE_LINEAR_READONLY_TESTS`                    | No                | Tests                    | Set to `1` with a Read-permission key for the bounded read-only smoke test.  |
 | `LUMA_LIVE_NOTION_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                 |
 | `LUMA_LIVE_GITHUB_TESTS`                             | No                | Tests                    | Set to `1` for the GitHub compatibility smoke test.                          |
-| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.               |
 
 ## Security Rules
 

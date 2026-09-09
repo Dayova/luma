@@ -1061,6 +1061,7 @@ export type MeetingIntelligenceError =
       retryable: boolean;
       limitScope?: "month" | "day" | "workflow";
       resetAt?: string;
+      timezone?: string;
       retryAfterSeconds?: number;
     }
   | {

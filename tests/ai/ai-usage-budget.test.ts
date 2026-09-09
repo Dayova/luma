@@ -160,6 +160,24 @@ describe("durable AI usage budget", () => {
     });
   });
 
+  it.each(["month", "day"] as const)(
+    "carries the configured timezone on a %s budget refusal",
+    async (limitScope) => {
+      const budget = createAiUsageBudget({
+        database,
+        timezone: "Asia/Tokyo",
+        now: () => new Date("2026-09-30T14:30:00Z"),
+        ...(limitScope === "month" ? { monthlyLimitUsd: 0 } : { dailyLimitUsd: 0 })
+      });
+      await expect(budget.reserve(reservation)).rejects.toMatchObject({
+        code: "budget-exhausted",
+        limitScope,
+        timezone: "Asia/Tokyo",
+        resetAt: "2026-09-30T15:00:00.000Z"
+      });
+    }
+  );
+
   it("uses Europe/Berlin month boundaries and settles late responses in their original period", async () => {
     let now = new Date("2026-09-30T21:59:00.000Z");
     const budget = createAiUsageBudget({ database, now: () => now });

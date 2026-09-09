@@ -561,6 +561,37 @@ async function recordMeetingNote(
   };
 }
 
+/** Revalidate both Discord surfaces after all preparation, immediately before execution. */
+async function requireFollowUpExecutionScope(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordCommandBase,
+  meetingThread: DiscordMeetingThreadRow
+): Promise<void> {
+  if (
+    !meetingThread.thread_id ||
+    meetingThread.guild_id !== command.guildId ||
+    meetingThread.workspace_id !== input.workspace.workspaceId ||
+    (command.channelId !== meetingThread.thread_id &&
+      command.channelId !== meetingThread.parent_channel_id)
+  )
+    throw new DiscordChannelAccessError();
+
+  const threadCheck = input.channelScope.requireChannel(
+    meetingThread.thread_id,
+    "public-thread"
+  );
+  const commandCheck =
+    command.channelId === meetingThread.thread_id
+      ? threadCheck
+      : input.channelScope.requireChannel(command.channelId, "text-channel");
+  const [, thread] = await Promise.all([commandCheck, threadCheck]);
+  if (
+    thread.parentChannelId !== meetingThread.parent_channel_id ||
+    thread.guildId !== meetingThread.guild_id
+  )
+    throw new DiscordChannelAccessError();
+}
+
 async function approveFollowUp(
   input: ScopedDiscordMeetingBotInput,
   command: Extract<DiscordCommand, { type: "approve" }>,
@@ -642,6 +673,7 @@ async function approveFollowUp(
     };
   }
 
+  await requireFollowUpExecutionScope(input, command, context.meetingThread);
   const result = await input.followUpExecution.execute({
     workspace: input.workspace,
     meetingId: context.meetingThread.meeting_id,
@@ -716,6 +748,7 @@ async function recoverFollowUp(
 
   let result: ExecuteFollowUpResult;
 
+  await requireFollowUpExecutionScope(input, command, context.meetingThread);
   try {
     result = await input.followUpExecution.recover({
       workspace: input.workspace,

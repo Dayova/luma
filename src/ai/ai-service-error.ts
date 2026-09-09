@@ -11,6 +11,7 @@ export type AiServiceErrorCode =
 /** Safe operational failure; provider payloads and source content stay private. */
 export class AiServiceError extends Error {
   readonly resetAt?: string;
+  readonly timezone?: string;
   readonly retryAfterSeconds?: number;
   readonly limitScope?: "month" | "day" | "workflow";
 
@@ -19,6 +20,7 @@ export class AiServiceError extends Error {
     message: string,
     details: {
       resetAt?: string;
+      timezone?: string;
       retryAfterSeconds?: number;
       limitScope?: "month" | "day" | "workflow";
     } = {}
@@ -26,6 +28,7 @@ export class AiServiceError extends Error {
     super(message);
     this.name = "AiServiceError";
     if (details.resetAt !== undefined) this.resetAt = details.resetAt;
+    if (details.timezone !== undefined) this.timezone = details.timezone;
     if (details.retryAfterSeconds !== undefined) {
       this.retryAfterSeconds = details.retryAfterSeconds;
     }

@@ -197,6 +197,8 @@ async function fixture(allowedParentChannelIds: readonly string[] = ["team_chat"
     database,
     reasoningModel: new GroundedReasoningModel()
   });
+  const realObserve = meetingIntelligence.observe.bind(meetingIntelligence);
+  const realQuery = meetingIntelligence.query.bind(meetingIntelligence);
   const observe = vi.spyOn(meetingIntelligence, "observe");
   const query = vi.spyOn(meetingIntelligence, "query");
   const conclude = vi.spyOn(meetingIntelligence, "conclude");
@@ -242,6 +244,8 @@ async function fixture(allowedParentChannelIds: readonly string[] = ["team_chat"
     database,
     databaseQuery,
     meetingIntelligence,
+    realObserve,
+    realQuery,
     observe,
     query,
     conclude,
@@ -438,6 +442,125 @@ describe("shared Discord channel scope", () => {
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.recover).not.toHaveBeenCalled();
   });
+
+  for (const commandType of ["approve", "recover"] as const) {
+    for (const changedSurface of [
+      "command",
+      "meeting-thread",
+      "thread-parent",
+      "unchanged"
+    ] as const) {
+      it(`${commandType} rechecks ${changedSurface} after durable preparation before invoking external execution`, async () => {
+        const f = await fixture(["team_chat", "other_allowed_parent"]);
+        await startMeeting(f);
+        await f.transport.command({
+          ...commandBase,
+          ...commandPayloads[3],
+          interactionId: "prepare_note"
+        });
+        if (commandType === "recover") {
+          await f.realObserve({
+            workspace,
+            observations: [
+              {
+                type: "follow-up-intent-approved",
+                observationId: "earlier_deliberate_approval",
+                workspaceId: workspace.workspaceId,
+                meetingId: "discord_start",
+                occurredAt: commandBase.occurredAt,
+                observedAt: commandBase.occurredAt,
+                intentId: "intent_release",
+                approvedBy: "person_jakob"
+              }
+            ]
+          });
+        }
+        const entered = deferred<void>();
+        const resume = deferred<void>();
+        if (commandType === "approve") {
+          f.observe.mockImplementation(async (input) => {
+            const update = await f.realObserve(input);
+            if (
+              input.observations.some(
+                (observation) => observation.type === "follow-up-intent-approved"
+              )
+            ) {
+              entered.resolve();
+              await resume.promise;
+            }
+            return update;
+          });
+        } else {
+          f.query.mockImplementation(async (input) => {
+            const result = await f.realQuery(input);
+            entered.resolve();
+            await resume.promise;
+            return result;
+          });
+        }
+        const externalOperation = vi.fn<FollowUpExecution["execute"]>(() =>
+          Promise.resolve({
+            idempotencyKey: "scope_receipt",
+            events: [],
+            observation: {
+              type: "follow-up-execution-recorded",
+              observationId: "scope_execution",
+              executionLeaseId: "scope_execution_lease",
+              workspaceId: workspace.workspaceId,
+              meetingId: "discord_start",
+              occurredAt: commandBase.occurredAt,
+              observedAt: commandBase.occurredAt,
+              intentId: "intent_release",
+              outcome: { status: "succeeded", externalReferences: [] }
+            }
+          })
+        );
+        f.execute.mockImplementation(externalOperation);
+        f.recover.mockImplementation(externalOperation);
+        clearCalls(f);
+        const pending = f.transport.command({
+          ...commandBase,
+          type: commandType,
+          intentId: "intent_release",
+          interactionId: `boundary_${commandType}`
+        });
+        await entered.promise;
+        if (changedSurface === "command") f.transport.channels.delete("team_chat");
+        if (changedSurface === "meeting-thread")
+          f.transport.channels.delete("meeting_thread");
+        if (changedSurface === "thread-parent")
+          f.transport.putThread("meeting_thread", "other_allowed_parent");
+        resume.resolve();
+        const result = await pending;
+        if (changedSurface === "unchanged") {
+          expect(externalOperation).toHaveBeenCalledOnce();
+          expect(result.content).toContain(
+            commandType === "approve" ? "Follow-up completed" : "Follow-up recovered"
+          );
+        } else {
+          expect(externalOperation).not.toHaveBeenCalled();
+          expect(f.execute).not.toHaveBeenCalled();
+          expect(f.recover).not.toHaveBeenCalled();
+          expect(result.content).toBe("Luma is not enabled in this Discord channel.");
+        }
+        // Permission revocation prevents execution, never erases the founder's
+        // deliberate approval that was already durably recorded.
+        expect(
+          await f.realQuery({
+            workspaceId: workspace.workspaceId,
+            meetingId: "discord_start",
+            query: { type: "snapshot" }
+          })
+        ).toMatchObject({
+          state: {
+            followUpIntentions: [
+              expect.objectContaining({ id: "intent_release", status: "approved" })
+            ]
+          }
+        });
+      });
+    }
+  }
 
   it("denies Context status and inquiries when Context configuration is wider than common scope", async () => {
     const f = await fixture();

@@ -47,10 +47,14 @@ asking its owned `ContextAnswerer` port.
 ## Current Boundary
 
 The optional Discord runtime is disabled unless an operator explicitly enables
-it with an allowlisted parent-channel set and Discord-user set. It listens only
-for a leading `@Luma` mention from those users in public threads below those
-parents; it never captures server-wide history, DMs, private threads, or a
-thread after the triggering mention.
+it with an allowlisted parent-channel set and Discord-user set. This is a
+technical admission gate, not live-use authorization: the
+[LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate)
+must also be satisfied (all four owner decisions recorded and the required
+follow-up implementation delivered). It listens only for a leading `@Luma`
+mention from those users in public threads below those parents; it never
+captures server-wide history, DMs, private threads, or a thread after the
+triggering mention.
 
 The runtime needs Discord's privileged Message Content intent because the
 mention-only exception does not expose surrounding history. It bounds both

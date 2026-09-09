@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   MeetingAnalysisProposalBatch,
   ReasoningModel,
@@ -41,6 +44,48 @@ class EmptyReasoningModel implements ReasoningModel {
       metadata: {
         provider: "test",
         model: "empty",
+        promptVersion: request.promptVersion
+      }
+    });
+  }
+}
+
+class ActionReasoningModel implements ReasoningModel {
+  generateStructured<T>(
+    request: StructuredReasoningRequest<T>
+  ): Promise<StructuredReasoningResult<T>> {
+    const evidence = request.evidence[0];
+    if (!evidence?.excerpt) {
+      throw new Error("expected original Meeting evidence");
+    }
+    const value: MeetingAnalysisProposalBatch = {
+      actionItems: [
+        {
+          stableKey: "release-checklist",
+          description: evidence.excerpt,
+          ownerId: null,
+          dueDate: {
+            originalPhrase: null,
+            normalizedDate: null,
+            confidence: "unknown",
+            timezone: "Europe/Berlin"
+          },
+          status: "candidate",
+          relatedDecisionIds: [],
+          evidenceIds: [evidence.evidenceId],
+          confidence: "high"
+        }
+      ],
+      decisions: [],
+      openQuestions: [],
+      risks: [],
+      followUpIntentions: []
+    };
+    return Promise.resolve({
+      value: value as T,
+      metadata: {
+        provider: "test",
+        model: "action",
         promptVersion: request.promptVersion
       }
     });
@@ -179,6 +224,150 @@ class ConcurrentDiscordTransport extends ProgrammableDiscordTransport {
 }
 
 describe("Discord meeting bot", () => {
+  it("keeps an ended Meeting readable in its exact thread after restart and a newer Meeting", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "luma-ended-meeting-"));
+    let database = await createPgliteDatabase(dataDir);
+    const transport = new ProgrammableDiscordTransport();
+    const makeBot = () =>
+      createDiscordMeetingBot({
+        database,
+        meetingIntelligence: createMeetingIntelligence({
+          database,
+          reasoningModel: new ActionReasoningModel(),
+          now: () => new Date("2026-07-11T14:00:00.000Z")
+        }),
+        identityDirectory: createLumaTeamIdentityDirectory(),
+        transport,
+        workspace: { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" },
+        guildId: "guild_dayova",
+        now: () => new Date("2026-07-11T14:00:00.000Z")
+      });
+    let bot = makeBot();
+    const base = {
+      guildId: "guild_dayova",
+      actorDiscordUserId: "779381502311137301",
+      occurredAt: "2026-07-11T13:00:00.000Z"
+    };
+    const ask: DiscordCommand = {
+      ...base,
+      type: "ask",
+      interactionId: "ask_ended_meeting",
+      channelId: "thread_product",
+      actorDiscordUserId: "reader_without_identity_mapping",
+      question: "Which action items remain?"
+    };
+    const catchup: DiscordCommand = {
+      ...base,
+      type: "catchup",
+      interactionId: "catchup_ended_meeting",
+      channelId: "thread_product",
+      sinceRevision: 0
+    };
+
+    try {
+      await bot.start();
+      await transport.execute({
+        ...base,
+        type: "start",
+        interactionId: "start_ended_meeting",
+        channelId: "channel_meeting_notes",
+        title: "Original Meeting",
+        languageMode: "en"
+      });
+      await transport.execute({
+        ...base,
+        type: "note",
+        interactionId: "note_ended_meeting",
+        channelId: "thread_product",
+        text: "Prepare the original release checklist.",
+        language: "en"
+      });
+      const originalAnswer = await transport.execute(ask);
+      const originalCatchup = await transport.execute(catchup);
+      expect(originalAnswer.content).toContain("Prepare the original release checklist.");
+      expect(originalCatchup.content).toContain(
+        "Prepare the original release checklist."
+      );
+      await transport.execute({
+        ...base,
+        type: "stop",
+        interactionId: "stop_ended_meeting",
+        channelId: "thread_product",
+        occurredAt: "2026-07-11T13:30:00.000Z"
+      });
+      await bot.stop();
+      await database.close();
+      database = await createPgliteDatabase(dataDir);
+      bot = makeBot();
+      await bot.start();
+
+      for (const query of [ask, catchup]) {
+        const parentResponse = await transport.execute({
+          ...query,
+          channelId: "channel_meeting_notes"
+        });
+        expect(parentResponse.content).toBe(
+          "There is no active Meeting in this Discord channel."
+        );
+      }
+      expect(await transport.execute(ask)).toEqual(originalAnswer);
+      expect(await transport.execute(catchup)).toEqual(originalCatchup);
+
+      await transport.execute({
+        ...base,
+        type: "start",
+        interactionId: "start_newer_meeting",
+        channelId: "channel_meeting_notes",
+        title: "Newer Meeting",
+        languageMode: "en",
+        occurredAt: "2026-07-11T14:00:00.000Z"
+      });
+      expect(await transport.execute(ask)).toEqual(originalAnswer);
+      expect(await transport.execute(catchup)).toEqual(originalCatchup);
+      const parentAnswer = await transport.execute({
+        ...ask,
+        channelId: "channel_meeting_notes"
+      });
+      expect(parentAnswer.content).toBe(
+        "I do not have enough evidence to answer that factually.\n\nEvidence: none"
+      );
+      const parentCatchup = await transport.execute({
+        ...catchup,
+        channelId: "channel_meeting_notes"
+      });
+      expect(parentCatchup.content).toBe(
+        "No grounded changes are available for this Meeting yet.\n\nEvidence: none"
+      );
+      for (const command of [
+        {
+          ...base,
+          type: "note",
+          interactionId: "note_after_end",
+          channelId: "thread_product",
+          text: "A later note",
+          language: "en"
+        },
+        {
+          ...base,
+          type: "stop",
+          interactionId: "stop_again",
+          channelId: "thread_product"
+        }
+      ] satisfies DiscordCommand[]) {
+        expect((await transport.execute(command)).content).toBe(
+          "There is no active Meeting in this Discord channel."
+        );
+      }
+      expect(
+        (await transport.execute({ ...ask, guildId: "another_guild" })).content
+      ).toBe("Luma is not configured for this Discord server.");
+    } finally {
+      await bot.stop();
+      await database.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("can retry a start after Meeting Intelligence temporarily fails", async () => {
     const database = await createPgliteDatabase();
     const durableMeetingIntelligence = createMeetingIntelligence({

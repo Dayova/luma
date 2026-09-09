@@ -49,7 +49,9 @@ export type MeetingQuery =
     }
   | {
       type: "freeform";
+      /** Bounded supported Meeting question forms; unsupported interpretation fails safely. */
       text: string;
+      /** Requester identity; filters only explicit first-person work questions. */
       participantId?: PersonId;
     }
   | {

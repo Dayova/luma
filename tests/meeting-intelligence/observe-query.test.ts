@@ -1367,7 +1367,7 @@ describe("MeetingIntelligence observe/query", () => {
         meetingId,
         query: {
           type: "freeform",
-          text: "What does Jakob own?",
+          text: "What do I own?",
           participantId: "person_jakob"
         }
       });
@@ -1748,14 +1748,14 @@ describe("MeetingIntelligence observe/query", () => {
       const generalAnswer = await meetingIntelligence.query({
         workspaceId: workspace.workspaceId,
         meetingId,
-        query: { type: "freeform", text: "What is the release checklist Action Item?" }
+        query: { type: "freeform", text: "What are our action items?" }
       });
       const participantAnswer = await meetingIntelligence.query({
         workspaceId: workspace.workspaceId,
         meetingId,
         query: {
           type: "freeform",
-          text: "What does Jakob own?",
+          text: "What do I own?",
           participantId: "person_jakob"
         }
       });

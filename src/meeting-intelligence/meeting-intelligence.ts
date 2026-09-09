@@ -1,3 +1,4 @@
+import { answerScopedMeetingQuestion } from "./meeting-question.js";
 import type {
   ActionItemReconciliationMatchSignal,
   ActionItemReconciliationIntentBinding,
@@ -42,6 +43,7 @@ import type {
 } from "../domain/model.js";
 import { opaqueIdentifierSegment } from "../domain/opaque-id.js";
 import {
+  actionItemOwnership,
   ownershipCanMutateCanonicalWork,
   sameActionItemOwnership
 } from "../domain/action-item-ownership.js";
@@ -2039,52 +2041,16 @@ async function queryMeeting(
         }
       };
     }
-    case "freeform": {
-      const matchingActionItems = query.participantId
-        ? state.actionItems.filter((item) => {
-            const ownership = actionItemOwnership(item);
-            return (
-              ownership.status === "confirmed" &&
-              ownership.ownerPersonId === query.participantId
-            );
-          })
-        : state.actionItems;
-      const evidence = matchingActionItems.flatMap((item) => item.provenance.evidence);
+    case "freeform":
+    case "decision-history":
       return {
-        type: "freeform",
-        answer: {
-          text:
-            matchingActionItems.length > 0
-              ? matchingActionItems
-                  .map((item) => formatActionAnswer(item, query.text))
-                  .join("\n")
-              : "I do not have enough evidence to answer that factually.",
-          evidence,
-          uncertainty: evidence.length > 0 ? "none" : "insufficient-evidence"
-        }
+        type: query.type,
+        answer: answerScopedMeetingQuestion(
+          state,
+          query,
+          await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
+        )
       };
-    }
-    case "decision-history": {
-      const matchingDecisions = state.decisions.filter((decision) =>
-        decision.statement.toLowerCase().includes(query.topic.toLowerCase())
-      );
-      const evidence = matchingDecisions.flatMap(
-        (decision) => decision.provenance.evidence
-      );
-      return {
-        type: "decision-history",
-        answer: {
-          text:
-            matchingDecisions.length > 0
-              ? matchingDecisions
-                  .map((decision) => `${decision.status}: ${decision.statement}`)
-                  .join("\n")
-              : "I do not have evidence for that Decision history.",
-          evidence,
-          uncertainty: evidence.length > 0 ? "none" : "insufficient-evidence"
-        }
-      };
-    }
     case "participant-brief": {
       return {
         type: "participant-brief",
@@ -5156,34 +5122,13 @@ function normalizeMeetingState(state: MeetingState): MeetingState {
 }
 
 function normalizeActionItemOwnership(item: ActionItem): ActionItem {
-  const ownership = item.ownership ?? ownershipForLegacyActionItem(item.ownerId);
+  const ownership = actionItemOwnership(item);
 
   return {
     ...item,
     ownership,
     ownerId: ownership.status === "confirmed" ? ownership.ownerPersonId : null
   };
-}
-
-function ownershipForLegacyActionItem(
-  ownerId: string | null
-): ActionItemOwnershipAttribution {
-  return ownerId
-    ? {
-        status: "proposed",
-        proposedOwnerPersonId: ownerId,
-        confidence: "low",
-        basis: "inferred-assignment"
-      }
-    : {
-        status: "unresolved",
-        reason: "no-owner-stated",
-        likelyOwnerPersonId: null
-      };
-}
-
-function actionItemOwnership(item: ActionItem): ActionItemOwnershipAttribution {
-  return item.ownership ?? ownershipForLegacyActionItem(item.ownerId);
 }
 
 function ownershipForHumanActionItemCorrection(
@@ -7297,25 +7242,6 @@ function buildParticipantBrief(
     ),
     outputLanguage
   };
-}
-
-function formatActionAnswer(item: ActionItem, queryText: string): string {
-  const prefix = /warum|wieso|why/i.test(queryText)
-    ? "Grounded Action Item"
-    : "Action Item";
-  const ownership = actionItemOwnership(item);
-  const owner =
-    ownership.status === "confirmed"
-      ? `confirmed owner ${ownership.ownerPersonId}`
-      : ownership.status === "proposed"
-        ? ownership.proposedOwnerPersonId
-          ? `proposed owner ${ownership.proposedOwnerPersonId}`
-          : "proposed owner requires confirmation"
-        : ownership.status === "intentionally-unassigned"
-          ? "explicitly unassigned by Human Judgment"
-          : "no confirmed owner";
-  const due = item.dueDate ? `due ${item.dueDate}` : "no confirmed deadline";
-  return `${prefix}: ${item.description}; ${owner}; ${due}.`;
 }
 
 function actionItemId(stableKey: string): string {

@@ -885,7 +885,7 @@ async function answerMeetingQuestion(
   }
 
   return {
-    content: `${result.answer.text}\n\n${renderEvidenceSummary(result.answer.evidence)}`
+    content: renderScopedMeetingAnswer(result.answer.text, result.answer.evidence)
   };
 }
 
@@ -1287,4 +1287,26 @@ function renderThreadName(
   const base = `${title} - ${day} ${month} ${year}`;
 
   return `${base.slice(0, Math.max(0, 100 - suffix.length))}${suffix}`.slice(-100);
+}
+
+/** Preserve whole claims and references inside Discord's message budget. */
+function renderScopedMeetingAnswer(
+  text: string,
+  evidence: Array<{ source: string; sourceObjectId: string }>
+): string {
+  if (text.length > 1600)
+    return "This Meeting answer is too large to display safely. Ask about a narrower topic.";
+  const references: string[] = [];
+  const unique = [
+    ...new Set(
+      evidence.map((reference) => `${reference.source}:${reference.sourceObjectId}`)
+    )
+  ];
+  for (const reference of unique) {
+    const candidate = `${text}\n\nEvidence: ${[...references, reference].join(", ")}`;
+    if (candidate.length > 1850) continue;
+    references.push(reference);
+  }
+  const omitted = unique.length - references.length;
+  return `${text}\n\nEvidence: ${references.join(", ") || (omitted > 0 ? "none displayed" : "none")}${omitted > 0 ? `; ${omitted} additional reference(s) retained in the Meeting record.` : ""}`;
 }

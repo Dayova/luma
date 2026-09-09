@@ -1326,6 +1326,137 @@ describe("Discord meeting bot", () => {
     expect(stopRetry).toEqual(response);
   });
 
+  it("keeps a scoped answer intact while reporting Evidence references that do not fit in Discord", async () => {
+    const database = await createPgliteDatabase();
+    const reasoningModel: ReasoningModel = {
+      generateStructured<T>(
+        request: StructuredReasoningRequest<T>
+      ): Promise<StructuredReasoningResult<T>> {
+        const value: MeetingAnalysisProposalBatch = {
+          decisions: request.evidence.map((reference, index) => ({
+            stableKey: `discord-bounds-${index}`,
+            statement: reference.excerpt ?? "",
+            rationale: [],
+            status: "confirmed",
+            supportingParticipantIds: [],
+            objectingParticipantIds: [],
+            relatedTopicIds: [],
+            evidenceIds: [reference.evidenceId],
+            confidence: "high"
+          })),
+          actionItems: [],
+          openQuestions: [],
+          risks: [],
+          followUpIntentions: []
+        };
+        return Promise.resolve({
+          value: value as T,
+          metadata: {
+            provider: "test",
+            model: "bounded-decisions",
+            promptVersion: request.promptVersion
+          }
+        });
+      }
+    };
+    const meetingIntelligence = createMeetingIntelligence({ database, reasoningModel });
+    const transport = new ProgrammableDiscordTransport();
+    const workspace = { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" };
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
+      allowedParentChannelIds: ["channel_meeting_notes"],
+      transport,
+      workspace,
+      guildId: "guild_dayova"
+    });
+    const base = {
+      guildId: "guild_dayova",
+      actorDiscordUserId: "779381502311137301",
+      occurredAt: "2026-09-09T12:00:00.000Z"
+    };
+    try {
+      await bot.start();
+      await transport.execute({
+        ...base,
+        type: "start",
+        interactionId: "bounded",
+        channelId: "channel_meeting_notes",
+        title: "Release bounds",
+        languageMode: "en"
+      });
+      const update = await meetingIntelligence.observe({
+        workspace,
+        observations: Array.from({ length: 8 }, (_, index) => ({
+          type: "utterance-committed" as const,
+          observationId: `bounded:observation:${index}`,
+          workspaceId: workspace.workspaceId,
+          meetingId: "discord_bounded",
+          occurredAt: base.occurredAt,
+          observedAt: base.occurredAt,
+          utteranceId: `long_source_${index}_${"x".repeat(140)}`,
+          version: 1,
+          speaker: {
+            status: "attributed" as const,
+            personId: "person_jakob",
+            confidence: "deterministic" as const,
+            basis: "provider-identity" as const
+          },
+          startedAt: base.occurredAt,
+          endedAt: base.occurredAt,
+          originalText: `Release rule ${index}: ${"Keep the original source and review context. ".repeat(2)}END-${index}`,
+          language: "en" as const
+        }))
+      });
+      expect(update.errors).toEqual([]);
+      const answer = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "discord_bounded",
+        query: { type: "freeform", text: "What did we decide?" }
+      });
+      if (answer.type !== "freeform") throw new Error("Expected a scoped answer");
+      expect(answer.answer.evidence).toHaveLength(8);
+      const response = await transport.execute({
+        ...base,
+        type: "ask",
+        interactionId: "bounded_ask",
+        channelId: "thread_product",
+        question: "What did we decide?"
+      });
+      expect(response.content.startsWith(`${answer.answer.text}\n\nEvidence:`)).toBe(
+        true
+      );
+      expect(response.content.length).toBeLessThanOrEqual(2000);
+      expect(response.content).toContain(
+        "additional reference(s) retained in the Meeting record"
+      );
+      const referenceSection = response.content.slice(answer.answer.text.length);
+      for (const reference of answer.answer.evidence) {
+        if (referenceSection.includes(reference.sourceObjectId.slice(0, 20))) {
+          expect(referenceSection).toContain(
+            `${reference.source}:${reference.sourceObjectId}`
+          );
+        }
+      }
+      const unchanged = await meetingIntelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: "discord_bounded",
+        query: { type: "freeform", text: "What did we decide?" }
+      });
+      expect(unchanged).toEqual(answer);
+    } finally {
+      await bot.stop();
+      await database.close();
+    }
+  });
+
   it("posts a bot-authored Follow-up receipt with explicit Discord mentions", async () => {
     const database = await createPgliteDatabase();
     const meetingIntelligence = createMeetingIntelligence({

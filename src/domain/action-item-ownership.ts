@@ -1,4 +1,4 @@
-import type { ActionItemOwnershipAttribution } from "./model.js";
+import type { ActionItem, ActionItemOwnershipAttribution } from "./model.js";
 
 /**
  * Only these two durable states can authorize a canonical-work mutation.
@@ -42,4 +42,21 @@ export function sameActionItemOwnership(
         right.likelyOwnerPersonId === left.likelyOwnerPersonId
       );
   }
+}
+
+/** Legacy owner IDs remain proposals until Human Judgment confirms ownership. */
+export function actionItemOwnership(item: ActionItem): ActionItemOwnershipAttribution {
+  if (item.ownership) return item.ownership;
+  return item.ownerId
+    ? {
+        status: "proposed",
+        proposedOwnerPersonId: item.ownerId,
+        confidence: "low",
+        basis: "inferred-assignment"
+      }
+    : {
+        status: "unresolved",
+        reason: "no-owner-stated",
+        likelyOwnerPersonId: null
+      };
 }

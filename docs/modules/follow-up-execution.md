@@ -82,8 +82,10 @@ interface FollowUpExecution {
 The current implementation supports approved `create-work-item`,
 `record-meeting`, and `settle-operational-outcome` paths. New generic
 `update-knowledge` proposals are retained only as policy-rejected audit
-records: Luma does not create or update a canonical Notion document until
-LUM-11 provides a Human-selected target, exact region, and conflict policy.
+records. LUM-11's policy is selected: canonical patches require a Human-selected
+target, an exact region, and the agreed conflict checks. The target-bound patch
+implementation and live proof remain outstanding, so generic canonical document
+creation and updates remain unavailable.
 For a historical generic document create whose outcome was already
 indeterminate, or whose execution was interrupted while its reservation was
 still held, `recoverClaimedIntent` may only use the same read-only exact

@@ -1366,6 +1366,13 @@ describe("Discord meeting bot", () => {
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
+      allowedParentChannelIds: ["channel_meeting_notes"],
       transport,
       workspace,
       guildId: "guild_dayova"

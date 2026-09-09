@@ -37,20 +37,29 @@ This runbook provides cold backup, not automatic crash recovery or failover.
 ## Cold backup
 
 1. Record the current release's complete Git commit ID and the absolute durable
-   store path. Build that release with its locked dependency versions.
+   store path. Use that release's already-built, immutable installation with its
+   locked dependency versions. Build it as the deployment user before installing
+   the release; the service account must not build or modify installed code.
 2. Stop the application through its service manager and wait for graceful shutdown
    to finish. Disable any timer, orchestrator, or restart policy that can reopen
    the volume during the maintenance window. Keep the volume attached only to the
    stopped service's host. Application-level execution reservations may remain
    unresolved; preserve them rather than clearing them.
-3. Run the command as the service account, using a **fresh**, private destination
-   outside the database directory. Never load the production `.env` for these
-   commands. The entrypoint imports no application server or live provider.
+3. An administrator first prepares the private destination parents once. If a
+   parent already exists, inspect its owner and contents before changing it;
+   never change another service's directory ownership.
 
 ```sh
-pnpm build
-node dist/src/app/store-maintenance.js backup /var/lib/luma/pglite /var/backups/luma/RELEASE-TIMESTAMP FULL_40_CHARACTER_COMMIT_ID
-node dist/src/app/store-maintenance.js verify-backup /var/backups/luma/RELEASE-TIMESTAMP
+sudo install -d -o luma -g luma -m 0700 /var/backups/luma /var/lib/luma-rehearsal
+```
+
+Run the command as the service account, using a **fresh**, private destination
+outside the database directory. Never load the production `.env` for these
+commands. The entrypoint imports no application server or live provider.
+
+```sh
+sudo -u luma env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/FULL_40_CHARACTER_COMMIT_ID/dist/src/app/store-maintenance.js backup /var/lib/luma/pglite /var/backups/luma/RELEASE-TIMESTAMP FULL_40_CHARACTER_COMMIT_ID
+sudo -u luma env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/FULL_40_CHARACTER_COMMIT_ID/dist/src/app/store-maintenance.js verify-backup /var/backups/luma/RELEASE-TIMESTAMP
 ```
 
 Substitute the actual release ID and timestamp; placeholders are not valid
@@ -61,6 +70,10 @@ and directories, and SHA-256 plus byte counts are verified before completion.
 version, and complete inventory. `manifest.sha256` detects an accidentally
 changed manifest. These hashes detect corruption; they are not a cryptographic
 signature against someone who can rewrite both the data and manifest.
+
+These commands use the absolute immutable release path and a cleared environment;
+they never read `/etc/luma/production.env`. They run outside the application's
+systemd sandbox, whose writable scope intentionally excludes backup storage.
 
 An incomplete command is not a valid backup. Keep its failure output and choose a
 new destination after resolving the cause. Do not overwrite an existing artifact.
@@ -83,8 +96,8 @@ with no provider credentials and no outbound network access. Do not start Luma's
 application server or point its service at this directory.
 
 ```sh
-node dist/src/app/store-maintenance.js restore /var/backups/luma/RELEASE-TIMESTAMP /var/lib/luma-rehearsal/RESTORE-TIMESTAMP
-node dist/src/app/store-maintenance.js verify-restore /var/lib/luma-rehearsal/RESTORE-TIMESTAMP
+sudo -u luma env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/FULL_40_CHARACTER_COMMIT_ID/dist/src/app/store-maintenance.js restore /var/backups/luma/RELEASE-TIMESTAMP /var/lib/luma-rehearsal/RESTORE-TIMESTAMP
+sudo -u luma env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/FULL_40_CHARACTER_COMMIT_ID/dist/src/app/store-maintenance.js verify-restore /var/lib/luma-rehearsal/RESTORE-TIMESTAMP
 ```
 
 Restore verifies every manifest entry and rejects missing, additional, or changed

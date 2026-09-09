@@ -13,7 +13,7 @@ export function renderAiServiceFailure(error: unknown): string {
         return "This request reached Luma's workflow cost or attempt limit, so no new AI call was made. Please ask a narrower question or have a founder review the pending workflow. /meeting usage remains available.";
       }
       const scope = error.limitScope === "day" ? "daily safety" : "shared AI";
-      return `Luma's ${scope} budget cannot cover this request, so no new AI call was made.${error.resetAt ? ` This budget resets ${formatReset(error.resetAt, "Europe/Berlin")}.` : ""} Check /meeting usage; a founder can review the provisional limit.`;
+      return `Luma's ${scope} budget cannot cover this request, so no new AI call was made.${error.resetAt ? ` This budget resets ${formatReset(error.resetAt, error.timezone ?? "UTC")}.` : ""} Check /meeting usage; a founder can review the provisional limit.`;
     }
     case "provider-quota":
       return "Luma's AI provider has reached a billing or quota limit. A founder needs to check the provider account; the monthly Luma budget reset may not resolve it. /meeting usage remains available.";
@@ -148,6 +148,7 @@ export function renderDeferredAnalysis(errors: MeetingIntelligenceError[]): stri
     return `Note saved; the original evidence is safe. AI analysis is deferred. ${renderAiServiceFailure(
       new AiServiceError(code, "Analysis deferred", {
         ...(error.resetAt ? { resetAt: error.resetAt } : {}),
+        ...(error.timezone ? { timezone: error.timezone } : {}),
         ...(error.limitScope ? { limitScope: error.limitScope } : {}),
         ...(error.retryAfterSeconds !== undefined
           ? { retryAfterSeconds: error.retryAfterSeconds }

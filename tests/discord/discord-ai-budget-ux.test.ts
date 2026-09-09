@@ -299,10 +299,38 @@ describe("Discord AI usage and failure experience", () => {
     expect(renderAiUsageWarning(status({ status: "warning" }))).toContain("80%");
   });
 
+  it("renders configured budget timezones through immediate and deferred failures", () => {
+    const details = {
+      limitScope: "month" as const,
+      timezone: "Asia/Tokyo",
+      resetAt: "2026-09-30T15:00:00Z"
+    };
+    expect(
+      renderAiServiceFailure(new AiServiceError("budget-exhausted", "internal", details))
+    ).toContain("1 Oct 2026, 00:00 (Asia/Tokyo)");
+    expect(
+      renderDeferredAnalysis([
+        {
+          code: "analysis-budget-exhausted",
+          retryable: false,
+          ...details
+        }
+      ])
+    ).toContain("1 Oct 2026, 00:00 (Asia/Tokyo)");
+    expect(
+      renderAiServiceFailure(
+        new AiServiceError("budget-exhausted", "legacy", {
+          resetAt: details.resetAt
+        })
+      )
+    ).toContain("30 Sept 2026, 15:00 (UTC)");
+  });
+
   it("distinguishes daily and workflow limits from the shared monthly allowance", () => {
     const daily = renderAiServiceFailure(
       new AiServiceError("budget-exhausted", "internal", {
         limitScope: "day",
+        timezone: "Europe/Berlin",
         resetAt: "2026-09-08T22:00:00Z"
       })
     );

@@ -213,6 +213,7 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
             "There is not enough unreserved monthly AI budget for this request.",
             {
               resetAt: nextBoundary(now, settings.timezone, "month"),
+              timezone: settings.timezone,
               limitScope: "month"
             }
           );
@@ -225,7 +226,11 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
           throw new AiServiceError(
             "budget-exhausted",
             "There is not enough unreserved daily AI budget for this request.",
-            { resetAt: nextBoundary(now, settings.timezone, "day"), limitScope: "day" }
+            {
+              resetAt: nextBoundary(now, settings.timezone, "day"),
+              timezone: settings.timezone,
+              limitScope: "day"
+            }
           );
         }
         const reservationId = randomUUID();

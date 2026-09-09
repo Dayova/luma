@@ -26,6 +26,7 @@ describe("Meeting analysis availability", () => {
             return Promise.reject(
               new AiServiceError(code, "private provider diagnostic", {
                 resetAt,
+                timezone: "Asia/Tokyo",
                 retryAfterSeconds: 20
               })
             );
@@ -62,7 +63,13 @@ describe("Meeting analysis availability", () => {
         expect(update.acceptedObservationIds).toEqual([observation.observationId]);
         expect(update.analysisStatus).toBe("deferred");
         expect(update.errors).toEqual([
-          { code: `analysis-${code}`, retryable, resetAt, retryAfterSeconds: 20 }
+          {
+            code: `analysis-${code}`,
+            retryable,
+            resetAt,
+            timezone: "Asia/Tokyo",
+            retryAfterSeconds: 20
+          }
         ]);
         expect(JSON.stringify(update)).not.toContain("private provider diagnostic");
 

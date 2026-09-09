@@ -1,16 +1,25 @@
 import { PGlite } from "@electric-sql/pglite";
-import { mkdir } from "node:fs/promises";
+import { openOwnedPgliteDatabase } from "./store-ownership.js";
 
 export type LumaDatabase = PGlite;
 
 export async function createPgliteDatabase(dataDir?: string): Promise<LumaDatabase> {
-  if (dataDir && !dataDir.includes("://")) {
-    await mkdir(dataDir, { recursive: true });
+  if (dataDir?.includes("://") && dataDir !== "memory://") {
+    throw new Error(
+      "Durable stores require a local filesystem path for exclusive ownership"
+    );
   }
-
-  const database = new PGlite(dataDir);
-  await runMigrations(database);
-  return database;
+  const database =
+    dataDir && dataDir !== "memory://"
+      ? await openOwnedPgliteDatabase(dataDir, "runtime")
+      : new PGlite(dataDir);
+  try {
+    await runMigrations(database);
+    return database;
+  } catch (error) {
+    await database.close();
+    throw error;
+  }
 }
 
 export async function runMigrations(database: LumaDatabase): Promise<void> {

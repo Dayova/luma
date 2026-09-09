@@ -20,6 +20,15 @@ export type MeetingNotesSyncResult = {
   partialReasons: MeetingNotesScanPartialReason[];
 };
 
+/** Content-free operational state for the canonical recovery schedule. */
+export type MeetingNotesSyncStatus = {
+  active: boolean;
+  scheduled: boolean;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastOutcome: "complete" | "partial" | "failed" | null;
+};
+
 export type MeetingNotesSyncLogger = {
   info(message: string): void;
   warn(message: string): void;
@@ -39,6 +48,7 @@ export type CreateMeetingNotesSyncInput = {
   pageLimit?: number;
   logger?: MeetingNotesSyncLogger;
   scheduleRecurring?: MeetingNotesSyncScheduler;
+  now?: () => Date;
 };
 
 export interface MeetingNotesSync {
@@ -48,6 +58,8 @@ export interface MeetingNotesSync {
   start(): void;
   /** Cancels future runs and waits for an active one before persistence closes. */
   stop(): Promise<void>;
+  /** Content-free schedule and completion status for operations health checks. */
+  status(): MeetingNotesSyncStatus;
 }
 
 const DEFAULT_SYNC_INTERVAL_MS = 60_000;
@@ -70,19 +82,37 @@ export function createMeetingNotesSync(
   const pageLimit = input.pageLimit;
   const logger = input.logger ?? consoleLogger;
   const scheduleRecurring = input.scheduleRecurring ?? defaultScheduleRecurring;
+  const now = input.now ?? (() => new Date());
   let activeRun: Promise<MeetingNotesSyncResult> | null = null;
   let cancelSchedule: (() => void) | null = null;
   let stopped = false;
+  let lastStartedAt: string | null = null;
+  let lastFinishedAt: string | null = null;
+  let lastOutcome: MeetingNotesSyncStatus["lastOutcome"] = null;
 
   const syncOnce = (): Promise<MeetingNotesSyncResult> => {
     if (activeRun) {
       return activeRun;
     }
 
+    lastStartedAt = now().toISOString();
     const run = drainSource(input, pageLimit, logger);
-    activeRun = run.finally(() => {
-      activeRun = null;
-    });
+    activeRun = run
+      .then(
+        (result) => {
+          lastFinishedAt = now().toISOString();
+          lastOutcome = result.completeness === "complete" ? "complete" : "partial";
+          return result;
+        },
+        (error: unknown) => {
+          lastFinishedAt = now().toISOString();
+          lastOutcome = "failed";
+          throw error;
+        }
+      )
+      .finally(() => {
+        activeRun = null;
+      });
     return activeRun;
   };
 
@@ -130,6 +160,15 @@ export function createMeetingNotesSync(
           `Luma Meeting Notes sync stopped after failure: ${errorMessage(error)}`
         );
       }
+    },
+    status() {
+      return {
+        active: activeRun !== null,
+        scheduled: cancelSchedule !== null,
+        lastStartedAt,
+        lastFinishedAt,
+        lastOutcome
+      };
     }
   };
 }

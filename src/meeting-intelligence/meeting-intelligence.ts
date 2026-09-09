@@ -505,6 +505,7 @@ async function observeMeeting(
           retryable: ["rate-limited", "timeout", "unavailable"].includes(error.code),
           ...(error.limitScope ? { limitScope: error.limitScope } : {}),
           ...(error.resetAt ? { resetAt: error.resetAt } : {}),
+          ...(error.timezone ? { timezone: error.timezone } : {}),
           ...(error.retryAfterSeconds !== undefined
             ? { retryAfterSeconds: error.retryAfterSeconds }
             : {})

@@ -32,6 +32,8 @@ import { resolveDiscordMentions } from "../identity/static-identity-directory.js
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { ContextIntelligence } from "../context-intelligence/interface.js";
+import type { ConversationEvidenceProof } from "../context-intelligence/conversation-evidence-source.js";
+import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
 import {
   createDiscordContextAskRateLimiter,
   renderDiscordContextAskResult,
@@ -92,6 +94,8 @@ export type DiscordContextAskResponse = {
   content: string;
   /** Stable message-derived delivery identity for Gateway replay safety. */
   idempotencyKey: string;
+  /** Required for evidence-derived answers, revalidated at the final send boundary. */
+  sourceProof?: ConversationEvidenceProof;
 };
 
 export type DiscordThread = {
@@ -306,10 +310,29 @@ async function answerConversationThread(
       }
     });
 
-    return reply(
+    const response = await reply(
       await appendAiUsageWarning(input, renderDiscordContextAskResult(result))
     );
+    return response
+      ? {
+          ...response,
+          sourceProof: {
+            workspaceId: input.workspace.workspaceId,
+            subject: { ...result.subject },
+            question: result.question,
+            contentHash: result.boundary.contentHash
+          }
+        }
+      : null;
   } catch (error: unknown) {
+    if (
+      error instanceof ContextIntelligenceError &&
+      error.code === "context-inquiry-source-changed"
+    ) {
+      return reply(
+        "The conversation changed or is no longer readable. Post a new @Luma question to use its current state."
+      );
+    }
     return reply(renderAiServiceFailure(error));
   }
 }

@@ -27,6 +27,7 @@ import type {
   CapturedConversationEvidence,
   ConversationEvidenceSource
 } from "../context-intelligence/conversation-evidence-source.js";
+import { requireCurrentConversationEvidence } from "../context-intelligence/conversation-evidence-source.js";
 import {
   createDiscordConversationEvidenceSource,
   type DiscordConversationMessage,
@@ -158,7 +159,8 @@ export function createDiscordJsTransport(
       message,
       handler,
       ask,
-      channelScope
+      channelScope,
+      conversationEvidenceSource
     }).catch(() => {
       reportDiscordDeliveryFailure({
         code: "discord-context-ask-reply-failed",
@@ -419,6 +421,7 @@ async function handleContextAskMention(input: {
   handler: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>;
   ask: DiscordContextAskMention;
   channelScope: ReturnType<typeof createDiscordChannelScope>;
+  conversationEvidenceSource: ConversationEvidenceSource | null;
 }): Promise<void> {
   const mayReply = async (): Promise<boolean> => {
     const surface = await input.channelScope.resolveAllowedChannel(input.ask.channelId);
@@ -438,8 +441,30 @@ async function handleContextAskMention(input: {
     };
   }
   // A failed or ambiguous send must not trigger a second, contradictory reply.
-  if (response && (await mayReply()))
-    await replyToContextAskMessage(input.message, response);
+  if (!response || !(await mayReply())) return;
+  if (response.sourceProof) {
+    const proof = response.sourceProof;
+    if (
+      !input.conversationEvidenceSource ||
+      proof.subject.providerId !== "discord" ||
+      proof.subject.conversationObjectId !== input.ask.channelId ||
+      proof.subject.anchorMessageId !== input.ask.messageId ||
+      proof.question !== input.ask.question
+    )
+      return;
+    try {
+      await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
+    } catch {
+      // Retain the old result for audit, but do not republish its old claims.
+      response = {
+        content:
+          "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+        idempotencyKey: response.idempotencyKey
+      };
+    }
+    if (!(await mayReply())) return;
+  }
+  await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(
@@ -528,7 +553,7 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
       }
 
       try {
-        const message = await thread.messages.fetch(messageId);
+        const message = await thread.messages.fetch({ message: messageId, force: true });
         return discordConversationMessage(message);
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
@@ -567,15 +592,29 @@ async function discordThreadById(
 ): Promise<ThreadChannel | null> {
   const channel = await client.channels.fetch(conversationObjectId, { force: true });
 
-  if (!channel?.isThread()) {
+  if (
+    !channel?.isThread() ||
+    channel.type !== ChannelType.PublicThread ||
+    !channel.parentId
+  ) {
     return null;
   }
 
+  const parent = await client.channels.fetch(channel.parentId, { force: true });
+  if (
+    !parent ||
+    parent.type !== ChannelType.GuildText ||
+    parent.guildId !== channel.guildId
+  )
+    return null;
   const permissions = client.user ? channel.permissionsFor(client.user) : null;
+  const parentPermissions = client.user ? parent.permissionsFor(client.user) : null;
 
   if (
     !permissions?.has(PermissionFlagsBits.ViewChannel) ||
-    !permissions.has(PermissionFlagsBits.ReadMessageHistory)
+    !permissions.has(PermissionFlagsBits.ReadMessageHistory) ||
+    !parentPermissions?.has(PermissionFlagsBits.ViewChannel) ||
+    !parentPermissions.has(PermissionFlagsBits.ReadMessageHistory)
   ) {
     return null;
   }

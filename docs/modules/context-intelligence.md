@@ -27,10 +27,11 @@ asking its owned `ContextAnswerer` port.
 
 - An inquiry ID is idempotent only for the exact original question and subject.
 - A successful answer is bound to a specific immutable conversation revision
-  and content hash. Replay retrieves that historic revision rather than
-  recapturing or re-answering.
+  and content hash. Replay revalidates the current bounded source before reusing
+  that answer; it never reruns the Answerer for a completed inquiry.
 - Stored answers are replayed only if their subject, boundary, and supporting
-  Evidence still exactly match the persisted source revision.
+  Evidence still exactly match both the persisted source revision and a fresh
+  eligible capture. Changed, removed, partial, or unreadable history blocks replay.
 - The persisted result carries a SHA-256 corruption check; replay rejects a
   changed result rather than silently strengthening its wording or provenance.
 - Facts, answers, and inferences are grounded in captured available Evidence. Inferences
@@ -55,11 +56,28 @@ thread after the triggering mention.
 The runtime needs Discord's privileged Message Content intent because the
 mention-only exception does not expose surrounding history. It bounds both
 message count and captured text, and marks the result incomplete rather than
-calling the answerer when history is truncated, unreadable, non-text, or
-contains bot, webhook, or system messages. Capturing a current snapshot does
-not promise future edit/deletion event retention; that needs its own consent
-and retention slice. The OpenAI adapter requests `store: false`; that does not
-replace channel consent or change Luma's own durable evidence retention.
+calling the answerer when history is truncated, unreadable, non-text, or contains
+unknown bot, webhook, or system messages. Plain text messages from the currently
+connected Luma bot are excluded with their IDs and author identity recorded and
+a visible coverage note. They never become Human Evidence. They still count
+toward scan limits; polls and other unsupported content remain incomplete even
+when posted by Luma. This permits repeated questions in the same thread.
+
+Completed answers are persisted before the final freshness check, so a source
+edit during reasoning blocks publication without causing a duplicate paid run.
+Before sending an evidence-derived Discord answer, the adapter rereads its exact
+boundary, current anchor question, and bot reading permission, then rechecks the
+configured channel scope. A change or loss of access produces a fixed recovery
+message without old claims. These are bounded observations immediately before
+delivery; Discord offers no atomic snapshot-and-send transaction.
+
+Each new mention captures current history up to that mention. Approved captures
+and their history are retained by default; failed freshness checks do not delete
+them or infer deletion from an unavailable read. Continuous edit/delete event
+retention, organization-wide ranking, and cross-provider retrieval remain
+separate work. They are not required to ask about the current selected thread.
+The OpenAI adapter requests `store: false`; this does not replace participant
+notice or change Luma's durable evidence retention.
 
 ## Dependencies
 

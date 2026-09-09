@@ -16,7 +16,7 @@ export type ConversationContextSubject = {
 export type ContextInquiry = {
   type: "ask";
   workspaceId: WorkspaceId;
-  /** Stable interaction/run identity. Repeating it replays the first answer. */
+  /** Repeats reuse the first answer only while its exact source remains eligible. */
   inquiryId: string;
   question: string;
   subject: ConversationContextSubject;
@@ -69,6 +69,7 @@ export type ContextInquiryWarning = {
   code:
     | "conversation-boundary-incomplete"
     | "conversation-evidence-deleted"
+    | "conversation-assistant-output-excluded"
     | "context-answer-unavailable";
   message: string;
 };

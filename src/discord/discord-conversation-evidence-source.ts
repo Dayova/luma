@@ -105,11 +105,22 @@ export function createDiscordConversationEvidenceSource(
       validateDiscordSubject(captureInput.workspaceId, captureInput.subject);
       const subject = captureInput.subject;
       const thread = await readThread(input, subject);
-      const anchor = await readAnchor(input, subject, thread);
+      const anchor = await readAnchor(input, subject, thread, captureInput.question);
       const capture = await readThreadThroughAnchor(input, thread.id, anchor);
+      const botUserId = input.botUserId();
+      const excludedMessages = capture.messages
+        .filter((message) => isLumaOutput(message, botUserId))
+        .sort(compareDiscordMessagesChronologically)
+        .map((message) => ({
+          messageId: message.id,
+          providerUserId: message.author.providerUserId,
+          reason: "assistant-output" as const
+        }));
       const partialReasons = [
         ...capture.partialReasons,
-        ...incompleteEvidenceReasons(capture.messages)
+        ...incompleteEvidenceReasons(
+          capture.messages.filter((message) => !isLumaOutput(message, botUserId))
+        )
       ];
       const messages = capture.messages
         .filter(isReadableHumanTextMessage)
@@ -157,6 +168,7 @@ export function createDiscordConversationEvidenceSource(
             messageIds: messages.map((message) => message.id)
           },
           messages,
+          ...(excludedMessages.length > 0 ? { excludedMessages } : {}),
           completeness:
             partialReasons.length === 0
               ? { state: "complete" }
@@ -250,7 +262,8 @@ async function readThread(
 async function readAnchor(
   input: CreateDiscordConversationEvidenceSourceInput,
   subject: ConversationContextSubject,
-  thread: DiscordConversationThread
+  thread: DiscordConversationThread,
+  question?: string
 ): Promise<DiscordConversationMessage> {
   const anchor = await input.reader.readMessage({
     conversationObjectId: thread.id,
@@ -267,7 +280,9 @@ async function readAnchor(
     !input.config.allowedDiscordUserIds.includes(anchor.author.providerUserId) ||
     !botUserId ||
     !anchor.mentionedDiscordUserIds.includes(botUserId) ||
-    !questionAfterLeadingDiscordBotMention(anchor.content, botUserId)
+    !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
+    (question !== undefined &&
+      questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question)
   ) {
     throw new DiscordConversationEvidenceError(
       "discord-conversation-anchor-unavailable",
@@ -456,6 +471,20 @@ function incompleteEvidenceReasons(
 
 function isReadableHumanTextMessage(message: DiscordConversationMessage): boolean {
   return message.authorKind === "human" && message.content.trim().length > 0;
+}
+
+function isLumaOutput(
+  message: DiscordConversationMessage,
+  botUserId: string | null
+): boolean {
+  return (
+    botUserId !== null &&
+    message.authorKind === "bot" &&
+    message.author.providerUserId === botUserId &&
+    message.kind === "message" &&
+    !message.hasUnsupportedContent &&
+    message.content.trim().length > 0
+  );
 }
 
 function rawConversationMessage(

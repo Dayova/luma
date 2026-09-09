@@ -11,6 +11,7 @@ import type {
   CapturedConversationEvidence,
   ConversationEvidenceSource
 } from "./conversation-evidence-source.js";
+import { requireCurrentConversationEvidence } from "./conversation-evidence-source.js";
 import type {
   ContextBoundary,
   ContextEvidence,
@@ -59,6 +60,7 @@ export class ContextIntelligenceError extends Error {
       | "context-inquiry-id-conflict"
       | "context-inquiry-corrupt"
       | "context-inquiry-replay-unavailable"
+      | "context-inquiry-source-changed"
       | "conversation-capture-invalid"
       | "conversation-capture-unavailable"
       | "context-answer-invalid"
@@ -108,12 +110,18 @@ async function inquire(
   const existing = await readContextInquiry(input.database, immutableInquiry);
 
   if (existing) {
-    return existingContextInquiryResult({
+    const result = await existingContextInquiryResult({
       ledger: input.ledger,
       inquiry: immutableInquiry,
       row: existing,
       requestHash
     });
+    await requireCurrentResult(
+      input.conversationEvidenceSource,
+      immutableInquiry,
+      result
+    );
+    return result;
   }
 
   const captured = await captureConversationEvidence(
@@ -149,6 +157,7 @@ async function inquire(
     failureMessage: "Captured conversation does not match its immutable ledger revision"
   });
   const result = await answerInquiry(input.answerer, immutableInquiry, immutableRecorded);
+  result.warnings.push(...assistantOutputWarning(immutableRecorded.snapshot));
 
   const persisted = await persistContextInquiry({
     database: input.database,
@@ -159,14 +168,44 @@ async function inquire(
     createdAt: now().toISOString()
   });
 
-  return persisted.status === "persisted"
-    ? persisted.result
-    : existingContextInquiryResult({
-        ledger: input.ledger,
-        inquiry: immutableInquiry,
-        row: persisted.row,
-        requestHash
-      });
+  const finalResult =
+    persisted.status === "persisted"
+      ? persisted.result
+      : await existingContextInquiryResult({
+          ledger: input.ledger,
+          inquiry: immutableInquiry,
+          row: persisted.row,
+          requestHash
+        });
+  // Persist completed model work before checking freshness: a duplicate must
+  // never make another paid request just because its source changed mid-answer.
+  await requireCurrentResult(
+    input.conversationEvidenceSource,
+    immutableInquiry,
+    finalResult
+  );
+  return finalResult;
+}
+
+async function requireCurrentResult(
+  source: ConversationEvidenceSource,
+  inquiry: ContextInquiry,
+  result: ContextInquiryResult
+): Promise<void> {
+  try {
+    await requireCurrentConversationEvidence(source, {
+      workspaceId: inquiry.workspaceId,
+      subject: { ...inquiry.subject },
+      question: inquiry.question,
+      contentHash: result.boundary.contentHash
+    });
+  } catch {
+    throw new ContextIntelligenceError(
+      "context-inquiry-source-changed",
+      false,
+      "The captured conversation changed or is unreadable. Post a new question to use its current state."
+    );
+  }
 }
 
 async function captureConversationEvidence(
@@ -176,7 +215,8 @@ async function captureConversationEvidence(
   try {
     return await source.capture({
       workspaceId: inquiry.workspaceId,
-      subject: { ...inquiry.subject }
+      subject: { ...inquiry.subject },
+      question: inquiry.question
     });
   } catch (error: unknown) {
     if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
@@ -510,7 +550,8 @@ function storedContextInquiryMatches(
         expectedBoundary,
         expectedEvidence,
         recorded.snapshot
-      )
+      ),
+      assistantOutputWarning(recorded.snapshot)
     );
   }
 
@@ -522,7 +563,8 @@ function storedContextInquiryMatches(
         expectedBoundary,
         expectedEvidence,
         "The captured thread has no currently available message text, so Luma cannot answer reliably."
-      )
+      ),
+      assistantOutputWarning(recorded.snapshot)
     );
   }
 
@@ -532,14 +574,18 @@ function storedContextInquiryMatches(
       expectedEvidence.some((evidence) => evidence.state === "deleted")
         ? "partial"
         : "none") &&
-    sameContextWarnings(result.warnings, deletedEvidenceWarning(expectedEvidence)) &&
+    sameContextWarnings(result.warnings, [
+      ...deletedEvidenceWarning(expectedEvidence),
+      ...assistantOutputWarning(recorded.snapshot)
+    ]) &&
     result.modelMetadata !== undefined
   );
 }
 
 function sameCanonicalNoAnswerResult(
   actual: ContextInquiryResult,
-  expected: ContextInquiryResult
+  expected: ContextInquiryResult,
+  extraWarnings: ContextInquiryWarning[]
 ): boolean {
   return (
     actual.answer.text === expected.answer.text &&
@@ -548,7 +594,7 @@ function sameCanonicalNoAnswerResult(
     actual.inferences.length === 0 &&
     sameStringArray(actual.unresolved, expected.unresolved) &&
     actual.uncertainty === expected.uncertainty &&
-    sameContextWarnings(actual.warnings, expected.warnings) &&
+    sameContextWarnings(actual.warnings, [...expected.warnings, ...extraWarnings]) &&
     actual.modelMetadata === undefined
   );
 }
@@ -838,6 +884,20 @@ function insufficientEvidenceResult(
       }
     ]
   };
+}
+
+function assistantOutputWarning(
+  snapshot: RawConversationSnapshot
+): ContextInquiryWarning[] {
+  const count = snapshot.excludedMessages?.length ?? 0;
+  return count === 0
+    ? []
+    : [
+        {
+          code: "conversation-assistant-output-excluded",
+          message: `${count} prior Luma text message(s) were excluded from Human Evidence.`
+        }
+      ];
 }
 
 function deletedEvidenceWarning(evidence: ContextEvidence[]): ContextInquiryWarning[] {
@@ -1246,6 +1306,7 @@ function isContextInquiryWarning(value: unknown): value is ContextInquiryWarning
     isRecord(value) &&
     (value["code"] === "conversation-boundary-incomplete" ||
       value["code"] === "conversation-evidence-deleted" ||
+      value["code"] === "conversation-assistant-output-excluded" ||
       value["code"] === "context-answer-unavailable") &&
     isNonBlankString(value["message"])
   );

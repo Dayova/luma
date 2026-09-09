@@ -1,5 +1,25 @@
 # Architecture Review
 
+> Historical foundation review, recorded on 2026-07-06 in commit `4995c9e`.
+> The original findings below describe that foundation slice, not the current
+> implementation or production readiness.
+
+## Current-state Clarification — 2026-09-08
+
+Follow-up Execution now persists reservations, staged settlement outcomes,
+and recovery state; its original in-instance-only idempotency finding below
+is historical. Production provider and Discord SDKs now live behind owned
+Adapters, so the original repository-wide import scan is also historical.
+Bounded read-only Context Ask and a provider-neutral Logical Meeting binding
+foundation have since been added. Granola ingestion and multi-capture
+synthesis remain incomplete.
+
+Use the [current delivery boundary](../../README.md#current-delivery-boundary),
+[Follow-up Execution](../modules/follow-up-execution.md),
+[Context Intelligence](../modules/context-intelligence.md), and
+[Logical Meeting ADR](../adr/0008-provider-neutral-logical-meetings.md) for
+current scope and limitations. The original review is preserved below.
+
 ## Scope
 
 This review covers the first foundation slice: TypeScript setup, domain model, Meeting Intelligence, provider-neutral capability Interfaces, Follow-up Execution, persistence, and behavioural tests.

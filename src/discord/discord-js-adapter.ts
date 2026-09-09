@@ -1,3 +1,8 @@
+import {
+  createDiscordChannelScope,
+  discordAllowedParentChannelIdsFromEnv,
+  type DiscordChannelSurface
+} from "./discord-channel-scope.js";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -49,6 +54,7 @@ export type DiscordJsTransportConfig = {
   token: string;
   clientId: string;
   guildId: string;
+  allowedParentChannelIds: readonly string[];
   contextAsk?: DiscordContextAskConfig;
 };
 
@@ -68,8 +74,22 @@ export class DiscordJsAdapterError extends Error {
 export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
+  if (
+    config.contextAsk?.parentChannelIds.some(
+      (id) => !config.allowedParentChannelIds.includes(id)
+    )
+  ) {
+    throw new Error(
+      "Discord Context Ask parent channels must be within the common Discord channel scope"
+    );
+  }
   const client = new Client({
     intents: discordGatewayIntentsForContextAsk(config.contextAsk)
+  });
+  const channelScope = createDiscordChannelScope({
+    guildId: config.guildId,
+    allowedParentChannelIds: config.allowedParentChannelIds,
+    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId)
   });
   let commandHandler:
     ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null = null;
@@ -90,7 +110,7 @@ export function createDiscordJsTransport(
       return;
     }
 
-    void handleInteraction(interaction, config.guildId, commandHandler)
+    void handleInteraction(interaction, config.guildId, commandHandler, channelScope)
       .catch(async () => {
         const content =
           "Luma could not process the command right now. Please try again later.";
@@ -137,7 +157,8 @@ export function createDiscordJsTransport(
     void handleContextAskMention({
       message,
       handler,
-      ask
+      ask,
+      channelScope
     }).catch(() => {
       reportDiscordDeliveryFailure({
         code: "discord-context-ask-reply-failed",
@@ -161,10 +182,16 @@ export function createDiscordJsTransport(
       commandHandler = null;
       contextAskHandler = null;
     },
+    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId),
     async createThread(input): Promise<DiscordThread> {
-      const channel = await client.channels.fetch(input.parentChannelId);
+      const channel = await client.channels.fetch(input.parentChannelId, { force: true });
 
-      if (!channel || channel.type !== ChannelType.GuildText) {
+      if (
+        !channel ||
+        channel.type !== ChannelType.GuildText ||
+        channel.guildId !== config.guildId ||
+        !config.allowedParentChannelIds.includes(channel.id)
+      ) {
         throw new DiscordJsAdapterError(
           "discord-thread-parent-invalid",
           "The /meeting start command must be used in a server text channel"
@@ -203,7 +230,30 @@ export function createDiscordJsTransport(
       };
     },
     async sendMessage(input) {
-      const channel = await client.channels.fetch(input.channelId);
+      const channel = await client.channels.fetch(input.channelId, { force: true });
+      if (
+        !channel ||
+        channel.type !== ChannelType.PublicThread ||
+        channel.guildId !== config.guildId ||
+        !channel.parentId ||
+        !config.allowedParentChannelIds.includes(channel.parentId)
+      ) {
+        throw new DiscordJsAdapterError(
+          "discord-channel-not-allowed",
+          "Luma is not enabled in this Discord channel."
+        );
+      }
+      const parent = await client.channels.fetch(channel.parentId, { force: true });
+      if (
+        !parent ||
+        parent.type !== ChannelType.GuildText ||
+        parent.guildId !== config.guildId
+      ) {
+        throw new DiscordJsAdapterError(
+          "discord-channel-not-allowed",
+          "Luma is not enabled in this Discord channel."
+        );
+      }
 
       if (!channel?.isSendable()) {
         throw new DiscordJsAdapterError(
@@ -219,6 +269,7 @@ export function createDiscordJsTransport(
         return;
       }
 
+      await channelScope.requireChannel(input.channelId, "public-thread");
       await channel.send({
         content: renderDiscordMessage(input.content, marker),
         allowedMentions: {
@@ -246,6 +297,46 @@ export function createDiscordJsTransport(
   };
 }
 
+async function resolveDiscordChannel(
+  client: Client,
+  channelId: string
+): Promise<DiscordChannelSurface | null> {
+  const channel = await client.channels.fetch(channelId, { force: true });
+  if (
+    !channel ||
+    !("guildId" in channel) ||
+    !client.user ||
+    !channel.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
+  )
+    return null;
+  if (channel.type === ChannelType.GuildText) {
+    return {
+      id: channel.id,
+      guildId: channel.guildId,
+      kind: "text-channel",
+      parentChannelId: null
+    };
+  }
+  if (channel.type === ChannelType.PublicThread) {
+    if (!channel.parentId) return null;
+    const parent = await client.channels.fetch(channel.parentId, { force: true });
+    if (
+      !parent ||
+      parent.type !== ChannelType.GuildText ||
+      parent.guildId !== channel.guildId ||
+      !parent.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
+    )
+      return null;
+    return {
+      id: channel.id,
+      guildId: channel.guildId,
+      kind: "public-thread",
+      parentChannelId: channel.parentId
+    };
+  }
+  return null;
+}
+
 export function createDiscordJsTransportFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env)
@@ -265,6 +356,7 @@ export function createDiscordJsTransportFromEnv(
     token,
     clientId,
     guildId,
+    allowedParentChannelIds: discordAllowedParentChannelIdsFromEnv(env),
     ...(contextAsk ? { contextAsk } : {})
   });
 }
@@ -292,7 +384,8 @@ async function registerMeetingCommand(config: DiscordJsTransportConfig): Promise
 async function handleInteraction(
   interaction: ChatInputCommandInteraction,
   guildId: string,
-  commandHandler: ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null
+  commandHandler: ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null,
+  channelScope: ReturnType<typeof createDiscordChannelScope>
 ): Promise<void> {
   if (!commandHandler) {
     throw new DiscordJsAdapterError(
@@ -313,8 +406,11 @@ async function handleInteraction(
     flags: MessageFlags.Ephemeral
   });
   const response = await commandHandler(toDiscordCommand(interaction));
+  const admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
   await interaction.editReply({
-    content: truncateDiscordMessage(response.content)
+    content: admitted
+      ? truncateDiscordMessage(response.content)
+      : "Luma is not enabled in this Discord channel."
   });
 }
 
@@ -322,7 +418,16 @@ async function handleContextAskMention(input: {
   message: Message;
   handler: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>;
   ask: DiscordContextAskMention;
+  channelScope: ReturnType<typeof createDiscordChannelScope>;
 }): Promise<void> {
+  const mayReply = async (): Promise<boolean> => {
+    const surface = await input.channelScope.resolveAllowedChannel(input.ask.channelId);
+    return (
+      surface?.kind === "public-thread" &&
+      surface.parentChannelId === input.ask.parentChannelId
+    );
+  };
+  if (!(await mayReply())) return;
   let response: DiscordContextAskResponse | null;
   try {
     response = await input.handler(input.ask);
@@ -333,7 +438,8 @@ async function handleContextAskMention(input: {
     };
   }
   // A failed or ambiguous send must not trigger a second, contradictory reply.
-  if (response) await replyToContextAskMessage(input.message, response);
+  if (response && (await mayReply()))
+    await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(
@@ -459,7 +565,7 @@ async function discordThreadById(
   client: Client,
   conversationObjectId: string
 ): Promise<ThreadChannel | null> {
-  const channel = await client.channels.fetch(conversationObjectId);
+  const channel = await client.channels.fetch(conversationObjectId, { force: true });
 
   if (!channel?.isThread()) {
     return null;

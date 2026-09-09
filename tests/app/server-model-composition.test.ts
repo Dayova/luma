@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { startServer } from "../../src/app/server.js";
 import type { ReasoningModel } from "../../src/ai/reasoning-model.js";
 import type { ContextAnswerer } from "../../src/context-intelligence/context-answerer.js";
+import type { DiscordChannelSurface } from "../../src/discord/discord-channel-scope.js";
 import type { DiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 import type { LumaDatabase } from "../../src/persistence/db.js";
 import type { OpenAIReasoningModelConfig } from "../../src/ai/openai-reasoning-model.js";
@@ -178,6 +179,17 @@ function createServerHarness(): {
   const transport: DiscordJsTransport = {
     connect: () => Promise.resolve(),
     disconnect: () => Promise.resolve(),
+    resolveChannel: ({ channelId }): Promise<DiscordChannelSurface | null> =>
+      Promise.resolve(
+        channelId === "100000000000000001"
+          ? {
+              id: channelId,
+              guildId: "guild_test",
+              kind: "text-channel",
+              parentChannelId: null
+            }
+          : null
+      ),
     createThread: () =>
       Promise.resolve({
         id: "thread_test",
@@ -233,7 +245,8 @@ function serverEnv(configuredModel: string | undefined): NodeJS.ProcessEnv {
     DISCORD_GUILD_ID: "guild_test",
     OPENAI_API_KEY: "openai-test-key",
     LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
-    LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "channel_test",
+    LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: "100000000000000001",
+    LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "100000000000000001",
     LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301",
     ...(configuredModel === undefined
       ? {}

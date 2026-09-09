@@ -234,7 +234,15 @@ When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and repor
 DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=
 ```
+
+Configure comma-separated numeric IDs of reviewed founder-only text parents in
+`LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`. Blank means no channel work is
+permitted; malformed or duplicate IDs fail before resources are allocated.
+Meeting commands and replies require this common scope. Channel names do not
+grant access, and stored threads are rechecked against their current parent.
+This checks channel scope; live reader permissions still need verification.
 
 See `docs/integrations/discord.md` for Application creation, installation permissions, command behavior, and smoke testing. Never reuse the development token in production.
 
@@ -256,6 +264,7 @@ prerequisites, not authorization:
 
 ```dotenv
 LUMA_DISCORD_CONTEXT_ASK_ENABLED=1
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=123456789012345678
 LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS=123456789012345678
 LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS=779381502311137301
 LUMA_DISCORD_CONTEXT_ASK_MAX_MESSAGES=50
@@ -263,7 +272,8 @@ LUMA_DISCORD_CONTEXT_ASK_MAX_EVIDENCE_CHARS=32000
 LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS=60000
 ```
 
-All three limits are hard-validated. The channel and user allowlists are
+All three limits are hard-validated. Context Ask parents must be a subset of the
+common allowed parents, including for usage/status replies. The channel and user allowlists are
 mandatory; an incomplete attempted enablement fails before the Discord Gateway
 connects. Luma captures only text history ending at the triggering mention. A
 truncated, unreadable, non-text, bot, webhook, or system message produces an
@@ -334,6 +344,7 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `DISCORD_TOKEN`                                      | For bot           | Discord Adapter          | Secret Gateway and REST token.                                               |
 | `DISCORD_CLIENT_ID`                                  | For bot           | Discord Adapter          | Discord Application ID.                                                      |
 | `DISCORD_GUILD_ID`                                   | For bot           | Discord Adapter          | Server receiving guild-scoped commands.                                      |
+| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.               |
 | `LUMA_DISCORD_CONTEXT_ASK_ENABLED`                   | No; exact `1`     | Discord Context Ask      | Enables the separately scoped, read-only thread Ask runtime.                 |
 | `LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS`        | With Context Ask  | Discord Context Ask      | Comma-separated parent-channel allowlist for public threads.                 |
 | `LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS`  | With Context Ask  | Discord Context Ask      | Comma-separated Discord-user allowlist for mentions.                         |

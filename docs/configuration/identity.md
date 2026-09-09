@@ -39,6 +39,15 @@ Before live rollout, verify that all selected parent channels and output
 destinations are visible only to the founders and required integration accounts.
 Do not infer that proof from a successful actor-admission test.
 
+The common `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS` configuration independently
+restricts Meeting commands, Context Ask and shared Meeting replies to reviewed
+text parents and their public threads. Empty scope denies channel work. Current
+guild, type and parent are checked rather than trusting a stored Meeting mapping.
+This does not enumerate every potential reader or detect all role-permission
+changes; live audience verification remains required. The
+[current channel inventory](../integrations/discord.md#current-dayova-channel-inventory)
+excludes `allgemein` and `gäste` from the initial internal scope.
+
 The native review module remains dormant. Before exposing a native ingress,
 apply the same independent admission policy before both fresh review and durable
 receipt replay; uniquely mapping a native actor is insufficient authorization.

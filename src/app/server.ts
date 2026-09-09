@@ -1,3 +1,4 @@
+import { discordAllowedParentChannelIdsFromEnv } from "../discord/discord-channel-scope.js";
 import type {
   ReasoningModel,
   StructuredReasoningRequest,
@@ -83,7 +84,17 @@ export async function startServer(
   const config = loadAppConfigFromEnv(env);
   rejectConflictingNotionMeetingNotesTopology(env);
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
+  const allowedParentChannelIds = discordAllowedParentChannelIdsFromEnv(env);
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
+  if (
+    discordContextAskConfig?.parentChannelIds.some(
+      (id) => !allowedParentChannelIds.includes(id)
+    )
+  ) {
+    throw new Error(
+      "Discord Context Ask parent channels must be within LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS"
+    );
+  }
   const openAIReasoningModelName = openAIReasoningModelNameFromEnv(env);
   // Validate operating limits before acquiring database or transport resources.
   const aiBudgetSettings = aiUsageBudgetSettingsFromEnv(env);
@@ -232,6 +243,7 @@ export async function startServer(
       transport: discordTransport,
       workspace,
       guildId,
+      allowedParentChannelIds,
       aiUsage,
       ...(discordContextAskConfig && contextIntelligence
         ? {

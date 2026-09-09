@@ -12,6 +12,7 @@ import {
   type DiscordThread,
   type DiscordTransport
 } from "../../src/discord/discord-meeting-bot.js";
+import type { DiscordChannelSurface } from "../../src/discord/discord-channel-scope.js";
 import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
 import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 import type {
@@ -155,6 +156,22 @@ class RecordingKnowledgeProvider implements KnowledgeProvider {
 }
 
 class TestDiscordTransport implements DiscordTransport {
+  private readonly channels = new Map<string, DiscordChannelSurface>([
+    [
+      "channel_product",
+      {
+        id: "channel_product",
+        guildId: "guild_dayova",
+        kind: "text-channel",
+        parentChannelId: null
+      }
+    ]
+  ]);
+
+  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null> {
+    return Promise.resolve(this.channels.get(input.channelId) ?? null);
+  }
+
   readonly sentMessages: Array<{
     channelId: string;
     content: string;
@@ -175,7 +192,13 @@ class TestDiscordTransport implements DiscordTransport {
     return Promise.resolve();
   }
 
-  createThread(): Promise<DiscordThread> {
+  createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread> {
+    this.channels.set("thread_product", {
+      id: "thread_product",
+      guildId: "guild_dayova",
+      kind: "public-thread",
+      parentChannelId: input.parentChannelId
+    });
     return Promise.resolve({
       id: "thread_product",
       url: "https://discord.com/channels/guild_dayova/thread_product"
@@ -217,6 +240,7 @@ async function createLegacyGenericKnowledgeDiscordContext() {
   const knowledgeProvider = new RecordingKnowledgeProvider();
   const transport = new TestDiscordTransport();
   const bot = createDiscordMeetingBot({
+    allowedParentChannelIds: ["channel_product"],
     authorizedPersonIds: [
       "person_jakob",
       "person_fabius",
@@ -419,6 +443,7 @@ describe("Discord follow-up commands", () => {
     });
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_product"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -526,6 +551,7 @@ describe("Discord follow-up commands", () => {
     const workProvider = new LinearWorkProvider();
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_product"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",
@@ -627,6 +653,7 @@ describe("Discord follow-up commands", () => {
     const workProvider = new LinearWorkProvider();
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      allowedParentChannelIds: ["channel_product"],
       authorizedPersonIds: [
         "person_jakob",
         "person_fabius",

@@ -9,6 +9,7 @@ import {
   renderAiUsageStatus,
   renderAiUsageWarning
 } from "../../src/discord/discord-ai-status.js";
+import type { DiscordChannelSurface } from "../../src/discord/discord-channel-scope.js";
 import type { DiscordContextAskMention } from "../../src/discord/discord-context-ask-runtime.js";
 import {
   createDiscordMeetingBot,
@@ -40,6 +41,20 @@ const mention: DiscordContextAskMention = {
 };
 
 class ScriptedTransport implements DiscordTransport {
+  private readonly channels = new Map<string, DiscordChannelSurface>([
+    [
+      "parent",
+      { id: "parent", guildId: "guild", kind: "text-channel", parentChannelId: null }
+    ],
+    [
+      "thread",
+      { id: "thread", guildId: "guild", kind: "public-thread", parentChannelId: "parent" }
+    ]
+  ]);
+  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null> {
+    return Promise.resolve(this.channels.get(input.channelId) ?? null);
+  }
+
   command: (command: DiscordCommand) => Promise<DiscordCommandResponse> = () =>
     Promise.reject(new Error("not connected"));
   mention: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null> =
@@ -55,12 +70,18 @@ class ScriptedTransport implements DiscordTransport {
   disconnect(): Promise<void> {
     return Promise.resolve();
   }
-  createThread = vi.fn(() =>
-    Promise.resolve({
+  createThread = vi.fn((input: { parentChannelId: string; name: string }) => {
+    this.channels.set("meeting-thread", {
+      id: "meeting-thread",
+      guildId: "guild",
+      kind: "public-thread",
+      parentChannelId: input.parentChannelId
+    });
+    return Promise.resolve({
       id: "meeting-thread",
       url: "https://discord.com/channels/guild/meeting-thread"
-    })
-  );
+    });
+  });
   sendMessage = vi.fn(() => Promise.resolve());
 }
 
@@ -106,6 +127,7 @@ async function fixture(
   const transport = new ScriptedTransport();
   let time = new Date(commandBase.occurredAt).getTime();
   const bot = createDiscordMeetingBot({
+    allowedParentChannelIds: ["parent"],
     database,
     meetingIntelligence,
     identityDirectory: createLumaTeamIdentityDirectory(),

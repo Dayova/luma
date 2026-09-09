@@ -104,6 +104,7 @@ function createLifecycleHarness() {
   const transport: DiscordJsTransport = {
     connect,
     disconnect,
+    resolveChannel: () => Promise.resolve(null),
     createThread: () => Promise.reject(new Error("unexpected thread creation")),
     sendMessage: () => Promise.reject(new Error("unexpected message send")),
     capture: () => Promise.reject(new Error("unexpected evidence capture"))

@@ -217,6 +217,12 @@ async function createLegacyGenericKnowledgeDiscordContext() {
   const knowledgeProvider = new RecordingKnowledgeProvider();
   const transport = new TestDiscordTransport();
   const bot = createDiscordMeetingBot({
+    authorizedPersonIds: [
+      "person_jakob",
+      "person_fabius",
+      "person_philipp",
+      "person_julius"
+    ],
     database,
     meetingIntelligence,
     followUpExecution: createFollowUpExecution({
@@ -413,6 +419,12 @@ describe("Discord follow-up commands", () => {
     });
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       followUpExecution,
@@ -514,6 +526,12 @@ describe("Discord follow-up commands", () => {
     const workProvider = new LinearWorkProvider();
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       followUpExecution: createFollowUpExecution({
@@ -564,7 +582,7 @@ describe("Discord follow-up commands", () => {
         intentId: "intent_linear_release"
       });
       expect(unmappedResponse.content).toBe(
-        "Only a mapped Luma participant can record or judge Meeting evidence."
+        "You do not have access to Luma in this workspace."
       );
     }
     const response = await transport.execute({
@@ -609,6 +627,12 @@ describe("Discord follow-up commands", () => {
     const workProvider = new LinearWorkProvider();
     const transport = new TestDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       followUpExecution: createFollowUpExecution({

@@ -27,6 +27,8 @@ import { createPgliteDatabase } from "../persistence/db.js";
 import { createLinearWorkProviderFromEnv } from "../work/linear-work-provider.js";
 import { toWorkCatalog } from "../work/interface.js";
 import { loadAppConfigFromEnv } from "./env.js";
+import { dayovaFounderPersonIds } from "./founder-access.js";
+import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 
 export type RunningLumaApp = {
   stop(): Promise<void>;
@@ -80,11 +82,31 @@ export async function startServer(
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
   }
 
+  const identityDirectory = createIdentityDirectoryFromEnv(env);
+  const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
+  const accessPolicy = createWorkspaceAccessPolicy({
+    workspaceId,
+    identityDirectory,
+    authorizedPersonIds: dayovaFounderPersonIds
+  });
+  for (const providerUserId of discordContextAskConfig?.allowedDiscordUserIds ?? []) {
+    if (
+      !(await accessPolicy.authorize({
+        workspaceId,
+        providerId: "discord",
+        providerUserId
+      }))
+    ) {
+      throw new Error(
+        "Context Ask users must each uniquely map to an authorized Luma founder"
+      );
+    }
+  }
+
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
   const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
 
   try {
-    const identityDirectory = createIdentityDirectoryFromEnv(env);
     const workProvider = optionalLinearWorkProvider(env);
     const observedSourceLedger = createObservedSourceLedger({ database });
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
@@ -94,7 +116,7 @@ export async function startServer(
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
     const workspace = {
-      workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
+      workspaceId,
       timezone: config.defaultWorkspaceTimezone,
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
@@ -183,6 +205,7 @@ export async function startServer(
       meetingIntelligence,
       followUpExecution,
       identityDirectory,
+      authorizedPersonIds: dayovaFounderPersonIds,
       transport: discordTransport,
       workspace,
       guildId,

@@ -22,7 +22,10 @@ import type {
   ContextInquiryResult
 } from "../../src/context-intelligence/interface.js";
 import type { DiscordContextAskMention } from "../../src/discord/discord-context-ask-runtime.js";
-import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
+import {
+  createIdentityDirectoryFromEnv,
+  createLumaTeamIdentityDirectory
+} from "../../src/identity/static-identity-directory.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import type { MeetingIntelligence } from "../../src/meeting-intelligence/interface.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
@@ -63,7 +66,7 @@ class ActionReasoningModel implements ReasoningModel {
         {
           stableKey: "release-checklist",
           description: evidence.excerpt,
-          ownerId: null,
+          ownerId: "person_jakob",
           dueDate: {
             originalPhrase: null,
             normalizedDate: null,
@@ -230,6 +233,12 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const makeBot = () =>
       createDiscordMeetingBot({
+        authorizedPersonIds: [
+          "person_jakob",
+          "person_fabius",
+          "person_philipp",
+          "person_julius"
+        ],
         database,
         meetingIntelligence: createMeetingIntelligence({
           database,
@@ -253,7 +262,7 @@ describe("Discord meeting bot", () => {
       type: "ask",
       interactionId: "ask_ended_meeting",
       channelId: "thread_product",
-      actorDiscordUserId: "reader_without_identity_mapping",
+      actorDiscordUserId: "779381502311137301",
       question: "Which action items remain?"
     };
     const catchup: DiscordCommand = {
@@ -279,14 +288,16 @@ describe("Discord meeting bot", () => {
         type: "note",
         interactionId: "note_ended_meeting",
         channelId: "thread_product",
-        text: "Prepare the original release checklist.",
+        text: "I will prepare the original release checklist.",
         language: "en"
       });
       const originalAnswer = await transport.execute(ask);
       const originalCatchup = await transport.execute(catchup);
-      expect(originalAnswer.content).toContain("Prepare the original release checklist.");
+      expect(originalAnswer.content).toContain(
+        "I will prepare the original release checklist."
+      );
       expect(originalCatchup.content).toContain(
-        "Prepare the original release checklist."
+        "I will prepare the original release checklist."
       );
       await transport.execute({
         ...base,
@@ -368,6 +379,143 @@ describe("Discord meeting bot", () => {
     }
   });
 
+  it.each(["configured nonfounder", "unmapped", "ambiguous", "identity unavailable"])(
+    "denies every command and Context Ask for %s before side effects",
+    async (scenario) => {
+      const database = await createPgliteDatabase();
+      const transport = new ProgrammableDiscordTransport();
+      const contextIntelligence = new RecordingContextIntelligence();
+      const actorDiscordUserId =
+        scenario === "ambiguous"
+          ? "779381502311137301"
+          : scenario === "unmapped"
+            ? "unmapped"
+            : "discord_guest";
+      const directory = createIdentityDirectoryFromEnv({
+        LUMA_IDENTITY_PEOPLE_JSON: JSON.stringify([
+          {
+            personId: "person_guest",
+            displayName: "Guest",
+            discordUserId: scenario === "ambiguous" ? actorDiscordUserId : "discord_guest"
+          }
+        ])
+      });
+      let identityUnavailable = false;
+      let meetingCalls = 0;
+      let executionCalls = 0;
+      const meetingIntelligence = createMeetingIntelligence({
+        database,
+        reasoningModel: new EmptyReasoningModel()
+      });
+      const deniedExecution = () => {
+        executionCalls += 1;
+        return Promise.reject(new Error("Unauthorized Follow-up execution"));
+      };
+      const bot = createDiscordMeetingBot({
+        authorizedPersonIds: [
+          "person_jakob",
+          "person_fabius",
+          "person_philipp",
+          "person_julius"
+        ],
+        database,
+        meetingIntelligence: {
+          observe(input) {
+            meetingCalls += 1;
+            return meetingIntelligence.observe(input);
+          },
+          query(input) {
+            meetingCalls += 1;
+            return meetingIntelligence.query(input);
+          },
+          conclude(input) {
+            meetingCalls += 1;
+            return meetingIntelligence.conclude(input);
+          }
+        },
+        followUpExecution: { execute: deniedExecution, recover: deniedExecution },
+        identityDirectory: {
+          ...directory,
+          findPeopleByProviderUserId: (input) =>
+            identityUnavailable
+              ? Promise.reject(new Error("private identity provider error"))
+              : directory.findPeopleByProviderUserId(input)
+        },
+        transport,
+        workspace: { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" },
+        guildId: "guild_dayova",
+        contextAsk: {
+          contextIntelligence,
+          config: {
+            parentChannelIds: ["channel_meeting_notes"],
+            allowedDiscordUserIds: [actorDiscordUserId],
+            maxMessages: 50,
+            maxEvidenceChars: 32_000,
+            minIntervalMs: 60_000
+          }
+        }
+      });
+
+      try {
+        await bot.start();
+        const base = {
+          guildId: "guild_dayova",
+          channelId: "channel_meeting_notes",
+          actorDiscordUserId,
+          occurredAt: "2026-09-08T10:00:00.000Z"
+        };
+        await transport.execute({
+          ...base,
+          type: "start",
+          interactionId: "founder_start",
+          actorDiscordUserId: "726409024894926869",
+          title: "Founder Meeting",
+          languageMode: "en"
+        });
+        const messages = [...transport.sentMessages];
+        meetingCalls = 0;
+        identityUnavailable = scenario === "identity unavailable";
+        for (const payload of [
+          { type: "start", title: "Unauthorized Meeting", languageMode: "multilingual" },
+          { type: "ask", question: "What did the founders decide?" },
+          { type: "catchup", sinceRevision: 0 },
+          { type: "note", text: "I will publish the source", language: "en" },
+          { type: "approve", intentId: "private_intent" },
+          { type: "recover", intentId: "private_intent" },
+          { type: "reject", intentId: "private_intent" },
+          { type: "stop" }
+        ] as const) {
+          await expect(
+            transport.execute({
+              ...base,
+              ...payload,
+              interactionId: `denied_${payload.type}`
+            })
+          ).resolves.toEqual({
+            content: "You do not have access to Luma in this workspace."
+          });
+        }
+        await expect(
+          transport.executeContextAsk({
+            ...base,
+            channelId: "thread_product",
+            parentChannelId: "channel_meeting_notes",
+            messageId: "denied_context_ask",
+            question: "What did the founders decide?"
+          })
+        ).resolves.toBeNull();
+        expect(contextIntelligence.inquiries).toEqual([]);
+        expect(meetingCalls).toBe(0);
+        expect(executionCalls).toBe(0);
+        expect(transport.createdThreads).toHaveLength(1);
+        expect(transport.sentMessages).toEqual(messages);
+      } finally {
+        await bot.stop();
+        await database.close();
+      }
+    }
+  );
+
   it("can retry a start after Meeting Intelligence temporarily fails", async () => {
     const database = await createPgliteDatabase();
     const durableMeetingIntelligence = createMeetingIntelligence({
@@ -391,6 +539,12 @@ describe("Discord meeting bot", () => {
     };
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -495,6 +649,12 @@ describe("Discord meeting bot", () => {
       }
     });
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -549,6 +709,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ConcurrentDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -603,6 +769,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -669,6 +841,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -721,6 +899,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -769,6 +953,12 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const contextIntelligence = new RecordingContextIntelligence();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -782,7 +972,7 @@ describe("Discord meeting bot", () => {
         contextIntelligence,
         config: {
           parentChannelIds: ["channel_context"],
-          allowedDiscordUserIds: ["user_jakob"],
+          allowedDiscordUserIds: ["779381502311137301"],
           maxMessages: 50,
           maxEvidenceChars: 32_000,
           minIntervalMs: 60_000
@@ -796,7 +986,7 @@ describe("Discord meeting bot", () => {
       guildId: "guild_dayova",
       channelId: "thread_context",
       parentChannelId: "channel_context",
-      actorDiscordUserId: "user_jakob",
+      actorDiscordUserId: "779381502311137301",
       question: "What did we decide about the release?",
       occurredAt: "2026-08-08T10:00:00.000Z"
     });
@@ -831,6 +1021,12 @@ describe("Discord meeting bot", () => {
     const transport = new ProgrammableDiscordTransport();
     const contextIntelligence = new RecordingContextIntelligence();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence: createMeetingIntelligence({
         database,
@@ -847,7 +1043,7 @@ describe("Discord meeting bot", () => {
         contextIntelligence,
         config: {
           parentChannelIds: ["channel_context"],
-          allowedDiscordUserIds: ["user_jakob"],
+          allowedDiscordUserIds: ["779381502311137301"],
           maxMessages: 50,
           maxEvidenceChars: 32_000,
           minIntervalMs: 60_000
@@ -862,7 +1058,7 @@ describe("Discord meeting bot", () => {
         guildId: "guild_dayova",
         channelId: "thread_elsewhere",
         parentChannelId: "channel_elsewhere",
-        actorDiscordUserId: "user_jakob",
+        actorDiscordUserId: "779381502311137301",
         question: "What did we decide?",
         occurredAt: "2026-08-08T10:00:00.000Z"
       })
@@ -874,6 +1070,12 @@ describe("Discord meeting bot", () => {
     const database = await createPgliteDatabase();
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence: createMeetingIntelligence({
         database,
@@ -892,7 +1094,7 @@ describe("Discord meeting bot", () => {
         ),
         config: {
           parentChannelIds: ["channel_context"],
-          allowedDiscordUserIds: ["user_jakob"],
+          allowedDiscordUserIds: ["779381502311137301"],
           maxMessages: 50,
           maxEvidenceChars: 32_000,
           minIntervalMs: 60_000
@@ -906,7 +1108,7 @@ describe("Discord meeting bot", () => {
       guildId: "guild_dayova",
       channelId: "thread_context",
       parentChannelId: "channel_context",
-      actorDiscordUserId: "user_jakob",
+      actorDiscordUserId: "779381502311137301",
       question: "What did we decide?",
       occurredAt: "2026-08-08T10:00:00.000Z"
     });
@@ -926,6 +1128,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -973,6 +1181,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -1053,6 +1267,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -1120,6 +1340,12 @@ describe("Discord meeting bot", () => {
     });
     const transport = new ProgrammableDiscordTransport();
     const bot = createDiscordMeetingBot({
+      authorizedPersonIds: [
+        "person_jakob",
+        "person_fabius",
+        "person_philipp",
+        "person_julius"
+      ],
       database,
       meetingIntelligence,
       identityDirectory: createLumaTeamIdentityDirectory(),
@@ -1221,7 +1447,7 @@ function contextInquiryResult(): ContextInquiryResult {
     messageId: "message_release",
     ordinal: 0,
     author: {
-      providerUserId: "user_jakob",
+      providerUserId: "779381502311137301",
       displayName: "Jakob",
       personId: null
     },

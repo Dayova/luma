@@ -382,8 +382,10 @@ After the development Application is installed and `.env` is populated:
 4. Run `/meeting start` in a normal text channel.
 5. Confirm Luma creates a public thread and replies privately with its link.
 6. Run `/meeting note` in the thread and confirm the original note is saved.
-7. Run `/meeting reject` for any proposed Intent and confirm it performs no
-   provider mutation.
+7. If `/meeting note` returns a proposed Intent, run `/meeting reject` with
+   that exact `intent_id` and confirm it performs no provider mutation. If
+   analysis is deferred or no proposal is returned, skip this optional step;
+   it is not a prerequisite for the smoke test.
 8. Run `/meeting catchup` and confirm the response is private.
 
 Do not use this development smoke test to exercise approval, Linear, or Notion

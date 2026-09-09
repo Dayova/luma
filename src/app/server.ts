@@ -81,131 +81,151 @@ export async function startServer(
   }
 
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
-  const identityDirectory = createIdentityDirectoryFromEnv(env);
-  const workProvider = optionalLinearWorkProvider(env);
-  const observedSourceLedger = createObservedSourceLedger({ database });
-  const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
-    database
-  });
-  const workItemProviderId = workProvider?.providerId ?? "linear";
-  const discordTransport = createDiscordTransport(env, discordContextAskConfig);
-  const workspace = {
-    workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
-    timezone: config.defaultWorkspaceTimezone,
-    outputLanguagePolicy: config.outputLanguagePolicy,
-    publishingPolicy: config.publishingPolicy
-  };
-  const meetingIntelligence = createMeetingIntelligence({
-    database,
-    reasoningModel: reasoningModelFromEnv(
+  const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
+
+  try {
+    const identityDirectory = createIdentityDirectoryFromEnv(env);
+    const workProvider = optionalLinearWorkProvider(env);
+    const observedSourceLedger = createObservedSourceLedger({ database });
+    const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
+      database
+    });
+    const workItemProviderId = workProvider?.providerId ?? "linear";
+    const discordTransport = createDiscordTransport(env, discordContextAskConfig);
+    startupCleanup.push(() => discordTransport.disconnect());
+    const workspace = {
+      workspaceId: env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova",
+      timezone: config.defaultWorkspaceTimezone,
+      outputLanguagePolicy: config.outputLanguagePolicy,
+      publishingPolicy: config.publishingPolicy
+    };
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: reasoningModelFromEnv(
+        env,
+        openAIReasoningModelName,
+        createReasoningModel
+      ),
+      ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
+      ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
+        ? {
+            importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
+              ledger: observedSourceLedger,
+              workItemProviderId
+            })
+          }
+        : {})
+    });
+    const knowledgeProvider = optionalNotionKnowledgeProvider(env);
+    const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
-      openAIReasoningModelName,
-      createReasoningModel
-    ),
-    ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
-    ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
-      ? {
-          importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
-            ledger: observedSourceLedger,
+      observedSourceLedger,
+      operationalOutcomeMarkerVerifier
+    );
+    const operationalOutcomeWriter = optionalNotionOperationalOutcomeWriter(
+      env,
+      operationalOutcomeMarkerVerifier
+    );
+    const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
+    const meetingNotesSync = meetingNotesSource
+      ? createMeetingNotesSync({
+          workspace,
+          source: meetingNotesSource,
+          ingestion: createMeetingNotesIngestion({
+            meetingIntelligence,
             workItemProviderId
-          })
-        }
-      : {})
-  });
-  const knowledgeProvider = optionalNotionKnowledgeProvider(env);
-  const meetingNotesSource = optionalNotionMeetingNotesSource(
-    env,
-    observedSourceLedger,
-    operationalOutcomeMarkerVerifier
-  );
-  const operationalOutcomeWriter = optionalNotionOperationalOutcomeWriter(
-    env,
-    operationalOutcomeMarkerVerifier
-  );
-  const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
-  const meetingNotesSync = meetingNotesSource
-    ? createMeetingNotesSync({
-        workspace,
-        source: meetingNotesSource,
-        ingestion: createMeetingNotesIngestion({
-          meetingIntelligence,
-          workItemProviderId
-        }),
-        ...(meetingNotesSyncIntervalMs !== undefined
-          ? { intervalMs: meetingNotesSyncIntervalMs }
-          : {})
-      })
-    : undefined;
-  const followUpExecution = createFollowUpExecution({
-    database,
-    meetingIntelligence,
-    identityDirectory,
-    ...(workProvider ? { workProvider } : {}),
-    ...(knowledgeProvider ? { knowledgeProvider } : {}),
-    ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
-    ...(meetingNotesSource
-      ? {
-          operationalOutcomeSourceExecutionFence:
-            createLedgerBackedOperationalOutcomeSourceExecutionFence({
-              ledger: observedSourceLedger
-            })
-        }
-      : {}),
-    ...(meetingNotesSource
-      ? {
-          operationalOutcomeSourceCurrentnessVerifier:
-            createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({
-              ledger: observedSourceLedger
-            })
-        }
-      : {})
-  });
-  const contextIntelligence = discordContextAskConfig
-    ? createContextIntelligence({
-        database,
-        ledger: observedSourceLedger,
-        conversationEvidenceSource: discordTransport,
-        answerer: createContextAnswerer({
-          apiKey: requireEnv(env, "OPENAI_API_KEY"),
-          model: openAIReasoningModelName
+          }),
+          ...(meetingNotesSyncIntervalMs !== undefined
+            ? { intervalMs: meetingNotesSyncIntervalMs }
+            : {})
         })
-      })
-    : undefined;
-  const bot = createDiscordMeetingBot({
-    database,
-    meetingIntelligence,
-    followUpExecution,
-    identityDirectory,
-    transport: discordTransport,
-    workspace,
-    guildId,
-    ...(discordContextAskConfig && contextIntelligence
-      ? {
-          contextAsk: {
-            contextIntelligence,
-            config: discordContextAskConfig
+      : undefined;
+    if (meetingNotesSync) {
+      startupCleanup.push(() => meetingNotesSync.stop());
+    }
+    const followUpExecution = createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory,
+      ...(workProvider ? { workProvider } : {}),
+      ...(knowledgeProvider ? { knowledgeProvider } : {}),
+      ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
+      ...(meetingNotesSource
+        ? {
+            operationalOutcomeSourceExecutionFence:
+              createLedgerBackedOperationalOutcomeSourceExecutionFence({
+                ledger: observedSourceLedger
+              })
+          }
+        : {}),
+      ...(meetingNotesSource
+        ? {
+            operationalOutcomeSourceCurrentnessVerifier:
+              createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({
+                ledger: observedSourceLedger
+              })
+          }
+        : {})
+    });
+    const contextIntelligence = discordContextAskConfig
+      ? createContextIntelligence({
+          database,
+          ledger: observedSourceLedger,
+          conversationEvidenceSource: discordTransport,
+          answerer: createContextAnswerer({
+            apiKey: requireEnv(env, "OPENAI_API_KEY"),
+            model: openAIReasoningModelName
+          })
+        })
+      : undefined;
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence,
+      followUpExecution,
+      identityDirectory,
+      transport: discordTransport,
+      workspace,
+      guildId,
+      ...(discordContextAskConfig && contextIntelligence
+        ? {
+            contextAsk: {
+              contextIntelligence,
+              config: discordContextAskConfig
+            }
+          }
+        : {})
+    });
+
+    await bot.start();
+    meetingNotesSync?.start();
+    console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
+
+    return {
+      async stop() {
+        try {
+          await meetingNotesSync?.stop();
+        } finally {
+          try {
+            await bot.stop();
+          } finally {
+            await database.close();
           }
         }
-      : {})
-  });
-
-  await bot.start();
-  meetingNotesSync?.start();
-  console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
-
-  return {
-    async stop() {
+      }
+    };
+  } catch (error) {
+    // A rejected startup cannot return stop() to its caller. Release every
+    // acquired resource in reverse order, preserving the original failure
+    // even when a cleanup itself fails.
+    for (const cleanup of startupCleanup.reverse()) {
       try {
-        await meetingNotesSync?.stop();
-      } finally {
-        try {
-          await bot.stop();
-        } finally {
-          await database.close();
-        }
+        await cleanup();
+      } catch {
+        // Continue releasing the remaining resources before rethrowing.
       }
     }
-  };
+    throw error;
+  }
 }
 
 const unavailableReasoningModel: ReasoningModel = {

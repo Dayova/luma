@@ -221,7 +221,9 @@ LUMA_REASONING_MODEL_PROVIDER=openai
 LUMA_REASONING_MODEL_NAME=gpt-5.6-luna
 ```
 
-The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model; override it per environment when a different quality/cost point is required. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default.
+The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default. A model override requires a verified price configuration before paid requests are admitted.
+
+Both capabilities share a durable provisional $30/month AI allowance, explicit request bounds and cost accounting. `/meeting usage` remains available without a model call. See [AI usage and the exploratory budget](ai-usage.md) for limits, warnings, recovery behavior, estimation assumptions and live billing prerequisites.
 
 When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and reports analysis as deferred. Set `LUMA_REASONING_MODEL_PROVIDER=disabled` to make that behavior explicit.
 
@@ -231,7 +233,15 @@ When `OPENAI_API_KEY` is absent, Luma still persists original Evidence and repor
 DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=
 ```
+
+Configure comma-separated numeric IDs of reviewed founder-only text parents in
+`LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`. Blank means no channel work is
+permitted; malformed or duplicate IDs fail before resources are allocated.
+Meeting commands and replies require this common scope. Channel names do not
+grant access, and stored threads are rechecked against their current parent.
+This checks channel scope; live reader permissions still need verification.
 
 See `docs/integrations/discord.md` for Application creation, installation permissions, command behavior, and smoke testing. Never reuse the development token in production.
 
@@ -253,6 +263,7 @@ prerequisites, not authorization:
 
 ```dotenv
 LUMA_DISCORD_CONTEXT_ASK_ENABLED=1
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=123456789012345678
 LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS=123456789012345678
 LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS=779381502311137301
 LUMA_DISCORD_CONTEXT_ASK_MAX_MESSAGES=50
@@ -260,7 +271,8 @@ LUMA_DISCORD_CONTEXT_ASK_MAX_EVIDENCE_CHARS=32000
 LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS=60000
 ```
 
-All three limits are hard-validated. The channel and user allowlists are
+All three limits are hard-validated. Context Ask parents must be a subset of the
+common allowed parents, including for usage/status replies. The channel and user allowlists are
 mandatory; an incomplete attempted enablement fails before the Discord Gateway
 connects. Luma captures only text history ending at the triggering mention. A
 truncated, unreadable, non-text, bot, webhook, or system message produces an
@@ -349,6 +361,7 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `LUMA_LIVE_LINEAR_READONLY_TESTS`                    | No                | Tests                    | Set to `1` with a Read-permission key for the bounded read-only smoke test.  |
 | `LUMA_LIVE_NOTION_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                 |
 | `LUMA_LIVE_GITHUB_TESTS`                             | No                | Tests                    | Set to `1` for the GitHub compatibility smoke test.                          |
+| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.               |
 
 ## Security Rules
 

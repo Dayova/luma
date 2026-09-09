@@ -14,6 +14,10 @@ Intelligence events back into persistent Discord threads.
 
 Implemented now:
 
+- founder-only admission for every Meeting command and Context Ask; provider
+  accounts must uniquely map to the executable's explicit authorized Person set
+- explicit parent-channel scope for commands, Context Ask, and Meeting replies;
+  current channel identity is checked before work and outbound publication
 - guild-scoped `/meeting` slash command registration
 - `/meeting start`, `/meeting note`, `/meeting approve`, `/meeting reject`, `/meeting stop`, `/meeting ask`, and `/meeting catchup`
 - one persistent public Discord thread per Meeting
@@ -125,7 +129,17 @@ Required:
 DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=
 ```
+
+Set `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS` to the comma-separated numeric IDs
+of reviewed founder-only text channels. A blank value permits no channel work;
+invalid or duplicate IDs fail startup before database allocation. Channel names,
+role labels, and a stored Meeting mapping do not grant access. The current
+channel must resolve to an allowed text parent or its public thread in the
+configured guild. Private threads, voice channels, missing channels, and
+unavailable lookups are rejected safely. Existing installations must configure
+this scope before using Meeting commands.
 
 Optional bounded Context Ask (off unless the exact `1` flag is set):
 
@@ -139,7 +153,61 @@ LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS=60000
 ```
 
 An enabled Context Ask configuration needs an OpenAI key and every allowlist
-variable. Invalid or incomplete values fail startup before the bot connects.
+variable. Each configured user must uniquely map to one of the four authorized
+founders. Invalid or incomplete values fail startup before database allocation
+or connection. The allowlist can narrow founder access but cannot admit other
+People, including People added through identity configuration.
+Its parent-channel allowlist must be a subset of the common
+`LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS` scope; it cannot widen that scope.
+
+The current internal users are Jakob, Fabius, Philipp, and Julius. Before a live
+rollout, verify that selected parent channels are restricted to these founders
+and required integration accounts: public threads inherit their parent channel's
+audience. Actor admission alone does not limit who can read thread replies.
+The Context Ask user allowlist restricts question authors; it does not filter
+other human messages out of the selected thread's bounded evidence capture.
+See the [access policy](../configuration/identity.md#current-access-policy).
+
+### Current Dayova Channel Inventory
+
+Jakob described this structure on 8 September 2026. It is a changeable inventory,
+not a live permission audit or an instruction to ingest all channel history.
+
+| Current channel         | Audience reported by Jakob                | Initial Luma scope                       |
+| ----------------------- | ----------------------------------------- | ---------------------------------------- |
+| `allgemein`             | Includes people outside the four founders | Excluded                                 |
+| `team-chat`             | Founders and bots                         | Candidate work threads                   |
+| `team-chat-development` | Founders and bots                         | Candidate work threads                   |
+| `resources`             | Founders and bots                         | Candidate work threads                   |
+| `team-off-topic`        | Founders and bots                         | Excluded initially                       |
+| `team-voice`            | Founders and bots                         | Future candidate; voice is unimplemented |
+| `gäste`                 | Also people with the Gäste role           | Excluded                                 |
+
+Resolve the selected parents to verified IDs during rollout. The three work
+channels are the initial pilot candidates; actual collection remains disabled
+until the source notice, retention, and reader-permission gates are satisfied.
+The indented thread titles in the supplied screenshot are examples, not fixed
+source bindings. Context Ask currently works in selected public threads under
+these parents, not in parent-channel conversations. Here, a public thread can
+still have a founder-only audience through its restricted parent.
+
+Renaming a configured channel keeps its ID binding. A new or replacement channel
+requires explicit configuration. Recheck reader permissions after category,
+role, or overwrite changes; a stable ID does not prove an unchanged audience.
+The channel guard validates current guild/type/parent, not every possible
+reader's effective permissions. Stop shared output when audience compatibility
+is unknown. Removing a parent from configuration takes effect on restart and
+also prevents publication to its previously stored Meeting threads. Grant the
+bot only the required permissions in reviewed channels.
+
+Before broadening a channel's audience, also review its existing Luma replies
+and source history. Pausing future output does not retract already posted content.
+
+Bot access does not authorize bot actors to invoke founder capabilities, and
+the Gäste role grants no Luma access. Preserve existing source permissions even
+inside founder-only channels. See the
+[operating decisions](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23)
+and [channel-scope work item](https://linear.app/dayova/issue/LUM-48).
 
 Recommended local settings:
 
@@ -213,13 +281,28 @@ relevant mapped People.
 
 Records Human rejection and performs no provider mutation. Rejected Intents cannot later be approved without a new proposal.
 
+### Recover
+
+```text
+/meeting recover intent_id:"intent_create_release_checklist"
+```
+
+Resumes an eligible Follow-up through its existing recovery policy and durable
+execution records. Approval, rejection, and recovery remain available in the
+Meeting's exact thread after `/meeting stop`; mapped participant identity and
+the existing ownership and execution gates still apply. In a parent channel,
+these commands target only its currently active Meeting.
+
 ### Ask
 
 ```text
 /meeting ask question:"What did we decide about the release?"
 ```
 
-Resolves the active Meeting from the current thread or its parent channel and returns a private, evidence-aware answer. Known Discord user IDs are resolved to internal People so participant-specific Action Items can be selected.
+Resolves the Meeting saved for the exact current thread, including an ended
+Meeting, and returns a private, evidence-aware answer. In a parent channel it
+resolves only the currently active Meeting. Known Discord user IDs are resolved
+to internal People so participant-specific Action Items can be selected.
 
 ### Context Ask (opt-in)
 
@@ -258,6 +341,8 @@ Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/
 ```
 
 Returns a private grounded update from the requested Meeting Revision. The revision defaults to `0` when omitted.
+Like Ask, it remains available in an ended Meeting's exact thread, including
+after a bot restart or when the parent channel has a newer Meeting.
 
 ### Stop
 
@@ -266,6 +351,8 @@ Returns a private grounded update from the requested Meeting Revision. The revis
 ```
 
 Records a `meeting-ended` Observation, obtains a versioned Conclusion through Meeting Intelligence, posts the brief summary in the Meeting thread, and closes the active thread mapping.
+The saved thread remains available for Ask, Catch Up, and Follow-up review and
+recovery. Note and Stop still require an active Meeting.
 
 ## Follow-up Receipts
 

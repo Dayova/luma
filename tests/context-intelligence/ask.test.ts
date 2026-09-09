@@ -1,3 +1,4 @@
+import { AiServiceError } from "../../src/ai/ai-service-error.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -76,6 +77,40 @@ class ProgrammableContextAnswerer implements ContextAnswerer {
 }
 
 describe("Context Intelligence Ask", () => {
+  it("preserves typed budget failures without caching an invented answer or creating executable work", async () => {
+    const database = await createPgliteDatabase();
+    try {
+      const budgetError = new AiServiceError("budget-exhausted", "No unreserved budget", {
+        resetAt: "2026-09-30T22:00:00Z",
+        limitScope: "month"
+      });
+      const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+      const answerer = new ProgrammableContextAnswerer(() => {
+        throw budgetError;
+      });
+      const context = createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: source,
+        answerer
+      });
+      await expect(context.inquire(contextInquiry())).rejects.toBe(budgetError);
+      await expect(context.inquire(contextInquiry())).rejects.toBe(budgetError);
+      expect(answerer.requests).toHaveLength(2);
+      expect(source.captures).toEqual([subject, subject]);
+      await expect(
+        database.query<{ count: number }>(
+          "SELECT COUNT(*)::int AS count FROM context_inquiries"
+        )
+      ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+      await expect(
+        database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM meetings")
+      ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    } finally {
+      await database.close();
+    }
+  });
+
   it("reports invalid inquiries through its Promise contract", async () => {
     const database = await createPgliteDatabase();
 

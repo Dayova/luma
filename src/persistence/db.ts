@@ -15,6 +15,42 @@ export async function createPgliteDatabase(dataDir?: string): Promise<LumaDataba
 
 export async function runMigrations(database: LumaDatabase): Promise<void> {
   await database.exec(`
+    CREATE TABLE IF NOT EXISTS ai_usage_locks (
+      workspace_id TEXT PRIMARY KEY,
+      accounting_blocked BOOLEAN NOT NULL DEFAULT FALSE
+    );
+
+    -- Operational accounting only: no prompt, output, source text or provider secrets.
+    CREATE TABLE IF NOT EXISTS ai_usage_requests (
+      reservation_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      capability TEXT NOT NULL,
+      model TEXT NOT NULL,
+      price_version TEXT NOT NULL,
+      month TEXT NOT NULL,
+      day TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('reserved','unknown','settled')),
+      reserved_nanos BIGINT NOT NULL CHECK (reserved_nanos >= 0),
+      input_token_upper_bound INTEGER NOT NULL,
+      max_output_tokens INTEGER NOT NULL,
+      charged_nanos BIGINT,
+      input_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      cache_write_tokens INTEGER,
+      output_tokens INTEGER,
+      reasoning_tokens INTEGER,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      settled_at TEXT,
+      response_facts_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS ai_usage_month_idx
+      ON ai_usage_requests (workspace_id, month);
+    CREATE INDEX IF NOT EXISTS ai_usage_workflow_idx
+      ON ai_usage_requests (workspace_id, workflow_id);
+
     CREATE TABLE IF NOT EXISTS workspaces (
       workspace_id TEXT PRIMARY KEY,
       timezone TEXT NOT NULL,

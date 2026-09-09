@@ -1,0 +1,39 @@
+[Unit]
+Description=Luma founders-only Discord service
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=luma
+Group=luma
+WorkingDirectory=/opt/luma/current
+EnvironmentFile=/etc/luma/production.env
+UnsetEnvironment=NODE_OPTIONS NODE_PATH
+StateDirectory=luma
+StateDirectoryMode=0700
+UMask=0077
+ExecStartPre=+/usr/bin/node /opt/luma/current/dist/src/app/production-main.js --check-env-file /etc/luma/production.env
+ExecStart=/usr/bin/flock --nonblock --no-fork /var/lib/luma/runtime.lock /usr/bin/node /opt/luma/current/dist/src/app/production-main.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+KillSignal=SIGTERM
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/luma
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+LimitCORE=0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=luma
+
+[Install]
+WantedBy=multi-user.target

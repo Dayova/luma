@@ -152,7 +152,6 @@ describe("full-store cold backup and isolated restore", () => {
       providerId: "notion",
       search: () => Promise.resolve([]),
       getDocument: () => Promise.reject(new Error("No live reads in rehearsal")),
-      updateDocument: () => Promise.reject(new Error("No live updates in rehearsal")),
       listChanges: () => Promise.resolve({ changes: [], nextCursor: null }),
       createDocument: (input) => {
         writes.push(input.idempotencyKey);

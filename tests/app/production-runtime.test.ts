@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  parseProductionEnvironmentFile,
   validateProductionEnvironment,
   verifyProductionDiscordApplication
 } from "../../src/app/production-runtime.js";
@@ -18,6 +19,14 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("allows temporarily pausing paid AI without disabling the runtime", async () => {
+    await expect(
+      validateProductionEnvironment(
+        { ...configuration(), LUMA_AI_MONTHLY_LIMIT_USD: "0" },
+        "/opt/luma/releases/revision"
+      )
+    ).resolves.toBeUndefined();
+  });
   it("accepts a future explicitly configured channel without opening any store", async () => {
     const env = configuration();
     env["LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS"] = "888888888888888888";
@@ -71,6 +80,30 @@ describe("production deployment preflight", () => {
     ).catch((value: unknown) => value);
     expect(error).toBeInstanceOf(Error);
     expect(String(error)).not.toContain(secret);
+  });
+});
+
+describe("production environment file syntax", () => {
+  it("preserves literal values and permits whole-line comments and blank entries", () => {
+    expect(
+      parseProductionEnvironmentFile(
+        "# Configuration\nTOKEN=example_only-._+/=\nEMPTY=\n\n"
+      )
+    ).toEqual({ TOKEN: "example_only-._+/=", EMPTY: "" });
+  });
+
+  it.each([
+    'TOKEN="quoted"',
+    "TOKEN=inline#comment",
+    "TOKEN=two words",
+    "TOKEN=escaped\\value",
+    "TOKEN=$INTERPOLATION",
+    "TOKEN=before\u0000after",
+    "export TOKEN=value",
+    "TOKEN =value",
+    "TOKEN=first\nTOKEN=second"
+  ])("rejects ambiguous parser syntax without exposing values", (content) => {
+    expect(() => parseProductionEnvironmentFile(content)).toThrow();
   });
 });
 

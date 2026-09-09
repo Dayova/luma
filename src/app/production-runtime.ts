@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { parseEnv } from "node:util";
 import { z } from "zod";
 import { aiRequestLimitsFromEnv } from "../ai/ai-request.js";
 import { aiUsageBudgetSettingsFromEnv, isAiModelPriced } from "../ai/ai-usage-budget.js";
@@ -16,6 +17,30 @@ export class ProductionPreflightError extends Error {
     super(message);
     this.name = "ProductionPreflightError";
   }
+}
+
+/** One literal KEY=value subset shared by systemd EnvironmentFile and Node. */
+export function parseProductionEnvironmentFile(content: string): NodeJS.ProcessEnv {
+  const keys = new Set<string>();
+  for (const line of content.split(/\r?\n/u)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const assignment = /^([A-Z_][A-Z0-9_]*)=(.*)$/u.exec(line);
+    const key = assignment?.[1];
+    const value = assignment?.[2];
+    check(
+      Boolean(key) &&
+        value !== undefined &&
+        !/\s/u.test(value) &&
+        ![...value].some(
+          (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+        ) &&
+        !["'", '"', "\\", "#", "$", "`"].some((character) => value.includes(character)),
+      "Use literal unquoted KEY=value lines without whitespace, control characters, escapes, interpolation, or inline comments."
+    );
+    check(!keys.has(key ?? ""), "The production environment must not repeat a key.");
+    keys.add(key ?? "");
+  }
+  return parseEnv(content);
 }
 
 /** Validates deployment configuration without opening a store or calling a provider. */
@@ -84,8 +109,8 @@ export async function validateProductionEnvironment(
     }
     const budget = aiUsageBudgetSettingsFromEnv(env);
     check(
-      budget.monthlyLimitUsd > 0 && budget.monthlyLimitUsd <= 30,
-      "The production monthly AI limit must be between zero and the approved USD 30 cap."
+      budget.monthlyLimitUsd >= 0 && budget.monthlyLimitUsd <= 30,
+      "The production monthly AI limit must be from USD 0 through the approved USD 30 cap."
     );
     check(
       budget.timezone === "Europe/Berlin",

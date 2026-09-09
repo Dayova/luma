@@ -1,8 +1,8 @@
 import { lstat, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { parseEnv } from "node:util";
 import {
   ProductionPreflightError,
+  parseProductionEnvironmentFile,
   validateProductionEnvironment,
   verifyProductionDiscordApplication
 } from "./production-runtime.js";
@@ -27,7 +27,7 @@ try {
       );
     }
     await validateProductionEnvironment(
-      parseEnv(await readFile(path, "utf8")),
+      parseProductionEnvironmentFile(await readFile(path, "utf8")),
       releaseDirectory
     );
     console.log(

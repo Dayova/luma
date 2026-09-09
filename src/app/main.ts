@@ -1,20 +1,24 @@
 import { startServer } from "./server.js";
 
 const app = await startServer();
-let stopping = false;
+let stopping: Promise<void> | undefined;
 
-async function stop(): Promise<void> {
-  if (stopping) {
-    return;
-  }
-
-  stopping = true;
-  await app.stop();
+function stop(): Promise<void> {
+  stopping ??= app.stop();
+  return stopping;
 }
 
-process.once("SIGINT", () => {
-  void stop().finally(() => process.exit(0));
-});
-process.once("SIGTERM", () => {
-  void stop().finally(() => process.exit(0));
-});
+function stopForSignal(): void {
+  void stop().then(
+    () => process.exit(0),
+    () => {
+      console.error(
+        "Luma shutdown failed; preserve the store and inspect its ownership state before restarting."
+      );
+      process.exit(1);
+    }
+  );
+}
+
+process.once("SIGINT", stopForSignal);
+process.once("SIGTERM", stopForSignal);

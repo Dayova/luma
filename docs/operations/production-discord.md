@@ -78,7 +78,12 @@ history, service unit, or repository. Install the completed environment file as
 `root:root`, mode `0600`. systemd reads it before dropping privileges; the service
 does not need permission to read the file itself. Keep `/etc/luma` traversable so
 the launcher can inspect its metadata. The environment file is data, never a
-shell script: do not `source` it or enable shell tracing.
+shell script: do not `source` it or enable shell tracing. Use only literal,
+unquoted `KEY=value` lines, blank lines, and whole-line `#` comments. Values must
+not contain whitespace, quotes, backslashes, `#`, `$`, or backticks; no multiline
+values, interpolation, `export`, inline comments, or duplicate keys. The preflight
+enforces this common Node/systemd parser subset. Current Discord/OpenAI tokens
+fit this format; do not escape an incompatible future value silently.
 
 Before first activation, verify these existing product requirements:
 
@@ -99,7 +104,9 @@ Before first activation, verify these existing product requirements:
   threads under configured private parents are eligible. Channel names are
   descriptive; IDs are configurable and must be reviewed when scope changes.
 - Configure the production OpenAI key and the shared USD 30 Europe/Berlin monthly
-  cap. No separate observer process may create another independent spending
+  cap. Set that cap to `0` to pause paid AI while retaining notes and non-AI status;
+  the launcher accepts only the approved range `0` through `30`.
+  No separate observer process may create another independent spending
   ledger for that same budget. Usage records are estimates based on actual token
   reporting; reconcile with the provider bill.
 

@@ -4,10 +4,20 @@ import type {
   RawConversationSnapshot
 } from "../knowledge/observed-source-ledger.js";
 import type { ConversationContextSubject } from "./interface.js";
+import { conversationSnapshotContentHash } from "../knowledge/observed-source-ledger.js";
 
 export type CaptureConversationEvidenceInput = {
   workspaceId: WorkspaceId;
   subject: ConversationContextSubject;
+  /** When supplied, the current anchor must still ask this exact question. */
+  question?: string;
+};
+
+export type ConversationEvidenceProof = {
+  workspaceId: WorkspaceId;
+  subject: ConversationContextSubject;
+  question: string;
+  contentHash: string;
 };
 
 export type CapturedConversationEvidence = {
@@ -24,4 +34,28 @@ export type CapturedConversationEvidence = {
  */
 export interface ConversationEvidenceSource {
   capture(input: CaptureConversationEvidenceInput): Promise<CapturedConversationEvidence>;
+}
+
+/** Read-only revalidation; it never mutates retained evidence or runs an Answerer. */
+export async function requireCurrentConversationEvidence(
+  source: ConversationEvidenceSource,
+  proof: ConversationEvidenceProof
+): Promise<void> {
+  const current = await source.capture({
+    workspaceId: proof.workspaceId,
+    subject: { ...proof.subject },
+    question: proof.question
+  });
+  if (
+    current.source.sourceKind !== "conversation" ||
+    current.source.providerId !== proof.subject.providerId ||
+    current.source.sourceObjectId !== proof.subject.anchorMessageId ||
+    current.source.parentObjectId !== proof.subject.conversationObjectId ||
+    current.snapshot.conversation.conversationObjectId !==
+      proof.subject.conversationObjectId ||
+    current.snapshot.boundary.anchorMessageId !== proof.subject.anchorMessageId ||
+    conversationSnapshotContentHash(current.snapshot) !== proof.contentHash
+  ) {
+    throw new Error("The captured conversation changed or is no longer available");
+  }
 }

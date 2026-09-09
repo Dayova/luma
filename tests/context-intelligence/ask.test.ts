@@ -138,6 +138,122 @@ describe("Context Intelligence Ask", () => {
     }
   });
 
+  it.each(["edited", "deleted", "unreadable", "partial"])(
+    "retains history but refuses persisted answer replay after source becomes %s",
+    async (change) => {
+      const database = await createPgliteDatabase();
+      try {
+        const ledger = createObservedSourceLedger({ database });
+        const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+        let unreadable = false;
+        const answerer = answererForFirstCapturedMessage();
+        const context = createContextIntelligence({
+          database,
+          ledger,
+          answerer,
+          conversationEvidenceSource: {
+            capture: (input) =>
+              unreadable
+                ? Promise.reject(new Error("read access revoked"))
+                : source.capture(input)
+          }
+        });
+        const inquiry = contextInquiry();
+        const first = await context.inquire(inquiry);
+        const changed = conversationSnapshot();
+        const message = changed.messages[0];
+        if (!message) throw new Error("missing fixture message");
+        if (change === "edited") {
+          message.text = "The old claim was withdrawn.";
+          message.editedAt = "2026-09-09T10:00:00.000Z";
+        } else if (change === "deleted") {
+          changed.messages.shift();
+          changed.messages.forEach((item, ordinal) => {
+            item.ordinal = ordinal;
+          });
+          changed.boundary.messageIds = changed.messages.map((item) => item.id);
+          changed.boundary.firstMessageId = changed.messages[0]!.id;
+        } else if (change === "partial") {
+          changed.completeness = {
+            state: "partial",
+            reasons: [
+              { code: "pagination-incomplete", message: "History is unreadable." }
+            ]
+          };
+        } else {
+          unreadable = true;
+        }
+        source.setSnapshot(changed);
+        await expect(context.inquire(inquiry)).rejects.toMatchObject({
+          code: "context-inquiry-source-changed"
+        });
+        expect(answerer.requests).toHaveLength(1);
+        const retained = await ledger.get({
+          workspaceId,
+          source: {
+            providerId: "discord",
+            sourceKind: "conversation",
+            sourceObjectId: subject.anchorMessageId
+          },
+          revision: first.boundary.sourceRevision
+        });
+        expect(retained?.snapshot.messages[0]?.text).toBe(
+          "Die Release-Checkliste ist noch offen."
+        );
+        expect(retained?.contentHash).toBe(first.boundary.contentHash);
+      } finally {
+        await database.close();
+      }
+    }
+  );
+
+  it("does not deliver an answer whose source changed during reasoning or rerun it on duplicate inquiry", async () => {
+    const database = await createPgliteDatabase();
+    try {
+      const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+      const answerer = new ProgrammableContextAnswerer((request) => {
+        const changed = conversationSnapshot();
+        const message = changed.messages[0];
+        if (!message) throw new Error("missing fixture message");
+        message.text = "This was corrected while Luma was answering.";
+        source.setSnapshot(changed);
+        return {
+          answer: { text: "Old claim", evidenceIds: [request.evidence[0]!.evidenceId] },
+          facts: [],
+          inferences: [],
+          unresolved: [],
+          metadata: {
+            provider: "test",
+            model: "programmable",
+            promptVersion: request.promptVersion
+          }
+        };
+      });
+      const context = createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: source,
+        answerer
+      });
+      await expect(context.inquire(contextInquiry())).rejects.toMatchObject({
+        code: "context-inquiry-source-changed"
+      });
+      await expect(context.inquire(contextInquiry())).rejects.toMatchObject({
+        code: "context-inquiry-source-changed"
+      });
+      expect(answerer.requests).toHaveLength(1);
+      expect(
+        (
+          await database.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM context_inquiries"
+          )
+        ).rows[0]?.count
+      ).toBe(1);
+    } finally {
+      await database.close();
+    }
+  });
+
   it("captures one immutable Discord thread revision, answers only from ordered evidence, and replays its first result", async () => {
     const database = await createPgliteDatabase();
 
@@ -191,7 +307,7 @@ describe("Context Intelligence Ask", () => {
       const replay = await contextIntelligence.inquire(inquiry);
 
       expect(replay).toEqual(first);
-      expect(source.captures).toEqual([subject]);
+      expect(source.captures).toEqual([subject, subject, subject]);
       expect(answerer.requests).toHaveLength(1);
       expect(answerer.requests[0]).toMatchObject({
         workspaceId,
@@ -390,7 +506,7 @@ describe("Context Intelligence Ask", () => {
 
       expect(result.question).toBe("What is the release status?");
       expect(result.subject).toEqual(subject);
-      expect(source.captures).toEqual([subject]);
+      expect(source.captures).toEqual([subject, subject]);
       expect(answerer.requests).toHaveLength(1);
     } finally {
       await database.close();
@@ -546,7 +662,7 @@ describe("Context Intelligence Ask", () => {
         code: "context-inquiry-corrupt",
         retryable: false
       } satisfies Partial<ContextIntelligenceError>);
-      expect(source.captures).toHaveLength(1);
+      expect(source.captures).toHaveLength(2);
       expect(answerer.requests).toHaveLength(0);
     } finally {
       await database.close();
@@ -775,7 +891,7 @@ describe("Context Intelligence Ask", () => {
     }
   });
 
-  it("replays the durable result after reopening without recapturing or re-answering", async () => {
+  it("revalidates the source after reopening and replays without re-answering", async () => {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "luma-context-intelligence-"));
     const dataDir = join(temporaryRoot, "pglite");
     let database: LumaDatabase | null = await createPgliteDatabase(dataDir);
@@ -809,7 +925,7 @@ describe("Context Intelligence Ask", () => {
       }).inquire(inquiry);
 
       expect(replay).toEqual(first);
-      expect(replaySource.captures).toEqual([]);
+      expect(replaySource.captures).toEqual([subject]);
       expect(replayAnswerer.requests).toEqual([]);
     } finally {
       if (database) {
@@ -845,7 +961,7 @@ describe("Context Intelligence Ask", () => {
         code: "context-inquiry-corrupt",
         retryable: false
       } satisfies Partial<ContextIntelligenceError>);
-      expect(source.captures).toHaveLength(1);
+      expect(source.captures).toHaveLength(2);
       expect(answerer.requests).toHaveLength(1);
     } finally {
       await database.close();
@@ -879,7 +995,7 @@ describe("Context Intelligence Ask", () => {
         code: "context-inquiry-corrupt",
         retryable: false
       } satisfies Partial<ContextIntelligenceError>);
-      expect(source.captures).toHaveLength(1);
+      expect(source.captures).toHaveLength(2);
       expect(answerer.requests).toHaveLength(1);
     } finally {
       await database.close();
@@ -934,7 +1050,7 @@ describe("Context Intelligence Ask", () => {
         code: "context-inquiry-corrupt",
         retryable: false
       } satisfies Partial<ContextIntelligenceError>);
-      expect(source.captures).toHaveLength(1);
+      expect(source.captures).toHaveLength(2);
       expect(answerer.requests).toHaveLength(1);
     } finally {
       await database.close();

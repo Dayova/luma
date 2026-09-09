@@ -1,3 +1,6 @@
+import { createContextIntelligence } from "../../src/context-intelligence/context-intelligence.js";
+import { createObservedSourceLedger } from "../../src/knowledge/observed-source-ledger.js";
+import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { describe, expect, it } from "vitest";
 import {
   createDiscordConversationEvidenceSource,
@@ -64,6 +67,176 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("answers repeated questions in one thread while retaining only Human Evidence and explicit Luma exclusions", async () => {
+    const database = await createPgliteDatabase();
+    try {
+      const reader = new ProgrammableDiscordConversationReader();
+      const original = humanMessage({
+        id: "message_original",
+        content: "We might release on Friday.",
+        createdAt: "2026-08-08T09:00:00.000Z"
+      });
+      const history: DiscordConversationMessage[] = [original];
+      let modelCalls = 0;
+      const context = createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: createSource(reader),
+        answerer: {
+          answer: (request) => {
+            modelCalls += 1;
+            expect(
+              request.evidence.every((item) => item.author.providerUserId !== "bot_luma")
+            ).toBe(true);
+            expect(
+              request.evidence.some((item) =>
+                item.text?.includes("AI-generated certainty")
+              )
+            ).toBe(false);
+            return Promise.resolve({
+              answer: {
+                text: "Friday is tentative.",
+                evidenceIds: [request.evidence[0]!.evidenceId]
+              },
+              facts: [],
+              inferences: [],
+              unresolved: [],
+              metadata: {
+                provider: "test",
+                model: "programmable",
+                promptVersion: request.promptVersion
+              }
+            });
+          }
+        }
+      });
+      for (const questionNumber of [1, 2, 3]) {
+        const anchor = humanMessage({
+          id: `message_ask_${questionNumber}`,
+          content: "<@bot_luma> What did we decide?",
+          createdAt: `2026-08-08T1${questionNumber}:00:00.000Z`
+        });
+        reader.anchor = anchor;
+        reader.pages.set(anchor.id, { messages: [...history].reverse(), hasMore: false });
+        const result = await context.inquire({
+          type: "ask",
+          workspaceId: "workspace_dayova",
+          inquiryId: anchor.id,
+          question: "What did we decide?",
+          subject: { ...captureInput().subject, anchorMessageId: anchor.id }
+        });
+        if (questionNumber === 2) {
+          const replay = await context.inquire({
+            type: "ask",
+            workspaceId: "workspace_dayova",
+            inquiryId: anchor.id,
+            question: "What did we decide?",
+            subject: { ...captureInput().subject, anchorMessageId: anchor.id }
+          });
+          expect(replay).toEqual(result);
+        }
+        expect(result.answer.text).toBe("Friday is tentative.");
+        expect(result.boundary.completeness).toBe("complete");
+        expect(
+          result.evidence.every((item) => item.author.providerUserId !== "bot_luma")
+        ).toBe(true);
+        if (questionNumber > 1)
+          expect(result.warnings).toContainEqual({
+            code: "conversation-assistant-output-excluded",
+            message: `${questionNumber - 1} prior Luma text message(s) were excluded from Human Evidence.`
+          });
+        history.push(anchor, {
+          ...humanMessage({
+            id: `message_luma_${questionNumber}`,
+            content: "AI-generated certainty",
+            createdAt: `2026-08-08T1${questionNumber}:01:00.000Z`
+          }),
+          authorKind: "bot",
+          author: { providerUserId: "bot_luma", displayName: "Luma" }
+        });
+      }
+      expect(modelCalls).toBe(3);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it.each(["other-bot", "webhook", "poll"])(
+    "does not silently exclude %s as verified Luma text output",
+    async (kind) => {
+      const reader = new ProgrammableDiscordConversationReader();
+      reader.pages.set("message_ask", {
+        messages: [
+          {
+            ...humanMessage({
+              id: "message_generated",
+              content: "Unverified output",
+              createdAt: "2026-08-08T09:00:00.000Z"
+            }),
+            authorKind: kind === "webhook" ? "webhook" : "bot",
+            author: {
+              providerUserId: kind === "other-bot" ? "another_bot" : "bot_luma",
+              displayName: "Luma"
+            },
+            hasUnsupportedContent: kind === "poll"
+          }
+        ],
+        hasMore: false
+      });
+      const captured = await createSource(reader).capture(captureInput());
+      expect(captured.snapshot.completeness.state).toBe("partial");
+      expect(captured.snapshot.excludedMessages).toBeUndefined();
+    }
+  );
+
+  it("keeps excluded Luma output inside the bounded scan limit", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    reader.pages.set("message_ask", {
+      messages: [
+        {
+          ...humanMessage({
+            id: "message_luma",
+            content: "A prior reply",
+            createdAt: "2026-08-08T09:30:00.000Z"
+          }),
+          authorKind: "bot",
+          author: { providerUserId: "bot_luma", displayName: "Luma" }
+        },
+        humanMessage({
+          id: "message_original",
+          content: "Older Human Evidence",
+          createdAt: "2026-08-08T09:00:00.000Z"
+        })
+      ],
+      hasMore: false
+    });
+    const captured = await createSource(reader, {
+      ...contextAskConfig,
+      maxMessages: 2
+    }).capture(captureInput());
+    expect(captured.snapshot.excludedMessages).toEqual([
+      {
+        messageId: "message_luma",
+        providerUserId: "bot_luma",
+        reason: "assistant-output"
+      }
+    ]);
+    expect(captured.snapshot.completeness).toMatchObject({
+      state: "partial",
+      reasons: [{ code: "history-truncated" }]
+    });
+  });
+
+  it("rejects an anchor whose current question differs from the original trigger", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    await expect(
+      createSource(reader).capture({
+        ...captureInput(),
+        question: "A different question"
+      })
+    ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+  });
+
   it("captures only chronological thread history through the mention anchor", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     reader.pages.set("message_ask", {

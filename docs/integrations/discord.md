@@ -324,9 +324,20 @@ must be leading and exact; nonleading mentions, bots, webhooks, system
 messages, private threads, DMs, and channels outside the reviewed scope are
 ignored without capture.
 
-The first slice does not retain later Discord edit/delete events. It does not
-answer from a truncated boundary or one containing unreadable/non-text or
-bot/webhook/system evidence. It never creates a Meeting, proposal, Intent,
+The snapshot reader does not retain continuous Discord edit/delete events. New
+questions read current history; repeated deliveries reuse a stored answer only
+after rereading its exact boundary and current reading permission. The final
+Discord send checks this again. Changed, removed, or unreadable source produces
+a recovery message without publishing the old claims; original captures remain
+retained for history.
+
+Luma's own plain text replies are explicitly excluded from Human Evidence, so
+second and later questions work in the same thread. Their IDs remain in capture
+metadata, their exclusion is disclosed, and they still consume the scan budget.
+Unknown bots, webhooks, system messages, polls, unsupported content, and truncated
+history still produce an insufficient-evidence answer. This scope answers the
+selected thread only and needs no Granola or cross-provider retrieval. It never
+creates a Meeting, proposal, Intent,
 Linear issue, Notion page, or any other Follow-up mutation. This is an
 implemented bounded limitation, not a permanent statement that Discord
 conversations cannot later feed the shared Evidence, reconciliation,

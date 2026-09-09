@@ -53,6 +53,22 @@ type StartServerDependencies = {
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
 };
 
+const legacyMeetingNotesSourceEnvironment = [
+  "NOTION_API_TOKEN",
+  "NOTION_MEETINGS_DATA_SOURCE_ID"
+] as const;
+
+const notionObservationTopologyEnvironment = [
+  "LUMA_OBSERVATION_WORKSPACE_ID",
+  "LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN",
+  "LUMA_NOTION_OBSERVATION_MEETINGS_DATA_SOURCE_ID",
+  "LUMA_NOTION_OBSERVATION_WORKSPACE_ID",
+  "LUMA_NOTION_OBSERVATION_SUBSCRIPTION_ID",
+  "LUMA_NOTION_OBSERVATION_INTEGRATION_ID",
+  "LUMA_NOTION_OBSERVATION_WEBHOOK_VERIFICATION_TOKEN",
+  "LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR"
+] as const;
+
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
   dependencies: StartServerDependencies = {}
@@ -65,6 +81,7 @@ export async function startServer(
   const createContextAnswerer =
     dependencies.createOpenAIContextAnswerer ?? createOpenAIContextAnswerer;
   const config = loadAppConfigFromEnv(env);
+  rejectConflictingNotionMeetingNotesTopology(env);
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
   const openAIReasoningModelName = openAIReasoningModelNameFromEnv(env);
@@ -98,145 +115,163 @@ export async function startServer(
   }
 
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
-  const aiUsage = createAiUsageBudget({
-    ...aiBudgetSettings,
-    database,
-    configured:
-      isAiModelPriced(openAIReasoningModelName) &&
-      hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
-      (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
-        discordContextAskConfig !== undefined)
-  });
-  const workProvider = optionalLinearWorkProvider(env);
-  const observedSourceLedger = createObservedSourceLedger({ database });
-  const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
-    database
-  });
-  const workItemProviderId = workProvider?.providerId ?? "linear";
-  const discordTransport = createDiscordTransport(env, discordContextAskConfig);
-  const workspace = {
-    workspaceId,
-    timezone: config.defaultWorkspaceTimezone,
-    outputLanguagePolicy: config.outputLanguagePolicy,
-    publishingPolicy: config.publishingPolicy
-  };
-  const meetingIntelligence = createMeetingIntelligence({
-    database,
-    reasoningModel: reasoningModelFromEnv(
+  const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
+  try {
+    const aiUsage = createAiUsageBudget({
+      ...aiBudgetSettings,
+      database,
+      configured:
+        isAiModelPriced(openAIReasoningModelName) &&
+        hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
+        (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
+          discordContextAskConfig !== undefined)
+    });
+    const workProvider = optionalLinearWorkProvider(env);
+    const observedSourceLedger = createObservedSourceLedger({ database });
+    const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
+      database
+    });
+    const workItemProviderId = workProvider?.providerId ?? "linear";
+    const discordTransport = createDiscordTransport(env, discordContextAskConfig);
+    startupCleanup.push(() => discordTransport.disconnect());
+    const workspace = {
+      workspaceId,
+      timezone: config.defaultWorkspaceTimezone,
+      outputLanguagePolicy: config.outputLanguagePolicy,
+      publishingPolicy: config.publishingPolicy
+    };
+    const meetingIntelligence = createMeetingIntelligence({
+      database,
+      reasoningModel: reasoningModelFromEnv(
+        env,
+        openAIReasoningModelName,
+        createReasoningModel,
+        aiUsage,
+        aiRequestLimits
+      ),
+      ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
+      ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
+        ? {
+            importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
+              ledger: observedSourceLedger,
+              workItemProviderId
+            })
+          }
+        : {})
+    });
+    const knowledgeProvider = optionalNotionKnowledgeProvider(env);
+    const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
-      openAIReasoningModelName,
-      createReasoningModel,
-      aiUsage,
-      aiRequestLimits
-    ),
-    ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
-    ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
-      ? {
-          importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
-            ledger: observedSourceLedger,
+      observedSourceLedger,
+      operationalOutcomeMarkerVerifier
+    );
+    const operationalOutcomeWriter = optionalNotionOperationalOutcomeWriter(
+      env,
+      operationalOutcomeMarkerVerifier
+    );
+    const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
+    const meetingNotesSync = meetingNotesSource
+      ? createMeetingNotesSync({
+          workspace,
+          source: meetingNotesSource,
+          ingestion: createMeetingNotesIngestion({
+            meetingIntelligence,
             workItemProviderId
-          })
-        }
-      : {})
-  });
-  const knowledgeProvider = optionalNotionKnowledgeProvider(env);
-  const meetingNotesSource = optionalNotionMeetingNotesSource(
-    env,
-    observedSourceLedger,
-    operationalOutcomeMarkerVerifier
-  );
-  const operationalOutcomeWriter = optionalNotionOperationalOutcomeWriter(
-    env,
-    operationalOutcomeMarkerVerifier
-  );
-  const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
-  const meetingNotesSync = meetingNotesSource
-    ? createMeetingNotesSync({
-        workspace,
-        source: meetingNotesSource,
-        ingestion: createMeetingNotesIngestion({
-          meetingIntelligence,
-          workItemProviderId
-        }),
-        ...(meetingNotesSyncIntervalMs !== undefined
-          ? { intervalMs: meetingNotesSyncIntervalMs }
-          : {})
-      })
-    : undefined;
-  const followUpExecution = createFollowUpExecution({
-    database,
-    meetingIntelligence,
-    identityDirectory,
-    ...(workProvider ? { workProvider } : {}),
-    ...(knowledgeProvider ? { knowledgeProvider } : {}),
-    ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
-    ...(meetingNotesSource
-      ? {
-          operationalOutcomeSourceExecutionFence:
-            createLedgerBackedOperationalOutcomeSourceExecutionFence({
-              ledger: observedSourceLedger
-            })
-        }
-      : {}),
-    ...(meetingNotesSource
-      ? {
-          operationalOutcomeSourceCurrentnessVerifier:
-            createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({
-              ledger: observedSourceLedger
-            })
-        }
-      : {})
-  });
-  const contextIntelligence = discordContextAskConfig
-    ? createContextIntelligence({
-        database,
-        ledger: observedSourceLedger,
-        conversationEvidenceSource: discordTransport,
-        answerer: createContextAnswerer({
-          apiKey: requireEnv(env, "OPENAI_API_KEY"),
-          model: openAIReasoningModelName,
-          budget: aiUsage,
-          limits: aiRequestLimits
+          }),
+          ...(meetingNotesSyncIntervalMs !== undefined
+            ? { intervalMs: meetingNotesSyncIntervalMs }
+            : {})
         })
-      })
-    : undefined;
-  const bot = createDiscordMeetingBot({
-    database,
-    meetingIntelligence,
-    followUpExecution,
-    identityDirectory,
-    authorizedPersonIds: dayovaFounderPersonIds,
-    transport: discordTransport,
-    workspace,
-    guildId,
-    aiUsage,
-    ...(discordContextAskConfig && contextIntelligence
-      ? {
-          contextAsk: {
-            contextIntelligence,
-            config: discordContextAskConfig
+      : undefined;
+    if (meetingNotesSync) {
+      startupCleanup.push(() => meetingNotesSync.stop());
+    }
+    const followUpExecution = createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory,
+      ...(workProvider ? { workProvider } : {}),
+      ...(knowledgeProvider ? { knowledgeProvider } : {}),
+      ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
+      ...(meetingNotesSource
+        ? {
+            operationalOutcomeSourceExecutionFence:
+              createLedgerBackedOperationalOutcomeSourceExecutionFence({
+                ledger: observedSourceLedger
+              })
+          }
+        : {}),
+      ...(meetingNotesSource
+        ? {
+            operationalOutcomeSourceCurrentnessVerifier:
+              createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({
+                ledger: observedSourceLedger
+              })
+          }
+        : {})
+    });
+    const contextIntelligence = discordContextAskConfig
+      ? createContextIntelligence({
+          database,
+          ledger: observedSourceLedger,
+          conversationEvidenceSource: discordTransport,
+          answerer: createContextAnswerer({
+            apiKey: requireEnv(env, "OPENAI_API_KEY"),
+            model: openAIReasoningModelName,
+            budget: aiUsage,
+            limits: aiRequestLimits
+          })
+        })
+      : undefined;
+    const bot = createDiscordMeetingBot({
+      database,
+      meetingIntelligence,
+      followUpExecution,
+      identityDirectory,
+      authorizedPersonIds: dayovaFounderPersonIds,
+      transport: discordTransport,
+      workspace,
+      guildId,
+      aiUsage,
+      ...(discordContextAskConfig && contextIntelligence
+        ? {
+            contextAsk: {
+              contextIntelligence,
+              config: discordContextAskConfig
+            }
+          }
+        : {})
+    });
+
+    await bot.start();
+    meetingNotesSync?.start();
+    console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
+
+    return {
+      async stop() {
+        try {
+          await meetingNotesSync?.stop();
+        } finally {
+          try {
+            await bot.stop();
+          } finally {
+            await database.close();
           }
         }
-      : {})
-  });
-
-  await bot.start();
-  meetingNotesSync?.start();
-  console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
-
-  return {
-    async stop() {
+      }
+    };
+  } catch (error) {
+    // A rejected startup cannot return stop() to its caller. Release every
+    // acquired resource in reverse order and preserve the original failure.
+    for (const cleanup of startupCleanup.reverse()) {
       try {
-        await meetingNotesSync?.stop();
-      } finally {
-        try {
-          await bot.stop();
-        } finally {
-          await database.close();
-        }
+        await cleanup();
+      } catch {
+        // Continue releasing the remaining resources before rethrowing.
       }
     }
-  };
+    throw error;
+  }
 }
 
 const unavailableReasoningModel: ReasoningModel = {
@@ -349,6 +384,30 @@ function hasAnyEnv(env: NodeJS.ProcessEnv, keys: string[]): boolean {
     const value = env[key];
     return Boolean(value && value.trim().length > 0);
   });
+}
+
+function hasAllEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): boolean {
+  return keys.every((key) => {
+    const value = env[key];
+    return Boolean(value && value.trim().length > 0);
+  });
+}
+
+/**
+ * The legacy Discord process and the dedicated observer create independent
+ * observed-source ledgers and marker verifiers. They cannot observe the same
+ * canonical Meeting Notes source from one environment or PGlite ownership
+ * would split. A deployed observer must be the sole source owner instead.
+ */
+function rejectConflictingNotionMeetingNotesTopology(env: NodeJS.ProcessEnv): void {
+  if (
+    hasAllEnv(env, legacyMeetingNotesSourceEnvironment) &&
+    hasAllEnv(env, notionObservationTopologyEnvironment)
+  ) {
+    throw new Error(
+      "Legacy Notion Meeting Notes sync and the Notion observation server cannot share one process environment"
+    );
+  }
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, key: string): string {

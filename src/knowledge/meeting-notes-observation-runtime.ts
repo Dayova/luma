@@ -42,6 +42,8 @@ export type MeetingNotesObservationRuntimeDrain = {
 };
 
 export type MeetingNotesObservationRuntimeStatus = {
+  /** True only while a bounded wake-up drain currently owns provider work. */
+  drainActive: boolean;
   pendingPageCount: number;
   canonicalReconciliationPending: boolean;
   /** Number of bounded page queues promoted into canonical scans under load. */
@@ -277,6 +279,7 @@ export function createMeetingNotesObservationRuntime(
         : Math.max(0, now().getTime() - occurredAtMs);
 
       return {
+        drainActive: activeDrain !== null,
         pendingPageCount: pendingPages.size,
         canonicalReconciliationPending: pendingCanonicalReconciliation !== null,
         pageWakeUpOverflowCount,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   accountingOperatorFromPolicy,
+  accountingInvokingUid,
   readAccountingInput,
   runAiAccountingMaintenance
 } from "../../src/app/ai-accounting-maintenance.js";
@@ -65,6 +66,46 @@ describe("private stopped-store accounting maintenance", () => {
     await expect(readAccountingInput("relative.json", uid)).rejects.toThrow(
       "absolute-input-path-required"
     );
+  });
+
+  it("identifies the sudo invoker instead of attributing every root session to one founder", () => {
+    expect(accountingInvokingUid(0, "1001")).toBe(1001);
+    const policy = {
+      operators: [
+        { localUid: 1001, personId: "person_jakob" },
+        { localUid: 1002, personId: "person_fabius" }
+      ]
+    };
+    expect(
+      accountingOperatorFromPolicy(policy, accountingInvokingUid(0, "1002"))
+    ).toEqual({ localUid: 1002, personId: "person_fabius" });
+    for (const value of [
+      undefined,
+      "",
+      "0",
+      "01",
+      "-1",
+      "1001x",
+      "1e3",
+      "1.5",
+      "9007199254740992"
+    ]) {
+      expect(() => accountingInvokingUid(0, value)).toThrow(
+        "identified-sudo-invoker-required"
+      );
+    }
+    expect(() => accountingInvokingUid(1001, "1002")).toThrow(
+      "identified-sudo-invoker-required"
+    );
+    expect(() => accountingInvokingUid(undefined, "1002")).toThrow(
+      "identified-sudo-invoker-required"
+    );
+    expect(() =>
+      accountingOperatorFromPolicy(
+        { operators: [{ localUid: 0, personId: "person_jakob" }] },
+        0
+      )
+    ).toThrow();
   });
 
   it("requires an existing cleanly stopped owner and refuses quarantined recovery stores", async () => {

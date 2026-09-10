@@ -26,7 +26,7 @@ export function accountingOperatorFromPolicy(value: unknown, currentUid: number)
         .array(
           z
             .object({
-              localUid: z.number().int().nonnegative(),
+              localUid: z.number().int().positive(),
               personId: z.enum(dayovaFounderPersonIds)
             })
             .strict()
@@ -40,6 +40,24 @@ export function accountingOperatorFromPolicy(value: unknown, currentUid: number)
   if (matches.length !== 1)
     throw new AiAccountingRecoveryError("operator-not-authorized");
   return matches[0]!;
+}
+
+/** sudo sets SUDO_UID for a direct invocation. Root can forge host evidence;
+ * the trust boundary is a distinct, administrator-managed Unix account.
+ */
+export function accountingInvokingUid(
+  effectiveUid: number | undefined,
+  sudoUid: string | undefined
+): number {
+  if (
+    effectiveUid !== 0 ||
+    !sudoUid ||
+    !/^[1-9][0-9]*$/u.test(sudoUid) ||
+    !Number.isSafeInteger(Number(sudoUid))
+  ) {
+    throw new AiAccountingRecoveryError("identified-sudo-invoker-required");
+  }
+  return Number(sudoUid);
 }
 
 /** No symlinks, shared hard links, oversized files or broadly readable review inputs. */
@@ -102,13 +120,12 @@ export async function runAiAccountingMaintenance(args: string[]): Promise<void> 
     (!outputWithinLease.startsWith(`..${sep}`) && outputWithinLease !== "..")
   )
     throw new AiAccountingRecoveryError("output-must-be-outside-store");
-  const uid = process.geteuid?.();
-  if (uid === undefined) throw new AiAccountingRecoveryError("unix-operator-required");
+  const uid = accountingInvokingUid(process.geteuid?.(), process.env["SUDO_UID"]);
   const operator = accountingOperatorFromPolicy(
     await readAccountingInput(policyPath, 0),
     uid
   );
-  const request = await readAccountingInput(inputPath, uid);
+  const request = await readAccountingInput(inputPath, 0);
   // Acquire output exclusively before a mutation so an existing output can never
   // cause a successful operation to look unrecorded. Failure leaves an empty file.
   const output = await open(

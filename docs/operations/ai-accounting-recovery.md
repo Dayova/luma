@@ -33,28 +33,39 @@ sudo install -d -o root -g root -m 0700 /var/lib/luma-accounting
 ```
 
 An administrator creates `/etc/luma/accounting-operators.json`, owned by root,
-mode `0600`. It maps the effective Unix UID used to run maintenance to exactly
-one authorized founder. The following example identifies Jakob when he is the
-authorized administrator executing the commands through `sudo` (effective UID
-0). Set the actual approved mapping; a shared administrator account cannot
-distinguish its human users, so update the binding when the operator changes.
+mode `0600`. It maps each founder’s distinct Unix login UID to that founder. Replace the
+example UIDs below with the real host accounts. Invoke Node directly through
+`sudo` from that personal account: the CLI requires effective root for store
+access, but identifies the operator using sudo’s nonzero `SUDO_UID`. It refuses
+a direct root session without a sudo invoker. Do not share a Unix login account
+between founders or switch to a shared root shell before running these commands.
 
 ```json
-{ "operators": [{ "localUid": 0, "personId": "person_jakob" }] }
+{
+  "operators": [
+    { "localUid": 1001, "personId": "person_jakob" },
+    { "localUid": 1002, "personId": "person_fabius" }
+  ]
+}
 ```
 
 Allowed founder IDs are `person_jakob`, `person_fabius`, `person_julius` and
 `person_philipp`. Request files cannot choose another operator. Preparation and
-application must use the same policy-bound operator. The UID and founder ID are
-part of the immutable preparation and audit. Root administrators control the
-host and this policy; these records do not claim protection from a hostile host
-administrator or a rewritten datastore.
+application must use the same policy-bound invoking account. The invoker UID
+and founder ID are part of the immutable preparation and audit. Sudo supplies
+`SUDO_UID`; do not set or forward it manually. This identifies a host account,
+not a biometric human identity. Root administrators can forge environment
+variables or rewrite the policy/datastore, so these records do not claim
+protection from a hostile host administrator.
 
-Every input and review file must be an absolute, regular file owned by the
-effective operator UID with mode `0600`, without symlinks or shared hard links.
+Every input and review file must be an absolute, regular file owned by root
+with mode `0600`, without symlinks or shared hard links.
 Inputs are limited to 64 KiB. Use an editor with `umask 077`; keep documents and
 credentials out of command arguments, shell history and logs. Output must be a
-fresh path outside the datastore. No command reads the production environment.
+fresh path outside the datastore. No command loads the production environment
+file or initializes providers. Do not use `env -i` for this entrypoint: it would
+remove sudo’s invocation identity. No other environment value authorizes an
+accounting operation.
 
 ## Inspect and prepare one exact charge
 
@@ -65,7 +76,7 @@ Create `/var/lib/luma-accounting/selection.json` privately:
 ```
 
 ```sh
-sudo env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js inspect /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/selection.json /var/lib/luma-accounting/report-1.json
+sudo -- /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js inspect /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/selection.json /var/lib/luma-accounting/report-1.json
 ```
 
 The private report lists sanitized request identities, provider identifiers,
@@ -99,7 +110,7 @@ For a verified zero, set `verifiedAmountUsd` to `"0"` and evidence kind to
 evidence. Do not include API credentials or entire billing documents in the JSON.
 
 ```sh
-sudo env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js prepare /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/charge.json /var/lib/luma-accounting/prepared-charge.json
+sudo -- /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js prepare /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/charge.json /var/lib/luma-accounting/prepared-charge.json
 ```
 
 Preparation persists the exact immutable request, original accounting facts,
@@ -122,7 +133,7 @@ and digest after reviewing the entire preparation:
 ```
 
 ```sh
-sudo env -i PATH=/usr/bin:/bin /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js apply /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/approval-charge.json /var/lib/luma-accounting/applied-charge.json
+sudo -- /usr/bin/node /opt/luma/releases/RELEASE/dist/src/app/ai-accounting-maintenance.js apply /var/lib/luma/pglite /etc/luma/accounting-operators.json /var/lib/luma-accounting/approval-charge.json /var/lib/luma-accounting/applied-charge.json
 ```
 
 The charge and its append-only audit commit in the same transaction. Original

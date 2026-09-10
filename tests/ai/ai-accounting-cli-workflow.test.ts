@@ -8,14 +8,21 @@ import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
 
 const host = vi.hoisted(() => ({ policyPath: "", policy: "" }));
-// The test runner is not root. Model only the root-controlled policy-file
-// boundary; inputs, outputs, datastore, transactions and owner lease are real.
+// The test runner is not root. Model the root-owned file/identity boundary;
+// input permissions, output creation, datastore, transactions and owner lease are real.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof FsPromises>();
   return {
     ...original,
     open: async (...args: Parameters<typeof original.open>) => {
-      if (args[0] !== host.policyPath) return original.open(...args);
+      if (args[0] !== host.policyPath) {
+        const file = await original.open(...args);
+        const stat = file.stat.bind(file);
+        Object.defineProperty(file, "stat", {
+          value: async () => Object.assign(await stat(), { uid: 0 })
+        });
+        return file;
+      }
       return {
         stat: () =>
           Promise.resolve({
@@ -39,9 +46,12 @@ it("completes inspect, prepare, reviewed apply and idempotent retry using only p
   const network = vi
     .spyOn(globalThis, "fetch")
     .mockRejectedValue(new Error("no network during accounting maintenance"));
+  const originalGeteuid = process.geteuid;
+  process.geteuid = () => 0;
+  vi.stubEnv("SUDO_UID", "1001");
   host.policyPath = join(root, "root-policy.json");
   host.policy = JSON.stringify({
-    operators: [{ localUid: process.geteuid!(), personId: "person_jakob" }]
+    operators: [{ localUid: 1001, personId: "person_jakob" }]
   });
   let database = await createPgliteDatabase(store);
   try {
@@ -95,6 +105,9 @@ it("completes inspect, prepare, reviewed apply and idempotent retry using only p
       reviewed: true
     };
     const applied = await command("apply", approval, "apply");
+    expect(applied).toMatchObject({
+      operator: { localUid: 1001, personId: "person_jakob" }
+    });
     expect(await command("apply", approval, "retry")).toEqual(applied);
     await expect(
       runAiAccountingMaintenance([
@@ -119,5 +132,8 @@ it("completes inspect, prepare, reviewed apply and idempotent retry using only p
     await rm(root, { recursive: true, force: true });
     stdout.mockRestore();
     network.mockRestore();
+    if (originalGeteuid) process.geteuid = originalGeteuid;
+    else delete process.geteuid;
+    vi.unstubAllEnvs();
   }
 }, 30_000);

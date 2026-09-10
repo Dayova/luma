@@ -1,6 +1,7 @@
 import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
 import { PGlite } from "@electric-sql/pglite";
 import { openOwnedPgliteDatabase } from "./store-ownership.js";
+import { migrateAiAccountingRecovery } from "./ai-accounting-migration.js";
 
 export type LumaDatabase = PGlite;
 
@@ -801,4 +802,5 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
       ALTER COLUMN speaker_id DROP NOT NULL;
   `);
   await migrateOrganizationalContext(database);
+  await migrateAiAccountingRecovery(database);
 }

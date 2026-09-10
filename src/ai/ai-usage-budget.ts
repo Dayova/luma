@@ -42,6 +42,7 @@ export type AiUsageStatus = {
   alerts: (80 | 90 | 100)[];
   byCapability: AiUsageBreakdown[];
   configured: boolean;
+  accountingBlocked?: boolean;
   limitScope?: "month" | "day";
   dailySpentUsd?: number;
   dailyReservedUsd?: number;
@@ -101,6 +102,7 @@ type UsageRow = {
   max_output_tokens: number;
   price_version: string;
   model: string;
+  reconciliation_id?: string | null;
 };
 
 type BudgetConfig = Partial<AiUsageBudgetSettings> & {
@@ -145,7 +147,10 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
           "SELECT * FROM ai_usage_requests WHERE workspace_id = $1 AND month = $2",
           [workspaceId, localDate(now, settings.timezone).slice(0, 7)]
         );
-        return statusFor(rows, now, settings, configured && !blocked);
+        return {
+          ...statusFor(rows, now, settings, configured && !blocked),
+          accountingBlocked: blocked
+        };
       });
     },
     async reserve(input) {
@@ -190,6 +195,12 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
           [input.workspaceId, month, workflowId]
         );
         const workflow = rows.filter((row) => row.workflow_id === workflowId);
+        if (workflow.some((row) => row.reconciliation_id)) {
+          throw new AiServiceError(
+            "request-indeterminate",
+            "This workflow was reconciled by an operator and will not be sent again."
+          );
+        }
         if (workflow.some((row) => row.state !== "settled")) {
           throw new AiServiceError(
             "request-indeterminate",
@@ -345,7 +356,11 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
         );
         if (options?.blockWorkspace) {
           await tx.query(
-            "UPDATE ai_usage_locks SET accounting_blocked = TRUE WHERE workspace_id = $1",
+            "UPDATE ai_usage_requests SET accounting_blocker = TRUE WHERE reservation_id = $1",
+            [reservationId]
+          );
+          await tx.query(
+            "UPDATE ai_usage_locks SET accounting_blocked = TRUE, accounting_revision = accounting_revision + 1 WHERE workspace_id = $1",
             [row.workspace_id]
           );
         }

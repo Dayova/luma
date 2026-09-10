@@ -21,7 +21,7 @@ describe("versioned Meeting product evaluation", () => {
     const { corpus, samples } = await load();
     const report = await evaluateCorpus(corpus, samples);
     expect(report.fixtures.map((fixture) => fixture.id)).toEqual(
-      corpus.fixtures.map((fixture) => fixture.id)
+      [...corpus.fixtures, ...corpus.retrievalFixtures].map((fixture) => fixture.id)
     );
     expect(report.summary.failed).toBe(0);
     expect(report.summary.passed).toBeGreaterThan(40);
@@ -31,11 +31,7 @@ describe("versioned Meeting product evaluation", () => {
     expect(missing.map((check) => check.id)).toEqual([
       "code-context-can-be-linked",
       "cross-meeting-current-recall",
-      "cross-provider-stale-inclusion",
-      "duplicate-context",
-      "revoked-source-derived-views",
-      "deleted-source-derived-views",
-      "bounded-organizational-input-output"
+      "cross-provider-stale-inclusion"
     ]);
     expect(report.knowledgeSelection.relevantCurrentRecall).toEqual({
       recalled: 3,
@@ -48,7 +44,29 @@ describe("versioned Meeting product evaluation", () => {
       unobserved: 0,
       ratio: 0
     });
-    expect(report.knowledgeSelection.contextUse.additionalContextEntries).toBe(0);
+    const meetingContextEntries = report.fixtures
+      .filter(
+        (fixture) => fixture.surface === "MeetingIntelligence.observe/query/conclude"
+      )
+      .reduce((sum, fixture) => sum + fixture.contextUse.contextEntries, 0);
+    expect(report.knowledgeSelection.contextUse.additionalContextEntries).toBe(
+      meetingContextEntries
+    );
+    expect(report.knowledgeSelection.contextUse.inputCharacters).toBeGreaterThan(0);
+    expect(report.retrievalKnowledgeSelection.relevantCurrentRecall).toEqual({
+      recalled: 5,
+      relevant: 5,
+      ratio: 1
+    });
+    expect(report.retrievalKnowledgeSelection.staleClaimInclusion).toEqual({
+      included: 0,
+      annotatedStaleOrUnaccepted: 6,
+      unobserved: 0,
+      ratio: 0
+    });
+    expect(
+      report.retrievalKnowledgeSelection.contextUse.additionalContextEntries
+    ).toBeGreaterThan(0);
     expect(report.productReadiness).toBe("not-demonstrated");
     expect(report.usage).toMatchObject({
       paidRequests: 0,
@@ -115,6 +133,75 @@ describe("versioned Meeting product evaluation", () => {
     delete samples.samples["german"];
     expect(() => validateCoverage(corpus, samples)).toThrow("Missing sample german");
   });
+
+  it("rejects a missing linked retrieval assertion instead of silently resolving an original product gap", async () => {
+    const { corpus, samples } = await load();
+    const duplicate = corpus.retrievalFixtures.find(
+      (fixture) => fixture.id === "organizational-duplicate-context"
+    );
+    if (!duplicate) throw new Error("Expected retrieval corpus");
+    duplicate.assertions = duplicate.assertions.filter(
+      (check) => check.id !== "duplicate-context"
+    );
+    expect(() => validateCoverage(corpus, samples)).toThrow(
+      "Missing executable retrieval coverage duplicate-context"
+    );
+  });
+
+  it("fails when catalog authority, duplicate selection, excerpt budgets or source invalidation regress", async () => {
+    const { corpus, samples } = await load();
+    const get = (id: string) => {
+      const fixture = corpus.retrievalFixtures.find((entry) => entry.id === id);
+      if (!fixture) throw new Error(`Missing mutation fixture ${id}`);
+      return fixture;
+    };
+    const ranked = get("organizational-current-ranking").sources[0];
+    const copy = get("organizational-duplicate-context").sources[1];
+    if (!ranked || !copy) throw new Error("Missing mutation source");
+    ranked.source.standing = "superseded";
+    copy.source.content = "Fabius owns Luma.";
+    get("organizational-bounded-context").limits.maxCharacters = 8_000;
+    for (const id of [
+      "organizational-revoked-derived-answers",
+      "organizational-deleted-derived-answers",
+      "organizational-new-discovery"
+    ])
+      get(id).steps = get(id).steps.filter((step) => step.type !== "change");
+    const midflight = get("organizational-midflight-revocation").steps[0];
+    if (midflight?.type !== "inquire") throw new Error("Missing midflight step");
+    delete midflight.duringAnswer;
+    const report = await evaluateCorpus(corpus, samples);
+    const failed = report.fixtures
+      .flatMap((fixture) => fixture.checks)
+      .filter((check) => check.status === "failed")
+      .map((check) => check.id);
+    expect(failed).toEqual(
+      expect.arrayContaining([
+        "old-valid-organizational-recall",
+        "human-owner-outranks-provisional-cto",
+        "newer-unaccepted-owner-not-promoted",
+        "duplicate-context",
+        "duplicate-source-not-extra-authority",
+        "bounded-organizational-input-output",
+        "truncation-explicit",
+        "revoked-source-derived-views",
+        "revoked-delivery-denied",
+        "revoked-fresh-answer-no-stale-claim",
+        "deleted-source-derived-views",
+        "deleted-delivery-denied",
+        "deleted-fresh-answer-no-stale-claim",
+        "new-discovery-invalidates-replay",
+        "midflight-result-cached-nondeliverable"
+      ])
+    );
+    expect(
+      report.retrievalKnowledgeSelection.relevantCurrentRecall.recalled
+    ).toBeLessThan(5);
+    expect(
+      report.retrievalKnowledgeSelection.staleClaimInclusion.included
+    ).toBeGreaterThan(0);
+    expect(reportExitCode(report.fixtures.flatMap((fixture) => fixture.checks))).toBe(1);
+  }, 20_000);
 });
 
 describe("semantic annotation scorer", () => {

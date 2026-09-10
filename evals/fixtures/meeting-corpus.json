@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "annotationProvenance": "The original four fixtures and their named expectations are retained. New structured samples and scenario assertions are agent-authored synthetic annotations and require human review; they are not a human-labeled benchmark.",
   "referenceAt": "2026-09-10T08:00:00.000Z",
   "timezone": "Europe/Berlin",
@@ -85,7 +85,8 @@
           "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "english-code-identifier",
@@ -162,10 +163,11 @@
         {
           "id": "code-context-can-be-linked",
           "metric": "context-use",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "reason": "A normalized programmable catalog is exercised, but actual GitHub CodeProvider linkage is not implemented in this evaluation.",
           "acceptance": "A code source must be retrieved and linked without asserting that an unverified implementation works."
         }
-      ]
+      ],
+      "coveredBy": []
     },
     {
       "id": "mixed-github-issue",
@@ -258,7 +260,8 @@
           "expected": ["suggested"]
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "uncertain-proposal",
@@ -320,7 +323,8 @@
           "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "retained-current-and-historical-decisions",
@@ -499,38 +503,32 @@
         {
           "id": "cross-meeting-current-recall",
           "metric": "relevant-current-recall",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "reason": "Context Ask and retained source revisions are exercised, but retrieval from another actual Meeting is not demonstrated.",
           "acceptance": "Retrieve the old still-valid ownership decision from another Meeting while excluding unrelated material."
         },
         {
           "id": "cross-provider-stale-inclusion",
           "metric": "stale-claim-inclusion",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "reason": "Normalized multi-catalog ranking is measured separately. Actual Notion/Linear/GitHub source adapters and their standing/authority mapping are not demonstrated.",
           "acceptance": "Prefer current accepted knowledge over superseded documents and newer unaccepted proposals from Notion/Linear/GitHub."
-        },
+        }
+      ],
+      "coveredBy": [
         {
           "id": "duplicate-context",
-          "metric": "context-use",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
-          "acceptance": "The same underlying fact retrieved from multiple sources must not consume duplicate context budget."
+          "fixtureId": "organizational-duplicate-context"
         },
         {
           "id": "revoked-source-derived-views",
-          "metric": "coverage",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
-          "acceptance": "A source revoked or made private must disappear from retrieval and derived answers without rewriting approved history."
+          "fixtureId": "organizational-revoked-derived-answers"
         },
         {
           "id": "deleted-source-derived-views",
-          "metric": "coverage",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
-          "acceptance": "A source deleted at the provider must not support a current derived answer; retained evidence remains qualified historical data."
+          "fixtureId": "organizational-deleted-derived-answers"
         },
         {
           "id": "bounded-organizational-input-output",
-          "metric": "context-use",
-          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
-          "acceptance": "Enforce a bounded retrieval input and output budget with explicit omissions and coverage limitations; report quality separately from context size."
+          "fixtureId": "organizational-bounded-context"
         }
       ]
     },
@@ -623,7 +621,8 @@
           "expected": "Delegate all Luma work"
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "reconcile-exact",
@@ -675,7 +674,8 @@
           "expected": []
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "reconcile-unavailable",
@@ -735,7 +735,8 @@
           "expected": true
         }
       ],
-      "missing": []
+      "missing": [],
+      "coveredBy": []
     },
     {
       "id": "bounded-scoped-answer-with-omissions",
@@ -868,6 +869,1466 @@
           "path": ["after", "state"],
           "operation": "same-as",
           "expected": ["before", "state"]
+        }
+      ],
+      "missing": [],
+      "coveredBy": []
+    }
+  ],
+  "retrievalFixtures": [
+    {
+      "id": "organizational-current-ranking",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 1,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        },
+        {
+          "id": "proposals",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "old-valid",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma. Use staged rollout.",
+            "version": "1",
+            "updatedAt": "2025-08-01T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "old-valid",
+              "url": "https://example.invalid/old-valid"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        },
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "obsolete",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Fabius owns Luma. Use immediate rollout.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "obsolete",
+              "url": "https://example.invalid/obsolete"
+            },
+            "standing": "superseded",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        },
+        {
+          "catalogId": "proposals",
+          "source": {
+            "id": "cto-proposal",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Fabius owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T07:59:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "cto-proposal",
+              "url": "https://example.invalid/cto-proposal"
+            },
+            "standing": "proposed",
+            "authority": "ai-inference"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "old-valid-organizational-recall",
+          "human-owner-outranks-provisional-cto",
+          "organizational-stale-claim-excluded",
+          "newer-unaccepted-owner-not-promoted",
+          "selected-authority-preserved",
+          "limited-search-is-partial",
+          "ranking-omission-visible",
+          "all-four-recipients-checked"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "old-valid-organizational-recall",
+          "metric": "relevant-current-recall",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "human-owner-outranks-provisional-cto",
+          "metric": "ownership",
+          "path": ["first", "selectedIds"],
+          "operation": "equals",
+          "expected": ["old-valid"]
+        },
+        {
+          "id": "organizational-stale-claim-excluded",
+          "metric": "stale-claim-inclusion",
+          "path": ["first", "answerText"],
+          "operation": "excludes",
+          "expected": "immediate rollout"
+        },
+        {
+          "id": "newer-unaccepted-owner-not-promoted",
+          "metric": "stale-claim-inclusion",
+          "path": ["first", "answerText"],
+          "operation": "excludes",
+          "expected": "Fabius owns Luma"
+        },
+        {
+          "id": "selected-authority-preserved",
+          "metric": "ownership",
+          "path": ["first", "authority"],
+          "operation": "equals",
+          "expected": ["human-confirmed"]
+        },
+        {
+          "id": "limited-search-is-partial",
+          "metric": "coverage",
+          "path": ["first", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "ranking-omission-visible",
+          "metric": "coverage",
+          "path": ["first", "rendered"],
+          "operation": "includes",
+          "expected": "coverage partial"
+        },
+        {
+          "id": "all-four-recipients-checked",
+          "metric": "coverage",
+          "path": ["readAudiences"],
+          "operation": "equals",
+          "expected": ["person_fabius,person_jakob,person_julius,person_philipp"]
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-duplicate-context",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        },
+        {
+          "id": "mirror-one",
+          "complete": true
+        },
+        {
+          "id": "mirror-two",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "original",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "original",
+              "url": "https://example.invalid/original"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        },
+        {
+          "catalogId": "mirror-one",
+          "source": {
+            "id": "copy-one",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2025-08-01T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "copy-one",
+              "url": "https://example.invalid/copy-one"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        },
+        {
+          "catalogId": "mirror-two",
+          "source": {
+            "id": "copy-two",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2025-08-01T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "copy-two",
+              "url": "https://example.invalid/copy-two"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "duplicate-context",
+          "duplicate-copies-remain-citations",
+          "duplicate-source-not-extra-authority",
+          "deduplication-preserves-current-recall",
+          "deduplicated-context-is-exact",
+          "duplicate-citations-single-source"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "duplicate-context",
+          "metric": "context-use",
+          "path": ["requests", 0, "contextEntries"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "duplicate-copies-remain-citations",
+          "metric": "coverage",
+          "path": ["first", "duplicates"],
+          "operation": "equals",
+          "expected": ["mirror-one:copy-one", "mirror-two:copy-two"]
+        },
+        {
+          "id": "duplicate-source-not-extra-authority",
+          "metric": "grounding",
+          "path": ["first", "authority"],
+          "operation": "equals",
+          "expected": ["human-confirmed"]
+        },
+        {
+          "id": "deduplication-preserves-current-recall",
+          "metric": "relevant-current-recall",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "deduplicated-context-is-exact",
+          "metric": "context-use",
+          "path": ["requests", 0, "contextText"],
+          "operation": "equals",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "duplicate-citations-single-source",
+          "metric": "grounding",
+          "path": ["first", "citedSourceIds"],
+          "operation": "equals",
+          "expected": ["original"]
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-revoked-derived-answers",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "ownership",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://example.invalid/ownership"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "revoked-initial-answer-grounded",
+          "revoked-source-derived-views",
+          "revoked-delivery-denied",
+          "revoked-replay-no-model-retry",
+          "revoked-delivery-no-model-retry",
+          "revoked-fresh-answer-has-no-source",
+          "revoked-fresh-answer-no-stale-claim",
+          "revoked-fresh-answer-no-derived-citation",
+          "revoked-history-was-retained",
+          "revoked-retained-history-unmodified",
+          "revoked-initial-snapshot-exists",
+          "revoked-all-four-recipients-checked",
+          "revoked-history-access-denied",
+          "revoked-history-no-content-leak"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        },
+        {
+          "type": "retained-snapshots",
+          "id": "before"
+        },
+        {
+          "type": "change",
+          "id": "external-change",
+          "change": {
+            "type": "revoke",
+            "catalogId": "reviewed",
+            "sourceId": "ownership",
+            "personId": "person_julius"
+          }
+        },
+        {
+          "type": "inquire",
+          "id": "replay",
+          "inquiryId": "first"
+        },
+        {
+          "type": "require-current",
+          "id": "delivery",
+          "inquiryId": "first"
+        },
+        {
+          "type": "inquire",
+          "id": "fresh",
+          "inquiryId": "fresh"
+        },
+        {
+          "type": "inquire",
+          "id": "historical",
+          "inquiryId": "historical",
+          "time": {
+            "mode": "history",
+            "asOf": "2026-09-10T08:00:00.000Z"
+          }
+        },
+        {
+          "type": "retained-snapshots",
+          "id": "after"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "revoked-initial-answer-grounded",
+          "metric": "grounding",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "revoked-source-derived-views",
+          "metric": "coverage",
+          "path": ["replay", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "revoked-delivery-denied",
+          "metric": "coverage",
+          "path": ["delivery", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "revoked-replay-no-model-retry",
+          "metric": "coverage",
+          "path": ["replayAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "revoked-delivery-no-model-retry",
+          "metric": "coverage",
+          "path": ["deliveryAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "revoked-fresh-answer-has-no-source",
+          "metric": "grounding",
+          "path": ["fresh", "selectedIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "revoked-fresh-answer-no-stale-claim",
+          "metric": "stale-claim-inclusion",
+          "path": ["fresh", "answerText"],
+          "operation": "excludes",
+          "expected": "Jakob owns Luma"
+        },
+        {
+          "id": "revoked-fresh-answer-no-derived-citation",
+          "metric": "grounding",
+          "path": ["fresh", "citedSourceIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "revoked-history-was-retained",
+          "metric": "retention",
+          "path": ["before"],
+          "operation": "length-at-most",
+          "expected": 1
+        },
+        {
+          "id": "revoked-retained-history-unmodified",
+          "metric": "retention",
+          "path": ["after"],
+          "operation": "same-as",
+          "expected": ["before"]
+        },
+        {
+          "id": "revoked-initial-snapshot-exists",
+          "metric": "retention",
+          "path": ["before", 0, "sourceId"],
+          "operation": "equals",
+          "expected": "ownership"
+        },
+        {
+          "id": "revoked-all-four-recipients-checked",
+          "metric": "coverage",
+          "path": ["readAudiences"],
+          "operation": "equals",
+          "expected": ["person_fabius,person_jakob,person_julius,person_philipp"]
+        },
+        {
+          "id": "revoked-history-access-denied",
+          "metric": "grounding",
+          "path": ["historical", "selectedIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "revoked-history-no-content-leak",
+          "metric": "grounding",
+          "path": ["historical", "answerText"],
+          "operation": "excludes",
+          "expected": "Jakob owns Luma"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-deleted-derived-answers",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "ownership",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://example.invalid/ownership"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "deleted-initial-answer-grounded",
+          "deleted-source-derived-views",
+          "deleted-delivery-denied",
+          "deleted-replay-no-model-retry",
+          "deleted-delivery-no-model-retry",
+          "deleted-fresh-answer-has-no-source",
+          "deleted-fresh-answer-no-stale-claim",
+          "deleted-fresh-answer-no-derived-citation",
+          "deleted-history-was-retained",
+          "deleted-retained-history-unmodified",
+          "deleted-initial-snapshot-exists",
+          "deleted-all-four-recipients-checked",
+          "deleted-history-access-denied",
+          "deleted-history-no-content-leak"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        },
+        {
+          "type": "retained-snapshots",
+          "id": "before"
+        },
+        {
+          "type": "change",
+          "id": "external-change",
+          "change": {
+            "type": "delete",
+            "catalogId": "reviewed",
+            "sourceId": "ownership"
+          }
+        },
+        {
+          "type": "inquire",
+          "id": "replay",
+          "inquiryId": "first"
+        },
+        {
+          "type": "require-current",
+          "id": "delivery",
+          "inquiryId": "first"
+        },
+        {
+          "type": "inquire",
+          "id": "fresh",
+          "inquiryId": "fresh"
+        },
+        {
+          "type": "inquire",
+          "id": "historical",
+          "inquiryId": "historical",
+          "time": {
+            "mode": "history",
+            "asOf": "2026-09-10T08:00:00.000Z"
+          }
+        },
+        {
+          "type": "retained-snapshots",
+          "id": "after"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "deleted-initial-answer-grounded",
+          "metric": "grounding",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "deleted-source-derived-views",
+          "metric": "coverage",
+          "path": ["replay", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "deleted-delivery-denied",
+          "metric": "coverage",
+          "path": ["delivery", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "deleted-replay-no-model-retry",
+          "metric": "coverage",
+          "path": ["replayAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "deleted-delivery-no-model-retry",
+          "metric": "coverage",
+          "path": ["deliveryAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "deleted-fresh-answer-has-no-source",
+          "metric": "grounding",
+          "path": ["fresh", "selectedIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "deleted-fresh-answer-no-stale-claim",
+          "metric": "stale-claim-inclusion",
+          "path": ["fresh", "answerText"],
+          "operation": "excludes",
+          "expected": "Jakob owns Luma"
+        },
+        {
+          "id": "deleted-fresh-answer-no-derived-citation",
+          "metric": "grounding",
+          "path": ["fresh", "citedSourceIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "deleted-history-was-retained",
+          "metric": "retention",
+          "path": ["before"],
+          "operation": "length-at-most",
+          "expected": 1
+        },
+        {
+          "id": "deleted-retained-history-unmodified",
+          "metric": "retention",
+          "path": ["after"],
+          "operation": "same-as",
+          "expected": ["before"]
+        },
+        {
+          "id": "deleted-initial-snapshot-exists",
+          "metric": "retention",
+          "path": ["before", 0, "sourceId"],
+          "operation": "equals",
+          "expected": "ownership"
+        },
+        {
+          "id": "deleted-all-four-recipients-checked",
+          "metric": "coverage",
+          "path": ["readAudiences"],
+          "operation": "equals",
+          "expected": ["person_fabius,person_jakob,person_julius,person_philipp"]
+        },
+        {
+          "id": "deleted-history-access-denied",
+          "metric": "grounding",
+          "path": ["historical", "selectedIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "deleted-history-no-content-leak",
+          "metric": "grounding",
+          "path": ["historical", "answerText"],
+          "operation": "excludes",
+          "expected": "Jakob owns Luma"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-bounded-context",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 2,
+        "maxCharacters": 120
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "long-current",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. Detailed accepted Luma context. ",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "long-current",
+              "url": "https://example.invalid/long-current"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        },
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "another-current",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Julius owns Luma finance planning.",
+            "version": "1",
+            "updatedAt": "2025-08-01T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "another-current",
+              "url": "https://example.invalid/another-current"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "bounded-organizational-input-output",
+          "bounded-context-not-empty",
+          "bounded-context-source-limit",
+          "bounded-answer-discord-limit",
+          "truncation-explicit",
+          "bounded-current-recall",
+          "bounded-coverage-not-complete",
+          "bounded-uncertainty-partial",
+          "bounded-coverage-visible",
+          "bounded-warning-visible"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "bounded-organizational-input-output",
+          "metric": "context-use",
+          "path": ["requests", 0, "contextText"],
+          "operation": "length-at-most",
+          "expected": 120,
+          "note": "The governed excerpt bound; measured total request characters are reported separately and are not token usage."
+        },
+        {
+          "id": "bounded-context-not-empty",
+          "metric": "context-use",
+          "path": ["first", "selectedIds"],
+          "operation": "equals",
+          "expected": ["long-current"]
+        },
+        {
+          "id": "bounded-context-source-limit",
+          "metric": "context-use",
+          "path": ["first", "selectedIds"],
+          "operation": "length-at-most",
+          "expected": 2
+        },
+        {
+          "id": "bounded-answer-discord-limit",
+          "metric": "context-use",
+          "path": ["first", "rendered"],
+          "operation": "length-at-most",
+          "expected": 2000
+        },
+        {
+          "id": "truncation-explicit",
+          "metric": "coverage",
+          "path": ["first", "truncated"],
+          "operation": "equals",
+          "expected": [true]
+        },
+        {
+          "id": "bounded-current-recall",
+          "metric": "relevant-current-recall",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "bounded-coverage-not-complete",
+          "metric": "coverage",
+          "path": ["first", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "bounded-uncertainty-partial",
+          "metric": "coverage",
+          "path": ["first", "uncertainty"],
+          "operation": "equals",
+          "expected": "partial"
+        },
+        {
+          "id": "bounded-coverage-visible",
+          "metric": "coverage",
+          "path": ["first", "rendered"],
+          "operation": "includes",
+          "expected": "coverage partial"
+        },
+        {
+          "id": "bounded-warning-visible",
+          "metric": "coverage",
+          "path": ["first", "warnings"],
+          "operation": "includes",
+          "expected": "organizational-context-partial"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-no-configured-catalogs",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [],
+      "sources": [],
+      "expected": {
+        "checks": [
+          "no-catalogs-no-sources",
+          "no-catalogs-not-complete",
+          "no-catalogs-limitation-visible",
+          "no-catalogs-no-authority-invented"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "no-catalogs-no-sources",
+          "metric": "coverage",
+          "path": ["first", "selectedIds"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "no-catalogs-not-complete",
+          "metric": "coverage",
+          "path": ["first", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "no-catalogs-limitation-visible",
+          "metric": "coverage",
+          "path": ["first", "rendered"],
+          "operation": "includes",
+          "expected": "No organizational context sources are configured."
+        },
+        {
+          "id": "no-catalogs-no-authority-invented",
+          "metric": "stale-claim-inclusion",
+          "path": ["first", "answerText"],
+          "operation": "excludes",
+          "expected": "Jakob owns Luma"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-partial-search",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": false
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "ownership",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://example.invalid/ownership"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "partial-search-recalls-current",
+          "partial-search-disclosed",
+          "partial-search-rendered",
+          "partial-search-uncertainty"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "partial-search-recalls-current",
+          "metric": "relevant-current-recall",
+          "path": ["first", "answerText"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "partial-search-disclosed",
+          "metric": "coverage",
+          "path": ["first", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "partial-search-rendered",
+          "metric": "coverage",
+          "path": ["first", "rendered"],
+          "operation": "includes",
+          "expected": "coverage partial"
+        },
+        {
+          "id": "partial-search-uncertainty",
+          "metric": "coverage",
+          "path": ["first", "uncertainty"],
+          "operation": "equals",
+          "expected": "partial"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-new-discovery",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "ownership",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://example.invalid/ownership"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "new-discovery-invalidates-replay",
+          "new-discovery-invalidates-delivery",
+          "new-discovery-no-reasoning-retry",
+          "new-discovery-new-inquiry-sees-source",
+          "disputed-source-stays-disputed"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        },
+        {
+          "type": "change",
+          "id": "new-source",
+          "change": {
+            "type": "replace",
+            "catalogId": "reviewed",
+            "source": {
+              "id": "newly-discovered",
+              "kind": "knowledge-document",
+              "title": "Luma ownership",
+              "content": "A new Luma ownership decision needs review.",
+              "version": "1",
+              "updatedAt": "2026-09-10T08:00:00.000Z",
+              "externalReference": {
+                "providerId": "synthetic-knowledge",
+                "objectType": "document",
+                "externalId": "newly-discovered",
+                "url": "https://example.invalid/newly-discovered"
+              },
+              "standing": "disputed",
+              "authority": "source"
+            }
+          }
+        },
+        {
+          "type": "inquire",
+          "id": "replay",
+          "inquiryId": "first"
+        },
+        {
+          "type": "require-current",
+          "id": "delivery",
+          "inquiryId": "first"
+        },
+        {
+          "type": "inquire",
+          "id": "fresh",
+          "inquiryId": "fresh"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "new-discovery-invalidates-replay",
+          "metric": "coverage",
+          "path": ["replay", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "new-discovery-invalidates-delivery",
+          "metric": "coverage",
+          "path": ["delivery", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "new-discovery-no-reasoning-retry",
+          "metric": "coverage",
+          "path": ["replayAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "new-discovery-new-inquiry-sees-source",
+          "metric": "coverage",
+          "path": ["fresh", "selectedIds"],
+          "operation": "includes",
+          "expected": "newly-discovered"
+        },
+        {
+          "id": "disputed-source-stays-disputed",
+          "metric": "modality",
+          "path": ["fresh", "standing"],
+          "operation": "equals",
+          "expected": ["current", "disputed"]
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-midflight-revocation",
+      "question": "Who owns Luma?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "ownership",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Jakob owns Luma.",
+            "version": "1",
+            "updatedAt": "2026-09-10T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://example.invalid/ownership"
+            },
+            "standing": "current",
+            "authority": "human-confirmed"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "midflight-answer-not-delivered",
+          "midflight-result-cached-nondeliverable",
+          "midflight-replay-stays-blocked",
+          "midflight-replay-does-not-repeat-model",
+          "midflight-delivery-blocked"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first",
+          "duringAnswer": {
+            "type": "revoke",
+            "catalogId": "reviewed",
+            "sourceId": "ownership",
+            "personId": "person_julius"
+          }
+        },
+        {
+          "type": "inquire",
+          "id": "replay",
+          "inquiryId": "first"
+        },
+        {
+          "type": "require-current",
+          "id": "delivery",
+          "inquiryId": "first"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "midflight-answer-not-delivered",
+          "metric": "coverage",
+          "path": ["first", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "midflight-result-cached-nondeliverable",
+          "metric": "coverage",
+          "path": ["firstAccounting", "saved", 0, "result_is_deliverable"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "midflight-replay-stays-blocked",
+          "metric": "coverage",
+          "path": ["replay", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "midflight-replay-does-not-repeat-model",
+          "metric": "coverage",
+          "path": ["replayAccounting", "modelCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "midflight-delivery-blocked",
+          "metric": "coverage",
+          "path": ["delivery", "code"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "organizational-exact-history",
+      "question": "What was the Luma rollout decision?",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "limits": {
+        "limit": 8,
+        "maxCharacters": 8000
+      },
+      "catalogs": [
+        {
+          "id": "reviewed",
+          "complete": true
+        }
+      ],
+      "sources": [
+        {
+          "catalogId": "reviewed",
+          "source": {
+            "id": "rollout",
+            "kind": "knowledge-document",
+            "title": "Luma ownership",
+            "content": "Luma used immediate rollout.",
+            "version": "1",
+            "updatedAt": "2025-08-01T08:00:00.000Z",
+            "externalReference": {
+              "providerId": "synthetic-knowledge",
+              "objectType": "document",
+              "externalId": "rollout",
+              "url": "https://example.invalid/rollout"
+            },
+            "standing": "current",
+            "authority": "human-confirmed",
+            "effectiveAt": "2025-08-01T08:00:00.000Z"
+          },
+          "readableBy": [
+            "person_jakob",
+            "person_fabius",
+            "person_philipp",
+            "person_julius"
+          ]
+        }
+      ],
+      "expected": {
+        "checks": [
+          "current-revision-selected",
+          "previous-revision-not-current",
+          "exact-history-recalls-old-decision",
+          "exact-history-qualified",
+          "exact-history-excludes-future",
+          "history-keeps-two-revisions"
+        ]
+      },
+      "steps": [
+        {
+          "type": "inquire",
+          "id": "first",
+          "inquiryId": "first"
+        },
+        {
+          "type": "change",
+          "id": "updated",
+          "change": {
+            "type": "replace",
+            "catalogId": "reviewed",
+            "source": {
+              "id": "rollout",
+              "kind": "knowledge-document",
+              "title": "Luma ownership",
+              "content": "Luma uses staged rollout.",
+              "version": "2",
+              "updatedAt": "2026-09-10T08:00:00.000Z",
+              "externalReference": {
+                "providerId": "synthetic-knowledge",
+                "objectType": "document",
+                "externalId": "rollout",
+                "url": "https://example.invalid/rollout"
+              },
+              "standing": "current",
+              "authority": "human-confirmed",
+              "effectiveAt": "2026-09-10T08:00:00.000Z"
+            }
+          }
+        },
+        {
+          "type": "inquire",
+          "id": "current",
+          "inquiryId": "current"
+        },
+        {
+          "type": "inquire",
+          "id": "historical",
+          "inquiryId": "history",
+          "time": {
+            "mode": "history",
+            "asOf": "2025-08-02T08:00:00.000Z"
+          }
+        },
+        {
+          "type": "retained-snapshots",
+          "id": "retained"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "current-revision-selected",
+          "metric": "relevant-current-recall",
+          "path": ["current", "answerText"],
+          "operation": "includes",
+          "expected": "Luma uses staged rollout."
+        },
+        {
+          "id": "previous-revision-not-current",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "answerText"],
+          "operation": "excludes",
+          "expected": "immediate rollout"
+        },
+        {
+          "id": "exact-history-recalls-old-decision",
+          "metric": "retention",
+          "path": ["historical", "answerText"],
+          "operation": "includes",
+          "expected": "Luma used immediate rollout."
+        },
+        {
+          "id": "exact-history-qualified",
+          "metric": "retention",
+          "path": ["historical", "standing"],
+          "operation": "equals",
+          "expected": ["historical"]
+        },
+        {
+          "id": "exact-history-excludes-future",
+          "metric": "grounding",
+          "path": ["historical", "answerText"],
+          "operation": "excludes",
+          "expected": "staged rollout"
+        },
+        {
+          "id": "history-keeps-two-revisions",
+          "metric": "retention",
+          "path": ["retained", 1, "sourceId"],
+          "operation": "equals",
+          "expected": "rollout"
         }
       ],
       "missing": []

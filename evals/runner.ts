@@ -18,6 +18,7 @@ import {
 } from "./corpus.js";
 import { importedObservation } from "./imported-source.js";
 import { score, summarize, type CheckResult } from "./scorer.js";
+import { runRetrievalFixture } from "./retrieval-runner.js";
 
 type RequestRecord = {
   sampleId: string;
@@ -306,6 +307,8 @@ async function runFixture(
   });
   return {
     id: fixture.id,
+    surface: "MeetingIntelligence.observe/query/conclude" as const,
+    coveredBy: fixture.coveredBy,
     checks,
     outputs,
     contextUse: {
@@ -326,21 +329,73 @@ async function runFixture(
   };
 }
 
+function knowledgeMeasurements(
+  fixtures: Array<{
+    checks: CheckResult[];
+    contextUse: {
+      inputCharacters: number;
+      contextCharacters: number;
+      contextEntries: number;
+    };
+  }>,
+  scope: string
+) {
+  const checks = fixtures.flatMap((fixture) => fixture.checks);
+  const recall = checks.filter(
+    (check) => check.metric === "relevant-current-recall" && check.status !== "missing"
+  );
+  const stale = checks.filter(
+    (check) => check.metric === "stale-claim-inclusion" && check.status !== "missing"
+  );
+  const observedStale = stale.filter((check) => typeof check.actual === "string");
+  return {
+    scope,
+    relevantCurrentRecall: {
+      recalled: recall.filter((check) => check.status === "passed").length,
+      relevant: recall.length,
+      ratio: recall.length
+        ? recall.filter((check) => check.status === "passed").length / recall.length
+        : null
+    },
+    staleClaimInclusion: {
+      included: observedStale.filter((check) => check.status === "failed").length,
+      annotatedStaleOrUnaccepted: stale.length,
+      unobserved: stale.length - observedStale.length,
+      ratio: observedStale.length
+        ? observedStale.filter((check) => check.status === "failed").length /
+          observedStale.length
+        : null
+    },
+    contextUse: {
+      inputCharacters: fixtures.reduce(
+        (sum, fixture) => sum + fixture.contextUse.inputCharacters,
+        0
+      ),
+      additionalContextCharacters: fixtures.reduce(
+        (sum, fixture) => sum + fixture.contextUse.contextCharacters,
+        0
+      ),
+      additionalContextEntries: fixtures.reduce(
+        (sum, fixture) => sum + fixture.contextUse.contextEntries,
+        0
+      ),
+      note: "Measured model input and separately supplied context. Input can include prior state independently of additional context; entry counts do not prove retrieval quality. Character counts are not token counts or a quality improvement."
+    }
+  };
+}
+
 export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchive) {
   validateCoverage(corpus, samples);
   const database = await createPgliteDatabase();
   try {
-    const fixtures = [];
+    const meetingFixtures = [];
     for (const fixture of corpus.fixtures)
-      fixtures.push(await runFixture(database, fixture, corpus, samples));
+      meetingFixtures.push(await runFixture(database, fixture, corpus, samples));
+    const retrievalFixtures = [];
+    for (const fixture of corpus.retrievalFixtures)
+      retrievalFixtures.push(await runRetrievalFixture(database, fixture, corpus));
+    const fixtures = [...meetingFixtures, ...retrievalFixtures];
     const checks = fixtures.flatMap((fixture) => fixture.checks);
-    const recall = checks.filter(
-      (check) => check.metric === "relevant-current-recall" && check.status !== "missing"
-    );
-    const stale = checks.filter(
-      (check) => check.metric === "stale-claim-inclusion" && check.status !== "missing"
-    );
-    const observedStale = stale.filter((check) => typeof check.actual === "string");
     const metrics = Object.fromEntries(
       [...new Set(checks.map((check) => check.metric))].map((metric) => [
         metric,
@@ -348,7 +403,7 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       ])
     );
     return {
-      reportVersion: 1,
+      reportVersion: 2,
       mode: "deterministic-synthetic-replay",
       corpusVersion: corpus.version,
       corpusSha256: digest(JSON.stringify(corpus)),
@@ -356,6 +411,7 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       annotationProvenance: corpus.annotationProvenance,
       model: {
         name: samples.model,
+        contextAnswerer: "selected-evidence-echo-v1",
         provenance: samples.provenance,
         liveQuality: "unmeasured",
         promptVersions: [
@@ -383,41 +439,14 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       },
       summary: summarize(checks),
       metrics,
-      knowledgeSelection: {
-        scope:
-          "Annotated facts in this corpus's scoped Meeting answers; not organization-wide retrieval",
-        relevantCurrentRecall: {
-          recalled: recall.filter((check) => check.status === "passed").length,
-          relevant: recall.length,
-          ratio: recall.length
-            ? recall.filter((check) => check.status === "passed").length / recall.length
-            : null
-        },
-        staleClaimInclusion: {
-          included: observedStale.filter((check) => check.status === "failed").length,
-          annotatedStaleOrUnaccepted: stale.length,
-          unobserved: stale.length - observedStale.length,
-          ratio: observedStale.length
-            ? observedStale.filter((check) => check.status === "failed").length /
-              observedStale.length
-            : null
-        },
-        contextUse: {
-          inputCharacters: fixtures.reduce(
-            (sum, fixture) => sum + fixture.contextUse.inputCharacters,
-            0
-          ),
-          additionalContextCharacters: fixtures.reduce(
-            (sum, fixture) => sum + fixture.contextUse.contextCharacters,
-            0
-          ),
-          additionalContextEntries: fixtures.reduce(
-            (sum, fixture) => sum + fixture.contextUse.contextEntries,
-            0
-          ),
-          note: "Zero additional context means no retrieval was demonstrated; it is not a quality improvement. Character counts are not token counts."
-        }
-      },
+      knowledgeSelection: knowledgeMeasurements(
+        meetingFixtures,
+        "Annotated facts in scoped Meeting answers; this does not prove cross-Meeting recall."
+      ),
+      retrievalKnowledgeSelection: knowledgeMeasurements(
+        retrievalFixtures,
+        "Actual Context Ask and governed multi-catalog selection with synthetic normalized sources and evidence-echo model; live model interpretation and real provider linkage are unmeasured."
+      ),
       productReadiness: checks.some((check) => check.status !== "passed")
         ? "not-demonstrated"
         : "only-declared-corpus-demonstrated",

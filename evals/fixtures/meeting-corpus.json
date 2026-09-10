@@ -1,5 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
+  "annotationProvenance": "The original four fixtures and their named expectations are retained. New structured samples and scenario assertions are agent-authored synthetic annotations and require human review; they are not a human-labeled benchmark.",
+  "referenceAt": "2026-09-10T08:00:00.000Z",
+  "timezone": "Europe/Berlin",
   "fixtures": [
     {
       "id": "german-relative-deadline",
@@ -14,9 +17,75 @@
         "checks": [
           "original-language-preserved",
           "relative-deadline-normalized-with-workspace-timezone",
-          "ambiguous-owner-remains-null"
+          "ambiguous-owner-remains-null",
+          "workspace-timezone-used",
+          "conclusion-retains-grounded-action",
+          "only-source-supported-claims"
         ]
-      }
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "german",
+          "utterances": [0]
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        },
+        {
+          "type": "conclude",
+          "id": "conclusion"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "original-language-preserved",
+          "metric": "grounding",
+          "path": ["final", "sourceExcerpts"],
+          "operation": "includes",
+          "expected": "Das muss bis übernächsten Dienstag fertig sein."
+        },
+        {
+          "id": "relative-deadline-normalized-with-workspace-timezone",
+          "metric": "grounding",
+          "path": ["final", "actions", "action:german", "dueDate"],
+          "operation": "equals",
+          "expected": "2026-09-22",
+          "note": "Fixed Thursday 10 September 2026 in Europe/Berlin; recorded model normalization, not a live inference result."
+        },
+        {
+          "id": "ambiguous-owner-remains-null",
+          "metric": "ownership",
+          "path": ["final", "actions", "action:german", "ownerId"],
+          "operation": "equals",
+          "expected": null
+        },
+        {
+          "id": "workspace-timezone-used",
+          "metric": "coverage",
+          "path": ["requests", 0, "input", "timezone"],
+          "operation": "equals",
+          "expected": "Europe/Berlin"
+        },
+        {
+          "id": "conclusion-retains-grounded-action",
+          "metric": "grounding",
+          "path": ["conclusion", "actionItems", 0, "description"],
+          "operation": "equals",
+          "expected": "Das muss bis übernächsten Dienstag fertig sein."
+        },
+        {
+          "id": "only-source-supported-claims",
+          "metric": "grounding",
+          "path": ["final", "claimTexts"],
+          "operation": "set-equals",
+          "expected": ["Das muss bis übernächsten Dienstag fertig sein."],
+          "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
+        }
+      ],
+      "missing": []
     },
     {
       "id": "english-code-identifier",
@@ -31,9 +100,72 @@
         "checks": [
           "code-identifier-preserved",
           "unsupported-implementation-claim-rate-zero",
-          "code-context-can-be-linked"
+          "code-context-can-be-linked",
+          "implementation-uncertainty-preserved",
+          "uncertain-implementation-is-not-confirmed",
+          "only-source-supported-claims"
         ]
-      }
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "code",
+          "utterances": [0]
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "code-identifier-preserved",
+          "metric": "grounding",
+          "path": ["final", "decisions", "decision:code", "statement"],
+          "operation": "includes",
+          "expected": "use-auth-session"
+        },
+        {
+          "id": "unsupported-implementation-claim-rate-zero",
+          "metric": "grounding",
+          "path": ["final", "claims"],
+          "operation": "set-equals",
+          "expected": ["decision:code"]
+        },
+        {
+          "id": "implementation-uncertainty-preserved",
+          "metric": "modality",
+          "path": ["final", "decisions", "decision:code", "statement"],
+          "operation": "includes",
+          "expected": "probably"
+        },
+        {
+          "id": "uncertain-implementation-is-not-confirmed",
+          "metric": "decisions",
+          "path": ["final", "decisions", "decision:code", "status"],
+          "operation": "equals",
+          "expected": "candidate"
+        },
+        {
+          "id": "only-source-supported-claims",
+          "metric": "grounding",
+          "path": ["final", "claimTexts"],
+          "operation": "set-equals",
+          "expected": [
+            "The bug is probably in use-auth-session, not the token refresh worker."
+          ],
+          "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
+        }
+      ],
+      "missing": [
+        {
+          "id": "code-context-can-be-linked",
+          "metric": "context-use",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "A code source must be retrieved and linked without asserting that an unverified implementation works."
+        }
+      ]
     },
     {
       "id": "mixed-github-issue",
@@ -49,9 +181,84 @@
           "owner-is-jakob",
           "deadline-is-next-monday",
           "technical-term-preserved",
-          "no-provider-specific-work-created-before-approval"
+          "no-provider-specific-work-created-before-approval",
+          "model-owner-not-silently-confirmed",
+          "only-source-supported-claims",
+          "work-intent-remains-suggested"
         ]
-      }
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "mixed",
+          "utterances": [0]
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "owner-is-jakob",
+          "metric": "ownership",
+          "path": [
+            "final",
+            "actions",
+            "action:mixed",
+            "ownership",
+            "proposedOwnerPersonId"
+          ],
+          "operation": "equals",
+          "expected": "person_jakob",
+          "note": "Source/model assignment remains proposed until confirmed; this does not grant confirmed ownership."
+        },
+        {
+          "id": "deadline-is-next-monday",
+          "metric": "grounding",
+          "path": ["final", "actions", "action:mixed", "dueDate"],
+          "operation": "equals",
+          "expected": "2026-09-14"
+        },
+        {
+          "id": "technical-term-preserved",
+          "metric": "grounding",
+          "path": ["final", "actions", "action:mixed", "description"],
+          "operation": "includes",
+          "expected": "GitHub Issue"
+        },
+        {
+          "id": "no-provider-specific-work-created-before-approval",
+          "metric": "ownership",
+          "path": ["final", "externalWorkReferences"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "model-owner-not-silently-confirmed",
+          "metric": "ownership",
+          "path": ["final", "actions", "action:mixed", "ownerId"],
+          "operation": "equals",
+          "expected": null
+        },
+        {
+          "id": "only-source-supported-claims",
+          "metric": "grounding",
+          "path": ["final", "claimTexts"],
+          "operation": "set-equals",
+          "expected": ["Jakob übernimmt das GitHub Issue bis Montag."],
+          "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
+        },
+        {
+          "id": "work-intent-remains-suggested",
+          "metric": "ownership",
+          "path": ["final", "followUpStatuses"],
+          "operation": "equals",
+          "expected": ["suggested"]
+        }
+      ],
+      "missing": []
     },
     {
       "id": "uncertain-proposal",
@@ -66,9 +273,604 @@
         "checks": [
           "decision-status-candidate",
           "modality-preserved",
-          "confirmation-intervention-emitted"
+          "confirmation-intervention-emitted",
+          "only-source-supported-claims"
         ]
-      }
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "uncertain",
+          "utterances": [0]
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "decision-status-candidate",
+          "metric": "decisions",
+          "path": ["final", "decisions", "decision:uncertain", "status"],
+          "operation": "equals",
+          "expected": "candidate"
+        },
+        {
+          "id": "modality-preserved",
+          "metric": "modality",
+          "path": ["final", "decisions", "decision:uncertain", "statement"],
+          "operation": "includes",
+          "expected": "könnten vielleicht"
+        },
+        {
+          "id": "confirmation-intervention-emitted",
+          "metric": "decisions",
+          "path": ["observe", "interventions", 0, "type"],
+          "operation": "equals",
+          "expected": "decision-confirmation-needed"
+        },
+        {
+          "id": "only-source-supported-claims",
+          "metric": "grounding",
+          "path": ["final", "claimTexts"],
+          "operation": "set-equals",
+          "expected": ["Wir könnten vielleicht Linear verwenden."],
+          "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "retained-current-and-historical-decisions",
+      "language": "en",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Luma is owned by Jakob.",
+          "occurredAt": "2025-01-10T08:00:00.000Z"
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Luma rollout uses immediate deployment.",
+          "occurredAt": "2026-08-10T08:00:00.000Z"
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Luma rollout uses a staged deployment.",
+          "occurredAt": "2026-08-10T08:00:00.000Z"
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Luma might be owned by the CTO.",
+          "occurredAt": "2026-09-10T08:00:00.000Z"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "old-still-valid-decision-recalled",
+          "current-decision-recalled",
+          "superseded-fact-excluded-from-current",
+          "newer-unaccepted-proposal-excluded",
+          "explicit-history-recalls-superseded",
+          "history-labels-superseded",
+          "history-excludes-unrelated-owner",
+          "queries-do-not-delete-retained-state",
+          "meeting-answer-is-bounded",
+          "meeting-evidence-is-bounded",
+          "cross-meeting-current-recall",
+          "cross-provider-stale-inclusion",
+          "duplicate-context",
+          "revoked-source-derived-views",
+          "deleted-source-derived-views",
+          "bounded-organizational-input-output"
+        ]
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "retained",
+          "utterances": [0, 1, 2]
+        },
+        {
+          "type": "judge",
+          "id": "confirm-owner",
+          "itemId": "decision:owner",
+          "correction": {
+            "status": "confirmed"
+          }
+        },
+        {
+          "type": "judge",
+          "id": "supersede",
+          "itemId": "decision:old",
+          "correction": {
+            "status": "superseded"
+          }
+        },
+        {
+          "type": "judge",
+          "id": "confirm-current",
+          "itemId": "decision:current",
+          "correction": {
+            "status": "confirmed"
+          }
+        },
+        {
+          "type": "observe",
+          "id": "newer-proposal",
+          "sample": "retained-newer-proposal",
+          "utterances": [3]
+        },
+        {
+          "type": "snapshot",
+          "id": "before"
+        },
+        {
+          "type": "ask",
+          "id": "current",
+          "text": "What did we decide?"
+        },
+        {
+          "type": "ask",
+          "id": "history",
+          "text": "Show decision history about Luma rollout"
+        },
+        {
+          "type": "snapshot",
+          "id": "after"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "old-still-valid-decision-recalled",
+          "metric": "relevant-current-recall",
+          "path": ["current", "text"],
+          "operation": "includes",
+          "expected": "Luma is owned by Jakob."
+        },
+        {
+          "id": "current-decision-recalled",
+          "metric": "relevant-current-recall",
+          "path": ["current", "text"],
+          "operation": "includes",
+          "expected": "Luma rollout uses a staged deployment."
+        },
+        {
+          "id": "superseded-fact-excluded-from-current",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "text"],
+          "operation": "excludes",
+          "expected": "Luma rollout uses immediate deployment."
+        },
+        {
+          "id": "newer-unaccepted-proposal-excluded",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "text"],
+          "operation": "excludes",
+          "expected": "Luma might be owned by the CTO."
+        },
+        {
+          "id": "explicit-history-recalls-superseded",
+          "metric": "retention",
+          "path": ["history", "text"],
+          "operation": "includes",
+          "expected": "Luma rollout uses immediate deployment."
+        },
+        {
+          "id": "history-labels-superseded",
+          "metric": "retention",
+          "path": ["history", "text"],
+          "operation": "includes",
+          "expected": "superseded"
+        },
+        {
+          "id": "history-excludes-unrelated-owner",
+          "metric": "retention",
+          "path": ["history", "text"],
+          "operation": "excludes",
+          "expected": "Luma is owned by Jakob."
+        },
+        {
+          "id": "queries-do-not-delete-retained-state",
+          "metric": "retention",
+          "path": ["after", "state"],
+          "operation": "same-as",
+          "expected": ["before", "state"]
+        },
+        {
+          "id": "meeting-answer-is-bounded",
+          "metric": "coverage",
+          "path": ["current", "text"],
+          "operation": "length-at-most",
+          "expected": 1600
+        },
+        {
+          "id": "meeting-evidence-is-bounded",
+          "metric": "coverage",
+          "path": ["current", "evidence"],
+          "operation": "length-at-most",
+          "expected": 24
+        }
+      ],
+      "missing": [
+        {
+          "id": "cross-meeting-current-recall",
+          "metric": "relevant-current-recall",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "Retrieve the old still-valid ownership decision from another Meeting while excluding unrelated material."
+        },
+        {
+          "id": "cross-provider-stale-inclusion",
+          "metric": "stale-claim-inclusion",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "Prefer current accepted knowledge over superseded documents and newer unaccepted proposals from Notion/Linear/GitHub."
+        },
+        {
+          "id": "duplicate-context",
+          "metric": "context-use",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "The same underlying fact retrieved from multiple sources must not consume duplicate context budget."
+        },
+        {
+          "id": "revoked-source-derived-views",
+          "metric": "coverage",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "A source revoked or made private must disappear from retrieval and derived answers without rewriting approved history."
+        },
+        {
+          "id": "deleted-source-derived-views",
+          "metric": "coverage",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "A source deleted at the provider must not support a current derived answer; retained evidence remains qualified historical data."
+        },
+        {
+          "id": "bounded-organizational-input-output",
+          "metric": "context-use",
+          "reason": "No implemented organizational retrieval evaluation adapter; this requirement is not demonstrated by local Meeting replay.",
+          "acceptance": "Enforce a bounded retrieval input and output budget with explicit omissions and coverage limitations; report quality separately from context size."
+        }
+      ]
+    },
+    {
+      "id": "jakob-owns-luma-human-judgment",
+      "language": "mixed",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Jakob owns Luma."
+        },
+        {
+          "speakerId": "person_fabius",
+          "text": "Fabius is provisionally CTO; that title does not transfer ownership of Luma."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "human-owner-survives-inference",
+          "human-wording-survives-inference",
+          "personal-work-recalls-confirmed-owner",
+          "cto-title-does-not-auto-assign"
+        ]
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "owner-initial",
+          "utterances": [0]
+        },
+        {
+          "type": "judge",
+          "id": "confirm",
+          "itemId": "action:luma",
+          "correction": {
+            "ownerId": "person_jakob",
+            "description": "Build Luma.",
+            "status": "confirmed"
+          }
+        },
+        {
+          "type": "snapshot",
+          "id": "before"
+        },
+        {
+          "type": "observe",
+          "id": "later",
+          "sample": "owner-later",
+          "utterances": [1]
+        },
+        {
+          "type": "snapshot",
+          "id": "after"
+        },
+        {
+          "type": "ask",
+          "id": "personal",
+          "text": "What are my action items?",
+          "participantId": "person_jakob"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "human-owner-survives-inference",
+          "metric": "ownership",
+          "path": ["after", "actions", "action:luma", "ownerId"],
+          "operation": "equals",
+          "expected": "person_jakob"
+        },
+        {
+          "id": "human-wording-survives-inference",
+          "metric": "ownership",
+          "path": ["after", "actions", "action:luma", "description"],
+          "operation": "equals",
+          "expected": "Build Luma."
+        },
+        {
+          "id": "personal-work-recalls-confirmed-owner",
+          "metric": "relevant-current-recall",
+          "path": ["personal", "text"],
+          "operation": "includes",
+          "expected": "Build Luma."
+        },
+        {
+          "id": "cto-title-does-not-auto-assign",
+          "metric": "ownership",
+          "path": ["personal", "text"],
+          "operation": "excludes",
+          "expected": "Delegate all Luma work"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "reconcile-exact",
+      "language": "en",
+      "utterances": [],
+      "expected": {
+        "checks": [
+          "canonical-reconciliation-outcome",
+          "source-modality-retained",
+          "reconciliation-does-not-create-work"
+        ]
+      },
+      "steps": [
+        {
+          "type": "import",
+          "id": "imported",
+          "text": "Jakob will finish LUM-3 source import by 2026-09-11.",
+          "catalog": "exact"
+        },
+        {
+          "type": "reconciliation",
+          "id": "review"
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "canonical-reconciliation-outcome",
+          "metric": "reconciliation",
+          "path": ["review", 0, "effectiveOutcome", "type"],
+          "operation": "equals",
+          "expected": "link-existing"
+        },
+        {
+          "id": "source-modality-retained",
+          "metric": "modality",
+          "path": ["review", 0, "proposal", "candidate", "modality", "kind"],
+          "operation": "equals",
+          "expected": "commitment"
+        },
+        {
+          "id": "reconciliation-does-not-create-work",
+          "metric": "reconciliation",
+          "path": ["final", "externalWorkReferences"],
+          "operation": "equals",
+          "expected": []
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "reconcile-unavailable",
+      "language": "en",
+      "utterances": [],
+      "expected": {
+        "checks": [
+          "canonical-reconciliation-outcome",
+          "source-modality-retained",
+          "reconciliation-does-not-create-work",
+          "catalog-outage-keeps-review-retryable"
+        ]
+      },
+      "steps": [
+        {
+          "type": "import",
+          "id": "imported",
+          "text": "Jakob will finish LUM-3 source import by 2026-09-11.",
+          "catalog": "unavailable"
+        },
+        {
+          "type": "reconciliation",
+          "id": "review"
+        },
+        {
+          "type": "snapshot",
+          "id": "final"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "canonical-reconciliation-outcome",
+          "metric": "reconciliation",
+          "path": ["review", 0, "effectiveOutcome", "type"],
+          "operation": "equals",
+          "expected": "needs-clarification"
+        },
+        {
+          "id": "source-modality-retained",
+          "metric": "modality",
+          "path": ["review", 0, "proposal", "candidate", "modality", "kind"],
+          "operation": "equals",
+          "expected": "commitment"
+        },
+        {
+          "id": "reconciliation-does-not-create-work",
+          "metric": "reconciliation",
+          "path": ["final", "externalWorkReferences"],
+          "operation": "equals",
+          "expected": []
+        },
+        {
+          "id": "catalog-outage-keeps-review-retryable",
+          "metric": "reconciliation",
+          "path": ["review", 0, "proposal", "retryable"],
+          "operation": "equals",
+          "expected": true
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "bounded-scoped-answer-with-omissions",
+      "language": "en",
+      "utterances": [
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 00: Use the reviewed rollout procedure for component 00, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 01: Use the reviewed rollout procedure for component 01, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 02: Use the reviewed rollout procedure for component 02, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 03: Use the reviewed rollout procedure for component 03, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 04: Use the reviewed rollout procedure for component 04, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 05: Use the reviewed rollout procedure for component 05, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 06: Use the reviewed rollout procedure for component 06, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 07: Use the reviewed rollout procedure for component 07, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 08: Use the reviewed rollout procedure for component 08, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 09: Use the reviewed rollout procedure for component 09, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 10: Use the reviewed rollout procedure for component 10, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        },
+        {
+          "speakerId": "person_jakob",
+          "text": "Decision 11: Use the reviewed rollout procedure for component 11, preserving all required checks, ownership conditions, and recovery evidence before each production change."
+        }
+      ],
+      "expected": {
+        "checks": [
+          "overfull-answer-is-bounded",
+          "coverage-omissions-exposed",
+          "limited-answer-keeps-uncertainty",
+          "all-source-decisions-retained",
+          "bounded-query-does-not-delete-history"
+        ]
+      },
+      "steps": [
+        {
+          "type": "observe",
+          "id": "observe",
+          "sample": "bounded",
+          "utterances": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        },
+        {
+          "type": "snapshot",
+          "id": "before"
+        },
+        {
+          "type": "ask",
+          "id": "answer",
+          "text": "What did we decide?"
+        },
+        {
+          "type": "snapshot",
+          "id": "after"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "overfull-answer-is-bounded",
+          "metric": "coverage",
+          "path": ["answer", "text"],
+          "operation": "length-at-most",
+          "expected": 1600
+        },
+        {
+          "id": "coverage-omissions-exposed",
+          "metric": "coverage",
+          "path": ["answer", "text"],
+          "operation": "includes",
+          "expected": "omitted because of answer bounds"
+        },
+        {
+          "id": "limited-answer-keeps-uncertainty",
+          "metric": "coverage",
+          "path": ["answer", "uncertainty"],
+          "operation": "equals",
+          "expected": "partial"
+        },
+        {
+          "id": "all-source-decisions-retained",
+          "metric": "retention",
+          "path": ["after", "claims"],
+          "operation": "set-equals",
+          "expected": [
+            "decision:bounded-0",
+            "decision:bounded-1",
+            "decision:bounded-2",
+            "decision:bounded-3",
+            "decision:bounded-4",
+            "decision:bounded-5",
+            "decision:bounded-6",
+            "decision:bounded-7",
+            "decision:bounded-8",
+            "decision:bounded-9",
+            "decision:bounded-10",
+            "decision:bounded-11"
+          ]
+        },
+        {
+          "id": "bounded-query-does-not-delete-history",
+          "metric": "coverage",
+          "path": ["after", "state"],
+          "operation": "same-as",
+          "expected": ["before", "state"]
+        }
+      ],
+      "missing": []
     }
   ]
 }

@@ -1,5 +1,17 @@
 import type { ExternalUser } from "../domain/model.js";
 
+/** Coverage is about this bounded read, never proof that a repository has no other work. */
+export type CodeReadCoverage = {
+  complete: boolean;
+  warnings: string[];
+};
+
+/** Configured credential/repository boundary; this is not a reader ACL or a sharing grant. */
+export type CodeReadScope = {
+  credentialScopeId: string;
+  repositories: readonly string[];
+};
+
 export type CommitReference = {
   repository: string;
   sha: string;
@@ -8,8 +20,10 @@ export type CommitReference = {
 
 export type Commit = CommitReference & {
   message: string;
-  author: ExternalUser;
+  /** Null when GitHub cannot bind the original Git author to an account. */
+  author: ExternalUser | null;
   committedAt: string;
+  observedAt: string;
 };
 
 export type CodeChange = {
@@ -28,6 +42,11 @@ export type CodeChange = {
   commits: CommitReference[];
   linkedWorkItemIds: string[];
   url: string;
+  headSha: string;
+  baseSha: string;
+  updatedAt: string;
+  observedAt: string;
+  coverage: CodeReadCoverage;
 };
 
 export type RepositoryActivityQuery = {
@@ -37,11 +56,22 @@ export type RepositoryActivityQuery = {
 };
 
 export type CodeActivity = {
+  repository: string;
+  /** Provider event identity; commit timestamps are not push timestamps. */
+  sourceEventId: string;
   kind:
     "pull-request-opened" | "pull-request-merged" | "commit-pushed" | "release-created";
   title: string;
   occurredAt: string;
   url: string;
+  /** For commit-pushed, the observed tip after that push, not every commit in it. */
+  commitSha?: string;
+};
+
+export type CodeActivityResult = {
+  activities: CodeActivity[];
+  coverage: CodeReadCoverage;
+  observedAt: string;
 };
 
 export type CodeSearchQuery = {
@@ -55,11 +85,25 @@ export type CodeSearchResult = {
   path: string;
   excerpt: string;
   url: string;
+  commitSha: string;
+  blobSha: string;
+  startLine: number;
+  endLine: number;
+};
+
+export type CodeSearchResponse = {
+  results: CodeSearchResult[];
+  /** Exact default-branch commit whose file bytes were read. */
+  commitSha: string;
+  coverage: CodeReadCoverage;
+  observedAt: string;
 };
 
 export interface CodeProvider {
+  readonly providerId: string;
+  readonly readScope: CodeReadScope;
   getPullRequest(repository: string, number: number): Promise<CodeChange>;
   getCommit(repository: string, sha: string): Promise<Commit>;
-  getRecentActivity(query: RepositoryActivityQuery): Promise<CodeActivity[]>;
-  searchCode(query: CodeSearchQuery): Promise<CodeSearchResult[]>;
+  getRecentActivity(query: RepositoryActivityQuery): Promise<CodeActivityResult>;
+  searchCode(query: CodeSearchQuery): Promise<CodeSearchResponse>;
 }

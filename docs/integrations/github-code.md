@@ -58,6 +58,16 @@ unreadable or changed sources are ineligible. Receipt checks therefore fail
 closed after a head change, even when that change touched another file. Historical
 snapshots remain in organizational storage; the catalog does not delete them.
 
+Context Ask and Meeting Intelligence derive up to eight distinct literal terms
+from at most 8,000 input characters before discovery, removing common English
+and German question words while preserving names such as `monthlyLimitUsd`,
+`Dayova/luma`, and `LUM-4`. The original question and Meeting Evidence remain
+unchanged. This is bounded keyword discovery, without semantic expansion or
+translation; the catalog's request limits can omit later terms. A question with
+no useful terms skips external searches, returns explicit partial coverage, and
+can still use its current conversation evidence. Persisted answers bind the
+derived terms as well as the original question, audience, sources and receipt.
+
 This catalog currently discovers code excerpts. PR, commit and event methods
 are available through the CodeProvider capability but are not silently included
 in catalog searches or claimed as complete implementation-status knowledge.
@@ -104,6 +114,7 @@ blob bytes, partial coverage, cancellation and rate-limit errors:
 ```sh
 pnpm exec vitest run tests/code/github-code-provider.test.ts
 pnpm exec vitest run tests/organizational-context/github-catalog.test.ts
+pnpm exec vitest run tests/context-intelligence/github-retrieval.test.ts
 ```
 
 The adapter uses REST API version `2026-03-10`. Protocol behavior was checked

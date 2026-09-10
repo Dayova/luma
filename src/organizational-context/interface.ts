@@ -6,6 +6,7 @@ export type OrganizationalContextRequest = {
   audience: ContextAudience;
   subject: { type: "meeting" | "conversation"; id: string };
   purpose: "understand-discussion" | "answer-question" | "prepare-conclusion";
+  /** Bounded literal discovery terms; empty skips discovery with partial coverage. */
   concepts: string[];
   time: { mode: "current" } | { mode: "history"; asOf?: string };
   limit: number;

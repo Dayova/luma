@@ -79,6 +79,10 @@ export function createOrganizationalContext(input: {
       request = structuredClone(request);
       validateRequest(request);
       const warnings: string[] = [];
+      if (!request.concepts.length)
+        warnings.push(
+          "No meaningful searchable terms were found; external discovery was skipped."
+        );
       const candidates: Candidate[] = [];
       const searches: SearchProof[] = [];
       const unavailableReads: ReadOutcome[] = [];
@@ -87,7 +91,7 @@ export function createOrganizationalContext(input: {
       let remaining = MAX_CANDIDATES;
       let remainingHistory = MAX_CANDIDATES;
       const readDeadline = Date.now() + 15_000;
-      for (const catalog of catalogs.values()) {
+      for (const catalog of request.concepts.length ? catalogs.values() : []) {
         if (remaining <= 0 || Date.now() >= readDeadline) {
           warnings.push("The source scan reached its configured bound.");
           break;
@@ -497,7 +501,6 @@ function validateRequest(request: OrganizationalContextRequest): void {
     !request.audience.personIds.length ||
     request.audience.personIds.some((id) => !id.trim()) ||
     !request.subject.id.trim() ||
-    !request.concepts.length ||
     request.concepts.length > 20 ||
     request.concepts.some((value) => !value.trim() || value.length > 2_000) ||
     !Number.isSafeInteger(request.limit) ||

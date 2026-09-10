@@ -1,4 +1,5 @@
 import type { OrganizationalContext } from "../organizational-context/interface.js";
+import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
 import {
   contextRetrievalRequest,
   contextRetrievalFor,
@@ -687,7 +688,7 @@ async function existingContextInquiryResult(input: {
         context.request.subject.id !== input.inquiry.subject.conversationObjectId ||
         context.request.purpose !== "answer-question" ||
         JSON.stringify(context.request.concepts) !==
-          JSON.stringify([input.inquiry.question]) ||
+          JSON.stringify(retrievalConcepts([input.inquiry.question])) ||
         JSON.stringify(context.request.time) !==
           JSON.stringify(input.inquiry.contextTime ?? { mode: "current" })
       : input.row.context_request_json !== null ||

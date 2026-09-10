@@ -1,6 +1,7 @@
 import type { EvidenceReference, MeetingState } from "../domain/model.js";
 import type { OrganizationalContextRequest } from "../organizational-context/interface.js";
 import { meetingAnalysisInput } from "./analysis-context.js";
+import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
 import {
   type createMeetingContextGuard,
   retainMeetingContextReceipt,
@@ -35,7 +36,10 @@ export async function prepareMeetingAnalysisContext(
         audience,
         subject: { type: "meeting", id: state.meetingId },
         purpose: "understand-discussion",
-        concepts: meetingContextConcepts(state.title, newEvidence),
+        concepts: retrievalConcepts([
+          ...newEvidence.map((item) => item.excerpt ?? ""),
+          state.title.slice(0, 200)
+        ]),
         time: { mode: "current" },
         limit: 8,
         maxCharacters: 12_000
@@ -114,58 +118,4 @@ export async function prepareMeetingAnalysisContext(
     receiptIds: [...receiptIds],
     unavailable
   };
-}
-
-function meetingContextConcepts(title: string, evidence: EvidenceReference[]): string[] {
-  const text = `${evidence
-    .map((item) => item.excerpt ?? "")
-    .join(" ")
-    .slice(0, 8_000)} ${title.slice(0, 200)}`;
-  const stop = new Set([
-    "this",
-    "that",
-    "with",
-    "have",
-    "will",
-    "would",
-    "could",
-    "should",
-    "meeting",
-    "about",
-    "there",
-    "their",
-    "from",
-    "what",
-    "which",
-    "they",
-    "your",
-    "auch",
-    "aber",
-    "dass",
-    "wird",
-    "werden",
-    "eine",
-    "einen",
-    "einer",
-    "sind",
-    "haben",
-    "nicht",
-    "noch",
-    "kann",
-    "soll",
-    "über",
-    "diese",
-    "dieser",
-    "hier",
-    "dann",
-    "jetzt",
-    "müssen"
-  ]);
-  return [
-    ...new Set(
-      (text.match(/[\p{L}\p{N}][\p{L}\p{N}_.-]{2,79}/gu) ?? []).filter(
-        (term) => !stop.has(term.toLowerCase())
-      )
-    )
-  ].slice(0, 8);
 }

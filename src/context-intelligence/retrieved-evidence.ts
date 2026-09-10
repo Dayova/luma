@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
 import type {
   OrganizationalContextRequest,
   OrganizationalContextBundle
@@ -94,7 +95,7 @@ export function contextRetrievalRequest(
     },
     subject: { type: "conversation", id: inquiry.subject.conversationObjectId },
     purpose: "answer-question",
-    concepts: [inquiry.question],
+    concepts: retrievalConcepts([inquiry.question]),
     time: inquiry.contextTime ?? { mode: "current" },
     limit: limits?.limit ?? 8,
     maxCharacters: limits?.maxCharacters ?? 8_000

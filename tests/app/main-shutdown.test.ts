@@ -5,7 +5,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /** Exercise the actual entrypoint with a programmable server in a child process. */
-async function shutdown(fail: boolean): Promise<{
+async function shutdown({
+  failClose = false,
+  startup = "ready",
+  secondSignal = "SIGTERM"
+}: {
+  failClose?: boolean;
+  startup?: "ready" | "cancel" | "delayed-ready" | "fail";
+  secondSignal?: "SIGTERM" | "SIGINT";
+}): Promise<{
   code: number | null;
   stdout: string;
   stderr: string;
@@ -19,13 +27,33 @@ async function shutdown(fail: boolean): Promise<{
     );
     await writeFile(
       join(directory, "server.js"),
-      `export async function startServer() {
+      `export class LumaStartupCancelledError extends Error {}
+      export async function startServer(_env, _dependencies, signal) {
         setInterval(() => {}, 1000);
-        setImmediate(() => console.log("ready"));
+        const startup = ${JSON.stringify(startup)};
+        if (startup === "cancel") {
+          console.log("starting");
+          await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+          console.log("stopping");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (${String(failClose)}) throw new Error("private-startup-cleanup-failure");
+          console.log("closed");
+          throw new LumaStartupCancelledError();
+        }
+        if (startup === "delayed-ready" || startup === "fail") {
+          console.log("starting");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          if (startup === "fail") {
+            console.log("startup-cleanup");
+            throw new Error("private-startup-failure");
+          }
+        } else {
+          setImmediate(() => console.log("ready"));
+        }
         return { async stop() {
           console.log("stopping");
           await new Promise((resolve) => setTimeout(resolve, 100));
-          if (${String(fail)}) throw new Error("private-provider-failure");
+          if (${String(failClose)}) throw new Error("private-provider-failure");
           console.log("closed");
         }};
       }`
@@ -37,16 +65,20 @@ async function shutdown(fail: boolean): Promise<{
     let stdout = "";
     let stderr = "";
     let firstSignal = false;
-    let secondSignal = false;
+    let secondSignalSent = false;
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
-      if (!firstSignal && stdout.includes("ready")) {
+      if (
+        startup !== "fail" &&
+        !firstSignal &&
+        (stdout.includes("ready") || stdout.includes("starting"))
+      ) {
         firstSignal = true;
         child.kill("SIGTERM");
       }
-      if (!secondSignal && stdout.includes("stopping")) {
-        secondSignal = true;
-        child.kill("SIGINT");
+      if (!secondSignalSent && stdout.includes("stopping")) {
+        secondSignalSent = true;
+        child.kill(secondSignal);
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
@@ -73,17 +105,50 @@ async function shutdown(fail: boolean): Promise<{
 }
 
 describe("executable shutdown", () => {
-  it("waits for the same successful close even when both stop signals arrive", async () => {
-    const result = await shutdown(false);
+  it.each(["SIGTERM", "SIGINT"] as const)(
+    "waits for one successful close when SIGTERM is followed by %s",
+    async (secondSignal) => {
+      const result = await shutdown({ secondSignal });
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("closed");
+      expect(result.stdout.match(/stopping/gu)).toHaveLength(1);
+    }
+  );
+
+  it("reports failed close as exit 1 without exposing raw provider errors", async () => {
+    const result = await shutdown({ failClose: true });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Luma shutdown failed");
+    expect(result.stderr).not.toContain("private-provider-failure");
+  });
+
+  it("cancels stalled startup and waits for cleanup despite repeated SIGTERM", async () => {
+    const result = await shutdown({ startup: "cancel" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("closed");
+    expect(result.stdout.match(/stopping/gu)).toHaveLength(1);
+    expect(result.stderr).toBe("");
+  });
+
+  it("does not report successful cancellation when startup cleanup fails", async () => {
+    const result = await shutdown({ startup: "cancel", failClose: true });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Luma shutdown failed");
+    expect(result.stderr).not.toContain("private-startup-cleanup-failure");
+  });
+
+  it("closes an app that finishes startup after the stop request", async () => {
+    const result = await shutdown({ startup: "delayed-ready" });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("closed");
     expect(result.stdout.match(/stopping/gu)).toHaveLength(1);
   });
 
-  it("reports failed close as exit 1 without exposing raw provider errors", async () => {
-    const result = await shutdown(true);
+  it("reports failed startup after its cleanup without exposing raw errors", async () => {
+    const result = await shutdown({ startup: "fail" });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("Luma shutdown failed");
-    expect(result.stderr).not.toContain("private-provider-failure");
+    expect(result.stdout).toContain("startup-cleanup");
+    expect(result.stderr).toContain("Luma startup failed");
+    expect(result.stderr).not.toContain("private-startup-failure");
   });
 });

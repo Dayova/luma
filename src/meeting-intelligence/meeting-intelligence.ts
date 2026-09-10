@@ -2148,6 +2148,8 @@ async function queryMeeting(
     await requireMeetingState(database, input.workspaceId, input.meetingId)
   );
   const query = input.query;
+  const receiptIds = contextReceiptIds(state);
+  const answerContext = receiptIds.length ? { contextReceiptIds: receiptIds } : {};
 
   switch (query.type) {
     case "snapshot":
@@ -2169,7 +2171,7 @@ async function queryMeeting(
       return {
         type: "catch-up",
         answer: {
-          contextReceiptIds: contextReceiptIds(state),
+          ...answerContext,
           text: withContextAvailability(changes.text, state),
           evidence: changes.evidence,
           uncertainty:
@@ -2196,7 +2198,7 @@ async function queryMeeting(
         type: query.type,
         answer: {
           ...answer,
-          contextReceiptIds: contextReceiptIds(state),
+          ...answerContext,
           text: withContextAvailability(answer.text, state),
           uncertainty:
             state.contextAvailability?.status === "partial" ||

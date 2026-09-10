@@ -1,3 +1,4 @@
+import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
 import { PGlite } from "@electric-sql/pglite";
 import { openOwnedPgliteDatabase } from "./store-ownership.js";
 
@@ -799,4 +800,5 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE utterance_versions
       ALTER COLUMN speaker_id DROP NOT NULL;
   `);
+  await migrateOrganizationalContext(database);
 }

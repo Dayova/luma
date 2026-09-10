@@ -8,6 +8,7 @@ import { once } from "node:events";
 import {
   ChannelType,
   Client,
+  DefaultRestOptions,
   Events,
   GatewayIntentBits,
   MessageFlags,
@@ -27,6 +28,7 @@ import type {
   CapturedConversationEvidence,
   ConversationEvidenceSource
 } from "../context-intelligence/conversation-evidence-source.js";
+import { requireCurrentConversationEvidence } from "../context-intelligence/conversation-evidence-source.js";
 import {
   createDiscordConversationEvidenceSource,
   type DiscordConversationMessage,
@@ -83,8 +85,21 @@ export function createDiscordJsTransport(
       "Discord Context Ask parent channels must be within the common Discord channel scope"
     );
   }
+  const lifetime = new AbortController();
+  const restOptions = {
+    ...DefaultRestOptions,
+    makeRequest: (
+      url: string,
+      init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
+    ) =>
+      DefaultRestOptions.makeRequest(url, {
+        ...init,
+        signal: AbortSignal.any([lifetime.signal, ...(init.signal ? [init.signal] : [])])
+      })
+  };
   const client = new Client({
-    intents: discordGatewayIntentsForContextAsk(config.contextAsk)
+    intents: discordGatewayIntentsForContextAsk(config.contextAsk),
+    rest: restOptions
   });
   const channelScope = createDiscordChannelScope({
     guildId: config.guildId,
@@ -96,6 +111,24 @@ export function createDiscordJsTransport(
   let contextAskHandler:
     | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
     | null = null;
+  let disconnected = false;
+  let disconnecting: Promise<void> | undefined;
+  function assertConnectedLifetime(): void {
+    lifetime.signal.throwIfAborted();
+  }
+  function disconnect(): Promise<void> {
+    if (!disconnected) {
+      disconnected = true;
+      // Remove admission before aborting any asynchronous initialization. All
+      // client REST, including gateway discovery inside login, shares this
+      // signal, so a stopped client cannot later discover/spawn a new Gateway.
+      commandHandler = null;
+      contextAskHandler = null;
+      lifetime.abort();
+      disconnecting = client.destroy();
+    }
+    return disconnecting ?? Promise.resolve();
+  }
   const conversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
         reader: createDiscordJsConversationReader(client),
@@ -106,6 +139,7 @@ export function createDiscordJsTransport(
     : null;
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (disconnected) return;
     if (!interaction.isChatInputCommand() || interaction.commandName !== "meeting") {
       return;
     }
@@ -158,7 +192,8 @@ export function createDiscordJsTransport(
       message,
       handler,
       ask,
-      channelScope
+      channelScope,
+      conversationEvidenceSource
     }).catch(() => {
       reportDiscordDeliveryFailure({
         code: "discord-context-ask-reply-failed",
@@ -169,19 +204,40 @@ export function createDiscordJsTransport(
   });
 
   return {
-    async connect(handler, contextHandler) {
+    async connect(handler, contextHandler, startupSignal) {
+      startupSignal?.throwIfAborted();
+      assertConnectedLifetime();
       commandHandler = handler;
       contextAskHandler = contextHandler ?? null;
-      await registerMeetingCommand(config);
-      const ready = once(client, Events.ClientReady);
-      await client.login(config.token);
-      await ready;
+      const cancel = () => {
+        void disconnect().catch(() => undefined);
+      };
+      startupSignal?.addEventListener("abort", cancel, { once: true });
+      try {
+        // Discord's REST queue can be asleep after a 429 even when its request
+        // signal is aborted. Stop waiting at this already-owned boundary; the
+        // shared request signal prevents a later HTTP attempt, and the lifetime
+        // fence below prevents any late completion from continuing into login.
+        await waitForStartupOperation(
+          registerMeetingCommand(config, restOptions, lifetime.signal),
+          lifetime.signal
+        );
+        // A late REST completion must never continue into client.login after
+        // disconnect. The SDK's gateway-discovery fetch is also abortable.
+        assertConnectedLifetime();
+        await Promise.all([
+          once(client, Events.ClientReady, { signal: lifetime.signal }),
+          client.login(config.token).then(() => assertConnectedLifetime())
+        ]);
+        assertConnectedLifetime();
+      } catch (error) {
+        await disconnect();
+        throw error;
+      } finally {
+        startupSignal?.removeEventListener("abort", cancel);
+      }
     },
-    async disconnect() {
-      await client.destroy();
-      commandHandler = null;
-      contextAskHandler = null;
-    },
+    disconnect,
     resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId),
     async createThread(input): Promise<DiscordThread> {
       const channel = await client.channels.fetch(input.parentChannelId, { force: true });
@@ -373,11 +429,43 @@ export function discordGatewayIntentsForContextAsk(
     : [GatewayIntentBits.Guilds];
 }
 
-async function registerMeetingCommand(config: DiscordJsTransportConfig): Promise<void> {
-  const rest = new REST({ version: "10" }).setToken(config.token);
+async function registerMeetingCommand(
+  config: DiscordJsTransportConfig,
+  restOptions: typeof DefaultRestOptions,
+  signal: AbortSignal
+): Promise<void> {
+  const rest = new REST({ ...restOptions, version: "10" }).setToken(config.token);
 
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
-    body: [meetingCommand.toJSON()]
+    body: [meetingCommand.toJSON()],
+    signal
+  });
+}
+
+function waitForStartupOperation<T>(
+  operation: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () =>
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Discord startup cancelled", "AbortError")
+      );
+    if (signal.aborted) aborted();
+    else signal.addEventListener("abort", aborted, { once: true });
+    void operation.then(
+      (value) => {
+        signal.removeEventListener("abort", aborted);
+        if (signal.aborted) aborted();
+        else resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", aborted);
+        reject(error instanceof Error ? error : new Error("Discord startup failed"));
+      }
+    );
   });
 }
 
@@ -419,6 +507,7 @@ async function handleContextAskMention(input: {
   handler: (ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>;
   ask: DiscordContextAskMention;
   channelScope: ReturnType<typeof createDiscordChannelScope>;
+  conversationEvidenceSource: ConversationEvidenceSource | null;
 }): Promise<void> {
   const mayReply = async (): Promise<boolean> => {
     const surface = await input.channelScope.resolveAllowedChannel(input.ask.channelId);
@@ -438,8 +527,30 @@ async function handleContextAskMention(input: {
     };
   }
   // A failed or ambiguous send must not trigger a second, contradictory reply.
-  if (response && (await mayReply()))
-    await replyToContextAskMessage(input.message, response);
+  if (!response || !(await mayReply())) return;
+  if (response.sourceProof) {
+    const proof = response.sourceProof;
+    if (
+      !input.conversationEvidenceSource ||
+      proof.subject.providerId !== "discord" ||
+      proof.subject.conversationObjectId !== input.ask.channelId ||
+      proof.subject.anchorMessageId !== input.ask.messageId ||
+      proof.question !== input.ask.question
+    )
+      return;
+    try {
+      await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
+    } catch {
+      // Retain the old result for audit, but do not republish its old claims.
+      response = {
+        content:
+          "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+        idempotencyKey: response.idempotencyKey
+      };
+    }
+    if (!(await mayReply())) return;
+  }
+  await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(
@@ -528,7 +639,7 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
       }
 
       try {
-        const message = await thread.messages.fetch(messageId);
+        const message = await thread.messages.fetch({ message: messageId, force: true });
         return discordConversationMessage(message);
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
@@ -567,15 +678,29 @@ async function discordThreadById(
 ): Promise<ThreadChannel | null> {
   const channel = await client.channels.fetch(conversationObjectId, { force: true });
 
-  if (!channel?.isThread()) {
+  if (
+    !channel?.isThread() ||
+    channel.type !== ChannelType.PublicThread ||
+    !channel.parentId
+  ) {
     return null;
   }
 
+  const parent = await client.channels.fetch(channel.parentId, { force: true });
+  if (
+    !parent ||
+    parent.type !== ChannelType.GuildText ||
+    parent.guildId !== channel.guildId
+  )
+    return null;
   const permissions = client.user ? channel.permissionsFor(client.user) : null;
+  const parentPermissions = client.user ? parent.permissionsFor(client.user) : null;
 
   if (
     !permissions?.has(PermissionFlagsBits.ViewChannel) ||
-    !permissions.has(PermissionFlagsBits.ReadMessageHistory)
+    !permissions.has(PermissionFlagsBits.ReadMessageHistory) ||
+    !parentPermissions?.has(PermissionFlagsBits.ViewChannel) ||
+    !parentPermissions.has(PermissionFlagsBits.ReadMessageHistory)
   ) {
     return null;
   }

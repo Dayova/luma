@@ -141,6 +141,12 @@ export type RawConversationSnapshot = {
     messageIds: string[];
   };
   messages: RawConversationMessage[];
+  /** Known assistant output omitted from Human Evidence, without retaining its prose. */
+  excludedMessages?: Array<{
+    messageId: string;
+    providerUserId: string;
+    reason: "assistant-output";
+  }>;
   completeness:
     | { state: "complete" }
     | { state: "partial"; reasons: ConversationSourcePartialReason[] };
@@ -1646,6 +1652,14 @@ function validateConversationSnapshotBinding(
     throw new Error("Observed conversation boundary has an invalid anchor message");
   }
 
+  const excludedIds = (snapshot.excludedMessages ?? []).map((entry) => entry.messageId);
+  if (
+    new Set(excludedIds).size !== excludedIds.length ||
+    excludedIds.some((id) => boundary.messageIds.includes(id))
+  ) {
+    throw new Error("Excluded assistant messages must be distinct from Human Evidence");
+  }
+
   const first = messages[0];
   const last = messages.at(-1);
 
@@ -1684,12 +1698,31 @@ function isRawConversationSnapshot(value: unknown): value is RawConversationSnap
     !isRawConversationBoundary(value["boundary"]) ||
     !Array.isArray(value["messages"]) ||
     !Array.from(value["messages"]).every(isRawConversationMessage) ||
-    !isRawConversationCompleteness(value["completeness"])
+    !isRawConversationCompleteness(value["completeness"]) ||
+    (value["excludedMessages"] !== undefined &&
+      (!Array.isArray(value["excludedMessages"]) ||
+        !value["excludedMessages"].every(
+          (entry) =>
+            isRecord(entry) &&
+            isNonBlankString(entry["messageId"]) &&
+            isNonBlankString(entry["providerUserId"]) &&
+            entry["reason"] === "assistant-output"
+        )))
   ) {
     return false;
   }
 
   return true;
+}
+
+/** Same digest used by immutable persistence, without recording a new revision. */
+export function conversationSnapshotContentHash(
+  snapshot: RawConversationSnapshot
+): string {
+  if (!isRawConversationSnapshot(snapshot)) {
+    throw new Error("Conversation snapshot has an invalid shape");
+  }
+  return observedSourceContentHash(canonicalJson(snapshot));
 }
 
 function isRawConversation(value: unknown): boolean {

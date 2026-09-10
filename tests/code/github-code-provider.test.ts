@@ -424,6 +424,74 @@ describe("GitHub read-only CodeProvider", () => {
     });
     expect(h.requests).toHaveLength(1);
   });
+
+  it("rereads pinned excerpt bytes and current default head without consulting the search index", async () => {
+    const h = harness();
+    const blob = searchRoutes(h, "first\npreserve\nlast");
+    const reference = {
+      repository: repo,
+      path: "src/a.ts",
+      commitSha: head,
+      blobSha: blob.sha,
+      startLine: 2,
+      endLine: 2
+    };
+    const result = await h.provider.getCurrentCodeExcerpt(reference);
+    expect(result).toMatchObject({
+      ...reference,
+      excerpt: "preserve",
+      committedAt: time,
+      observedAt: time
+    });
+    expect(h.requests.some((request) => request.url.pathname === "/search/code")).toBe(
+      false
+    );
+    h.json(headPath, commit(second));
+    await expect(h.provider.getCurrentCodeExcerpt(reference)).resolves.toBeNull();
+  });
+
+  it.each([
+    "deleted",
+    "access-revoked",
+    "changed-during-read",
+    "branch-switch",
+    "blob-changed",
+    "line-range"
+  ])("refuses ineligible current excerpt: %s", async (kind) => {
+    const h = harness();
+    const blob = searchRoutes(h, "preserve");
+    const reference = {
+      repository: repo,
+      path: "src/a.ts",
+      commitSha: head,
+      blobSha: blob.sha,
+      startLine: 1,
+      endLine: 1
+    };
+    if (kind === "deleted" || kind === "access-revoked")
+      h.on(
+        `${prefix}/contents/src/a.ts`,
+        () => new Response(null, { status: kind === "deleted" ? 404 : 403 })
+      );
+    if (kind === "changed-during-read") {
+      let reads = 0;
+      h.on(headPath, () => json(commit(++reads === 1 ? head : second)));
+    }
+    if (kind === "branch-switch") {
+      let reads = 0;
+      h.on(prefix, () =>
+        json({
+          full_name: repo,
+          html_url: `https://github.com/${repo}`,
+          default_branch: ++reads === 1 ? "main" : "release"
+        })
+      );
+      h.json(`${prefix}/commits/heads%2Frelease`, commit(head));
+    }
+    if (kind === "blob-changed") reference.blobSha = second;
+    if (kind === "line-range") reference.endLine = 2;
+    await expect(h.provider.getCurrentCodeExcerpt(reference)).resolves.toBeNull();
+  });
 });
 
 function harness(overrides: Partial<GitHubCodeProviderConfig> = {}) {

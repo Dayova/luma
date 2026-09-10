@@ -5,11 +5,13 @@ import type {
   CodeActivity,
   CodeActivityResult,
   CodeChange,
+  CodeExcerptReference,
   CodeProvider,
   CodeReadCoverage,
   CodeSearchQuery,
   CodeSearchResponse,
   Commit,
+  CurrentCodeExcerpt,
   RepositoryActivityQuery
 } from "./interface.js";
 
@@ -541,6 +543,102 @@ class GitHubCodeReader implements CodeProvider {
         observedAt: this.now().toISOString()
       };
     });
+  }
+
+  async getCurrentCodeExcerpt(
+    reference: CodeExcerptReference
+  ): Promise<CurrentCodeExcerpt | null> {
+    const repo = this.allowed(reference.repository);
+    const commitSha = parseInput(shaSchema, reference.commitSha);
+    const blobSha = parseInput(shaSchema, reference.blobSha);
+    const path = filePath(reference.path);
+    const { startLine, endLine } = reference;
+    if (
+      !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(endLine) ||
+      startLine < 1 ||
+      endLine < startLine ||
+      endLine - startLine > 100
+    )
+      fail("query-invalid");
+    try {
+      return await this.read(async (context) => {
+        const initial = await this.defaultHead(repo, context);
+        if (initial.head.sha !== commitSha) return null;
+        const content = parse(
+          contentSchema,
+          (
+            await this.get(
+              `/repos/${repo}/contents/${encodePath(path)}?ref=${commitSha}`,
+              context
+            )
+          ).value
+        );
+        if (content.path !== path) fail("response-invalid");
+        if (content.size > this.maxFileBytes) return null;
+        const bytes = decodeBlob(content.content, content.size, content.sha);
+        if (content.sha !== blobSha) return null;
+        let source: string;
+        try {
+          source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          return null;
+        }
+        if (source.includes("\0")) return null;
+        const lines = source.split("\n");
+        if (endLine > lines.length) return null;
+        const excerpt = lines.slice(startLine - 1, endLine).join("\n");
+        if (excerpt.length > 4_000) return null;
+        const final = await this.defaultHead(repo, context);
+        if (final.branch !== initial.branch || final.head.sha !== commitSha) return null;
+        return {
+          repository: repo,
+          path,
+          commitSha,
+          blobSha,
+          startLine,
+          endLine,
+          excerpt,
+          url: `${this.webUrl(`${repo}/blob/${commitSha}/${encodePath(path)}`)}#L${startLine}-L${endLine}`,
+          committedAt: initial.head.commit.committer.date,
+          observedAt: this.now().toISOString()
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof GitHubCodeProviderError &&
+        (error.code === "not-found" || error.code === "access-denied")
+      )
+        return null;
+      throw error;
+    }
+  }
+
+  private async defaultHead(
+    repo: string,
+    context: ReadContext
+  ): Promise<{ branch: string; head: z.infer<typeof commitSchema> }> {
+    const repository = parse(
+      z.object({
+        full_name: z.string(),
+        default_branch: z.string().min(1),
+        html_url: z.string()
+      }),
+      (await this.get(`/repos/${repo}`, context)).value
+    );
+    if (repositoryName(repository.full_name) !== repo) fail("response-invalid");
+    this.checkWeb(repository.html_url, repo);
+    const head = parse(
+      commitSchema,
+      (
+        await this.get(
+          `/repos/${repo}/commits/${encodeURIComponent(`heads/${repository.default_branch}`)}`,
+          context
+        )
+      ).value
+    );
+    this.checkWeb(head.html_url, `${repo}/commit/${head.sha}`);
+    return { branch: repository.default_branch, head };
   }
 
   private allowed(repository: string): string {

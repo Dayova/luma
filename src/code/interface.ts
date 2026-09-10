@@ -99,6 +99,15 @@ export type CodeSearchResponse = {
   observedAt: string;
 };
 
+export type CodeExcerptReference = Pick<
+  CodeSearchResult,
+  "repository" | "path" | "commitSha" | "blobSha" | "startLine" | "endLine"
+>;
+export type CurrentCodeExcerpt = CodeSearchResult & {
+  committedAt: string;
+  observedAt: string;
+};
+
 export interface CodeProvider {
   readonly providerId: string;
   readonly readScope: CodeReadScope;
@@ -106,4 +115,8 @@ export interface CodeProvider {
   getCommit(repository: string, sha: string): Promise<Commit>;
   getRecentActivity(query: RepositoryActivityQuery): Promise<CodeActivityResult>;
   searchCode(query: CodeSearchQuery): Promise<CodeSearchResponse>;
+  /** Fresh bytes and readability at the still-current default head; never a cached search hit. */
+  getCurrentCodeExcerpt(
+    reference: CodeExcerptReference
+  ): Promise<CurrentCodeExcerpt | null>;
 }

@@ -3,9 +3,10 @@
 `createGitHubCodeProvider` implements the read-only `CodeProvider` port for pull
 requests, immutable commits, recent repository events, and bounded code search.
 It is separate from the GitHub Issues compatibility writer and does not create
-issues, comments, reviews, or other external mutations. Application composition
-and an audience-authorized organizational catalog must bind it before it can
-supply context to a shared answer.
+issues, comments, reviews, or other external mutations. The audience-authorized
+`createGitHubContextCatalog` adapts it to organizational retrieval; application
+composition must supply the actual workspace audience grant before using it in
+a shared answer.
 
 ## Credential and repository boundary
 
@@ -40,6 +41,26 @@ rejected. Access tokens and raw provider error bodies are never included in
 adapter errors.
 
 ## Evidence and coverage
+
+The catalog requires an `authorize` callback receiving the workspace, every
+actual recipient, provider ID, credential scope ID and repository. It checks
+this live grant before and after discovery and each evidence read. Its catalog
+ID includes the credential scope ID so retained snapshots cannot silently cross
+credential bindings. Do not reuse a credential scope ID for a different trust
+boundary. A denied or revoked grant returns no evidence.
+
+Discovery makes at most six repository/phrase searches by default (configurable
+from one to twenty), with explicit partial coverage. Source IDs encode the
+repository, immutable commit, blob, path and line range. `read` calls
+`getCurrentCodeExcerpt` to fetch those exact bytes again and recheck the current
+default head; it does not reuse search snippets or cached file contents. Deleted,
+unreadable or changed sources are ineligible. Receipt checks therefore fail
+closed after a head change, even when that change touched another file. Historical
+snapshots remain in organizational storage; the catalog does not delete them.
+
+This catalog currently discovers code excerpts. PR, commit and event methods
+are available through the CodeProvider capability but are not silently included
+in catalog searches or claimed as complete implementation-status knowledge.
 
 - `getPullRequest` reads metadata twice around bounded files, commits and reviews
   and rejects a changed source. It reports head/base SHAs, `updatedAt`, and
@@ -82,6 +103,7 @@ blob bytes, partial coverage, cancellation and rate-limit errors:
 
 ```sh
 pnpm exec vitest run tests/code/github-code-provider.test.ts
+pnpm exec vitest run tests/organizational-context/github-catalog.test.ts
 ```
 
 The adapter uses REST API version `2026-03-10`. Protocol behavior was checked

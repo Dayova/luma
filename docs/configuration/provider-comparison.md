@@ -60,6 +60,41 @@ fixture/repetition pairs. A live run exits 2 when any case is missing, unrun,
 limited, or failed; exit 0 means all requested cases produced validated output,
 **not** that semantic checks passed. Invalid setup exits 1.
 
+## Google through Vertex
+
+To evaluate the same `gemini-3.8-flash` model through Vertex, use:
+
+```dotenv
+LUMA_EVAL_GOOGLE_BACKEND=vertex
+VERTEX_API_KEY=
+VERTEX_PROJECT_ID=
+```
+
+Put the key in the ignored local `.env`. Leave `VERTEX_PROJECT_ID` empty for
+an Express mode key; for a project-scoped Vertex authorization key, set the
+Google Cloud project ID or number. Both routes use the global endpoint.
+This adapter accepts API keys, not service-account JSON files or OAuth tokens.
+The default backend remains `developer`, using `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
+Selecting Vertex never falls back to a Developer API key or a different model.
+
+Vertex receives the identical Evidence, prompt, native schema, medium thinking
+setting, output-token cap and timeout as the Developer API candidate. Tests
+compare the complete outbound bodies across both routes. Reports identify the
+backend, Express/project scope and applicable pricing source, and retain the
+returned model version. A key with no access to the requested model produces an
+explicit failure; the command does not substitute a weaker model or prompt.
+
+This preserves the evaluation design, but does not establish identical outputs
+across hosting routes. Latency, quotas, safety behavior and billing can differ.
+Treat a Vertex result as a result for Gemini served through Vertex. Live access
+must still be verified before claiming the integration works. Google's published
+global introductory input/output rates match the Developer API rates used here;
+account-specific credits and discounts are excluded.
+
+- [Vertex Gemini 3.8 Flash model and thinking settings](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash)
+- [Vertex Express API routes](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/express-mode/api-reference)
+- [Vertex pricing](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)
+
 ## Bounds and accounting
 
 Each request has a 32,000-byte serialized body limit, 4,096 maximum output tokens,

@@ -79,10 +79,34 @@ export class ComparisonError extends Error {
   }
 }
 
+export type GoogleEndpoint =
+  { backend: "developer" } | { backend: "vertex"; projectId?: string };
+
+export function googleEndpoint(env: NodeJS.ProcessEnv): GoogleEndpoint {
+  const backend = env["LUMA_EVAL_GOOGLE_BACKEND"]?.trim() || "developer";
+  if (backend === "developer") return { backend };
+  if (backend !== "vertex") throw new ComparisonError("invalid-google-backend");
+  const projectId = env["VERTEX_PROJECT_ID"]?.trim();
+  if (projectId && !/^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]+)$/.test(projectId))
+    throw new ComparisonError("invalid-vertex-project");
+  return projectId ? { backend, projectId } : { backend };
+}
+
+function googleUrl(model: string, endpoint: GoogleEndpoint): string {
+  if (endpoint.backend === "developer")
+    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const scope = endpoint.projectId
+    ? `projects/${endpoint.projectId}/locations/global/`
+    : "";
+  return `https://aiplatform.googleapis.com/v1/${scope}publishers/google/models/${model}:generateContent`;
+}
+
 export function candidateKey(
   candidate: Candidate,
   env: NodeJS.ProcessEnv
 ): string | undefined {
+  if (candidate.id === "google" && googleEndpoint(env).backend === "vertex")
+    return env["VERTEX_API_KEY"]?.trim() || undefined;
   return (
     env[candidate.key]?.trim() ||
     (candidate.id === "google" ? env["GOOGLE_API_KEY"]?.trim() : undefined)
@@ -114,6 +138,7 @@ export function createComparisonReasoningModel(options: {
   apiKey: string;
   limits: Limits;
   transport?: Transport;
+  googleEndpoint?: GoogleEndpoint;
   onResponse: (facts: ResponseFacts) => void;
 }): ReasoningModel {
   const { candidate, limits } = options;
@@ -130,7 +155,13 @@ export function createComparisonReasoningModel(options: {
       if (request.schemaName !== "MeetingAnalysisProposalBatch")
         throw new ComparisonError("unsupported-schema");
       const payload = comparisonPayload(request);
-      const { url, body, headers } = outbound(candidate, options.apiKey, payload, limits);
+      const { url, body, headers } = outbound(
+        candidate,
+        options.apiKey,
+        payload,
+        limits,
+        options.googleEndpoint ?? { backend: "developer" }
+      );
       if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxInputBytes)
         throw new ComparisonError("input-limit");
       const controller = new AbortController();
@@ -198,7 +229,8 @@ function outbound(
   candidate: Candidate,
   key: string,
   payload: ReturnType<typeof comparisonPayload>,
-  limits: Limits
+  limits: Limits,
+  endpoint: GoogleEndpoint
 ) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   const messages = [{ role: "user", content: payload.input }];
@@ -250,7 +282,7 @@ function outbound(
     case "google":
       headers["x-goog-api-key"] = key;
       return {
-        url: `https://generativelanguage.googleapis.com/v1beta/models/${candidate.model}:generateContent`,
+        url: googleUrl(candidate.model, endpoint),
         headers,
         body: {
           systemInstruction: { parts: [{ text: payload.instructions }] },

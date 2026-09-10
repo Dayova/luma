@@ -6,6 +6,9 @@ import {
   createComparisonReasoningModel,
   defaultLimits,
   comparisonPayload,
+  candidateKey,
+  googleEndpoint,
+  type GoogleEndpoint,
   type Candidate,
   type ResponseFacts,
   type Transport
@@ -437,5 +440,81 @@ describe("comparison evaluation integrity", () => {
         selected: candidates
       })
     ).rejects.toBeInstanceOf(ComparisonError);
+  });
+});
+
+describe("Google hosting configuration", () => {
+  const google = candidates.find((c) => c.id === "google")!;
+
+  it("keeps the full model request identical across Developer API and Vertex routes", async () => {
+    const endpoints: GoogleEndpoint[] = [
+      { backend: "developer" },
+      { backend: "vertex" },
+      { backend: "vertex", projectId: "luma-evaluation" }
+    ];
+    const sent: { url: string; body: string }[] = [];
+    for (const endpoint of endpoints) {
+      const model = createComparisonReasoningModel({
+        candidate: google,
+        apiKey: "test-secret",
+        limits: defaultLimits,
+        googleEndpoint: endpoint,
+        onResponse: () => {},
+        transport: (url, init) => {
+          if (typeof init.body !== "string") throw new Error("expected JSON");
+          sent.push({ url, body: init.body });
+          expect(new Headers(init.headers).get("x-goog-api-key")).toBe("test-secret");
+          expect(url).not.toContain("test-secret");
+          expect(init.redirect).toBe("error");
+          return Promise.resolve(new Response(JSON.stringify(wire(google))));
+        }
+      });
+      expect((await model.generateStructured(request)).value).toEqual(proposal());
+    }
+    expect(new Set(sent.map((s) => s.body)).size).toBe(1);
+    expect(sent.map((s) => s.url)).toEqual([
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+      "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3.8-flash:generateContent",
+      "https://aiplatform.googleapis.com/v1/projects/luma-evaluation/locations/global/publishers/google/models/gemini-3.8-flash:generateContent"
+    ]);
+  });
+
+  it("uses only the selected backend's credential and records Vertex in preflight", async () => {
+    const env = { LUMA_EVAL_GOOGLE_BACKEND: "vertex", GEMINI_API_KEY: "developer-key" };
+    expect(candidateKey(google, env)).toBeUndefined();
+    expect(candidateKey(google, { ...env, VERTEX_API_KEY: "vertex-key" })).toBe(
+      "vertex-key"
+    );
+    expect(
+      candidateKey(google, {
+        GEMINI_API_KEY: "developer-key",
+        VERTEX_API_KEY: "vertex-key"
+      })
+    ).toBe("developer-key");
+    const report = await runComparison({
+      corpus,
+      env,
+      live: false,
+      maxRequests: 1,
+      repeats: 1,
+      gitRevision: "test",
+      selected: [google]
+    });
+    expect(report.rows.every((r) => r.status === "missing-credential")).toBe(true);
+    expect(report.googleEndpoint).toEqual({ backend: "vertex" });
+    expect(report.googlePricingSource).toContain("cloud.google.com");
+    expect(renderReport(report)).toContain("vertex (express, global)");
+  });
+
+  it("rejects invalid backends and project paths before sending credentials", () => {
+    expect(() => googleEndpoint({ LUMA_EVAL_GOOGLE_BACKEND: "typo" })).toThrow(
+      "invalid-google-backend"
+    );
+    expect(() =>
+      googleEndpoint({
+        LUMA_EVAL_GOOGLE_BACKEND: "vertex",
+        VERTEX_PROJECT_ID: "../another-project"
+      })
+    ).toThrow("invalid-vertex-project");
   });
 });

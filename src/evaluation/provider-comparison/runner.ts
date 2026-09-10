@@ -12,6 +12,8 @@ import {
 import {
   candidates,
   candidateKey,
+  googleEndpoint,
+  type GoogleEndpoint,
   comparisonPayload,
   createComparisonReasoningModel,
   ComparisonError,
@@ -45,6 +47,8 @@ export type Report = {
   mode: "preflight" | "live";
   limits: Limits & { maxRequests: number; repeats: number };
   candidateConfig: readonly Candidate[];
+  googleEndpoint: GoogleEndpoint;
+  googlePricingSource: string;
   pricingVerifiedAt: string;
   pricingNotes: string;
   interpretation: string;
@@ -92,6 +96,11 @@ export async function runComparison(options: RunnerOptions): Promise<Report> {
     mode: options.live ? "live" : "preflight",
     limits: { ...limits, maxRequests: options.maxRequests, repeats: options.repeats },
     candidateConfig: options.selected,
+    googleEndpoint: googleEndpoint(options.env),
+    googlePricingSource:
+      googleEndpoint(options.env).backend === "vertex"
+        ? "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
+        : "https://ai.google.dev/gemini-api/docs/pricing",
     pricingVerifiedAt: "2026-09-10",
     pricingNotes:
       "USD estimates use uncached input and billed output at published standard rates; DeepSeek peak rates, Google promotional rates through 2026-12-31. Cache discounts and actual invoice adjustments are not modeled. Missing usage is unknown, never zero. Request and output caps are enforced; USD estimates are not a provider billing cap.",
@@ -141,6 +150,7 @@ export async function runComparison(options: RunnerOptions): Promise<Report> {
           candidate,
           apiKey: candidateKey(candidate, options.env)!,
           limits,
+          googleEndpoint: report.googleEndpoint,
           onResponse
         });
       // Journal dispatch before the network call. Interrupted attempts may have been billed.
@@ -199,6 +209,7 @@ export function renderReport(report: Report): string {
     `- Git revision: ${report.gitRevision}`,
     `- Corpus SHA-256: ${report.corpusHash}`,
     `- Prompt version: ${report.promptVersion}`,
+    `- Google backend: ${report.googleEndpoint.backend}${report.googleEndpoint.backend === "vertex" ? (report.googleEndpoint.projectId ? " (project-scoped, global)" : " (express, global)") : ""}; pricing: ${report.googlePricingSource}.`,
     `- Maximum requests: ${report.limits.maxRequests}; repetitions: ${report.limits.repeats}; output tokens/request: ${report.limits.maxOutputTokens}; timeout: ${report.limits.timeoutMs} ms.`,
     "",
     report.pricingNotes,

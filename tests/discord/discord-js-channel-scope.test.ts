@@ -114,6 +114,43 @@ function mention() {
 }
 
 describe("Discord production channel resolution and delivery", () => {
+  it.each([true, false])(
+    "fences organizational context at final delivery without invoking the handler twice: %s",
+    async (current) => {
+      const live = transport();
+      const message = mention();
+      const fence = vi.fn(() =>
+        current
+          ? Promise.resolve()
+          : Promise.reject(new Error("Source revoked after answering"))
+      );
+      const handler = vi.fn(() =>
+        Promise.resolve({
+          content: "Old organizational claim",
+          idempotencyKey: "context-result",
+          requireCurrent: fence
+        })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      expect(fence).toHaveBeenCalledOnce();
+      expect(handler).toHaveBeenCalledOnce();
+      const sent = message.reply.mock.calls[0]?.[0];
+      expect(sent).toHaveProperty(
+        "content",
+        current
+          ? expect.stringContaining("Old organizational claim")
+          : expect.stringContaining("organizational context changed")
+      );
+      if (!current)
+        expect(sent).not.toHaveProperty(
+          "content",
+          expect.stringContaining("Old organizational claim")
+        );
+      await live.disconnect();
+    }
+  );
   it.each(["unchanged", "edited", "deleted", "history-revoked", "anchor-edited"])(
     "revalidates answer evidence and reading permission at final delivery: %s",
     async (change) => {

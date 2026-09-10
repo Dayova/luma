@@ -550,6 +550,18 @@ async function handleContextAskMention(input: {
     }
     if (!(await mayReply())) return;
   }
+  if (response.requireCurrent) {
+    try {
+      await response.requireCurrent();
+    } catch {
+      response = {
+        content:
+          "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
+        idempotencyKey: response.idempotencyKey
+      };
+    }
+    if (!(await mayReply())) return;
+  }
   await replyToContextAskMessage(input.message, response);
 }
 

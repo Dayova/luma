@@ -1,5 +1,5 @@
 import type { Confidence, WorkspaceId } from "../domain/model.js";
-import type { ContextEvidence } from "./interface.js";
+import type { ContextEvidence, OrganizationalContextEvidence } from "./interface.js";
 
 export type ContextAnswerRequest = {
   workspaceId: WorkspaceId;
@@ -19,6 +19,8 @@ export type ContextAnswerRequest = {
     };
   };
   evidence: ContextEvidence[];
+  organizationalEvidence?: OrganizationalContextEvidence[];
+  retrievalCoverage?: { complete: boolean; warnings: string[] };
   promptVersion: string;
 };
 

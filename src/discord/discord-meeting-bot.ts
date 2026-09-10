@@ -31,7 +31,10 @@ import {
 import { resolveDiscordMentions } from "../identity/static-identity-directory.js";
 import type { MeetingIntelligence } from "../meeting-intelligence/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
-import type { ContextIntelligence } from "../context-intelligence/interface.js";
+import type {
+  ContextIntelligence,
+  ContextInquiry
+} from "../context-intelligence/interface.js";
 import type { ConversationEvidenceProof } from "../context-intelligence/conversation-evidence-source.js";
 import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
 import {
@@ -96,6 +99,8 @@ export type DiscordContextAskResponse = {
   idempotencyKey: string;
   /** Required for evidence-derived answers, revalidated at the final send boundary. */
   sourceProof?: ConversationEvidenceProof;
+  /** A final read-only fence immediately before delivering the cached answer. */
+  requireCurrent?: () => Promise<void>;
 };
 
 export type DiscordThread = {
@@ -299,18 +304,25 @@ async function answerConversationThread(
   }
 
   try {
-    const result = await contextAsk.contextIntelligence.inquire({
+    const inquiry: ContextInquiry = {
       type: "ask",
       workspaceId: input.workspace.workspaceId,
       inquiryId: `discord:${ask.messageId}:context-ask`,
       question: ask.question,
+      audience: {
+        workspaceId: input.workspace.workspaceId,
+        personIds: [...input.authorizedPersonIds]
+      },
       subject: {
         type: "conversation-thread",
         providerId: "discord",
         conversationObjectId: ask.channelId,
         anchorMessageId: ask.messageId
       }
-    });
+    };
+    const result = await contextAsk.contextIntelligence.inquire(inquiry);
+    if (result.organizationalContext && !contextAsk.contextIntelligence.requireCurrent)
+      throw new Error("Organizational context requires a final delivery fence");
 
     const response = await reply(
       await appendAiUsageWarning(input, renderDiscordContextAskResult(result))
@@ -318,6 +330,12 @@ async function answerConversationThread(
     return response
       ? {
           ...response,
+          ...(contextAsk.contextIntelligence.requireCurrent
+            ? {
+                requireCurrent: () =>
+                  contextAsk.contextIntelligence.requireCurrent!(inquiry)
+              }
+            : {}),
           sourceProof: {
             workspaceId: input.workspace.workspaceId,
             subject: { ...result.subject },
@@ -329,10 +347,11 @@ async function answerConversationThread(
   } catch (error: unknown) {
     if (
       error instanceof ContextIntelligenceError &&
-      error.code === "context-inquiry-source-changed"
+      (error.code === "context-inquiry-source-changed" ||
+        error.code === "context-inquiry-context-changed")
     ) {
       return reply(
-        "The conversation changed or is no longer readable. Post a new @Luma question to use its current state."
+        "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state."
       );
     }
     return reply(renderAiServiceFailure(error));

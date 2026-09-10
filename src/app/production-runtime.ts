@@ -1,3 +1,4 @@
+import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { z } from "zod";
@@ -121,11 +122,12 @@ export async function validateProductionEnvironment(
       "The selected production model needs an audited price entry."
     );
     aiRequestLimitsFromEnv(env);
+    organizationalContextRuntimeConfig(env);
   } catch (error) {
     if (error instanceof ProductionPreflightError) throw error;
     // Adapter configuration errors may include supplied values. Never print them.
     throw new ProductionPreflightError(
-      "Production channel, identity, model, or budget configuration is invalid."
+      "Production channel, identity, model, budget, or organizational context configuration is invalid."
     );
   }
 }

@@ -68,7 +68,7 @@ export function createOrganizationalContext(input: {
   ) => {
     if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
     const source = await deadline(
-      catalog.read({ audience: request.audience, sourceId }),
+      catalog.read({ audience: structuredClone(request.audience), sourceId }),
       Math.min(input.timeoutMs ?? 5_000, deadlineAt - Date.now())
     );
     if (source) validateSource(source, sourceId);
@@ -76,6 +76,7 @@ export function createOrganizationalContext(input: {
   };
   return {
     async retrieve(request) {
+      request = structuredClone(request);
       validateRequest(request);
       const warnings: string[] = [];
       const candidates: Candidate[] = [];
@@ -95,8 +96,8 @@ export function createOrganizationalContext(input: {
         try {
           const search = await deadline(
             catalog.search({
-              audience: request.audience,
-              concepts: request.concepts,
+              audience: structuredClone(request.audience),
+              concepts: [...request.concepts],
               limit: remaining
             }),
             input.timeoutMs ?? 5_000
@@ -374,6 +375,7 @@ export function createOrganizationalContext(input: {
       return bundle;
     },
     async requireCurrent(request, receiptId) {
+      request = structuredClone(request);
       validateRequest(request);
       const readDeadline = Date.now() + 15_000;
       const result = await input.database.query<{
@@ -399,8 +401,8 @@ export function createOrganizationalContext(input: {
         try {
           current = await deadline(
             catalog.search({
-              audience: request.audience,
-              concepts: request.concepts,
+              audience: structuredClone(request.audience),
+              concepts: [...request.concepts],
               limit: search.limit
             }),
             Math.min(input.timeoutMs ?? 5_000, readDeadline - Date.now())

@@ -100,6 +100,54 @@ async function setup(initial: ContextSource[]) {
 }
 
 describe("governed organizational retrieval", () => {
+  it("binds receipts to the original audience while callers and catalog inputs mutate", async () => {
+    const database = await createPgliteDatabase();
+    databases.push(database);
+    const original = structuredClone(request);
+    const mutable = structuredClone(request);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const readAudiences: string[][] = [];
+    const context = createOrganizationalContext({
+      database,
+      catalogs: [
+        {
+          id: "audience-bound",
+          async search(input) {
+            await gate;
+            input.audience.personIds.splice(
+              0,
+              input.audience.personIds.length,
+              "outsider"
+            );
+            input.concepts.push("injected");
+            return { sourceIds: ["ownership"], complete: true, warnings: [] };
+          },
+          read(input) {
+            readAudiences.push([...input.audience.personIds]);
+            return Promise.resolve(source("ownership"));
+          }
+        }
+      ]
+    });
+    const pending = context.retrieve(mutable);
+    mutable.audience.personIds.push("outsider");
+    mutable.concepts.push("caller-changed");
+    release!();
+    const bundle = await pending;
+    expect(readAudiences[0]).toEqual(original.audience.personIds);
+    await expect(
+      context.requireCurrent(original, bundle.receiptId)
+    ).resolves.toBeUndefined();
+    await expect(context.requireCurrent(mutable, bundle.receiptId)).rejects.toThrow();
+    expect(
+      readAudiences.every(
+        (ids) => JSON.stringify(ids) === JSON.stringify(original.audience.personIds)
+      )
+    ).toBe(true);
+  });
   it("keeps an old valid Human decision above a newer unaccepted proposal", async () => {
     const { context } = await setup([
       source("accepted"),

@@ -1,5 +1,6 @@
 import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
 import { migrateContextRetrieval } from "../context-intelligence/persistence.js";
+import { migrateMeetingContext } from "../meeting-intelligence/context-guard.js";
 import { PGlite } from "@electric-sql/pglite";
 import { openOwnedPgliteDatabase } from "./store-ownership.js";
 import { migrateAiAccountingRecovery } from "./ai-accounting-migration.js";
@@ -805,4 +806,5 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
   await migrateOrganizationalContext(database);
   await migrateAiAccountingRecovery(database);
   await migrateContextRetrieval(database);
+  await migrateMeetingContext(database);
 }

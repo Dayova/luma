@@ -77,8 +77,9 @@ interface MeetingIntelligence {
 bounded analysis for new or revised utterance Evidence, followed by
 reconciliation of imported Action Item candidates against configured read-only
 Work Catalogs outside the source acceptance transaction. Durable reviews commit
-in a short follow-up transaction. This ordering gives model analysis an exact
-revision fence before any slow catalog I/O. Each stage advances the Meeting
+in a short follow-up transaction. Model analysis keeps the exact accepted
+revision as its fence while organizational retrieval and model I/O run. Work
+reconciliation follows that analysis fence. Each stage advances the Meeting
 Revision. If catalog work or analysis fails, accepted Evidence remains durable
 and reconciliation is represented as a reviewable clarification.
 
@@ -99,13 +100,28 @@ The Interface reports domain errors such as invalid Observations and temporary a
 
 ## Performance Expectations
 
-The current implementation analyzes only new/revised Evidence supplied to an `observe` call. It does not resend the whole transcript after every utterance.
+Analysis is triggered by new/revised Evidence in `observe`. It also receives
+bounded canonical prior state and, when configured, audience-authorized
+organizational sources with citations, versions, standing and partial coverage.
+It does not resend the whole transcript after every utterance. Retrieval runs
+inside the Module, using the explicitly configured shared audience rather than
+inferring permission from attendance.
+
+Durable receipt dependencies are checked before paid analysis, result
+persistence and final query/conclusion delivery. Changed or inaccessible sources
+withhold only the affected current items; observations and prior revisions remain
+retained. Reused conclusions are keyed by the eligible projection. Legacy
+constructors without organizational retrieval still use useful same-Meeting
+context and report absent global coverage. See
+[organizational context behavior and limits](../meeting-organizational-context.md).
 
 ## Dependency Classification
 
 - Persistence: local-substitutable, PostgreSQL-compatible PGlite in tests.
 - ReasoningModel: true external behind an owned port.
-- Organizational Context: true external behind a provider-neutral port, not yet wired into analysis.
+- Organizational Context: provider-neutral retrieval invoked internally before
+  analysis, with durable receipt validation through current views and follow-up
+  execution. Production composition must supply the service and explicit audience.
 - Knowledge, Work, Code providers: true external Adapters behind capability Interfaces.
 
 ## Extension Points

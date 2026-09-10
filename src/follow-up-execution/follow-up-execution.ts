@@ -203,7 +203,8 @@ async function withCurrentExecutionContext(
       ...state.openQuestions,
       ...state.risks,
       ...state.topics,
-      ...state.proposals
+      ...state.proposals,
+      ...state.followUpIntentions
     ];
     const contextDependent = items.some((item) => {
       if (item !== intent && intent.type !== "record-meeting" && !related.has(item.id))

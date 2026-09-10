@@ -1102,6 +1102,7 @@ describe("Follow-up execution meeting records", () => {
   });
   it.each([
     "missing-guard",
+    "missing-guard-other-followup",
     "revoked-before-claim",
     "revoked-before-write",
     "revoked-after-write"
@@ -1135,7 +1136,18 @@ describe("Follow-up execution meeting records", () => {
         const recordedIntent = state.followUpIntentions.find(
           (item) => item.id === intent.id
         )!;
-        Reflect.set(recordedIntent.provenance, "contextReceiptIds", [
+        const contextIntent =
+          scenario === "missing-guard-other-followup"
+            ? {
+                ...recordedIntent,
+                id: `${intent.id}-other`,
+                status: "suggested" as const,
+                provenance: { ...recordedIntent.provenance }
+              }
+            : recordedIntent;
+        if (contextIntent !== recordedIntent)
+          state.followUpIntentions.push(contextIntent);
+        Reflect.set(contextIntent.provenance, "contextReceiptIds", [
           "receipt-from-context"
         ]);
         await database.query(
@@ -1159,7 +1171,7 @@ describe("Follow-up execution meeting records", () => {
             }
           },
           knowledgeProvider: provider,
-          ...(scenario === "missing-guard"
+          ...(scenario === "missing-guard" || scenario === "missing-guard-other-followup"
             ? {}
             : {
                 organizationalContextGuard: {

@@ -92,16 +92,25 @@ Before first activation, verify these existing product requirements:
 - Use a separate production Discord application and token. The launcher rejects
   the known development application and verifies that the token belongs to the
   configured application before registering commands or connecting the Gateway.
+- Enable **Server Members Intent** under **Bot > Privileged Gateway Intents** on
+  that application and obtain Discord's approval where required. Startup checks
+  this approval even with Context Ask disabled. No environment flag bypasses it.
 - Match the configured guild and all four founder identities. Review actual
   human readers, including Team/Admin role holders, for each allowed parent.
   `allgemein`, `gäste`, and `team-off-topic` are absent from the initial scope.
+  Luma verifies fresh owner, administrator, role, and channel-overwrite permissions
+  against a complete API member list. The current proof supports at most 999
+  members including bots; a full 1,000-member page, incomplete data, or an API
+  failure blocks channel work and publication rather than using cached readers.
+  Private threads are unsupported. See
+  [current reader verification](../integrations/discord.md#current-reader-verification).
 - Give the production bot only the channel permissions needed for the approved
   surface: View Channel, Read Message History, Send Messages, Create Public
   Threads, and Send Messages in Threads. Administrator is unnecessary. The
   development bot's current role grants do not give it private team-channel
   access and are not evidence of the production bot's access.
 - For Context Ask, complete participant notice and source participation approval,
-  enable Message Content intent on the production application, then set
+  additionally enable Message Content intent on the production application, then set
   `LUMA_DISCORD_CONTEXT_ASK_ENABLED=1`. Only explicit founder invocations in public
   threads under configured private parents are eligible. Channel names are
   descriptive; IDs are configurable and must be reviewed when scope changes.

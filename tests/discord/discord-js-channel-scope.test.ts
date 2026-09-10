@@ -1,3 +1,4 @@
+import { discordAudienceFixture } from "./discord-audience-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
 import {
@@ -5,7 +6,8 @@ import {
   Collection,
   Events,
   MessageType,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  Routes
 } from "discord.js";
 import { conversationSnapshotContentHash } from "../../src/knowledge/observed-source-ledger.js";
 import { createDiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
@@ -18,6 +20,7 @@ const sdk = vi.hoisted(() => ({
     void _values;
     return false;
   },
+  get: vi.fn(),
   fetch: vi.fn<(id: string, options?: unknown) => Promise<unknown>>()
 }));
 
@@ -29,6 +32,7 @@ vi.mock("discord.js", async (importOriginal) => {
     Client: class extends EventEmitter {
       user = { id: "bot" };
       channels = { fetch: sdk.fetch };
+      rest = { get: sdk.get };
       constructor() {
         super();
         sdk.emit = this.emit.bind(this);
@@ -66,7 +70,12 @@ function channel(id: string, type: ChannelType, parentId: string | null = null) 
   };
 }
 
+let audience: ReturnType<typeof discordAudienceFixture>;
 beforeEach(() => {
+  audience = discordAudienceFixture({
+    channel: (id) => sdk.channels.get(id) as ReturnType<typeof channel> | undefined
+  });
+  sdk.get.mockImplementation(audience.read);
   sdk.channels.clear();
   sdk.channels.set("parent", channel("parent", ChannelType.GuildText));
   sdk.channels.set("thread", channel("thread", ChannelType.PublicThread, "parent"));
@@ -82,6 +91,7 @@ function transport() {
     clientId: "application",
     guildId: "guild",
     allowedParentChannelIds: ["parent"],
+    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],
@@ -151,7 +161,14 @@ describe("Discord production channel resolution and delivery", () => {
       await live.disconnect();
     }
   );
-  it.each(["unchanged", "edited", "deleted", "history-revoked", "anchor-edited"])(
+  it.each([
+    "unchanged",
+    "edited",
+    "deleted",
+    "history-revoked",
+    "anchor-edited",
+    "audience-expanded"
+  ])(
     "revalidates answer evidence and reading permission at final delivery: %s",
     async (change) => {
       const live = transport();
@@ -220,6 +237,11 @@ describe("Discord production channel resolution and delivery", () => {
       if (change === "deleted") deleted = true;
       if (change === "history-revoked") historyReadable = false;
       if (change === "anchor-edited") anchor.content = "<@bot> A different question";
+      if (change === "audience-expanded")
+        audience.state.members.push({
+          user: { id: "new-admin", bot: false },
+          roles: ["admin"]
+        });
       finish({
         content: "Internal old answer",
         idempotencyKey: "answer",
@@ -228,6 +250,12 @@ describe("Discord production channel resolution and delivery", () => {
           contentHash: conversationSnapshotContentHash(captured.snapshot)
         }
       });
+      if (change === "audience-expanded") {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(anchor.reply).not.toHaveBeenCalled();
+        await live.disconnect();
+        return;
+      }
       await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledOnce());
       const sent = anchor.reply.mock.calls[0]?.[0];
       if (change === "unchanged")
@@ -251,6 +279,109 @@ describe("Discord production channel resolution and delivery", () => {
     }
   );
 
+  it("refuses a capture whose audience expands while Discord returns messages", async () => {
+    const live = transport();
+    const anchor = {
+      ...mention(),
+      content: "<@bot> What did we decide?",
+      type: MessageType.Default,
+      author: { id: "founder", bot: false, username: "Founder" },
+      url: "https://discord.com/channels/guild/thread/message",
+      attachments: new Map(),
+      embeds: [],
+      stickers: new Map(),
+      components: [],
+      poll: null,
+      messageSnapshots: new Map(),
+      flags: { has: () => false },
+      editedAt: null,
+      reference: null
+    };
+    const messageFetch = vi.fn<(input: unknown) => Promise<unknown>>((input) => {
+      if (input && typeof input === "object" && "message" in input)
+        return Promise.resolve(anchor);
+      audience.state.members.push({
+        user: { id: "new-admin", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve(new Collection());
+    });
+    sdk.channels.set("thread", {
+      ...channel("thread", ChannelType.PublicThread, "parent"),
+      isThread: () => true,
+      url: "https://discord.com/channels/guild/thread",
+      messages: { fetch: messageFetch }
+    });
+    await expect(
+      live.capture({
+        workspaceId: "workspace",
+        subject: {
+          type: "conversation-thread",
+          providerId: "discord",
+          conversationObjectId: "thread",
+          anchorMessageId: "message"
+        },
+        question: "What did we decide?"
+      })
+    ).rejects.toThrow("not enabled");
+    expect(messageFetch).toHaveBeenCalled();
+  });
+
+  it.each(["guest-role", "everyone", "administrator"])(
+    "withholds an old answer replay if %s gains access at the final context fence",
+    async (grant) => {
+      const live = transport();
+      const message = mention();
+      const contextFence = vi.fn(() => Promise.resolve());
+      const retainedResponse = {
+        content: "Retained internal answer",
+        idempotencyKey: "same-answer",
+        requireCurrent: contextFence
+      };
+      const handler = vi.fn(() => Promise.resolve(retainedResponse));
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      contextFence.mockImplementationOnce(() => {
+        audience.state.members.push({
+          user: { id: "outsider", bot: false },
+          roles: [grant === "administrator" ? "admin" : "guest"]
+        });
+        if (grant !== "administrator")
+          audience.state.overwrites.push({
+            id: grant === "everyone" ? "guild" : "guest",
+            type: 0,
+            allow: String(PermissionFlagsBits.ViewChannel),
+            deny: "0"
+          });
+        return Promise.resolve();
+      });
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(contextFence).toHaveBeenCalledTimes(2));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(message.reply).toHaveBeenCalledOnce();
+      await live.disconnect();
+    }
+  );
+
+  it("resolves the audience without an unbounded SDK channel-cache lookup", async () => {
+    const live = transport();
+    sdk.fetch.mockImplementation(() => new Promise(() => undefined));
+    expect(await live.resolveChannel({ channelId: "thread" })).toEqual({
+      id: "thread",
+      guildId: "guild",
+      kind: "public-thread",
+      parentChannelId: "parent"
+    });
+    expect(sdk.fetch).not.toHaveBeenCalled();
+    audience.state.members.push({
+      user: { id: "new-admin", bot: false },
+      roles: ["admin"]
+    });
+    expect(await live.resolveChannel({ channelId: "thread" })).toBeNull();
+  });
+
   it("freshly resolves stable channel identity and supported parent type", async () => {
     const live = transport();
     expect(await live.resolveChannel({ channelId: "thread" })).toEqual({
@@ -259,8 +390,8 @@ describe("Discord production channel resolution and delivery", () => {
       kind: "public-thread",
       parentChannelId: "parent"
     });
-    expect(sdk.fetch).toHaveBeenCalledWith("thread", { force: true });
-    expect(sdk.fetch).toHaveBeenCalledWith("parent", { force: true });
+    expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything());
+    expect(sdk.get).toHaveBeenCalledWith(Routes.channel("parent"), expect.anything());
     sdk.channels.set("parent", {
       ...channel("parent", ChannelType.GuildText),
       name: "renamed work channel"
@@ -286,7 +417,7 @@ describe("Discord production channel resolution and delivery", () => {
     const message = mention();
     sdk.emit(Events.MessageCreate, message);
     await vi.waitFor(() =>
-      expect(sdk.fetch).toHaveBeenCalledWith("excluded", { force: true })
+      expect(sdk.get).toHaveBeenCalledWith(Routes.channel("excluded"), expect.anything())
     );
     expect(handler).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
@@ -310,15 +441,47 @@ describe("Discord production channel resolution and delivery", () => {
       sdk.emit(Events.MessageCreate, message);
       await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
       sdk.channels.delete("thread");
-      sdk.fetch.mockClear();
+      sdk.get.mockClear();
       finish();
       await vi.waitFor(() =>
-        expect(sdk.fetch).toHaveBeenCalledWith("thread", { force: true })
+        expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything())
       );
       expect(message.reply).not.toHaveBeenCalled();
       await live.disconnect();
     }
   );
+
+  it("withholds a completed slash-command response if its channel gains a guest before editReply", async () => {
+    const live = transport();
+    const handler = vi.fn(() => {
+      audience.state.members.push({
+        user: { id: "outsider", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve({ content: "Confidential completed command result" });
+    });
+    await live.connect(handler);
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "meeting",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "parent",
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-08T12:00:00Z"),
+      options: { getSubcommand: () => "usage" },
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi.fn(() => Promise.resolve())
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Luma is not enabled in this Discord channel."
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    await live.disconnect();
+  });
 
   it("blocks direct lifecycle publication outside scope before history or send", async () => {
     const live = transport();
@@ -336,6 +499,28 @@ describe("Discord production channel resolution and delivery", () => {
     await expect(
       live.createThread({ parentChannelId: "excluded", name: "internal title" })
     ).rejects.toThrow();
+  });
+
+  it("rechecks the real audience after asynchronous receipt recovery before sending", async () => {
+    const live = transport();
+    const destination = channel("thread", ChannelType.PublicThread, "parent");
+    destination.messages.fetch.mockImplementation(() => {
+      audience.state.members.push({
+        user: { id: "new-admin", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve(new Collection());
+    });
+    sdk.channels.set("thread", destination);
+    await expect(
+      live.sendMessage({
+        channelId: "thread",
+        content: "internal receipt",
+        idempotencyKey: "receipt"
+      })
+    ).rejects.toThrow("not enabled");
+    expect(destination.messages.fetch).toHaveBeenCalled();
+    expect(destination.send).not.toHaveBeenCalled();
   });
 
   it("rechecks scope after asynchronous receipt recovery before sending", async () => {

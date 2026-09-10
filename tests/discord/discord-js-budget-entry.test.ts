@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { discordAudienceFixture } from "./discord-audience-fixture.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
 import { ChannelType, Events } from "discord.js";
 import { createDiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
@@ -14,6 +15,7 @@ const sdk = vi.hoisted(() => ({
     return false;
   },
   put: vi.fn<(route: string, input: unknown) => Promise<void>>(() => Promise.resolve()),
+  get: vi.fn(),
   destroy: vi.fn()
 }));
 
@@ -24,6 +26,7 @@ vi.mock("discord.js", async (importOriginal) => {
     ...original,
     Client: class extends EventEmitter {
       user = { id: "bot_luma" };
+      rest = { get: sdk.get };
       channels = {
         fetch: (channelId: string) =>
           Promise.resolve(
@@ -70,6 +73,10 @@ vi.mock("discord.js", async (importOriginal) => {
   };
 });
 
+beforeEach(() => {
+  sdk.get.mockImplementation(discordAudienceFixture({ botId: "bot_luma" }).read);
+});
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -81,6 +88,7 @@ function transport() {
     clientId: "client",
     guildId: "guild",
     allowedParentChannelIds: ["parent"],
+    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],

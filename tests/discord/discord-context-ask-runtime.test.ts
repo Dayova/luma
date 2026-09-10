@@ -19,10 +19,11 @@ const contextAskConfig: DiscordContextAskConfig = {
 };
 
 describe("Discord Context Ask runtime boundary", () => {
-  it("remains disabled without an explicit enable flag and preserves the Guilds-only intent", () => {
+  it("remains disabled without an explicit enable flag while retaining member audience verification", () => {
     expect(discordContextAskConfigFromEnv({})).toBeUndefined();
     expect(discordGatewayIntentsForContextAsk(undefined)).toEqual([
-      GatewayIntentBits.Guilds
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers
     ]);
   });
 
@@ -67,6 +68,7 @@ describe("Discord Context Ask runtime boundary", () => {
     });
     expect(discordGatewayIntentsForContextAsk(contextAskConfig)).toEqual([
       GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent
     ]);

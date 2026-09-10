@@ -1100,4 +1100,105 @@ describe("Follow-up execution meeting records", () => {
       await database.close();
     }
   });
+  it.each([
+    "missing-guard",
+    "revoked-before-claim",
+    "revoked-before-write",
+    "revoked-after-write"
+  ] as const)(
+    "fences organizational evidence at %s and retains known execution outcomes",
+    async (scenario) => {
+      const database = await createPgliteDatabase();
+      const workspace = { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" };
+      const meetingId = `context-${scenario}`;
+      const core = createMeetingIntelligence({
+        database,
+        reasoningModel: new MeetingRecordReasoningModel()
+      });
+      const provider = new NotionKnowledgeProvider();
+      let available = scenario !== "revoked-before-claim";
+      try {
+        const intent = await createApprovedMeetingRecordIntent({
+          meetingIntelligence: core,
+          workspace,
+          meetingId
+        });
+        // Real canonical fixture with a dependency introduced by organizational analysis.
+        // The producer/receipt validation itself is exercised in MI integration tests.
+        const rows = await database.query<{ state_json: string }>(
+          "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",
+          [workspace.workspaceId, meetingId]
+        );
+        const state = JSON.parse(rows.rows[0]!.state_json) as {
+          followUpIntentions: FollowUpIntent[];
+        };
+        const recordedIntent = state.followUpIntentions.find(
+          (item) => item.id === intent.id
+        )!;
+        Reflect.set(recordedIntent.provenance, "contextReceiptIds", [
+          "receipt-from-context"
+        ]);
+        await database.query(
+          "UPDATE meetings SET state_json=$3 WHERE workspace_id=$1 AND meeting_id=$2",
+          [workspace.workspaceId, meetingId, JSON.stringify(state)]
+        );
+        const originalCreate = provider.createDocument.bind(provider);
+        provider.createDocument = async (input) => {
+          const result = await originalCreate(input);
+          if (scenario === "revoked-after-write") available = false;
+          return result;
+        };
+        const execution = createFollowUpExecution({
+          database,
+          meetingIntelligence: {
+            ...core,
+            conclude: async (input) => {
+              const conclusion = await core.conclude(input);
+              if (scenario === "revoked-before-write") available = false;
+              return conclusion;
+            }
+          },
+          knowledgeProvider: provider,
+          ...(scenario === "missing-guard"
+            ? {}
+            : {
+                organizationalContextGuard: {
+                  requireIntentCurrent: () =>
+                    available
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("SECRET revoked context"))
+                }
+              })
+        });
+        const request = { workspace, meetingId, intentId: intent.id };
+        await expect(execution.execute(request)).rejects.toThrow(
+          "Organizational sources changed"
+        );
+        expect(provider.createCalls).toHaveLength(
+          scenario === "revoked-after-write" ? 1 : 0
+        );
+        const receipts = await database.query<{ result_json: string | null }>(
+          "SELECT result_json FROM follow_up_executions WHERE meeting_id=$1",
+          [meetingId]
+        );
+        if (scenario === "revoked-after-write") {
+          expect(receipts.rows).toHaveLength(1);
+          expect(receipts.rows[0]?.result_json).toContain('"status":"succeeded"');
+          await expect(execution.execute(request)).rejects.toThrow(
+            "Organizational sources changed"
+          );
+          expect(provider.createCalls).toHaveLength(1);
+        } else if (scenario === "revoked-before-write") {
+          expect(receipts.rows[0]?.result_json).toContain(
+            "organizational-context-unavailable"
+          );
+          expect(receipts.rows[0]?.result_json).not.toContain("provider-outcome-unknown");
+        } else {
+          expect(receipts.rows).toHaveLength(0);
+        }
+      } finally {
+        await database.close();
+      }
+    }
+  );
 });

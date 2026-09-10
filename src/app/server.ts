@@ -43,6 +43,14 @@ export type RunningLumaApp = {
   stop(): Promise<void>;
 };
 
+/** Deliberate startup cancellation after all acquired resources were released. */
+export class LumaStartupCancelledError extends Error {
+  constructor() {
+    super("Luma startup was cancelled and its resources were released");
+    this.name = "LumaStartupCancelledError";
+  }
+}
+
 /**
  * Production adapter factories vary at the application-composition seam.
  * Keeping them injectable lets this wiring be verified without provider calls.
@@ -72,7 +80,8 @@ const notionObservationTopologyEnvironment = [
 
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  dependencies: StartServerDependencies = {}
+  dependencies: StartServerDependencies = {},
+  startupSignal?: AbortSignal
 ): Promise<RunningLumaApp> {
   const createDatabase = dependencies.createDatabase ?? createPgliteDatabase;
   const createDiscordTransport =
@@ -125,9 +134,13 @@ export async function startServer(
     }
   }
 
+  if (startupSignal?.aborted) throw new LumaStartupCancelledError();
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
   const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
   try {
+    // A database initialization already in flight must finish before we can
+    // close its owned resources; never race away from an unreturned handle.
+    startupSignal?.throwIfAborted();
     const aiUsage = createAiUsageBudget({
       ...aiBudgetSettings,
       database,
@@ -255,7 +268,8 @@ export async function startServer(
         : {})
     });
 
-    await bot.start();
+    await bot.start(startupSignal);
+    startupSignal?.throwIfAborted();
     meetingNotesSync?.start();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
@@ -275,12 +289,22 @@ export async function startServer(
   } catch (error) {
     // A rejected startup cannot return stop() to its caller. Release every
     // acquired resource in reverse order and preserve the original failure.
+    let cleanupFailed = false;
     for (const cleanup of startupCleanup.reverse()) {
       try {
         await cleanup();
       } catch {
+        cleanupFailed = true;
         // Continue releasing the remaining resources before rethrowing.
       }
+    }
+    if (
+      !cleanupFailed &&
+      startupSignal?.aborted &&
+      error instanceof Error &&
+      error.name === "AbortError"
+    ) {
+      throw new LumaStartupCancelledError();
     }
     throw error;
   }

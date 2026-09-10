@@ -262,7 +262,7 @@ function guardProvider<T extends object>(provider: T, guard: () => Promise<void>
     }
   });
 }
-function isContextRefusal(error: unknown): boolean {
+function isContextRefusal(error: unknown): error is NonRetryableExecutionError {
   return (
     error instanceof NonRetryableExecutionError &&
     error.code === "organizational-context-unavailable"
@@ -2307,6 +2307,9 @@ async function settleOperationalOutcomeWorkStage(
 
     return { externalReferences: result.externalReferences, unresolved: [] };
   } catch (error) {
+    // This owned refusal occurs only before a guarded call starts. A failed
+    // real mutation remains indeterminate even if its recovery probe is blocked.
+    const contextRefusal = isContextRefusal(error);
     const message =
       error instanceof Error
         ? error.message
@@ -2320,9 +2323,11 @@ async function settleOperationalOutcomeWorkStage(
         intentId: plan.intentId,
         stage: "work",
         executionLeaseId: input.executionLeaseId,
-        status: "requires-manual-recovery",
+        status: contextRefusal ? "unresolved" : "requires-manual-recovery",
         error: {
-          code: "work-outcome-unknown",
+          code: contextRefusal
+            ? "organizational-context-unavailable"
+            : "work-outcome-unknown",
           message
         },
         now: new Date()
@@ -2330,7 +2335,9 @@ async function settleOperationalOutcomeWorkStage(
     } catch (terminalizationError) {
       throw new PartialOperationalOutcomeSettlementError(
         knownWorkReferences,
-        "work-outcome-terminalization-unknown",
+        contextRefusal
+          ? "work-no-write-terminalization-unknown"
+          : "work-outcome-terminalization-unknown",
         `${message} Luma could not durably mark the work-stage boundary: ${
           terminalizationError instanceof Error
             ? terminalizationError.message
@@ -2339,6 +2346,8 @@ async function settleOperationalOutcomeWorkStage(
         "manual"
       );
     }
+
+    if (contextRefusal) throw error;
 
     throw new PartialOperationalOutcomeSettlementError(
       knownWorkReferences,
@@ -2477,6 +2486,7 @@ async function executeOperationalOutcomeWorkStage(
         assertUpdateWorkProvider(updateIntent, provider);
         await assertCurrentWorkItemVersion(updateIntent, provider);
       } catch (error) {
+        if (isContextRefusal(error)) throw error;
         return {
           externalReferences: [canonicalReference],
           unresolved: {
@@ -2740,6 +2750,19 @@ async function settleOperationalOutcomeWriteStage(
       throw error;
     }
 
+    if (isContextRefusal(error)) {
+      // providerWriteStarted is set before invoking the provider facade, whose
+      // guard can still refuse dispatch. The owned error proves upsert itself
+      // never ran; retain settled work and release only this pending page stage.
+      return resetOperationalOutcomePrewriteFailure(
+        dependencies,
+        input,
+        plan,
+        externalReferences,
+        error
+      );
+    }
+
     if (!providerWriteStarted && writerInput === null) {
       return resetOperationalOutcomePrewriteFailure(
         dependencies,
@@ -2954,6 +2977,9 @@ async function resetOperationalOutcomePrewriteFailure(
       ? error.message
       : "Luma could not prepare the Operational Outcome provider write";
   const providerConfirmedCode = "operational-outcome-prewrite-provider-not-started";
+  const failureCode = isContextRefusal(error)
+    ? "organizational-context-unavailable"
+    : "operational-outcome-prewrite-failed";
 
   try {
     await recordOperationalOutcomeKnownNotAppliedWithReadback({
@@ -2985,7 +3011,7 @@ async function resetOperationalOutcomePrewriteFailure(
       executionLeaseId: input.executionLeaseId,
       target: plan.target,
       error: {
-        code: "operational-outcome-prewrite-failed",
+        code: failureCode,
         message
       },
       now: new Date()
@@ -3018,8 +3044,8 @@ async function resetOperationalOutcomePrewriteFailure(
 
   throw new PartialOperationalOutcomeSettlementError(
     externalReferences,
-    "operational-outcome-prewrite-failed",
-    `${message} No provider write was attempted; explicit recovery can safely resume the settlement.`
+    failureCode,
+    `${message} No page write was attempted; explicit recovery can safely resume the pending outcome.`
   );
 }
 
@@ -4088,6 +4114,7 @@ type KnownNotAppliedOperationalOutcome = {
     | "operational-outcome-not-written"
     | "operational-outcome-not-writable"
     | "operational-outcome-prewrite-failed"
+    | "organizational-context-unavailable"
     | "operational-outcome-prewrite-abandoned";
   message: string;
   disposition: "resumable" | "failed";
@@ -4158,6 +4185,7 @@ function knownNotAppliedPendingOperationalOutcome(
         disposition: "failed"
       };
     case "operational-outcome-prewrite-failed":
+    case "organizational-context-unavailable":
       return {
         outcomeErrorCode: stage.error.code,
         message: stage.error.message,

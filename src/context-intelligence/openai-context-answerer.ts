@@ -95,7 +95,8 @@ export function createOpenAIContextAnswerer(
       if (!config.client && !config.budget) {
         throw new AiServiceError(
           "not-configured",
-          "A durable AI usage budget is required before paid requests."
+          "A durable AI usage budget is required before paid requests.",
+          { requestDispatched: false }
         );
       }
       const outbound = {

@@ -347,6 +347,15 @@ async function answerConversationThread(
   } catch (error: unknown) {
     if (
       error instanceof ContextIntelligenceError &&
+      (error.code === "context-answer-already-attempted" ||
+        error.code === "context-answer-invalid" ||
+        error.code === "context-answer-unavailable")
+    )
+      return reply(
+        "Luma already attempted this question but has no deliverable answer. It has not repeated the possible paid request. Check @Luma usage; post a new question for a new attempt."
+      );
+    if (
+      error instanceof ContextIntelligenceError &&
       (error.code === "context-inquiry-source-changed" ||
         error.code === "context-inquiry-context-changed")
     ) {

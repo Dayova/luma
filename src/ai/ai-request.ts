@@ -78,18 +78,29 @@ export async function runBudgetedAiRequest(input: {
   if (inputTokenUpperBound > input.limits.maxInputTokens) {
     throw new AiServiceError(
       "request-too-large",
-      "This AI request is too large; narrow the source or question before retrying."
+      "This AI request is too large; narrow the source or question before retrying.",
+      { requestDispatched: false }
     );
   }
-  const reservation = await input.budget?.reserve({
-    workspaceId: input.workspaceId,
-    workflowId: createHash("sha256").update(JSON.stringify(input.workflow)).digest("hex"),
-    capability: input.capability,
-    model: input.model,
-    inputTokenUpperBound,
-    maxOutputTokens: input.limits.maxOutputTokens,
-    timeoutMs: input.limits.timeoutMs
-  });
+  const reservation = await input.budget
+    ?.reserve({
+      workspaceId: input.workspaceId,
+      workflowId: createHash("sha256")
+        .update(JSON.stringify(input.workflow))
+        .digest("hex"),
+      capability: input.capability,
+      model: input.model,
+      inputTokenUpperBound,
+      maxOutputTokens: input.limits.maxOutputTokens,
+      timeoutMs: input.limits.timeoutMs
+    })
+    .catch((error: unknown) => {
+      const safe = normalizeAiServiceError(error);
+      throw new AiServiceError(safe.code, safe.message, {
+        ...safe,
+        requestDispatched: false
+      });
+    });
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -174,7 +185,10 @@ export async function runBudgetedAiRequest(input: {
       });
       await input.budget.markUnknown(reservation.reservationId);
     }
-    throw safe;
+    throw new AiServiceError(safe.code, safe.message, {
+      ...safe,
+      requestDispatched: true
+    });
   } finally {
     if (timeout) clearTimeout(timeout);
   }

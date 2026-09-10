@@ -82,6 +82,7 @@ export class ContextIntelligenceError extends Error {
       | "conversation-capture-invalid"
       | "conversation-capture-unavailable"
       | "context-answer-invalid"
+      | "context-answer-already-attempted"
       | "context-answer-unavailable",
     readonly retryable: boolean,
     message: string
@@ -184,6 +185,7 @@ async function inquire(
     return result;
   }
 
+  await rejectExistingAnswerAttempt(input.database, immutableInquiry, requestHash);
   const captured = await captureConversationEvidence(
     input.conversationEvidenceSource,
     immutableInquiry
@@ -239,7 +241,15 @@ async function inquire(
     input.answerer,
     immutableInquiry,
     immutableRecorded,
-    retrieval
+    retrieval,
+    (operation) =>
+      withDurableAnswerAttempt(
+        input.database,
+        immutableInquiry,
+        requestHash,
+        now,
+        operation
+      )
   );
   result.warnings.push(...assistantOutputWarning(immutableRecorded.snapshot));
 
@@ -416,7 +426,10 @@ async function answerInquiry(
   answerer: ContextAnswerer,
   inquiry: ContextInquiry,
   recorded: ConversationEvidenceRevision,
-  retrieval?: ContextRetrieval
+  retrieval: ContextRetrieval | undefined,
+  attempt: (
+    operation: () => Promise<ContextInquiryResult>
+  ) => Promise<ContextInquiryResult>
 ): Promise<ContextInquiryResult> {
   const evidence = contextEvidenceFor(recorded);
   const boundary = contextBoundaryFor(recorded.snapshot, recorded);
@@ -438,50 +451,109 @@ async function answerInquiry(
   }
 
   const promptVersion = retrieval ? "context-ask-v2" : CONTEXT_ASK_PROMPT_VERSION;
-  let answer: ContextAnswerResult;
+  return attempt(async () => {
+    let answer: ContextAnswerResult;
 
-  try {
-    answer = await answerer.answer({
-      workspaceId: inquiry.workspaceId,
-      inquiryId: inquiry.inquiryId,
-      question: inquiry.question,
-      source: {
-        providerId: inquiry.subject.providerId,
-        conversationObjectId: inquiry.subject.conversationObjectId,
-        anchorMessageId: inquiry.subject.anchorMessageId,
-        snapshotRevision: recorded.revision,
-        contentHash: recorded.contentHash,
-        boundary: {
-          mode: boundary.mode,
-          firstMessageId: boundary.firstMessageId,
-          lastMessageId: boundary.lastMessageId,
-          messageIds: [...boundary.messageIds]
-        }
-      },
-      evidence: answerableEvidence.map(copyContextEvidence),
-      ...(retrieval
-        ? {
-            organizationalEvidence: structuredClone(retrieval.evidence),
-            retrievalCoverage: structuredClone(retrieval.coverage)
+    try {
+      answer = await answerer.answer({
+        workspaceId: inquiry.workspaceId,
+        inquiryId: inquiry.inquiryId,
+        question: inquiry.question,
+        source: {
+          providerId: inquiry.subject.providerId,
+          conversationObjectId: inquiry.subject.conversationObjectId,
+          anchorMessageId: inquiry.subject.anchorMessageId,
+          snapshotRevision: recorded.revision,
+          contentHash: recorded.contentHash,
+          boundary: {
+            mode: boundary.mode,
+            firstMessageId: boundary.firstMessageId,
+            lastMessageId: boundary.lastMessageId,
+            messageIds: [...boundary.messageIds]
           }
-        : {}),
-      promptVersion
-    });
-    validateContextAnswerResult(answer, promptVersion);
-  } catch (error: unknown) {
-    if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
-      throw error;
+        },
+        evidence: answerableEvidence.map(copyContextEvidence),
+        ...(retrieval
+          ? {
+              organizationalEvidence: structuredClone(retrieval.evidence),
+              retrievalCoverage: structuredClone(retrieval.coverage)
+            }
+          : {}),
+        promptVersion
+      });
+      validateContextAnswerResult(answer, promptVersion);
+    } catch (error: unknown) {
+      if (error instanceof ContextIntelligenceError || error instanceof AiServiceError) {
+        throw error;
+      }
+
+      throw new ContextIntelligenceError(
+        "context-answer-unavailable",
+        false,
+        "Context Answer did not produce a deliverable result. This inquiry will not repeat possible paid work."
+      );
     }
 
-    const message = error instanceof Error ? error.message : "unknown answerer failure";
+    return contextInquiryResultFromAnswer(inquiry, boundary, evidence, answer, retrieval);
+  });
+}
+
+async function withDurableAnswerAttempt(
+  database: LumaDatabase,
+  inquiry: ContextInquiry,
+  requestHash: string,
+  now: () => Date,
+  operation: () => Promise<ContextInquiryResult>
+): Promise<ContextInquiryResult> {
+  const claimed = await database.query<{ inquiry_id: string }>(
+    `INSERT INTO context_answer_attempts (workspace_id,inquiry_id,request_hash,started_at)
+     VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING inquiry_id`,
+    [inquiry.workspaceId, inquiry.inquiryId, requestHash, now().toISOString()]
+  );
+  if (!claimed.rows[0]) {
+    await rejectExistingAnswerAttempt(database, inquiry, requestHash);
     throw new ContextIntelligenceError(
-      "context-answer-unavailable",
-      true,
-      `Context Answer is temporarily unavailable: ${message}`
+      "context-answer-already-attempted",
+      false,
+      "This question already reached the answer attempt boundary. Luma will not repeat its possible paid work. Post a new question for a new attempt."
     );
   }
+  try {
+    return await operation();
+  } catch (error) {
+    // Only an explicit adapter proof that no provider call occurred permits reuse.
+    // Unknown outcomes, invalid completed output and later persistence failures retain the fence.
+    if (error instanceof AiServiceError && error.requestDispatched === false)
+      await database.query(
+        `DELETE FROM context_answer_attempts WHERE workspace_id=$1 AND inquiry_id=$2 AND request_hash=$3`,
+        [inquiry.workspaceId, inquiry.inquiryId, requestHash]
+      );
+    throw error;
+  }
+}
 
-  return contextInquiryResultFromAnswer(inquiry, boundary, evidence, answer, retrieval);
+async function rejectExistingAnswerAttempt(
+  database: LumaDatabase,
+  inquiry: ContextInquiry,
+  requestHash: string
+): Promise<void> {
+  const rows = await database.query<{ request_hash: string }>(
+    `SELECT request_hash FROM context_answer_attempts WHERE workspace_id=$1 AND inquiry_id=$2`,
+    [inquiry.workspaceId, inquiry.inquiryId]
+  );
+  const row = rows.rows[0];
+  if (!row) return;
+  if (row.request_hash !== requestHash)
+    throw new ContextIntelligenceError(
+      "context-inquiry-id-conflict",
+      false,
+      "A Context inquiry ID may only be reused for the exact original request"
+    );
+  throw new ContextIntelligenceError(
+    "context-answer-already-attempted",
+    false,
+    "This question already reached the answer attempt boundary. Luma will not repeat its possible paid work. Post a new question for a new attempt."
+  );
 }
 
 async function persistContextInquiry(input: {

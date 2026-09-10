@@ -6,6 +6,14 @@ Context Intelligence answers a bounded question from immutable conversation
 evidence and optionally governed organizational context. It owns capture, durable source revisioning, Evidence validation,
 answer generation, and idempotent replay beneath one read-only operation.
 
+Each answerable inquiry claims a durable attempt before invoking the model. A
+completed but invalid response, an interrupted attempt, or failure to persist
+the final answer cannot silently send that inquiry again after a restart. Only
+an explicit adapter proof that no provider request was dispatched releases the
+claim, so budget refusals before dispatch remain retryable. Discord explains
+when a new question is required. Usage settlement and retained source history
+remain independent of whether an answer is deliverable.
+
 It is adjacent to Meeting Intelligence, not an extension of it. A Discord
 thread does not become a synthetic Meeting merely because someone asks a
 question about it.

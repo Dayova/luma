@@ -1,4 +1,6 @@
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
+import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
+import { createOpenAIContextAnswerer } from "../../src/context-intelligence/openai-context-answerer.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -77,12 +79,196 @@ class ProgrammableContextAnswerer implements ContextAnswerer {
 }
 
 describe("Context Intelligence Ask", () => {
+  it("retains invalid paid answer attempts across store restart and source changes without another dispatch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "luma-ask-attempt-"));
+    const path = join(directory, "store");
+    let database = await createPgliteDatabase(path);
+    let dispatches = 0;
+    let outputText = "";
+    const failures = [
+      "",
+      "not-json",
+      "{}",
+      JSON.stringify({
+        answer: { text: "Invented", evidenceIds: ["not-captured"] },
+        facts: [],
+        inferences: [],
+        unresolved: []
+      })
+    ];
+    const client = {
+      create: () => {
+        dispatches += 1;
+        return Promise.resolve({
+          outputText,
+          model: "gpt-5.6-luna",
+          serviceTier: "default",
+          status: "completed",
+          usage: {
+            inputTokens: 100,
+            cachedInputTokens: 0,
+            cacheWriteTokens: 0,
+            outputTokens: 20,
+            reasoningTokens: 0
+          }
+        });
+      }
+    };
+    const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+    const construct = () =>
+      createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: source,
+        answerer: createOpenAIContextAnswerer({
+          client,
+          budget: createAiUsageBudget({ database })
+        })
+      });
+    try {
+      const context = construct();
+      for (const [index, invalid] of failures.entries()) {
+        outputText = invalid;
+        await expect(
+          context.inquire({ ...contextInquiry(), inquiryId: `invalid-${index}` })
+        ).rejects.toThrow();
+      }
+      expect(dispatches).toBe(4);
+      expect(
+        await createAiUsageBudget({ database }).getStatus(workspaceId)
+      ).toMatchObject({ requestCount: 4, unknownUsd: 0 });
+      expect((await database.query("SELECT * FROM context_inquiries")).rows).toHaveLength(
+        0
+      );
+      await database.close();
+      database = await createPgliteDatabase(path);
+      source.captures.length = 0;
+      const edited = conversationSnapshot();
+      edited.messages[0]!.text = "The source changed after the interrupted answer.";
+      source.setSnapshot(edited);
+      const restarted = construct();
+      for (const [index] of failures.entries()) {
+        await expect(
+          restarted.inquire({ ...contextInquiry(), inquiryId: `invalid-${index}` })
+        ).rejects.toMatchObject({
+          code: "context-answer-already-attempted",
+          retryable: false
+        });
+      }
+      await expect(
+        restarted.inquire({
+          ...contextInquiry(),
+          inquiryId: "invalid-0",
+          question: "Changed question"
+        })
+      ).rejects.toMatchObject({ code: "context-inquiry-id-conflict" });
+      expect(dispatches).toBe(4);
+      expect(source.captures).toHaveLength(0);
+    } finally {
+      await database.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("allows the same inquiry after a proven pre-dispatch budget refusal is resolved", async () => {
+    const database = await createPgliteDatabase();
+    let dispatches = 0;
+    const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+    const construct = (monthlyLimitUsd: number) =>
+      createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: source,
+        answerer: createOpenAIContextAnswerer({
+          budget: createAiUsageBudget({ database, monthlyLimitUsd }),
+          client: {
+            create: (request) => {
+              dispatches += 1;
+              const payload = JSON.parse(request.input) as {
+                evidence: { evidenceId: string }[];
+              };
+              return Promise.resolve({
+                outputText: JSON.stringify({
+                  answer: {
+                    text: "A source-grounded answer",
+                    evidenceIds: [payload.evidence[0]!.evidenceId]
+                  },
+                  facts: [],
+                  inferences: [],
+                  unresolved: []
+                }),
+                model: "gpt-5.6-luna",
+                serviceTier: "default",
+                status: "completed",
+                usage: {
+                  inputTokens: 100,
+                  cachedInputTokens: 0,
+                  cacheWriteTokens: 0,
+                  outputTokens: 20,
+                  reasoningTokens: 0
+                }
+              });
+            }
+          }
+        })
+      });
+    try {
+      await expect(construct(0).inquire(contextInquiry())).rejects.toMatchObject({
+        code: "budget-exhausted",
+        requestDispatched: false
+      });
+      expect(dispatches).toBe(0);
+      expect(
+        (await database.query("SELECT * FROM context_answer_attempts")).rows
+      ).toHaveLength(0);
+      expect((await construct(30).inquire(contextInquiry())).answer.text).toBe(
+        "A source-grounded answer"
+      );
+      expect(dispatches).toBe(1);
+      await construct(30).inquire(contextInquiry());
+      expect(dispatches).toBe(1);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps an interrupted attempt fenced even when no final answer was persisted", async () => {
+    const database = await createPgliteDatabase();
+    let dispatches = 0;
+    const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
+    const construct = () =>
+      createContextIntelligence({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        conversationEvidenceSource: source,
+        answerer: {
+          answer: () => {
+            dispatches += 1;
+            return Promise.reject(new Error("interrupted after dispatch"));
+          }
+        }
+      });
+    try {
+      await expect(construct().inquire(contextInquiry())).rejects.toThrow();
+      await expect(construct().inquire(contextInquiry())).rejects.toMatchObject({
+        code: "context-answer-already-attempted"
+      });
+      expect(dispatches).toBe(1);
+      expect((await database.query("SELECT * FROM context_inquiries")).rows).toHaveLength(
+        0
+      );
+    } finally {
+      await database.close();
+    }
+  });
+
   it("preserves typed budget failures without caching an invented answer or creating executable work", async () => {
     const database = await createPgliteDatabase();
     try {
       const budgetError = new AiServiceError("budget-exhausted", "No unreserved budget", {
         resetAt: "2026-09-30T22:00:00Z",
-        limitScope: "month"
+        limitScope: "month",
+        requestDispatched: false
       });
       const source = new ProgrammableConversationEvidenceSource(conversationSnapshot());
       const answerer = new ProgrammableContextAnswerer(() => {

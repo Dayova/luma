@@ -17,7 +17,8 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "eval:providers": "pnpm build && node --env-file-if-exists=.env dist/src/evaluation/provider-comparison/main.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.12",

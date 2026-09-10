@@ -14,8 +14,16 @@ type SearchProof = {
   limit: number;
   sourceIds: string[];
   complete: boolean;
+  failed: boolean;
+};
+type ReadOutcome = {
+  catalogId: string;
+  sourceId: string;
+  status: "ineligible" | "unavailable";
 };
 type ReceiptProof = {
+  catalogIds: string[];
+  unavailableReads: ReadOutcome[];
   sources: Proof[];
   searches: SearchProof[];
   validUntil: string | null;
@@ -55,11 +63,13 @@ export function createOrganizationalContext(input: {
   const read = async (
     catalog: ContextCatalog,
     request: OrganizationalContextRequest,
-    sourceId: string
+    sourceId: string,
+    deadlineAt = Number.POSITIVE_INFINITY
   ) => {
+    if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
     const source = await deadline(
       catalog.read({ audience: request.audience, sourceId }),
-      input.timeoutMs ?? 5_000
+      Math.min(input.timeoutMs ?? 5_000, deadlineAt - Date.now())
     );
     if (source) validateSource(source, sourceId);
     return source;
@@ -70,6 +80,7 @@ export function createOrganizationalContext(input: {
       const warnings: string[] = [];
       const candidates: Candidate[] = [];
       const searches: SearchProof[] = [];
+      const unavailableReads: ReadOutcome[] = [];
       if (!catalogs.size)
         warnings.push("No organizational context sources are configured.");
       let remaining = MAX_CANDIDATES;
@@ -80,6 +91,7 @@ export function createOrganizationalContext(input: {
           warnings.push("The source scan reached its configured bound.");
           break;
         }
+        const searchLimit = remaining;
         try {
           const search = await deadline(
             catalog.search({
@@ -98,7 +110,8 @@ export function createOrganizationalContext(input: {
             catalogId: catalog.id,
             limit: remaining,
             sourceIds: [...new Set(search.sourceIds)].sort(),
-            complete: search.complete
+            complete: search.complete,
+            failed: false
           });
           const retained = await input.database.query<{ source_id: string }>(
             `SELECT DISTINCT source_id FROM organizational_context_snapshots
@@ -128,8 +141,13 @@ export function createOrganizationalContext(input: {
               break;
             }
             try {
-              const source = await read(catalog, request, sourceId);
+              const source = await read(catalog, request, sourceId, readDeadline);
               if (!source) {
+                unavailableReads.push({
+                  catalogId: catalog.id,
+                  sourceId,
+                  status: "ineligible"
+                });
                 warnings.push(
                   "A discovered source was unavailable or outside the requested audience."
                 );
@@ -150,21 +168,41 @@ export function createOrganizationalContext(input: {
                   now().toISOString()
                 ]
               );
+              const audience = [...new Set(request.audience.personIds)].sort();
+              await input.database.query(
+                `INSERT INTO organizational_context_snapshot_grants
+                 (workspace_id,catalog_id,source_id,snapshot_id,audience_hash,audience_json,observed_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+                [
+                  request.audience.workspaceId,
+                  catalog.id,
+                  source.id,
+                  snapshotId,
+                  digest(audience),
+                  JSON.stringify(audience),
+                  now().toISOString()
+                ]
+              );
               candidates.push({ source, catalogId: catalog.id, snapshotId, head });
               if (request.time.mode === "history") {
                 const history = await input.database.query<{
                   source_json: string;
                   snapshot_id: string;
                 }>(
-                  `SELECT source_json, snapshot_id FROM organizational_context_snapshots
-                   WHERE workspace_id=$1 AND catalog_id=$2 AND source_id=$3 AND snapshot_id<>$4
-                   ORDER BY observed_at DESC, snapshot_id LIMIT $5`,
+                  `SELECT s.source_json, s.snapshot_id FROM organizational_context_snapshots s
+                   WHERE s.workspace_id=$1 AND s.catalog_id=$2 AND s.source_id=$3 AND s.snapshot_id<>$4
+                   AND EXISTS (SELECT 1 FROM organizational_context_snapshot_grants g
+                     WHERE g.workspace_id=s.workspace_id AND g.catalog_id=s.catalog_id
+                       AND g.source_id=s.source_id AND g.snapshot_id=s.snapshot_id
+                       AND g.audience_json::jsonb @> $6::jsonb)
+                   ORDER BY s.observed_at DESC, s.snapshot_id LIMIT $5`,
                   [
                     request.audience.workspaceId,
                     catalog.id,
                     source.id,
                     snapshotId,
-                    remainingHistory + 1
+                    remainingHistory + 1,
+                    JSON.stringify(audience)
                   ]
                 );
                 if (history.rows.length > remainingHistory)
@@ -182,10 +220,23 @@ export function createOrganizationalContext(input: {
                 }
               }
             } catch {
+              unavailableReads.push({
+                catalogId: catalog.id,
+                sourceId,
+                status: "unavailable"
+              });
               warnings.push(`A source in catalog ${catalog.id} could not be verified.`);
             }
           }
         } catch {
+          if (!searches.some((search) => search.catalogId === catalog.id))
+            searches.push({
+              catalogId: catalog.id,
+              limit: searchLimit,
+              sourceIds: [],
+              complete: false,
+              failed: true
+            });
           warnings.push(
             `Catalog ${catalog.id} is unavailable; no cached source was substituted.`
           );
@@ -304,6 +355,8 @@ export function createOrganizationalContext(input: {
           request.audience.workspaceId,
           requestDigest(request),
           JSON.stringify({
+            catalogIds: [...catalogs.keys()].sort(),
+            unavailableReads,
             sources: uniqueProofs(proofs),
             searches,
             validUntil:
@@ -322,6 +375,7 @@ export function createOrganizationalContext(input: {
     },
     async requireCurrent(request, receiptId) {
       validateRequest(request);
+      const readDeadline = Date.now() + 15_000;
       const result = await input.database.query<{
         request_hash: string;
         proof_json: string;
@@ -333,34 +387,54 @@ export function createOrganizationalContext(input: {
       if (!row || row.request_hash !== requestDigest(request))
         throw new OrganizationalContextUnavailableError();
       const receipt = JSON.parse(row.proof_json) as ReceiptProof;
+      if (digest(receipt.catalogIds) !== digest([...catalogs.keys()].sort()))
+        throw new OrganizationalContextUnavailableError();
       if (receipt.validUntil && now().getTime() >= Date.parse(receipt.validUntil))
         throw new OrganizationalContextUnavailableError();
       for (const search of receipt.searches) {
+        if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
         const catalog = catalogs.get(search.catalogId);
         if (!catalog) throw new OrganizationalContextUnavailableError();
+        let current: Awaited<ReturnType<ContextCatalog["search"]>>;
         try {
-          const current = await deadline(
+          current = await deadline(
             catalog.search({
               audience: request.audience,
               concepts: request.concepts,
               limit: search.limit
             }),
-            input.timeoutMs ?? 5_000
+            Math.min(input.timeoutMs ?? 5_000, readDeadline - Date.now())
           );
-          if (
-            current.complete !== search.complete ||
-            digest([...new Set(current.sourceIds)].sort()) !== digest(search.sourceIds)
-          )
-            throw new OrganizationalContextUnavailableError();
         } catch {
+          if (search.failed) continue;
           throw new OrganizationalContextUnavailableError();
         }
+        if (
+          search.failed ||
+          current.complete !== search.complete ||
+          digest([...new Set(current.sourceIds)].sort()) !== digest(search.sourceIds)
+        )
+          throw new OrganizationalContextUnavailableError();
+      }
+      for (const outcome of receipt.unavailableReads) {
+        if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
+        const catalog = catalogs.get(outcome.catalogId);
+        if (!catalog) throw new OrganizationalContextUnavailableError();
+        let current: ContextSource | null;
+        try {
+          current = await read(catalog, request, outcome.sourceId, readDeadline);
+        } catch {
+          if (outcome.status === "unavailable") continue;
+          throw new OrganizationalContextUnavailableError();
+        }
+        if (current || outcome.status !== "ineligible")
+          throw new OrganizationalContextUnavailableError();
       }
       for (const proof of receipt.sources) {
         const catalog = catalogs.get(proof.catalogId);
         if (!catalog) throw new OrganizationalContextUnavailableError();
         try {
-          const current = await read(catalog, request, proof.sourceId);
+          const current = await read(catalog, request, proof.sourceId, readDeadline);
           if (!current || digest(current) !== proof.snapshotId)
             throw new OrganizationalContextUnavailableError();
         } catch {

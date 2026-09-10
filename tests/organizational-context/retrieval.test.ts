@@ -74,6 +74,12 @@ function catalog(initial: ContextSource[]) {
     },
     fail: () => {
       unavailable = true;
+    },
+    recover: () => {
+      unavailable = false;
+    },
+    permit: () => {
+      allowed = true;
     }
   };
 }
@@ -282,6 +288,61 @@ describe("governed organizational retrieval", () => {
     );
     await expect(
       context.requireCurrent(bounded, answer.receiptId)
+    ).rejects.toBeInstanceOf(OrganizationalContextUnavailableError);
+  });
+  it("does not expand a private historical snapshot to a newly authorized broader audience", async () => {
+    const { context, sources } = await setup([
+      source("policy", { content: "Luma budget: private old detail" })
+    ]);
+    const privateRequest = {
+      ...request,
+      audience: { ...request.audience, personIds: ["jakob"] }
+    };
+    await context.retrieve(privateRequest);
+    sources.set(
+      "policy",
+      source("policy", { content: "Luma budget: shared new detail", version: "v2" })
+    );
+    const publicHistory = await context.retrieve({
+      ...request,
+      time: { mode: "history" }
+    });
+    expect(publicHistory.sources.map((item) => item.version)).toEqual(["v2"]);
+    const privateHistory = await context.retrieve({
+      ...privateRequest,
+      time: { mode: "history" }
+    });
+    expect(privateHistory.sources.map((item) => item.version).sort()).toEqual([
+      "v1",
+      "v2"
+    ]);
+  });
+  it("invalidates incomplete receipts after a failed catalog recovers", async () => {
+    const { context, fail, recover } = await setup([source("policy")]);
+    fail();
+    const answer = await context.retrieve(request);
+    await context.requireCurrent(request, answer.receiptId);
+    recover();
+    await expect(
+      context.requireCurrent(request, answer.receiptId)
+    ).rejects.toBeInstanceOf(OrganizationalContextUnavailableError);
+  });
+  it("invalidates incomplete receipts after a previously ineligible source becomes readable", async () => {
+    const { context, revoke, permit } = await setup([source("policy")]);
+    revoke();
+    const answer = await context.retrieve(request);
+    await context.requireCurrent(request, answer.receiptId);
+    permit();
+    await expect(
+      context.requireCurrent(request, answer.receiptId)
+    ).rejects.toBeInstanceOf(OrganizationalContextUnavailableError);
+  });
+  it("invalidates a no-catalog receipt when a source is configured", async () => {
+    const { context, database } = await setup([source("policy")]);
+    const empty = createOrganizationalContext({ database, catalogs: [] });
+    const answer = await empty.retrieve(request);
+    await expect(
+      context.requireCurrent(request, answer.receiptId)
     ).rejects.toBeInstanceOf(OrganizationalContextUnavailableError);
   });
 });

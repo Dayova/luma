@@ -13,6 +13,16 @@ export async function migrateOrganizationalContext(
       observed_at TEXT NOT NULL,
       PRIMARY KEY (workspace_id, catalog_id, source_id, snapshot_id)
     );
+    CREATE TABLE IF NOT EXISTS organizational_context_snapshot_grants (
+      workspace_id TEXT NOT NULL,
+      catalog_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      snapshot_id TEXT NOT NULL,
+      audience_hash TEXT NOT NULL,
+      audience_json TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, catalog_id, source_id, snapshot_id, audience_hash)
+    );
     CREATE TABLE IF NOT EXISTS organizational_context_receipts (
       receipt_id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,

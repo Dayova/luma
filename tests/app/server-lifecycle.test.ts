@@ -1,11 +1,92 @@
 import { describe, expect, it, vi } from "vitest";
-import { startServer } from "../../src/app/server.js";
+import { LumaStartupCancelledError, startServer } from "../../src/app/server.js";
 import type { DiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 import type { LumaDatabase } from "../../src/persistence/db.js";
 
 type StartServerDependencies = NonNullable<Parameters<typeof startServer>[1]>;
 
 describe("Discord server startup resource ownership", () => {
+  it("does not acquire resources when already cancelled", async () => {
+    const harness = createLifecycleHarness();
+    const createDatabase = vi.fn(harness.dependencies.createDatabase);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      startServer(
+        serverEnv,
+        { ...harness.dependencies, createDatabase },
+        controller.signal
+      )
+    ).rejects.toBeInstanceOf(LumaStartupCancelledError);
+
+    expect(createDatabase).not.toHaveBeenCalled();
+    expect(harness.createTransport).not.toHaveBeenCalled();
+  });
+
+  it("waits for an in-flight database handle before closing cancelled startup", async () => {
+    const harness = createLifecycleHarness();
+    const acquisition = deferred<LumaDatabase>();
+    const controller = new AbortController();
+    const startup = startServer(
+      serverEnv,
+      { ...harness.dependencies, createDatabase: () => acquisition.promise },
+      controller.signal
+    );
+    const result = expect(startup).rejects.toBeInstanceOf(LumaStartupCancelledError);
+    controller.abort();
+    expect(harness.databaseClose).not.toHaveBeenCalled();
+
+    acquisition.resolve(harness.database);
+    await result;
+
+    expect(harness.databaseClose).toHaveBeenCalledOnce();
+    expect(harness.createTransport).not.toHaveBeenCalled();
+  });
+
+  it("cancels a stalled connection and waits for owned resources to close", async () => {
+    const harness = createLifecycleHarness();
+    const closing = deferred<void>();
+    const controller = new AbortController();
+    harness.connect.mockImplementation(cancellableConnect);
+    harness.databaseClose.mockReturnValue(closing.promise);
+    let settled = false;
+    const startup = startServer(serverEnv, harness.dependencies, controller.signal);
+    const result = expect(startup).rejects.toBeInstanceOf(LumaStartupCancelledError);
+    void startup.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await vi.waitFor(() => expect(harness.connect).toHaveBeenCalledOnce());
+
+    controller.abort();
+    await vi.waitFor(() => expect(harness.databaseClose).toHaveBeenCalledOnce());
+    expect(harness.disconnect).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    closing.resolve();
+    await result;
+    expect(settled).toBe(true);
+  });
+
+  it("does not report clean cancellation when a resource could not close", async () => {
+    const harness = createLifecycleHarness();
+    const controller = new AbortController();
+    harness.connect.mockImplementation(cancellableConnect);
+    harness.disconnect.mockRejectedValue(new Error("transport cleanup failed"));
+    const startup = startServer(serverEnv, harness.dependencies, controller.signal);
+    const result = expect(startup).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(harness.connect).toHaveBeenCalledOnce());
+
+    controller.abort();
+    await result;
+    expect(harness.disconnect).toHaveBeenCalledOnce();
+    expect(harness.databaseClose).toHaveBeenCalledOnce();
+  });
+
   it("closes persistence when provider configuration fails before transport creation", async () => {
     const harness = createLifecycleHarness();
 
@@ -97,7 +178,7 @@ describe("Discord server startup resource ownership", () => {
 });
 
 function createLifecycleHarness() {
-  const connect = vi.fn(() => Promise.resolve());
+  const connect = vi.fn<DiscordJsTransport["connect"]>(() => Promise.resolve());
   const disconnect = vi.fn(() => Promise.resolve());
   const databaseClose = vi.fn(() => Promise.resolve());
   const database = { close: databaseClose } as unknown as LumaDatabase;
@@ -115,7 +196,25 @@ function createLifecycleHarness() {
     createDiscordTransport: createTransport
   };
 
-  return { dependencies, connect, disconnect, databaseClose, createTransport };
+  return { dependencies, connect, disconnect, database, databaseClose, createTransport };
+}
+
+const cancellableConnect: DiscordJsTransport["connect"] = (_handler, _context, signal) =>
+  new Promise<void>((_resolve, reject) => {
+    if (!signal) throw new Error("startup signal was not forwarded");
+    signal.addEventListener(
+      "abort",
+      () => reject(new DOMException("cancelled", "AbortError")),
+      { once: true }
+    );
+  });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 const serverEnv: NodeJS.ProcessEnv = {

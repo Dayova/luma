@@ -108,7 +108,8 @@ export interface DiscordTransport {
     commandHandler: (command: DiscordCommand) => Promise<DiscordCommandResponse>,
     contextAskHandler?: (
       ask: DiscordContextAskMention
-    ) => Promise<DiscordContextAskResponse | null>
+    ) => Promise<DiscordContextAskResponse | null>,
+    startupSignal?: AbortSignal
   ): Promise<void>;
   disconnect(): Promise<void>;
   resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null>;
@@ -122,7 +123,7 @@ export interface DiscordTransport {
 }
 
 export interface DiscordMeetingBot {
-  start(): Promise<void>;
+  start(startupSignal?: AbortSignal): Promise<void>;
   stop(): Promise<void>;
   publishMeetingEvents(input: {
     workspaceId: string;
@@ -174,8 +175,8 @@ export function createDiscordMeetingBot(
     channelScope,
     ...configuration,
     transport: {
-      connect: (handler, contextHandler) =>
-        configuration.transport.connect(handler, contextHandler),
+      connect: (handler, contextHandler, startupSignal) =>
+        configuration.transport.connect(handler, contextHandler, startupSignal),
       disconnect: () => configuration.transport.disconnect(),
       resolveChannel: (surface) => configuration.transport.resolveChannel(surface),
       async createThread(thread) {
@@ -205,7 +206,7 @@ export function createDiscordMeetingBot(
   const seenContextMessages = new Map<string, number>();
 
   return {
-    start: () =>
+    start: (startupSignal) =>
       input.transport.connect(
         (command) => {
           if (command.type !== "start") {
@@ -229,7 +230,8 @@ export function createDiscordMeetingBot(
                 seenContextMessages,
                 now
               )
-          : undefined
+          : undefined,
+        startupSignal
       ),
     stop: () => input.transport.disconnect(),
     publishMeetingEvents: (publishInput) => publishMeetingEvents(input, publishInput)

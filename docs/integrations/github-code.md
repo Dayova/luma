@@ -79,7 +79,11 @@ omissions are bounded; source versions include the complete returned metadata.
 Relevant recent events are a separate bounded source containing at most twenty
 matching events, their exact URLs and explicit omissions. General recent-change
 questions can select the feed without requiring their question words in event
-titles. Every read repeats current repository access and all-recipient sharing
+titles. Each activity source labels the literal discovery terms and whether it
+selected the recent feed or matched event titles/commit IDs. These are request
+scope metadata, explicitly distinct from repository facts; they also preserve
+discovery relevance through the core's final ranking for English/German queries.
+Every read repeats current repository access and all-recipient sharing
 checks; there is no cached fallback. The feed is limited to GitHub's last thirty
 days and may lag. Removal from the readable feed invalidates dependent answers;
 stored revisions remain retained. This is partial implementation evidence, not

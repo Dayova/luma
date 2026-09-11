@@ -182,6 +182,16 @@ export function createGitHubChangeContextCatalog(input: {
           if (!matches.length) return null;
           const selected = matches.slice(0, 20);
           const content = JSON.stringify({
+            discoveryScope: {
+              requestedLiteralTerms: ref.concepts,
+              matching: ref.concepts.some((concept) =>
+                recentTerms.has(concept.toLowerCase())
+              )
+                ? "recent-feed"
+                : "event-title-or-commit-match",
+              interpretation:
+                "These terms describe the requested discovery scope, not words or claims supplied by the repository. Recent-feed matching does not establish a topic match for every event."
+            },
             coverage:
               "Partial recent activity from the last 30 days; feed may be delayed and older events omitted. Events do not prove deployed behavior.",
             omittedMatchingEvents: matches.length - selected.length,

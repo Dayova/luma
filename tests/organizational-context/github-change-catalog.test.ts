@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createPgliteDatabase } from "../../src/persistence/db.js";
+import { createOrganizationalContext } from "../../src/organizational-context/organizational-context.js";
 import { createGitHubCodeProvider } from "../../src/code/github-code-provider.js";
 import { createGitHubChangeContextCatalog } from "../../src/organizational-context/github-change-context-catalog.js";
 
@@ -11,6 +13,51 @@ const audience = {
 const head = "a".repeat(40);
 
 describe("GitHub PR/activity context through the real CodeProvider", () => {
+  it.each(["changed", "geändert"])(
+    "selects the generic %s activity scope through the real core and revalidates provider events",
+    async (term) => {
+      const h = harness();
+      const database = await createPgliteDatabase();
+      try {
+        const context = createOrganizationalContext({
+          database,
+          catalogs: [h.catalog],
+          now: () => new Date(now)
+        });
+        const request = {
+          audience,
+          subject: { type: "conversation" as const, id: "founder-updates" },
+          purpose: "answer-question" as const,
+          concepts: [term],
+          time: { mode: "current" as const },
+          limit: 5,
+          maxCharacters: 12000
+        };
+        const result = await context.retrieve(request);
+        expect(result.sources).toHaveLength(1);
+        const source = result.sources[0]!;
+        expect(source.title).toContain("recent activity");
+        expect(source.content).toContain('"matching":"recent-feed"');
+        expect(source.content).toContain('"requestedLiteralTerms":["' + term + '"]');
+        expect(source.content).toContain(
+          "not words or claims supplied by the repository"
+        );
+        expect(source.content).toContain("Preserve history");
+        await expect(
+          context.requireCurrent(request, result.receiptId)
+        ).resolves.toBeUndefined();
+        h.removeEvents();
+        await expect(context.requireCurrent(request, result.receiptId)).rejects.toThrow();
+        expect((await context.retrieve(request)).sources).toHaveLength(0);
+        h.revoke();
+        const reads = h.requests.length;
+        expect((await context.retrieve(request)).sources).toHaveLength(0);
+        expect(h.requests).toHaveLength(reads);
+      } finally {
+        await database.close();
+      }
+    }
+  );
   it("keeps draft work proposed, rereads merged state, versions body changes and refuses revocation", async () => {
     const h = harness();
     const result = await h.catalog.search({ audience, concepts: ["history"], limit: 4 });
@@ -130,7 +177,12 @@ function harness() {
       requests.push(url.pathname);
       if (failed) return Promise.reject(new Error("private diagnostic"));
       let response: unknown;
-      if (url.pathname === "/search/issues")
+      if (
+        url.pathname === "/search/issues" &&
+        !(url.searchParams.get("q") ?? "").includes('"history"')
+      )
+        response = { total_count: 0, incomplete_results: false, items: [] };
+      else if (url.pathname === "/search/issues")
         response = {
           total_count: 1,
           incomplete_results: false,

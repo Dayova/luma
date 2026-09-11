@@ -424,7 +424,7 @@ export function createDecisionIntelligence(
       };
     }
     await requireDecisionRequestCurrent(input, stored, {
-      catalog: !stages.length && !stored.state.execution
+      catalog: !stages.length && !stored.state.execution && stored.catalog.complete
     });
     await input.database.transaction(async (transaction) => {
       const current = await readDecisionRequest(
@@ -540,7 +540,15 @@ export function createDecisionIntelligence(
                 );
               return accepted;
             });
-            if (!fresh) return { ...structuredClone(prior.state), duplicate: true };
+            if (!fresh)
+              return {
+                ...(await read({
+                  workspaceId: bound.workspace.workspaceId,
+                  subject: bound.subject,
+                  query: { type: "decision-request", requestId }
+                })),
+                duplicate: true
+              };
             return {
               ...(await read({
                 workspaceId: bound.workspace.workspaceId,
@@ -618,7 +626,14 @@ export function createDecisionIntelligence(
               bound.workspace.workspaceId,
               stored
             );
-            return { ...stored.state, duplicate: false };
+            return {
+              ...(await read({
+                workspaceId: bound.workspace.workspaceId,
+                subject: bound.subject,
+                query: { type: "decision-request", requestId }
+              })),
+              duplicate: false
+            };
           }
           try {
             const interpretation = decisionInterpretationSchema.parse(

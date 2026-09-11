@@ -1,4 +1,8 @@
 import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
+import {
+  createAutomaticDecisionProcessing,
+  type AutomaticDecisionProcessingStatus
+} from "./automatic-decision-processing.js";
 import { createMeetingCaptureRuntime } from "./meeting-capture-runtime.js";
 import {
   meetingCaptureRuntimeConfig,
@@ -79,6 +83,7 @@ import { dayovaFounderPersonIds } from "./founder-access.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 
 export type RunningLumaApp = {
+  automaticDecisionStatus?(): Promise<AutomaticDecisionProcessingStatus | null>;
   stop(): Promise<void>;
   gatewayConnected(): boolean;
   decisionRecallStatus?(): Promise<DecisionRecallStatus | null>;
@@ -447,6 +452,18 @@ export async function startServer(
       : undefined;
     const meetingIntelligence =
       decisionMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+    const automaticDecisions =
+      decisionIntelligence?.automatic && decisionMeetingIntelligence
+        ? await createAutomaticDecisionProcessing({
+            database,
+            workspace,
+            meetingIntelligence: decisionMeetingIntelligence
+          })
+        : undefined;
+    if (automaticDecisions) {
+      startupAdmissionStops.push(() => automaticDecisions.pause());
+      startupCleanup.push(() => automaticDecisions.stop());
+    }
     const knowledgeProvider = optionalNotionKnowledgeProvider(env);
     const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
@@ -460,6 +477,7 @@ export async function startServer(
     const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
     const baseMeetingNotesIngestion = createMeetingNotesIngestion({
       meetingIntelligence,
+      ...(automaticDecisions ? { onProcessedSource: automaticDecisions.meeting } : {}),
       workItemProviderId
     });
     const meetingNotesIngestion = captureRuntime
@@ -567,6 +585,9 @@ export async function startServer(
     const contextIntelligence = discordContextAskConfig
       ? createContextIntelligence({
           database,
+          ...(automaticDecisions
+            ? { onProcessedSource: automaticDecisions.conversation }
+            : {}),
           ...(organizationalContext ? { organizationalContext } : {}),
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
@@ -609,6 +630,7 @@ export async function startServer(
       ...(decisionRecordConfig && decisionMeetingIntelligence
         ? {
             decisionRecords: {
+              ...(automaticDecisions ? { automatic: automaticDecisions } : {}),
               meetingIntelligence: decisionMeetingIntelligence,
               execution: followUpExecution,
               config: decisionRecordConfig
@@ -664,11 +686,14 @@ export async function startServer(
     else meetingNotesSync?.start();
     decisionIntelligence?.recall.start();
     captureRuntime?.start();
+    automaticDecisions?.start();
     startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
     let stopping: Promise<void> | undefined;
     return {
+      automaticDecisionStatus: () =>
+        automaticDecisions?.status() ?? Promise.resolve(null),
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
       notionObservationStatus: () => notionWebhook?.status() ?? null,
       decisionRecallStatus: () =>
@@ -684,6 +709,7 @@ export async function startServer(
                 bot.stop(),
                 granolaCallback?.stop(),
                 captureRuntime?.pauseIntake(),
+                automaticDecisions?.pause(),
                 notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
                 decisionIntelligence?.recall.stop()
               ]);
@@ -693,6 +719,7 @@ export async function startServer(
               // background cancellation; all command admission has now settled.
               await decisionIntelligence?.recall.stop();
               await captureRuntime?.stop();
+              await automaticDecisions?.stop();
               await granolaConnections?.stop();
             })()
           );

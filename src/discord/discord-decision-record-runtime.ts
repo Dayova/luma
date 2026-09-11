@@ -1,4 +1,6 @@
 import { AiServiceError } from "../ai/ai-service-error.js";
+import type { AutomaticDecisionProcessing } from "../app/automatic-decision-processing.js";
+import { decisionDigest } from "../decision-intelligence/persistence.js";
 import { renderAiServiceFailure } from "./discord-ai-status.js";
 import type { DecisionIntelligence } from "../decision-intelligence/interface.js";
 import type {
@@ -93,6 +95,7 @@ export function isExplicitDecisionRecordInstruction(text: string): boolean {
 }
 
 export type DiscordDecisionRecordRuntime = {
+  automatic?: Pick<AutomaticDecisionProcessing, "review">;
   meetingIntelligence: DecisionIntelligence;
   execution: DecisionFollowUpExecution;
   config: DiscordContextAskConfig;
@@ -100,6 +103,12 @@ export type DiscordDecisionRecordRuntime = {
 export type DiscordDecisionRecordCommand = DiscordCommandBase &
   (
     | { type: "decision-record-meeting"; instruction: string; targetRecordId?: string }
+    | {
+        type: "decision-record-candidates";
+        sourceMessageId?: string;
+        candidate?: number;
+        page?: number;
+      }
     | {
         type: "decision-record-status" | "decision-record-recover";
         sourceMessageId?: string;
@@ -115,6 +124,8 @@ export type DiscordDecisionRecordCommand = DiscordCommandBase &
       }
   );
 export function discordDecisionRequestId(command: DiscordDecisionRecordCommand): string {
+  if (command.type === "decision-record-candidates")
+    return `discord:${command.interactionId}:decision-candidates`;
   return command.type === "decision-record-meeting"
     ? `discord:${command.interactionId}:decision-record`
     : command.requestId;
@@ -183,6 +194,48 @@ export async function handleDiscordDecisionRecordCommand(input: {
         : (() => {
             throw new Error("Bind this thread to its imported Meeting first");
           })();
+  if (command.type === "decision-record-candidates") {
+    if (!runtime.automatic)
+      return {
+        content:
+          "Automatic decision processing is not enabled. Explicit recording and /meeting usage remain available."
+      };
+    const result = await runtime.automatic.review(subject);
+    const selected = command.candidate ?? 1;
+    if (!Number.isSafeInteger(selected) || selected < 1)
+      throw new Error("Select a positive candidate number");
+    const batch = result.batch;
+    const candidate = batch?.candidates[selected - 1];
+    const content = candidate
+      ? `Automatic decisions: candidate ${selected}/${batch!.candidates.length}.${batch!.complete ? "" : " Analysis is incomplete."}\n${renderDecisionRecordResponse(candidate, command.page)}`
+      : batch
+        ? `${batch.message.slice(0, 1200)}\n${batch.candidates.length} retained candidates. Select candidate:1 through candidate:${Math.max(1, batch.candidates.length)}. /meeting usage remains available.`
+        : (
+            {
+              unseen:
+                "This source has not been queued for automatic decisions. A new admitted conversation or accepted Meeting import starts processing.",
+              queued: "This source is queued for automatic decision analysis.",
+              processing: "This source is being analyzed for decisions.",
+              completed:
+                "No retained automatic decision review is available for this source.",
+              unavailable:
+                "Automatic decision analysis is unavailable. Original evidence remains retained. Check /meeting usage; a new explicit recording request remains available.",
+              interrupted:
+                "Automatic decision analysis was interrupted. Luma has not repeated the paid request. Check /meeting usage before starting a fresh explicit request."
+            } as const
+          )[result.status];
+    return {
+      content,
+      requireCurrent: async () => {
+        await input.requireCurrent?.();
+        if (
+          decisionDigest(await runtime.automatic!.review(subject)) !==
+          decisionDigest(result)
+        )
+          throw new Error("Automatic decision review changed before delivery");
+      }
+    };
+  }
   const requestId = discordDecisionRequestId(command);
   if (
     command.type === "decision-record-meeting" ||

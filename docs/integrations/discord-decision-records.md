@@ -167,3 +167,11 @@ to the admitted leading-mention surface. The read check never updates the ledger
 or authorizes another write; `requireCurrent` continues to demand the exact current
 execution source. Retained statements and poll counts keep their original meaning
 and standing.
+
+# Automatic source review
+
+`LUMA_AUTOMATIC_DECISIONS_ENABLED=1` connects accepted Conversation Ask material and imported Meeting revisions to a durable Decision candidate queue in the main app. It requires the existing four-founder Decision Records configuration and uses the same monthly AI budget. Source ingestion remains independent from background interpretation. A source notification is retained before ingestion or Ask returns; repeated notifications for the same current evidence are coalesced by Meeting Intelligence.
+
+Use `/decision-record candidates source_message:<original-message-id>` in the original Conversation, or `/decision-record candidates` in the bound imported Meeting thread. Optional `candidate` and `page` selections expose the full retained review and exact acceptance token. Every delivery rechecks the source, original audience and current channel binding. Queue, interruption and budget failures produce deterministic status text without requiring an AI response.
+
+Enabling source review does not grant standing permission to create or amend records. Candidates require the ordinary exact Human acceptance unless a separate current Human standing policy authorizes the operation. An interrupted model attempt is retained and is not silently charged again at restart. The main app stops background admission immediately during shutdown and drains admitted work before closing persistence.

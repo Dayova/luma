@@ -12,7 +12,10 @@ import {
   createNotionDecisionRecordCatalog,
   type NotionDecisionTransport
 } from "../../src/knowledge/notion-decision-records.js";
-import { createOpenAIDecisionInterpreter } from "../../src/decision-intelligence/openai-decision-interpreter.js";
+import {
+  createOpenAIDecisionInterpreter,
+  createOpenAIAutomaticDecisionDetector
+} from "../../src/decision-intelligence/openai-decision-interpreter.js";
 import { decisionAuthorityContentHash } from "../../src/decision-intelligence/notion-decision-authority.js";
 import { createOrganizationalContext } from "../../src/organizational-context/organizational-context.js";
 import type { DecisionSource } from "../../src/domain/decision-records.js";
@@ -44,7 +47,7 @@ afterEach(async () => {
   await rm(folder, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
-async function fixture(monthlyLimit = "30") {
+async function fixture(monthlyLimit = "30", automatic = false) {
   const authorityText =
     "Jakob owns Luma, including technical work. Other roles remain provisional.";
   const authorityPath = join(folder, "authority.json"),
@@ -91,6 +94,14 @@ async function fixture(monthlyLimit = "30") {
     { mode: 0o600 }
   );
   const env = {
+    ...(automatic
+      ? {
+          LUMA_AUTOMATIC_DECISIONS_ENABLED: "1",
+          LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
+          LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "100000000000000001",
+          LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: founders
+        }
+      : {}),
     DISCORD_TOKEN: "test-only",
     DISCORD_CLIENT_ID: "application",
     DISCORD_GUILD_ID: "guild",
@@ -245,6 +256,23 @@ async function fixture(monthlyLimit = "30") {
   app = await startServer(env, {
     createDatabase: () => Promise.resolve(database),
     createDiscordTransport: () => transport,
+    createOpenAIContextAnswerer: () => ({
+      answer: (request) =>
+        Promise.resolve({
+          answer: {
+            text: "The founders are discussing internal Luma access.",
+            evidenceIds: request.evidence.map((e) => e.evidenceId)
+          },
+          facts: [],
+          inferences: [],
+          unresolved: [],
+          metadata: {
+            provider: "programmable-answerer",
+            model: "test-only",
+            promptVersion: request.promptVersion
+          }
+        })
+    }),
     createOpenAIReasoningModel: () => {
       throw new Error("Meeting analysis is disabled");
     },
@@ -287,6 +315,27 @@ async function fixture(monthlyLimit = "30") {
             }
           });
         },
+        createDetector: (config) =>
+          createOpenAIAutomaticDecisionDetector({
+            ...config,
+            client: {
+              create: async (request) => {
+                const response = await model(request);
+                return {
+                  ...response,
+                  outputText: JSON.stringify({
+                    complete: true,
+                    candidates: [
+                      {
+                        confidence: "high",
+                        interpretation: JSON.parse(response.outputText) as unknown
+                      }
+                    ]
+                  })
+                };
+              }
+            }
+          }),
         createInterpreter: (config) =>
           createOpenAIDecisionInterpreter({ ...config, client: { create: model } })
       });
@@ -304,6 +353,22 @@ async function fixture(monthlyLimit = "30") {
     purpose: "decision-record"
   };
   return {
+    ask: () => {
+      if (!handler) throw new Error("Missing native Ask handler");
+      const { purpose: _purpose, ...ask } = mention;
+      void _purpose;
+      return handler(ask);
+    },
+    candidates: () =>
+      commandHandler({
+        type: "decision-record-candidates",
+        interactionId: "candidates-1",
+        guildId: "guild",
+        channelId: subject.conversationObjectId,
+        actorDiscordUserId: mention.actorDiscordUserId,
+        sourceMessageId: mention.messageId,
+        occurredAt: mention.occurredAt
+      }),
     writes,
     pages,
     model,
@@ -455,4 +520,43 @@ describe("composed production Decision Records", () => {
       expect(f.model).not.toHaveBeenCalled();
     }
   );
+});
+
+describe("automatic Decision processing in the actual main runtime", () => {
+  it("queues a newly admitted Ask source and serves governed candidates through the native Decision command", async () => {
+    const f = await fixture("30", true);
+    await f.ask();
+    await vi.waitFor(
+      async () =>
+        expect(await app!.automaticDecisionStatus!()).toMatchObject({
+          processing: 0,
+          completed: 1
+        }),
+      { timeout: 3000 }
+    );
+    const response = await f.candidates();
+    expect(response.content).toContain("Automatic decisions: candidate 1/1");
+    expect(response.content).toContain("person_jakob");
+    expect(f.model).toHaveBeenCalledTimes(1);
+    expect(f.writes).toEqual([]);
+    await response.requireCurrent?.();
+    f.revokeChannel();
+    await expect(response.requireCurrent?.()).rejects.toThrow();
+  });
+  it("keeps the original source and exposes budget exhaustion through the native command without a paid call", async () => {
+    const f = await fixture("0", true);
+    await f.ask();
+    await vi.waitFor(
+      async () =>
+        expect(await app!.automaticDecisionStatus!()).toMatchObject({
+          processing: 0,
+          unavailable: 1
+        }),
+      { timeout: 3000 }
+    );
+    const response = await f.candidates();
+    expect(response.content).toMatch(/budget/iu);
+    expect(f.model).not.toHaveBeenCalled();
+    expect(f.writes).toEqual([]);
+  });
 });

@@ -46,7 +46,7 @@ export type ObserveProcessedDecisionSource = {
 export type QueryAutomaticDecisions = {
   workspaceId: string;
   subject: DecisionSubject;
-  query: { type: "automatic-decision-candidates"; batchId: string };
+  query: { type: "automatic-decision-candidates"; batchId?: string };
 };
 export type AutomaticDecisionBatch = {
   batchId: string;

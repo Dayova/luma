@@ -118,7 +118,18 @@ export function createAutomaticDecisionIntelligence(
   const query = async (
     request: QueryAutomaticDecisions
   ): Promise<AutomaticDecisionBatch> => {
-    const batch = await load(request.workspaceId, request.query.batchId);
+    request = structuredClone(request);
+    decisionSubjectSchema.parse(request.subject);
+    const batchId =
+      request.query.batchId ??
+      (
+        await input.database.query<{ batch_id: string }>(
+          `SELECT batch_id FROM automatic_decision_batches WHERE workspace_id=$1
+        AND payload_json::jsonb->'subject'=$2::jsonb ORDER BY created_sequence DESC LIMIT 1`,
+          [request.workspaceId, JSON.stringify(request.subject)]
+        )
+      ).rows[0]?.batch_id;
+    const batch = batchId ? await load(request.workspaceId, batchId) : null;
     if (!batch || decisionDigest(batch.subject) !== decisionDigest(request.subject))
       throw new Error("Automatic Decision batch was not found in this subject");
     await requireSource(batch.source);

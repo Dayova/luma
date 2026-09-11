@@ -87,6 +87,13 @@ export function createOpenAIDecisionInterpreter(config: {
   budget: AiUsageBudget;
   limits?: Partial<AiRequestLimits>;
   client?: DecisionModelClient;
+  beforeInvoke?: (
+    request: Pick<
+      AutomaticDecisionContext,
+      "workspace" | "source" | "authority" | "catalog"
+    >,
+    signal: AbortSignal
+  ) => Promise<void>;
 }): DecisionInterpreter {
   if (!config.budget)
     throw new AiServiceError(
@@ -149,6 +156,8 @@ export function createOpenAIDecisionInterpreter(config: {
         input,
         schema: format.schema,
         limits,
+        beforeInvoke: (signal) =>
+          config.beforeInvoke?.(request, signal) ?? Promise.resolve(),
         invoke: (signal) =>
           client.create({
             model,
@@ -419,6 +428,8 @@ export function createOpenAIAutomaticDecisionDetector(
         input: modelInput,
         schema: detectionFormat.schema,
         limits,
+        beforeInvoke: (signal) =>
+          config.beforeInvoke?.(request, signal) ?? Promise.resolve(),
         invoke: (signal) =>
           client.create({
             model,

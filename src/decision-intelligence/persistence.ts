@@ -58,6 +58,8 @@ export async function migrateDecisionIntelligence(database: LumaDatabase): Promi
       payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
       PRIMARY KEY (workspace_id,batch_id)
     );
+    ALTER TABLE automatic_decision_batches ADD COLUMN IF NOT EXISTS
+      created_sequence BIGINT GENERATED ALWAYS AS IDENTITY;
     CREATE TABLE IF NOT EXISTS decision_requests (
       workspace_id TEXT NOT NULL, request_id TEXT NOT NULL, subject_key TEXT NOT NULL,
       payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,

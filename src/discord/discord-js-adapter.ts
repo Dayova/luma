@@ -1086,6 +1086,18 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
       : { ...choice, type: "granola-configure" };
   }
   if (interaction.commandName === "decision-record") {
+    if (subcommand === "candidates") {
+      const sourceMessageId = interaction.options.getString("source_message"),
+        candidate = interaction.options.getInteger("candidate"),
+        page = interaction.options.getInteger("page");
+      return {
+        ...base,
+        type: "decision-record-candidates",
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        ...(candidate ? { candidate } : {}),
+        ...(page ? { page } : {})
+      };
+    }
     if (subcommand === "meeting") {
       const targetRecordId = interaction.options.getString("target_record");
       return {
@@ -2010,6 +2022,33 @@ function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
 const decisionRecordCommand = new SlashCommandBuilder()
   .setName("decision-record")
   .setDescription("Record or review a decision from its original source")
+  .addSubcommand((command) =>
+    command
+      .setName("candidates")
+      .setDescription(
+        "Review automatic decisions from this Meeting or a captured conversation"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("candidate")
+          .setDescription("Retained candidate number")
+          .setMinValue(1)
+          .setMaxValue(20)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Candidate detail page")
+          .setMinValue(1)
+          .setMaxValue(10000)
+      )
+  )
   .addSubcommand((command) =>
     command
       .setName("meeting")

@@ -1,3 +1,4 @@
+import { createAutomaticDecisionProcessing } from "../../src/app/automatic-decision-processing.js";
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
 import { createOpenAIAutomaticDecisionDetector } from "../../src/decision-intelligence/openai-decision-interpreter.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -868,5 +869,175 @@ describe("unqualified original owner acceptance", () => {
     f.source.evidence[0]!.text = text;
     await f.make().observe(f.request);
     expect(f.provider.write).not.toHaveBeenCalled();
+  });
+});
+
+describe("durable automatic source processing through public MI", () => {
+  const workers: Array<Awaited<ReturnType<typeof createAutomaticDecisionProcessing>>> =
+    [];
+  afterEach(async () => {
+    for (const worker of workers.splice(0)) await worker.stop();
+  });
+  async function workerFor(f: ReturnType<typeof fixture>) {
+    const worker = await createAutomaticDecisionProcessing({
+      database,
+      workspace: f.request.workspace,
+      meetingIntelligence: f.make()
+    });
+    workers.push(worker);
+    const notify = () =>
+      f.source.subject.type === "meeting"
+        ? worker.meeting({
+            workspaceId: "dayova",
+            meetingId: f.source.subject.meetingId,
+            observationId: "accepted-import",
+            sourceRevision: 1,
+            contentHash: f.source.contentHash
+          })
+        : worker.conversation({
+            workspaceId: "dayova",
+            subject: f.source.subject,
+            admissionId: "original-admission",
+            sourceRevision: 1,
+            contentHash: f.source.contentHash
+          });
+    return { worker, notify };
+  }
+  it("does not strand an accepted source arriving while the empty queue read finishes", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    let signalEmpty = () => {},
+      releaseEmpty = () => {};
+    const empty = new Promise<void>((resolve) => {
+      signalEmpty = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseEmpty = resolve;
+    });
+    const original = database.query.bind(database);
+    let gated = false;
+    // Preserve real uniqueness/transactions and hold only delivery of a physical
+    // empty dequeue result, while another accepted notification commits.
+    const spy = vi
+      .spyOn(database, "query")
+      .mockImplementation(async <T>(...args: Parameters<typeof database.query>) => {
+        const response = await original<T>(...args);
+        if (
+          !gated &&
+          args[0].includes("SET phase='processing'") &&
+          response.rows.length === 0
+        ) {
+          gated = true;
+          signalEmpty();
+          await released;
+        }
+        return response;
+      });
+    try {
+      worker.start();
+      await empty;
+      await notify();
+      releaseEmpty();
+      await vi.waitFor(
+        async () =>
+          expect(await worker.status()).toMatchObject({
+            queued: 0,
+            processing: 0,
+            completed: 1
+          }),
+        { timeout: 2000 }
+      );
+      expect(f.detect).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseEmpty();
+      await worker.stop();
+      spy.mockRestore();
+    }
+  });
+  it("retains notifications before processing, coalesces duplicate deliveries and exposes the exact current review without a Human write request", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    await Promise.all([notify(), notify(), notify()]);
+    expect(f.detect).not.toHaveBeenCalled();
+    expect(await worker.status()).toMatchObject({ active: false, queued: 1 });
+    worker.start();
+    await vi.waitFor(
+      async () =>
+        expect(await worker.status()).toMatchObject({
+          queued: 0,
+          processing: 0,
+          completed: 1
+        }),
+      { timeout: 3000 }
+    );
+    const result = await worker.review(f.source.subject);
+    expect(result.batch?.candidates).toHaveLength(1);
+    expect(result.batch?.candidates[0]?.automatic?.recording).toBe("review-only");
+    expect(f.provider.write).not.toHaveBeenCalled();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    await notify();
+    await worker.stop();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    const latest = await f.make().query({
+      workspaceId: "dayova",
+      subject: f.source.subject,
+      query: { type: "automatic-decision-candidates" }
+    });
+    expect(latest.batchId).toBe(result.batch?.batchId);
+  });
+  it("does not repeat an interrupted attempt after restart and recovers an already retained MI review without another model call", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    await first.notify();
+    first.worker.start();
+    await vi.waitFor(
+      async () => expect(await first.worker.status()).toMatchObject({ completed: 1 }),
+      { timeout: 3000 }
+    );
+    await first.worker.stop();
+    await database.query(
+      "UPDATE automatic_decision_jobs SET phase='processing',batch_id=NULL WHERE workspace_id=$1",
+      ["dayova"]
+    );
+    const second = await workerFor(f);
+    second.worker.start();
+    expect(await second.worker.status()).toMatchObject({ interrupted: 1, queued: 0 });
+    const recovered = await second.worker.review(f.source.subject);
+    expect(recovered.status).toBe("interrupted");
+    expect(recovered.batch?.candidates).toHaveLength(1);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    f.revokeSource();
+    expect((await second.worker.review(f.source.subject)).batch).toBeNull();
+  });
+  it("reports a blocked shared AI budget without losing its source notification or retrying the paid operation", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    f.detect.mockRejectedValue(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    await notify();
+    worker.start();
+    await vi.waitFor(
+      async () =>
+        expect(await worker.status()).toMatchObject({ unavailable: 1, processing: 0 }),
+      { timeout: 3000 }
+    );
+    const review = await worker.review(f.source.subject);
+    expect(review.batch?.message).toBe("Monthly cap reached");
+    await notify();
+    await worker.stop();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    expect(f.provider.write).not.toHaveBeenCalled();
+    await expect(
+      worker.meeting({
+        workspaceId: "other",
+        meetingId: "meeting",
+        observationId: "o",
+        sourceRevision: 1,
+        contentHash: "h"
+      })
+    ).rejects.toThrow();
   });
 });

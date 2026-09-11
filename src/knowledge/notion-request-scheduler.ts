@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes, scryptSync } from "node:crypto";
 
 export const NOTION_OPERATION_TIMEOUT_MS = 240_000;
 const WINDOW_MS = 60_000;
@@ -21,7 +21,7 @@ const schedules = new Map<string, NotionRequestScheduler>();
 // A process-local secret avoids retaining a stable cross-process token fingerprint.
 const groupingKey = randomBytes(32);
 export function sharedNotionRequestScheduler(token: string): NotionRequestScheduler {
-  const key = createHmac("sha256", groupingKey).update(token).digest("hex");
+  const key = scryptSync(token, groupingKey, 32).toString("hex");
   const prior = schedules.get(key);
   if (prior) return prior;
   const scheduler = createNotionRequestScheduler();

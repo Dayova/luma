@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createNotionRequestScheduler } from "../../src/knowledge/notion-request-scheduler.js";
+import {
+  createNotionRequestScheduler,
+  sharedNotionRequestScheduler
+} from "../../src/knowledge/notion-request-scheduler.js";
 
 afterEach(() => vi.useRealTimers());
 
 describe("bounded Notion connection scheduling", () => {
+  it("shares connection capacity only across clients with the same credential", () => {
+    const first = sharedNotionRequestScheduler("synthetic-reader-one");
+    expect(sharedNotionRequestScheduler("synthetic-reader-one")).toBe(first);
+    expect(sharedNotionRequestScheduler("synthetic-reader-two")).not.toBe(first);
+  });
+
   it("shares a conservative 180-request window and cancels queued work without sending it", async () => {
     vi.useFakeTimers();
     const scheduler = createNotionRequestScheduler();

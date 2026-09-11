@@ -2,11 +2,10 @@
 
 ## Current Capability
 
-Discord is a first-class Luma conversation source and interaction surface in
-the product direction. The current implementation is deliberately narrower:
-it provides a persistent Meeting bot and a bounded read-only Context Ask
-slice. It does not yet implement the complete Discord Ask → Verify →
-Reconcile → Execute interaction model.
+Discord is a Luma conversation source and interaction surface. The shared
+runtime provides persistent Meetings, bounded Context Ask, source-bound review,
+reconciliation and governed execution. Each capability has its own explicit
+scope and activation checks; a successful read does not authorize a write.
 
 The Discord Module translates current Meeting interactions into
 provider-independent calls to Meeting Intelligence and renders Meeting
@@ -445,7 +444,7 @@ After the development Application is installed and `.env` is populated:
 
 Do not use this development smoke test to exercise approval, Linear, or Notion
 mutations. Those require their own source-bound authorization and rollout
-evidence outside this dormant Discord documentation path.
+evidence described in the linked capability guides.
 
 9. Run `/meeting stop` and confirm the Conclusion appears in the thread.
 10. Restart the bot and confirm `.luma/pglite` preserves thread and execution records.

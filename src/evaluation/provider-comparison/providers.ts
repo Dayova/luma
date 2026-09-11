@@ -45,8 +45,15 @@ export const candidates = [
     pricing: "https://api-docs.deepseek.com/quick_start/pricing/"
   }
 ] as const;
-export type Candidate = (typeof candidates)[number];
-export type ProviderId = Candidate["id"];
+export type ProviderId = (typeof candidates)[number]["id"];
+export type Candidate = {
+  id: ProviderId;
+  model: string;
+  key: string;
+  inputRate: number;
+  outputRate: number;
+  pricing: string;
+};
 export type Usage = {
   inputTokens: number;
   outputTokens: number;

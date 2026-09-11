@@ -1,0 +1,389 @@
+{
+  "version": 2,
+  "benchmarkHash": "e676cff8c0074fa2115dedb223f78063111c91b6b37159576c2f2f23a4a37e25",
+  "planHash": "700f1d17d28dbeebbf5bfc85af681d34b75b23a4f8141f47066033e65fecf1ee",
+  "mode": "historical-regrade",
+  "sourceReports": ["67286d21abd28b1e73f585b0eb294c1bfb608e168bfa855fa2cf335add5c641d"],
+  "candidates": [
+    {
+      "candidate": "openai-gpt-5-6-luna",
+      "planned": 8,
+      "dispatched": 8,
+      "validOutputs": 8,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "automaticPasses": 8,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 8,
+      "criticalFailures": 0,
+      "knownCostUsd": 0.0184878,
+      "knownCostAttempts": 8,
+      "medianValidLatencyMs": 11627,
+      "p95AttemptLatencyMs": 18095,
+      "dimensions": {
+        "recall": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 16
+        },
+        "grounding": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "modality": {
+          "automaticPassed": 2,
+          "automaticAssessed": 2,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 0,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "deadline": {
+          "automaticPassed": 1,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "ownership": {
+          "automaticPassed": 6,
+          "automaticAssessed": 6,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 8,
+          "reviewedPasses": 0
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-claude-sonnet-5",
+      "planned": 8,
+      "dispatched": 8,
+      "validOutputs": 8,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "automaticPasses": 8,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 8,
+      "criticalFailures": 0,
+      "knownCostUsd": 0.21505400000000002,
+      "knownCostAttempts": 8,
+      "medianValidLatencyMs": 14997,
+      "p95AttemptLatencyMs": 24615,
+      "dimensions": {
+        "recall": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 16
+        },
+        "grounding": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "modality": {
+          "automaticPassed": 2,
+          "automaticAssessed": 2,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 0,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "deadline": {
+          "automaticPassed": 1,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "ownership": {
+          "automaticPassed": 6,
+          "automaticAssessed": 6,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 8,
+          "reviewedPasses": 0
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-deepseek-flash",
+      "planned": 8,
+      "dispatched": 8,
+      "validOutputs": 2,
+      "operationalErrors": 6,
+      "unrun": 0,
+      "automaticPasses": 2,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 2,
+      "criticalFailures": 0,
+      "knownCostUsd": 0.0423798,
+      "knownCostAttempts": 8,
+      "medianValidLatencyMs": 12091.5,
+      "p95AttemptLatencyMs": 21209,
+      "dimensions": {
+        "recall": {
+          "automaticPassed": 2,
+          "automaticAssessed": 2,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 4
+        },
+        "grounding": {
+          "automaticPassed": 2,
+          "automaticAssessed": 2,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 2
+        },
+        "modality": {
+          "automaticPassed": 1,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 2
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 0,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 2
+        },
+        "deadline": {
+          "automaticPassed": 0,
+          "automaticAssessed": 0,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 2
+        },
+        "ownership": {
+          "automaticPassed": 1,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 2,
+          "reviewedPasses": 0
+        }
+      ]
+    },
+    {
+      "candidate": "google-gemini-3-8-flash",
+      "planned": 8,
+      "dispatched": 8,
+      "validOutputs": 8,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "automaticPasses": 8,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 8,
+      "criticalFailures": 0,
+      "knownCostUsd": 0.09618225,
+      "knownCostAttempts": 8,
+      "medianValidLatencyMs": 13480,
+      "p95AttemptLatencyMs": 32286,
+      "dimensions": {
+        "recall": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 16
+        },
+        "grounding": {
+          "automaticPassed": 8,
+          "automaticAssessed": 8,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "modality": {
+          "automaticPassed": 2,
+          "automaticAssessed": 2,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 0,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "deadline": {
+          "automaticPassed": 1,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 8
+        },
+        "ownership": {
+          "automaticPassed": 6,
+          "automaticAssessed": 6,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 8,
+          "reviewedPasses": 0
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "incumbent": "openai-gpt-5-6-luna",
+      "challenger": "anthropic-claude-sonnet-5",
+      "metric": "automatic-case-success",
+      "groups": 7,
+      "pairedAttempts": 8,
+      "missingPairs": 0,
+      "unreviewedPairs": 8,
+      "automaticDifference": 0,
+      "interval95": [0, 0],
+      "qualityDifference": null,
+      "qualityInterval95": null,
+      "interpretation": "Exploratory challenger-minus-incumbent differences, equally weighted by meeting group. Operational errors count as unsuccessful attempts; unrun pairs prevent an interval. Automatic checks are not semantic correctness. A narrow or zero bootstrap interval does not rule out unseen failure modes or establish equivalence. No automatic model promotion."
+    },
+    {
+      "incumbent": "openai-gpt-5-6-luna",
+      "challenger": "deepseek-deepseek-flash",
+      "metric": "automatic-case-success",
+      "groups": 7,
+      "pairedAttempts": 8,
+      "missingPairs": 0,
+      "unreviewedPairs": 8,
+      "automaticDifference": -0.7142857142857143,
+      "interval95": [-1, -0.42857142857142855],
+      "qualityDifference": null,
+      "qualityInterval95": null,
+      "interpretation": "Exploratory challenger-minus-incumbent differences, equally weighted by meeting group. Operational errors count as unsuccessful attempts; unrun pairs prevent an interval. Automatic checks are not semantic correctness. A narrow or zero bootstrap interval does not rule out unseen failure modes or establish equivalence. No automatic model promotion."
+    },
+    {
+      "incumbent": "openai-gpt-5-6-luna",
+      "challenger": "google-gemini-3-8-flash",
+      "metric": "automatic-case-success",
+      "groups": 7,
+      "pairedAttempts": 8,
+      "missingPairs": 0,
+      "unreviewedPairs": 8,
+      "automaticDifference": 0,
+      "interval95": [0, 0],
+      "qualityDifference": null,
+      "qualityInterval95": null,
+      "interpretation": "Exploratory challenger-minus-incumbent differences, equally weighted by meeting group. Operational errors count as unsuccessful attempts; unrun pairs prevent an interval. Automatic checks are not semantic correctness. A narrow or zero bootstrap interval does not rule out unseen failure modes or establish equivalence. No automatic model promotion."
+    }
+  ]
+}

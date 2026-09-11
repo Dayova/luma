@@ -1,4 +1,17 @@
 import {
+  createDecisionIntelligence,
+  type DecisionIntelligenceConfiguration
+} from "../decision-intelligence/decision-intelligence.js";
+import {
+  createMeetingDecisionEvidenceSource,
+  type MeetingDecisionSourceAudience
+} from "../decision-intelligence/meeting-evidence-source.js";
+import { bindDecisionModule } from "../decision-intelligence/module-binding.js";
+import {
+  scopeMeetingIntelligence,
+  type ScopedMeetingIntelligence
+} from "../decision-intelligence/scoped-meeting-intelligence.js";
+import {
   prepareImportedSourceAnalysisReceipt,
   readImportedSourceAnalysisReceipt,
   sameImportedSourceRevision,
@@ -121,6 +134,10 @@ const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v
 export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
   reasoningModel: ReasoningModel;
+  decisionIntelligence?: DecisionIntelligenceConfiguration & {
+    meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
+    meetingSourceAudience?: MeetingDecisionSourceAudience;
+  };
   /** Read-only catalogs; Meeting Intelligence cannot access WorkProvider writers. */
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
@@ -219,8 +236,16 @@ function workCatalogsByProvider(
 }
 
 export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput & {
+    decisionIntelligence: DecisionIntelligenceConfiguration;
+  }
+): ScopedMeetingIntelligence;
+export function createMeetingIntelligence(
   input: CreateMeetingIntelligenceInput
-): MeetingIntelligence {
+): MeetingIntelligence;
+export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput
+): ScopedMeetingIntelligence {
   const now = input.now ?? (() => new Date());
   const workCatalogs = workCatalogsByProvider(input.workCatalogs ?? []);
   const importedSourceObservationVerifier =
@@ -239,7 +264,7 @@ export function createMeetingIntelligence(
   };
   const contextGuard = createMeetingContextGuard(contextConfiguration);
 
-  return {
+  const meeting: MeetingIntelligence = {
     observe: (observeInput) => {
       const bound = structuredClone(observeInput);
       const run = () =>
@@ -298,6 +323,56 @@ export function createMeetingIntelligence(
         concludeInput
       )
   };
+  if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
+  const configuration = input.decisionIntelligence;
+  const meetingSource =
+    configuration.meetingEvidenceSource ??
+    (configuration.meetingSourceAudience
+      ? createMeetingDecisionEvidenceSource({
+          database: input.database,
+          audience: configuration.meetingSourceAudience,
+          requireContextCurrent: (state) =>
+            contextGuard.requireReceiptsCurrent({
+              workspaceId: state.workspaceId,
+              meetingId: state.meetingId,
+              receiptIds: contextReceiptIds(state)
+            }),
+          now
+        })
+      : undefined);
+  const dependencies = {
+    ...configuration,
+    database: input.database,
+    now,
+    evidenceSource: {
+      capture: (request: Parameters<typeof configuration.evidenceSource.capture>[0]) => {
+        if (request.subject.type !== "meeting")
+          return configuration.evidenceSource.capture(request);
+        if (!meetingSource)
+          throw new Error(
+            "Original and current Meeting source audience is not configured for Decision recording"
+          );
+        return meetingSource.capture(request);
+      },
+      requireCurrent: (
+        source: Parameters<typeof configuration.evidenceSource.requireCurrent>[0]
+      ) => {
+        if (source.subject.type !== "meeting")
+          return configuration.evidenceSource.requireCurrent(source);
+        if (!meetingSource)
+          throw new Error(
+            "Original and current Meeting source audience is not configured for Decision recording"
+          );
+        return meetingSource.requireCurrent(source);
+      }
+    }
+  };
+  const facade = scopeMeetingIntelligence(
+    meeting,
+    createDecisionIntelligence(dependencies)
+  );
+  bindDecisionModule(facade, dependencies);
+  return facade;
 }
 
 async function freshContextOutput<T>(

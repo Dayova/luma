@@ -175,6 +175,8 @@ function capabilityLabel(capability: string): string {
       return "Follow-up preparation";
     case "context-ask":
       return "Context Ask";
+    case "decision-interpretation":
+      return "Decision interpretation";
     default:
       return "Other tracked AI";
   }

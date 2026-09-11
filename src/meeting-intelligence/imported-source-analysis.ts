@@ -15,6 +15,13 @@ export interface ImportedSourceAnalysisAccess {
     audience: ContextAudience;
   }): Promise<void>;
 }
+/** Historical read permission; it never authorizes execution against obsolete words. */
+export interface ImportedSourceHistoryAccess extends ImportedSourceAnalysisAccess {
+  requireRetained(input: {
+    source: ImportedMeetingSource;
+    audience: ContextAudience;
+  }): Promise<void>;
+}
 export type ImportedSourceAnalysisConfiguration = {
   access: ImportedSourceAnalysisAccess;
   /** Actual recipients, never inferred from attendance or the service credential. */

@@ -1,5 +1,9 @@
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
 import {
+  discordDecisionRecordConfigFromEnv,
+  isExplicitDecisionRecordInstruction
+} from "./discord-decision-record-runtime.js";
+import {
   discordConsultationConfigFromEnv,
   type DiscordConsultationConfig
 } from "./discord-consultation-runtime.js";
@@ -53,6 +57,7 @@ import {
 import {
   discordContextAskConfigFromEnv,
   discordContextAskMentionFromCandidate,
+  questionAfterLeadingDiscordBotMention,
   type DiscordContextAskConfig,
   type DiscordContextAskMessageCandidate,
   type DiscordContextAskMention
@@ -75,6 +80,7 @@ export type DiscordJsTransportConfig = {
   authorizeHumanReader: (discordUserId: string) => Promise<boolean>;
   contextAsk?: DiscordContextAskConfig;
   consultations?: DiscordConsultationConfig;
+  decisionRecords?: DiscordContextAskConfig;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
@@ -100,8 +106,11 @@ export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
   if (
-    [config.contextAsk, config.consultations?.capture].some((capture) =>
-      capture?.parentChannelIds.some((id) => !config.allowedParentChannelIds.includes(id))
+    [config.contextAsk, config.consultations?.capture, config.decisionRecords].some(
+      (capture) =>
+        capture?.parentChannelIds.some(
+          (id) => !config.allowedParentChannelIds.includes(id)
+        )
     )
   ) {
     throw new Error(
@@ -111,7 +120,7 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
-    ...(config.consultations ? { retries: 0 } : {}),
+    ...(config.consultations || config.decisionRecords ? { retries: 0 } : {}),
     makeRequest: (
       url: string,
       init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
@@ -123,7 +132,7 @@ export function createDiscordJsTransport(
   };
   const client = new Client({
     intents: discordGatewayIntentsForContextAsk(
-      config.contextAsk ?? config.consultations?.capture
+      config.contextAsk ?? config.consultations?.capture ?? config.decisionRecords
     ),
     rest: restOptions
   });
@@ -191,8 +200,18 @@ export function createDiscordJsTransport(
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const rawDecisionEvidenceSource = config.decisionRecords
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.decisionRecords,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
   const conversationEvidenceSource: ConversationEvidenceSource | null =
-    rawConversationEvidenceSource || rawConsultationEvidenceSource
+    rawConversationEvidenceSource ||
+    rawConsultationEvidenceSource ||
+    rawDecisionEvidenceSource
       ? {
           async capture(input) {
             await channelScope.requireChannel(
@@ -202,7 +221,9 @@ export function createDiscordJsTransport(
             const source =
               input.purpose === "consultation"
                 ? rawConsultationEvidenceSource
-                : rawConversationEvidenceSource;
+                : input.purpose === "decision-record"
+                  ? rawDecisionEvidenceSource
+                  : rawConversationEvidenceSource;
             if (!source)
               throw new Error(
                 "The requested Conversation capture purpose is not enabled"
@@ -223,7 +244,7 @@ export function createDiscordJsTransport(
     if (disconnected) return;
     if (
       !interaction.isChatInputCommand() ||
-      !["meeting", "consultation"].includes(interaction.commandName)
+      !["meeting", "consultation", "decision-record"].includes(interaction.commandName)
     ) {
       return;
     }
@@ -256,23 +277,46 @@ export function createDiscordJsTransport(
 
   client.on(Events.MessageCreate, (message) => {
     const handler = contextAskHandler;
-    const contextAsk = config.contextAsk;
     const botUserId = client.user?.id;
 
-    if (!handler || !contextAsk || !botUserId) {
+    if (!handler || !botUserId) {
       return;
     }
 
-    const ask = discordContextAskMentionFromCandidate({
-      candidate: discordContextAskMessageCandidate(message),
+    const originalInstruction =
+      questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
+    const usageRequest = /^(?:usage|status)$/iu.test(originalInstruction.trim());
+    let decisionRequest = Boolean(
+      config.decisionRecords &&
+      (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+    );
+    const captureConfig = decisionRequest ? config.decisionRecords : config.contextAsk;
+    if (!captureConfig) return;
+
+    const candidate = discordContextAskMessageCandidate(message);
+    let ask = discordContextAskMentionFromCandidate({
+      candidate,
       botUserId,
       guildId: config.guildId,
-      config: contextAsk
+      config: captureConfig
     });
+
+    // Usage is a deterministic shared service. Its admission may come from the
+    // Ask scope when this channel is outside the separately enabled write scope.
+    if (!ask && decisionRequest && usageRequest && config.contextAsk) {
+      ask = discordContextAskMentionFromCandidate({
+        candidate,
+        botUserId,
+        guildId: config.guildId,
+        config: config.contextAsk
+      });
+      decisionRequest = false;
+    }
 
     if (!ask) {
       return;
     }
+    if (decisionRequest) ask.purpose = "decision-record";
 
     trackDelivery(
       handleContextAskMention({
@@ -521,6 +565,9 @@ export function createDiscordJsTransportFromEnv(
     ...(contextAsk ? { contextAsk } : {}),
     ...(discordConsultationConfigFromEnv(env)
       ? { consultations: discordConsultationConfigFromEnv(env)! }
+      : {}),
+    ...(discordDecisionRecordConfigFromEnv(env)
+      ? { decisionRecords: discordDecisionRecordConfigFromEnv(env)! }
       : {})
   });
 }
@@ -548,7 +595,8 @@ async function registerMeetingCommand(
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
     body: [
       meetingCommand.toJSON(),
-      ...(config.consultations ? [consultationCommand.toJSON()] : [])
+      ...(config.consultations ? [consultationCommand.toJSON()] : []),
+      ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : [])
     ],
     signal
   });
@@ -1007,6 +1055,38 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "decision-record") {
+    if (subcommand === "meeting") {
+      const targetRecordId = interaction.options.getString("target_record");
+      return {
+        ...base,
+        type: "decision-record-meeting",
+        instruction: interaction.options.getString("instruction", true),
+        ...(targetRecordId ? { targetRecordId } : {})
+      };
+    }
+    const sourceMessageId = interaction.options.getString("source_message");
+    const address = {
+      ...base,
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+      requestId: interaction.options.getString("request_id", true)
+    };
+    if (subcommand === "accept")
+      return {
+        ...address,
+        type: "decision-record-accept",
+        reviewToken: interaction.options.getString("review_token", true),
+        instruction: interaction.options.getString("confirmation", true)
+      };
+    if (subcommand !== "status" && subcommand !== "recover")
+      throw new Error("Unknown Decision Record command");
+    const page = subcommand === "status" ? interaction.options.getInteger("page") : null;
+    return {
+      ...address,
+      type: `decision-record-${subcommand}`,
+      ...(page ? { page } : {})
+    };
+  }
   if (interaction.commandName === "consultation") {
     const sourceMessageId = interaction.options.getString("source_message", true);
     if (subcommand === "start") {
@@ -1692,4 +1772,96 @@ function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
         .setDescription("Canonical consultation ID returned by Luma")
         .setRequired(true)
     );
+}
+
+const decisionRecordCommand = new SlashCommandBuilder()
+  .setName("decision-record")
+  .setDescription("Record or review a decision from its original source")
+  .addSubcommand((command) =>
+    command
+      .setName("meeting")
+      .setDescription("Record a decision from the imported Meeting bound to this thread")
+      .addStringOption((option) =>
+        option
+          .setName("instruction")
+          .setDescription("Your literal recording instruction or decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target_record")
+          .setDescription("Exact existing record ID when requesting an update")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("status")
+        .setDescription("Read the retained result of an explicit recording request")
+    ).addIntegerOption((option) =>
+      option
+        .setName("page")
+        .setDescription("Candidate review page")
+        .setMinValue(1)
+        .setMaxValue(10000)
+    )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("recover")
+        .setDescription("Check for an existing uncertain write without resending it")
+    )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("accept")
+        .setDescription(
+          "Confirm the exact reviewed candidate as your decision and record it"
+        ),
+      true
+    )
+      .addStringOption((option) =>
+        option
+          .setName("review_token")
+          .setDescription("Token from the final candidate review page")
+          .setRequired(true)
+          .setMaxLength(64)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("confirmation")
+          .setDescription("Your literal confirmation of this decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+  );
+function decisionRecordAddress(
+  command: SlashCommandSubcommandBuilder,
+  omitSource = false
+) {
+  const addressed = command.addStringOption((option) =>
+    option
+      .setName("request_id")
+      .setDescription("Request ID returned by Luma")
+      .setRequired(true)
+      .setMaxLength(512)
+  );
+  return omitSource
+    ? addressed
+    : addressed.addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      );
 }

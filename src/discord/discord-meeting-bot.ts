@@ -1,4 +1,13 @@
 import {
+  discordDecisionRequestId,
+  handleDiscordDecisionRecordCommand,
+  handleDiscordDecisionRecordMention,
+  renderDecisionRecordFailure,
+  isExplicitDecisionRecordInstruction,
+  type DiscordDecisionRecordCommand,
+  type DiscordDecisionRecordRuntime
+} from "./discord-decision-record-runtime.js";
+import {
   handleDiscordConsultationCommand,
   type DiscordConsultationCommand,
   type DiscordConsultationRuntime
@@ -67,6 +76,7 @@ export type DiscordCommandBase = {
 
 export type DiscordCommand =
   | DiscordConsultationCommand
+  | DiscordDecisionRecordCommand
   | (DiscordCommandBase & {
       type: "start";
       title: string;
@@ -191,6 +201,7 @@ export type CreateDiscordMeetingBotInput = {
   meetingIntelligence: MeetingIntelligence;
   followUpExecution?: FollowUpExecution;
   consultations?: DiscordConsultationRuntime;
+  decisionRecords?: DiscordDecisionRecordRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
   authorizedPersonIds: readonly PersonId[];
@@ -272,6 +283,12 @@ export function createDiscordMeetingBot(
         now: () => now().getTime()
       })
     : undefined;
+  const decisionRateLimiter = input.decisionRecords
+    ? createDiscordContextAskRateLimiter({
+        minIntervalMs: input.decisionRecords.config.minIntervalMs,
+        now: () => now().getTime()
+      })
+    : undefined;
   // A second Gateway delivery must not become a second cooldown/status reply.
   const seenContextMessages = new Map<string, number>();
 
@@ -291,7 +308,7 @@ export function createDiscordMeetingBot(
                 )
           );
         },
-        input.contextAsk
+        input.contextAsk || input.decisionRecords
           ? (ask) =>
               stopping
                 ? Promise.resolve(null)
@@ -301,7 +318,9 @@ export function createDiscordMeetingBot(
                       ask,
                       accessPolicy,
                       channelScope,
-                      contextRateLimiter,
+                      ask.purpose === "decision-record"
+                        ? decisionRateLimiter
+                        : contextRateLimiter,
                       seenContextMessages,
                       now
                     )
@@ -340,12 +359,15 @@ async function answerConversationThread(
   now: () => Date
 ): Promise<DiscordContextAskResponse | null> {
   const contextAsk = input.contextAsk;
+  const decisionRecords =
+    ask.purpose === "decision-record" ? input.decisionRecords : undefined;
+  const scope = ask.purpose === "decision-record" ? decisionRecords : contextAsk;
 
   if (
-    !contextAsk ||
+    !scope ||
     ask.guildId !== input.guildId ||
-    !contextAsk.config.parentChannelIds.includes(ask.parentChannelId) ||
-    !contextAsk.config.allowedDiscordUserIds.includes(ask.actorDiscordUserId) ||
+    !scope.config.parentChannelIds.includes(ask.parentChannelId) ||
+    !scope.config.allowedDiscordUserIds.includes(ask.actorDiscordUserId) ||
     !(await accessPolicy.authorize({
       workspaceId: input.workspace.workspaceId,
       providerId: "discord",
@@ -367,7 +389,7 @@ async function answerConversationThread(
     (await allowedSurface())
       ? {
           content,
-          idempotencyKey: `discord:${ask.messageId}:context-ask:reply`
+          idempotencyKey: `discord:${ask.messageId}:${ask.purpose ?? "context-ask"}:reply`
         }
       : null;
   const currentTime = now().getTime();
@@ -391,6 +413,34 @@ async function answerConversationThread(
   }
 
   try {
+    if (ask.purpose === "decision-record") {
+      if (!decisionRecords || !isExplicitDecisionRecordInstruction(ask.question))
+        return null;
+      const decision = await handleDiscordDecisionRecordMention({
+        runtime: decisionRecords,
+        workspace: input.workspace,
+        mention: ask
+      });
+      const response = await reply(await appendAiUsageWarning(input, decision.content));
+      return response
+        ? {
+            ...response,
+            requireCurrent: async () => {
+              if (
+                !(await accessPolicy.authorize({
+                  workspaceId: input.workspace.workspaceId,
+                  providerId: "discord",
+                  providerUserId: ask.actorDiscordUserId
+                })) ||
+                !(await allowedSurface())
+              )
+                throw new DiscordChannelAccessError();
+              await decision.requireCurrent?.();
+            }
+          }
+        : null;
+    }
+    if (!contextAsk) return null;
     const inquiry: ContextInquiry = {
       type: "ask",
       workspaceId: input.workspace.workspaceId,
@@ -432,6 +482,14 @@ async function answerConversationThread(
         }
       : null;
   } catch (error: unknown) {
+    if (ask.purpose === "decision-record")
+      return reply(
+        renderDecisionRecordFailure(
+          error,
+          `discord:${ask.messageId}:decision-record`,
+          ask.messageId
+        )
+      );
     if (
       error instanceof ContextIntelligenceError &&
       (error.code === "context-answer-already-attempted" ||
@@ -585,7 +643,21 @@ async function handleCommand(
                 accessPolicy
               })
             : { content: "Advisory consultations are not configured in this workspace." }
-          : await executeAdmittedCommand(input, command, now);
+          : isDecisionRecordCommand(command)
+            ? input.decisionRecords &&
+              surface.kind === "public-thread" &&
+              surface.parentChannelId &&
+              input.decisionRecords.config.parentChannelIds.includes(
+                surface.parentChannelId
+              ) &&
+              input.decisionRecords.config.allowedDiscordUserIds.includes(
+                command.actorDiscordUserId
+              )
+              ? await executeDecisionRecordCommand(input, command)
+              : {
+                  content: "Decision Records are not enabled for you in this discussion."
+                }
+            : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
         ? response.content
@@ -609,6 +681,14 @@ async function handleCommand(
       ...(sourceFence || response.requireCurrent ? { requireCurrent } : {})
     };
   } catch (error: unknown) {
+    if (isDecisionRecordCommand(command))
+      return {
+        content: renderDecisionRecordFailure(
+          error,
+          discordDecisionRequestId(command),
+          "sourceMessageId" in command ? command.sourceMessageId : undefined
+        )
+      };
     return {
       content:
         error instanceof ImportedMeetingReviewUnavailableError ||
@@ -620,6 +700,68 @@ async function handleCommand(
             : renderAiServiceFailure(error)
     };
   }
+}
+
+async function executeDecisionRecordCommand(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordDecisionRecordCommand
+): Promise<DiscordCommandResponse> {
+  if (!input.decisionRecords) throw new Error("Decision Records are not configured");
+  if ("sourceMessageId" in command && command.sourceMessageId)
+    return handleDiscordDecisionRecordCommand({
+      runtime: input.decisionRecords,
+      workspace: input.workspace,
+      command
+    });
+  const binding = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  if (!binding || binding.thread_id !== command.channelId)
+    return {
+      content:
+        "Attach this thread to its imported Meeting with /meeting bind first, or supply source_message for a Conversation request."
+    };
+  const state = await queryMeetingSnapshot(input, binding);
+  if (!state.importedSources.length)
+    return {
+      content:
+        "This command needs an imported Meeting binding. Use an explicit @Luma recording request for the discussion."
+    };
+  const requireBinding = async () => {
+    const current = await findMeetingThreadForChannel(
+      input,
+      command.guildId,
+      command.channelId,
+      "include-ended-thread"
+    );
+    if (
+      !current ||
+      current.meeting_id !== binding.meeting_id ||
+      current.thread_id !== binding.thread_id ||
+      current.parent_channel_id !== binding.parent_channel_id
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    await requireImportedMeetingCurrent(input, state);
+  };
+  await requireBinding();
+  const response = await handleDiscordDecisionRecordCommand({
+    runtime: input.decisionRecords,
+    workspace: input.workspace,
+    command,
+    meetingId: binding.meeting_id,
+    requireCurrent: requireBinding
+  });
+  await requireBinding();
+  return {
+    content: response.content,
+    requireCurrent: async () => {
+      await requireBinding();
+      await response.requireCurrent?.();
+    }
+  };
 }
 
 async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string> {
@@ -652,7 +794,10 @@ async function appendAiUsageWarning(
 
 async function executeAdmittedCommand(
   input: ScopedDiscordMeetingBotInput,
-  command: Exclude<DiscordCommand, { type: "usage" } | DiscordConsultationCommand>,
+  command: Exclude<
+    DiscordCommand,
+    { type: "usage" } | DiscordConsultationCommand | DiscordDecisionRecordCommand
+  >,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
   switch (command.type) {
@@ -715,6 +860,7 @@ async function commandSourceFence(
 ): Promise<(() => Promise<void>) | undefined> {
   if (
     isConsultationCommand(command) ||
+    isDecisionRecordCommand(command) ||
     command.type === "usage" ||
     command.type === "bind" ||
     command.type === "start"
@@ -2177,4 +2323,10 @@ function isConsultationCommand(
   command: DiscordCommand
 ): command is DiscordConsultationCommand {
   return command.type.startsWith("consultation-");
+}
+
+function isDecisionRecordCommand(
+  command: DiscordCommand
+): command is DiscordDecisionRecordCommand {
+  return command.type.startsWith("decision-record-");
 }

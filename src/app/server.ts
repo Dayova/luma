@@ -1,3 +1,6 @@
+import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
+import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
+import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
@@ -66,6 +69,7 @@ import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.j
 export type RunningLumaApp = {
   stop(): Promise<void>;
   gatewayConnected(): boolean;
+  decisionRecallStatus?(): Promise<DecisionRecallStatus | null>;
   notionObservationStatus?(): NotionMeetingNotesObservationHostStatus | null;
 };
 
@@ -88,6 +92,7 @@ type StartServerDependencies = {
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
   createContextCatalogs?: typeof organizationalContextCatalogsFromEnv;
   createNotionWebhookHttpServer?: typeof createNotionWebhookHttpServer;
+  createDecisionRuntime?: typeof createDecisionRuntime;
 };
 
 const legacyMeetingNotesSourceEnvironment = [
@@ -124,6 +129,19 @@ export async function startServer(
   const allowedParentChannelIds = discordAllowedParentChannelIdsFromEnv(env);
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
   const consultationConfig = discordConsultationConfigFromEnv(env);
+  const decisionRecordConfig = discordDecisionRecordConfigFromEnv(env);
+  if (
+    decisionRecordConfig?.parentChannelIds.some(
+      (id) => !allowedParentChannelIds.includes(id)
+    )
+  )
+    throw new Error(
+      "Decision Record parent channels must be within the common Discord scope"
+    );
+  if (decisionRecordConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"]))
+    throw new Error(
+      "OPENAI_API_KEY is required when Discord Decision Records are enabled"
+    );
   if (
     consultationConfig?.capture.parentChannelIds.some(
       (id) => !allowedParentChannelIds.includes(id)
@@ -146,6 +164,7 @@ export async function startServer(
   const aiBudgetSettings = aiUsageBudgetSettingsFromEnv(env);
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
   const contextConfig = organizationalContextRuntimeConfig(env);
+  const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
@@ -201,6 +220,17 @@ export async function startServer(
         "Consultations require the exact four uniquely mapped founder Discord users"
       );
   }
+  if (decisionRecordConfig) {
+    const recipients = await resolveConsultationRecipients(dayovaFounderPersonIds);
+    if (
+      !recipients ||
+      JSON.stringify([...recipients].sort()) !==
+        JSON.stringify([...decisionRecordConfig.allowedDiscordUserIds].sort())
+    )
+      throw new Error(
+        "Decision Records require the exact four uniquely mapped founder Discord users"
+      );
+  }
   const externalContextCatalogs = contextConfig
     ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
         workspaceId,
@@ -221,7 +251,8 @@ export async function startServer(
         isAiModelPriced(openAIReasoningModelName) &&
         hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
-          discordContextAskConfig !== undefined)
+          discordContextAskConfig !== undefined ||
+          decisionRecordConfig !== undefined)
     });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
@@ -240,24 +271,6 @@ export async function startServer(
       ledger: observedSourceLedger,
       operationalOutcomeMarkerVerifier
     });
-    const contextCatalogs = [...(externalContextCatalogs ?? [])];
-    if (importedSourceAnalysis) {
-      contextCatalogs.push(
-        createImportedMeetingContextCatalog({
-          database,
-          sourceAccess: importedSourceAnalysis.access,
-          externalContext: createExternalContextReceiptVerifier({
-            database,
-            catalogs: externalContextCatalogs ?? [],
-            ignoredEmptyCatalogIds: [importedMeetingContextCatalogId]
-          })
-        })
-      );
-    }
-    const organizationalContext =
-      externalContextCatalogs || contextCatalogs.length
-        ? createOrganizationalContext({ database, catalogs: contextCatalogs })
-        : undefined;
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
@@ -267,7 +280,48 @@ export async function startServer(
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
     };
-    const meetingIntelligence = createMeetingIntelligence({
+    const decisionIntelligence = decisionConfig
+      ? await (dependencies.createDecisionRuntime ?? createDecisionRuntime)({
+          config: decisionConfig,
+          env,
+          workspaceId,
+          database,
+          ledger: observedSourceLedger,
+          conversationEvidenceSource: discordTransport,
+          ...(importedSourceAnalysis
+            ? { importedSourceAccess: importedSourceAnalysis.access }
+            : {}),
+          accessPolicy,
+          budget: aiUsage,
+          limits: aiRequestLimits,
+          model: openAIReasoningModelName
+        })
+      : undefined;
+    if (decisionIntelligence)
+      startupCleanup.push(() => decisionIntelligence.recall.stop());
+    const providerContextCatalogs = [
+      ...(externalContextCatalogs ?? []),
+      ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
+    ];
+    const contextCatalogs = [...providerContextCatalogs];
+    if (importedSourceAnalysis) {
+      contextCatalogs.push(
+        createImportedMeetingContextCatalog({
+          database,
+          sourceAccess: importedSourceAnalysis.access,
+          externalContext: createExternalContextReceiptVerifier({
+            database,
+            catalogs: providerContextCatalogs,
+            ignoredEmptyCatalogIds: [importedMeetingContextCatalogId]
+          })
+        })
+      );
+    }
+    const organizationalContext =
+      externalContextCatalogs || contextCatalogs.length
+        ? createOrganizationalContext({ database, catalogs: contextCatalogs })
+        : undefined;
+    const meetingDependencies = {
       database,
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
@@ -287,7 +341,12 @@ export async function startServer(
             })
           }
         : {})
-    });
+    };
+    const decisionMeetingIntelligence = decisionIntelligence
+      ? createMeetingIntelligence({ ...meetingDependencies, decisionIntelligence })
+      : undefined;
+    const meetingIntelligence =
+      decisionMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
     const knowledgeProvider = optionalNotionKnowledgeProvider(env);
     const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
@@ -413,6 +472,15 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(decisionRecordConfig && decisionMeetingIntelligence
+        ? {
+            decisionRecords: {
+              meetingIntelligence: decisionMeetingIntelligence,
+              execution: followUpExecution,
+              config: decisionRecordConfig
+            }
+          }
+        : {}),
       ...(conversationConsultations
         ? {
             consultations: {
@@ -456,6 +524,7 @@ export async function startServer(
     startupSignal?.throwIfAborted();
     if (notionWebhook) await notionWebhook.start();
     else meetingNotesSync?.start();
+    decisionIntelligence?.recall.start();
     startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
@@ -463,16 +532,24 @@ export async function startServer(
     return {
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
       notionObservationStatus: () => notionWebhook?.status() ?? null,
+      decisionRecallStatus: () =>
+        decisionIntelligence?.recall.status() ?? Promise.resolve(null),
       stop() {
         stopping ??= (async () => {
           // Stop admission and scheduled ingestion immediately, then drain both.
           // A failed/timed-out drain never closes the store later in a detached
           // continuation: its lease must survive process termination for recovery.
           await drainBeforeClose(
-            Promise.all([
-              bot.stop(),
-              notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop()
-            ])
+            (async () => {
+              await Promise.all([
+                bot.stop(),
+                notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
+                decisionIntelligence?.recall.stop()
+              ]);
+              // An admitted foreground operation can begin its final retained proof
+              // after background cancellation. Drain again once ingress is settled.
+              await decisionIntelligence?.recall.stop();
+            })()
           );
           await database.close();
         })();

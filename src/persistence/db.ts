@@ -1,4 +1,6 @@
 import { migrateConversationConsultations } from "../context-intelligence/consultation-persistence.js";
+import { migrateDecisionIntelligence } from "../decision-intelligence/persistence.js";
+import { migrateDecisionAuthority } from "../decision-intelligence/authority-persistence.js";
 import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
 import { migrateContextRetrieval } from "../context-intelligence/persistence.js";
 import { migrateMeetingContext } from "../meeting-intelligence/context-guard.js";
@@ -816,5 +818,7 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
   await migrateAiAccountingRecovery(database);
   await migrateContextRetrieval(database);
   await migrateConversationConsultations(database);
+  await migrateDecisionIntelligence(database);
+  await migrateDecisionAuthority(database);
   await migrateMeetingContext(database);
 }

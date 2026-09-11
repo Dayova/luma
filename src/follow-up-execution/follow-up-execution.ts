@@ -1,3 +1,9 @@
+import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
+import { createDecisionFollowUpExecution } from "./decision-execution.js";
+import type {
+  ExecuteDecisionFollowUpInput,
+  ExecuteDecisionFollowUpResult
+} from "./interface.js";
 import type { CanonicalKnowledgePatchWriter } from "../knowledge/canonical-knowledge-patch.js";
 import {
   CanonicalPatchStageError,
@@ -186,13 +192,32 @@ export function createFollowUpExecution(
           now
         })
       : undefined;
+  const decisionDependencies = decisionModuleFor(input.meetingIntelligence);
+  const decisionExecution = decisionDependencies
+    ? createDecisionFollowUpExecution(decisionDependencies)
+    : undefined;
+  function execute(
+    request: ExecuteDecisionFollowUpInput
+  ): Promise<ExecuteDecisionFollowUpResult>;
   function execute(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
   function execute(
     request: ExecuteConversationFollowUpInput
   ): Promise<ExecuteConversationFollowUpResult>;
   function execute(
-    request: ExecuteFollowUpInput | ExecuteConversationFollowUpInput
-  ): Promise<ExecuteFollowUpResult | ExecuteConversationFollowUpResult> {
+    request:
+      | ExecuteFollowUpInput
+      | ExecuteConversationFollowUpInput
+      | ExecuteDecisionFollowUpInput
+  ): Promise<
+    | ExecuteFollowUpResult
+    | ExecuteConversationFollowUpResult
+    | ExecuteDecisionFollowUpResult
+  > {
+    if ("decisionRequestId" in request) {
+      if (!decisionExecution)
+        return Promise.reject(new Error("Decision execution is not configured"));
+      return decisionExecution.execute(request);
+    }
     if ("subject" in request) {
       if (!conversationExecution)
         return Promise.reject(
@@ -202,13 +227,28 @@ export function createFollowUpExecution(
     }
     return meetingExecution.execute(request);
   }
+  function recover(
+    request: ExecuteDecisionFollowUpInput
+  ): Promise<ExecuteDecisionFollowUpResult>;
   function recover(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
   function recover(
     request: ExecuteConversationFollowUpInput
   ): Promise<ExecuteConversationFollowUpResult>;
   function recover(
-    request: ExecuteFollowUpInput | ExecuteConversationFollowUpInput
-  ): Promise<ExecuteFollowUpResult | ExecuteConversationFollowUpResult> {
+    request:
+      | ExecuteFollowUpInput
+      | ExecuteConversationFollowUpInput
+      | ExecuteDecisionFollowUpInput
+  ): Promise<
+    | ExecuteFollowUpResult
+    | ExecuteConversationFollowUpResult
+    | ExecuteDecisionFollowUpResult
+  > {
+    if ("decisionRequestId" in request) {
+      if (!decisionExecution)
+        return Promise.reject(new Error("Decision execution is not configured"));
+      return decisionExecution.recover(request);
+    }
     if ("subject" in request) {
       if (!conversationExecution)
         return Promise.reject(

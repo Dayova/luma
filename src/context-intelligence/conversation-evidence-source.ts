@@ -11,7 +11,7 @@ export type CaptureConversationEvidenceInput = {
   subject: ConversationContextSubject;
   /** When supplied, the current anchor must still ask this exact question. */
   question?: string;
-  purpose?: "consultation";
+  purpose?: "consultation" | "decision-record";
 };
 
 export type ConversationEvidenceProof = {
@@ -19,7 +19,7 @@ export type ConversationEvidenceProof = {
   subject: ConversationContextSubject;
   question: string;
   contentHash: string;
-  capturePurpose?: "consultation";
+  capturePurpose?: "consultation" | "decision-record";
 };
 
 export type CapturedConversationEvidence = {

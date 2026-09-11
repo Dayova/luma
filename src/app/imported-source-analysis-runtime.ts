@@ -1,4 +1,7 @@
-import type { ImportedSourceAnalysisConfiguration } from "../meeting-intelligence/imported-source-analysis.js";
+import type {
+  ImportedSourceAnalysisConfiguration,
+  ImportedSourceHistoryAccess
+} from "../meeting-intelligence/imported-source-analysis.js";
 import { createGrantedImportedSourceAnalysisAccess } from "../knowledge/granted-imported-source-analysis-access.js";
 import type { ObservedSourceLedger } from "../knowledge/observed-source-ledger.js";
 import { createNotionObjectScopedMeetingNoteEvidenceReader } from "../knowledge/notion-object-scoped-meeting-note-evidence-reader.js";
@@ -15,7 +18,9 @@ export function importedSourceAnalysisFromEnv(input: {
   env: NodeJS.ProcessEnv;
   ledger: ObservedSourceLedger;
   operationalOutcomeMarkerVerifier: OperationalOutcomeMarkerVerifier;
-}): ImportedSourceAnalysisConfiguration | undefined {
+}):
+  | (ImportedSourceAnalysisConfiguration & { access: ImportedSourceHistoryAccess })
+  | undefined {
   const config = organizationalContextRuntimeConfig(input.env);
   if (!config?.providers.includes("notion")) return undefined;
   const token = input.env["LUMA_CONTEXT_NOTION_READONLY_API_TOKEN"]!.trim();

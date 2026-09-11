@@ -7,7 +7,7 @@ not a target to spend or a permanent financial commitment. Hosting, capture
 subscriptions, ChatGPT/Codex subscriptions, taxes and currency conversion are
 separate. The cap never increases automatically.
 
-The decision and ongoing pilot context live in the
+The decision and ongoing exploration context live in the
 [operating brief](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23).
 [LUM-44](https://linear.app/dayova/issue/LUM-44) tracks implementation.
 
@@ -32,14 +32,18 @@ messages contain no raw provider diagnostics or credentials.
 
 When a note is saved but its analysis is deferred, the response says both things.
 Original Evidence remains available. Do not resubmit the same note to force
-analysis: duplicate Observations do not re-run it. Monthly rollover does not
-automatically replay blocked requests or proposed external writes. Deterministic
+analysis: duplicate Observations do not re-run it. Automatic Decision processing
+can retry a retained attempt only when the provider was definitely not called,
+with at most three attempts for the exact source batch and a fresh permission
+check. Budget refusals wait for the actual reset; unknown charges remain held.
+Monthly rollover does not authorize proposed external writes. Deterministic
 queries and already saved information remain usable independently of AI spend.
 
 ## Accounting and admission
 
 The executable application supplies one durable usage controller to Meeting
-analysis and Context Ask. Reservations are transactional and shared across
+analysis, capture synthesis, Context Ask, Decision processing, structured work
+and native Notion review. Reservations are transactional and shared across
 concurrent callers. The ledger records request/workflow identities, capability,
 model, price version and token counts; it does not store prompt bodies or source
 text for telemetry.
@@ -120,7 +124,12 @@ Longer context, more revisions, greater reasoning usage or a model upgrade can
 consume the $30 allowance. New audio, paid tools or source services require a new
 estimate.
 
+Notion's own Custom Agent credits are separate from these Luma API calls. Native
+Notion review remains disabled until its access and separate billing arrangement
+are established; enabling the MCP endpoint does not bring provider agent charges
+under Luma's local ledger.
+
 After roughly two weeks of actual use, compare the usage breakdown with provider
 billing and useful workflow outcomes. Inspect uncertain/failed work and quality
-before changing the cap or routing. This is a pilot review checkpoint, not a
+before changing the cap or routing. This is an exploration review checkpoint, not a
 scheduled automation or a claim that live cost reconciliation has run.

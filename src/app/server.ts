@@ -77,6 +77,11 @@ import { createObservedSourceLedger } from "../knowledge/observed-source-ledger.
 import { createMeetingIntelligence } from "../meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../persistence/db.js";
 import { createLinearWorkProviderFromEnv } from "../work/linear-work-provider.js";
+import {
+  createStructuredWorkRuntime,
+  structuredWorkRuntimeConfig,
+  validateStructuredWorkFounderScope
+} from "./structured-work-runtime.js";
 import { toWorkCatalog } from "../work/interface.js";
 import { loadAppConfigFromEnv } from "./env.js";
 import { dayovaFounderPersonIds } from "./founder-access.js";
@@ -103,6 +108,8 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  createStructuredWorkRuntime?: typeof createStructuredWorkRuntime;
+  createWorkProvider?: typeof createLinearWorkProviderFromEnv;
   createGranolaConnections?: typeof granolaOAuthConnectionsFromEnv;
   createGranolaCallbackHost?: typeof createGranolaOAuthCallbackHost;
   createMeetingSynthesisWriter?: typeof createMeetingSynthesisRuntime;
@@ -185,6 +192,7 @@ export async function startServer(
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
   const contextConfig = organizationalContextRuntimeConfig(env);
   const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
+  const structuredWorkConfig = structuredWorkRuntimeConfig(env);
   const captureConfig = meetingCaptureRuntimeConfig(env);
   const granolaConfig = granolaOAuthRuntimeConfig(env);
   if (granolaConfig && !captureConfig?.granolaEnabled)
@@ -204,6 +212,13 @@ export async function startServer(
     identityDirectory,
     authorizedPersonIds: dayovaFounderPersonIds
   });
+  if (structuredWorkConfig)
+    await validateStructuredWorkFounderScope({
+      config: structuredWorkConfig,
+      workspaceId,
+      identityDirectory,
+      accessPolicy
+    });
   for (const providerUserId of discordContextAskConfig?.allowedDiscordUserIds ?? []) {
     if (
       !(await accessPolicy.authorize({
@@ -279,7 +294,8 @@ export async function startServer(
         hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
           discordContextAskConfig !== undefined ||
-          decisionRecordConfig !== undefined)
+          decisionRecordConfig !== undefined ||
+          structuredWorkConfig !== undefined)
     });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
@@ -287,7 +303,9 @@ export async function startServer(
           ? { workspaceId, personIds: [...dayovaFounderPersonIds] }
           : null
       );
-    const workProvider = optionalLinearWorkProvider(env);
+    const workProvider = dependencies.createWorkProvider
+      ? dependencies.createWorkProvider(env)
+      : optionalLinearWorkProvider(env);
     const observedSourceLedger = createObservedSourceLedger({ database });
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
       database
@@ -403,6 +421,31 @@ export async function startServer(
       startupAdmissionStops.push(() => decisionIntelligence.recall.stop());
       startupCleanup.push(() => decisionIntelligence.recall.stop());
     }
+    const structuredWorkRuntime =
+      structuredWorkConfig && workProvider
+        ? await (dependencies.createStructuredWorkRuntime ?? createStructuredWorkRuntime)(
+            {
+              config: structuredWorkConfig,
+              env,
+              workspaceId,
+              database,
+              ledger: observedSourceLedger,
+              conversationEvidenceSource: discordTransport,
+              ...(importedSourceAnalysis
+                ? { importedSourceAccess: importedSourceAnalysis.access }
+                : {}),
+              identityDirectory,
+              accessPolicy,
+              work: workProvider,
+              budget: aiUsage,
+              limits: aiRequestLimits,
+              model: openAIReasoningModelName
+            }
+          )
+        : undefined;
+    if (structuredWorkConfig && !structuredWorkRuntime)
+      throw new Error("Structured work requires the shared Linear WorkProvider");
+    if (structuredWorkRuntime) startupCleanup.push(() => structuredWorkRuntime.stop());
     const providerContextCatalogs = [
       ...(externalContextCatalogs ?? []),
       ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
@@ -427,6 +470,9 @@ export async function startServer(
         : undefined;
     const meetingDependencies = {
       database,
+      ...(structuredWorkRuntime
+        ? { structuredWork: structuredWorkRuntime.configuration }
+        : {}),
       ...(captureRuntime ? { captureSynthesis: captureRuntime.configuration } : {}),
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
@@ -447,11 +493,19 @@ export async function startServer(
           }
         : {})
     };
-    const decisionMeetingIntelligence = decisionIntelligence
+    const scopedMeetingIntelligence = decisionIntelligence
       ? createMeetingIntelligence({ ...meetingDependencies, decisionIntelligence })
-      : undefined;
+      : structuredWorkRuntime
+        ? createMeetingIntelligence({
+            ...meetingDependencies,
+            structuredWork: structuredWorkRuntime.configuration
+          })
+        : undefined;
     const meetingIntelligence =
-      decisionMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+      scopedMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+    const decisionMeetingIntelligence = decisionIntelligence
+      ? scopedMeetingIntelligence
+      : undefined;
     const automaticDecisions =
       decisionIntelligence?.automatic && decisionMeetingIntelligence
         ? await createAutomaticDecisionProcessing({
@@ -601,6 +655,14 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(structuredWorkRuntime && scopedMeetingIntelligence
+        ? {
+            structuredWork: structuredWorkRuntime.discord({
+              meetingIntelligence: scopedMeetingIntelligence,
+              execution: followUpExecution
+            })
+          }
+        : {}),
       ...(granolaConnections && granolaCallback
         ? {
             granola: await createDiscordGranolaRuntime({
@@ -718,6 +780,7 @@ export async function startServer(
               // Foreground Decision work may have entered a retained proof after
               // background cancellation; all command admission has now settled.
               await decisionIntelligence?.recall.stop();
+              await structuredWorkRuntime?.stop();
               await captureRuntime?.stop();
               await automaticDecisions?.stop();
               await granolaConnections?.stop();

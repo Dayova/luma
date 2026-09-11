@@ -1,4 +1,5 @@
 import type { ExternalReference, PersonId, WorkspaceId } from "../domain/model.js";
+import type { KnowledgeStanding } from "../domain/knowledge-standing.js";
 
 /** Actual recipients, including readers of a shared response. */
 export type ContextAudience = { workspaceId: WorkspaceId; personIds: PersonId[] };
@@ -21,7 +22,7 @@ export type ContextSource = {
   updatedAt: string;
   externalReference: ExternalReference;
   /** Source metadata or Human Judgment, never guessed from recency. */
-  standing: "current" | "proposed" | "disputed" | "superseded" | "historical";
+  standing: KnowledgeStanding;
   authority: "human-confirmed" | "source" | "ai-inference";
   effectiveAt?: string;
   /** Exact substantive equivalence asserted by an owned catalog; never authority. */

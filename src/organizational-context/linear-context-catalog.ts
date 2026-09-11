@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import {
+  isKnowledgeStanding,
+  type KnowledgeStanding
+} from "../domain/knowledge-standing.js";
+import {
   createLinearReadOnlyWorkCatalog,
   isIssuedLinearReadOnlyWorkCatalog,
   type LinearReadOnlyWorkCatalog
@@ -212,6 +216,8 @@ function parseSourceId(sourceId: string): { issueId: string; identifier: string 
 }
 
 function toContextSource(item: WorkItem, sourceId: string): ContextSource | null {
+  const standing = explicitStanding(item.labels);
+  if (!standing) return null;
   if (
     !item.title.trim() ||
     !Number.isFinite(Date.parse(item.updatedAt)) ||
@@ -243,6 +249,16 @@ function toContextSource(item: WorkItem, sourceId: string): ContextSource | null
       url: item.url
     },
     authority: "source",
-    standing: "current"
+    standing
   };
+}
+
+function explicitStanding(labels: string[]): KnowledgeStanding | null {
+  const prefix = "luma:knowledge:";
+  const explicit = [...new Set(labels.filter((label) => label.startsWith(prefix)))];
+  if (explicit.length === 0) return "current";
+  // Conflicting labels are not a licence to select the most convenient state.
+  if (explicit.length !== 1) return null;
+  const standing = explicit[0]!.slice(prefix.length);
+  return isKnowledgeStanding(standing) ? standing : null;
 }

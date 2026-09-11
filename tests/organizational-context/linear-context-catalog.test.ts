@@ -114,6 +114,69 @@ function fixture() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Linear organizational context catalog", () => {
+  it.each(["current", "proposed", "disputed", "superseded", "historical"])(
+    "uses explicit %s knowledge labels without treating completion or labels as Human authority",
+    async (standing) => {
+      const f = fixture();
+      f.setCurrent(
+        issue({
+          labels: [`luma:knowledge:${standing}`],
+          stateType: "completed",
+          stateName: "Done"
+        })
+      );
+      expect(await f.catalog.read(readInput)).toMatchObject({
+        standing,
+        authority: "source"
+      });
+    }
+  );
+
+  it("withholds conflicting or unsupported explicit knowledge labels", async () => {
+    const f = fixture();
+    for (const labels of [
+      ["luma:knowledge:current", "luma:knowledge:superseded"],
+      ["luma:knowledge:approved"],
+      ["luma:knowledge:"]
+    ]) {
+      f.setCurrent(issue({ labels }));
+      expect(await f.catalog.read(readInput)).toBeNull();
+    }
+  });
+
+  it("invalidates a retained receipt on label-only supersession without deleting historical material", async () => {
+    const f = fixture();
+    const database = await createPgliteDatabase();
+    try {
+      const context = createOrganizationalContext({ database, catalogs: [f.catalog] });
+      const request: OrganizationalContextRequest = {
+        audience,
+        subject: { type: "conversation", id: "standing" },
+        purpose: "answer-question",
+        concepts: ["Luma release"],
+        time: { mode: "current" },
+        limit: 10,
+        maxCharacters: 8000
+      };
+      const before = await context.retrieve(request);
+      expect(before.sources).toHaveLength(1);
+      f.setCurrent(issue({ labels: ["luma:knowledge:superseded"] }));
+      await expect(context.requireCurrent(request, before.receiptId)).rejects.toThrow();
+      expect((await context.retrieve(request)).sources).toEqual([]);
+      expect(
+        (await context.retrieve({ ...request, time: { mode: "history" } })).sources.some(
+          (source) => source.standing === "superseded"
+        )
+      ).toBe(true);
+      f.revokeTeam();
+      expect(
+        (await context.retrieve({ ...request, time: { mode: "history" } })).sources
+      ).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
   it("uses bounded read-only team search and source facts without inferring accepted decisions or owners", async () => {
     const f = fixture();
     const result = await f.catalog.search(searchInput);

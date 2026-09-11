@@ -110,6 +110,81 @@ afterEach(async () => {
 });
 
 describe("audience-scoped Notion organizational context", () => {
+  it.each(["current", "proposed", "disputed", "superseded", "historical"])(
+    "retains explicit %s source standing without inferring Human authority",
+    async (standing) => {
+      const test = setup();
+      test.setHead(
+        page(pageId, {
+          properties: {
+            ...page().properties,
+            "Luma knowledge state": { type: "select", select: { name: standing } }
+          }
+        })
+      );
+      expect(await test.catalog.read({ audience, sourceId: pageId })).toMatchObject({
+        standing,
+        authority: "source"
+      });
+    }
+  );
+
+  it("invalidates retained receipts when only explicit standing changes and keeps the prior source in history", async () => {
+    const test = setup();
+    const database = await createPgliteDatabase();
+    databases.push(database);
+    const context = createOrganizationalContext({ database, catalogs: [test.catalog] });
+    const before = await context.retrieve(request);
+    expect(before.sources).toHaveLength(1);
+    test.setHead(
+      page(pageId, {
+        properties: {
+          ...page().properties,
+          "Luma knowledge state": { type: "status", status: { name: "Superseded" } }
+        }
+      })
+    );
+    await expect(context.requireCurrent(request, before.receiptId)).rejects.toThrow();
+    expect((await context.retrieve(request)).sources).toEqual([]);
+    const history = await context.retrieve({ ...request, time: { mode: "history" } });
+    expect(history.sources.some((source) => source.standing === "superseded")).toBe(true);
+    test.revoke();
+    expect(
+      (await context.retrieve({ ...request, time: { mode: "history" } })).sources
+    ).toEqual([]);
+  });
+
+  it("rejects unset, unsupported and changed-during-read explicit standing", async () => {
+    const test = setup();
+    for (const property of [
+      { type: "select", select: null },
+      { type: "status", status: { name: "approved by everyone" } },
+      { type: "rich_text", rich_text: [] }
+    ]) {
+      test.setHead(
+        page(pageId, {
+          properties: { ...page().properties, "Luma knowledge state": property }
+        })
+      );
+      await expect(test.catalog.read({ audience, sourceId: pageId })).rejects.toThrow(
+        NotionKnowledgeReadError
+      );
+    }
+    test.setHead(page());
+    test.hooks.markdown = () =>
+      test.setHead(
+        page(pageId, {
+          properties: {
+            ...page().properties,
+            "Luma knowledge state": { type: "select", select: { name: "proposed" } }
+          }
+        })
+      );
+    await expect(test.catalog.read({ audience, sourceId: pageId })).rejects.toThrow(
+      NotionKnowledgeReadError
+    );
+  });
+
   it("uses only installed SDK GET operations with full transcripts and the dedicated read credential", async () => {
     const urls: URL[] = [];
     const network = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {

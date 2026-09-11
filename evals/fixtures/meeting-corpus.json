@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "annotationProvenance": "The original four fixtures and their named expectations are retained. New structured samples and scenario assertions are agent-authored synthetic annotations and require human review; they are not a human-labeled benchmark.",
   "referenceAt": "2026-09-10T08:00:00.000Z",
   "timezone": "Europe/Berlin",
@@ -499,12 +499,6 @@
       ],
       "missing": [
         {
-          "id": "cross-meeting-current-recall",
-          "metric": "relevant-current-recall",
-          "reason": "Context Ask and retained source revisions are exercised, but retrieval from another actual Meeting is not demonstrated.",
-          "acceptance": "Retrieve the old still-valid ownership decision from another Meeting while excluding unrelated material."
-        },
-        {
           "id": "cross-provider-stale-inclusion",
           "metric": "stale-claim-inclusion",
           "reason": "Normalized multi-catalog ranking is measured separately. Actual Notion/Linear/GitHub source adapters and their standing/authority mapping are not demonstrated.",
@@ -527,6 +521,10 @@
         {
           "id": "bounded-organizational-input-output",
           "fixtureId": "organizational-bounded-context"
+        },
+        {
+          "id": "cross-meeting-current-recall",
+          "fixtureId": "actual-imported-meeting-recall"
         }
       ]
     },
@@ -2442,6 +2440,141 @@
           "path": ["first", "coverage", "complete"],
           "operation": "equals",
           "expected": false
+        }
+      ]
+    }
+  ],
+  "importedMeetingFixtures": [
+    {
+      "id": "actual-imported-meeting-recall",
+      "question": "What did the previous Meeting decide about Luma ownership?",
+      "statement": "Jakob owns Luma.",
+      "confirm": true,
+      "revokeBeforeReplay": true,
+      "expected": {
+        "checks": [
+          "cross-meeting-current-recall",
+          "imported-recall-analysis-executed",
+          "imported-recall-human-authority",
+          "imported-recall-current-standing",
+          "imported-recall-real-meeting-source",
+          "imported-recall-source-link",
+          "imported-recall-unrelated-excluded",
+          "imported-recall-durable-replay",
+          "imported-recall-one-answer-call",
+          "imported-recall-revocation-blocks-replay",
+          "imported-recall-revocation-blocks-delivery",
+          "imported-recall-revocation-no-repeat-call",
+          "imported-recall-no-private-fresh-output",
+          "imported-recall-retains-immutable-history",
+          "imported-recall-normal-external-analysis"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "cross-meeting-current-recall",
+          "metric": "relevant-current-recall",
+          "path": ["first", "text"],
+          "operation": "includes",
+          "expected": "Jakob owns Luma."
+        },
+        {
+          "id": "imported-recall-analysis-executed",
+          "metric": "coverage",
+          "path": ["acceptedAnalysis"],
+          "operation": "equals",
+          "expected": "completed"
+        },
+        {
+          "id": "imported-recall-human-authority",
+          "metric": "decisions",
+          "path": ["first", "sources", 0, "authority"],
+          "operation": "equals",
+          "expected": "human-confirmed"
+        },
+        {
+          "id": "imported-recall-current-standing",
+          "metric": "decisions",
+          "path": ["first", "sources", 0, "standing"],
+          "operation": "equals",
+          "expected": "current"
+        },
+        {
+          "id": "imported-recall-real-meeting-source",
+          "metric": "grounding",
+          "path": ["first", "sources", 0, "kind"],
+          "operation": "equals",
+          "expected": "previous-meeting-item"
+        },
+        {
+          "id": "imported-recall-source-link",
+          "metric": "grounding",
+          "path": ["first", "sources", 0, "url"],
+          "operation": "equals",
+          "expected": "https://notion.so/page-ownership"
+        },
+        {
+          "id": "imported-recall-unrelated-excluded",
+          "metric": "context-use",
+          "path": ["first", "text"],
+          "operation": "excludes",
+          "expected": "Farbpalette"
+        },
+        {
+          "id": "imported-recall-durable-replay",
+          "metric": "retention",
+          "path": ["replayEqual"],
+          "operation": "equals",
+          "expected": true
+        },
+        {
+          "id": "imported-recall-one-answer-call",
+          "metric": "coverage",
+          "path": ["beforeReplayCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "imported-recall-revocation-blocks-replay",
+          "metric": "retention",
+          "path": ["revokedReplay"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "imported-recall-revocation-blocks-delivery",
+          "metric": "retention",
+          "path": ["finalDelivery"],
+          "operation": "equals",
+          "expected": "blocked"
+        },
+        {
+          "id": "imported-recall-revocation-no-repeat-call",
+          "metric": "coverage",
+          "path": ["afterReplayCalls"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "imported-recall-no-private-fresh-output",
+          "metric": "retention",
+          "path": ["freshSources"],
+          "operation": "equals",
+          "expected": 0
+        },
+        {
+          "id": "imported-recall-retains-immutable-history",
+          "metric": "retention",
+          "path": ["retainedAfter"],
+          "operation": "same-as",
+          "expected": ["retainedBefore"]
+        },
+        {
+          "id": "imported-recall-normal-external-analysis",
+          "metric": "coverage",
+          "path": ["externalEvidenceUsed"],
+          "operation": "equals",
+          "expected": true
         }
       ]
     }

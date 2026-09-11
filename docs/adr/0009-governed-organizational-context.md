@@ -29,3 +29,17 @@ This module does not authorize external writes. Approved Follow-up Intents,
 current source proofs, Human Judgment, and execution receipts remain mandatory
 for canonical mutations. Wiring a caller must include derived-output receipt
 persistence and replay checks; adding text to a prompt alone is insufficient.
+
+## Imported Meeting leaf recall
+
+The accepted-import recall catalog is owned by Meeting Intelligence persistence,
+with no recursive calls to Meeting Intelligence or Organizational Context. It
+requires original source-analysis audience grants, active Evidence and current
+source admission for every item, and excludes the current subject. Stable source
+identity includes the original grant identities so retained raw revisions cannot
+inherit a later capture's permission. Independent Human text needs its own audience grant. External Organizational
+Context dependencies use a restricted receipt verifier that checks original
+recipient admission, exact source versions and current external discovery. It
+cannot invoke a prior-Meeting catalog; multi-hop Meeting dependencies remain
+withheld. See [bounded imported Meeting recall](../imported-meeting-recall.md)
+for the coverage and evaluation limits.

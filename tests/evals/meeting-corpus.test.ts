@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { loadCorpus, validateCoverage, type SemanticCheck } from "../../evals/corpus.js";
 import { evaluateCorpus } from "../../evals/runner.js";
 import { reportExitCode, score } from "../../evals/scorer.js";
+import { createPgliteDatabase } from "../../src/persistence/db.js";
+import { runImportedMeetingFixture } from "../../evals/imported-meeting-runner.js";
 
 const load = () =>
   loadCorpus(
@@ -14,6 +16,40 @@ afterEach(() => {
 });
 
 describe("versioned Meeting product evaluation", () => {
+  it("detects missing imported source content, Human authority and revocation in real prior Meeting recall", async () => {
+    const { corpus } = await load();
+    const fixture = structuredClone(corpus.importedMeetingFixtures[0]!);
+    fixture.statement = "Unrelated marketing discussion.";
+    const database = await createPgliteDatabase();
+    try {
+      const absent = await runImportedMeetingFixture(
+        database,
+        { ...fixture, id: "missing-source" },
+        corpus
+      );
+      expect(
+        absent.checks.find((check) => check.id === "cross-meeting-current-recall")?.status
+      ).toBe("failed");
+      const unguarded = await runImportedMeetingFixture(
+        database,
+        {
+          ...corpus.importedMeetingFixtures[0]!,
+          id: "missing-controls",
+          confirm: false,
+          revokeBeforeReplay: false
+        },
+        corpus
+      );
+      const failed = unguarded.checks
+        .filter((check) => check.status === "failed")
+        .map((check) => check.id);
+      expect(failed).toContain("imported-recall-human-authority");
+      expect(failed).toContain("imported-recall-revocation-blocks-replay");
+      expect(failed).toContain("imported-recall-revocation-blocks-delivery");
+    } finally {
+      await database.close();
+    }
+  });
   it("consumes every named expectation, measures public behavior, and cannot turn missing retrieval into product readiness", async () => {
     const network = vi
       .spyOn(globalThis, "fetch")
@@ -21,19 +57,19 @@ describe("versioned Meeting product evaluation", () => {
     const { corpus, samples } = await load();
     const report = await evaluateCorpus(corpus, samples);
     expect(report.fixtures.map((fixture) => fixture.id)).toEqual(
-      [...corpus.fixtures, ...corpus.retrievalFixtures, ...corpus.githubFixtures].map(
-        (fixture) => fixture.id
-      )
+      [
+        ...corpus.fixtures,
+        ...corpus.retrievalFixtures,
+        ...corpus.githubFixtures,
+        ...corpus.importedMeetingFixtures
+      ].map((fixture) => fixture.id)
     );
     expect(report.summary.failed).toBe(0);
     expect(report.summary.passed).toBeGreaterThan(40);
     const missing = report.fixtures
       .flatMap((fixture) => fixture.checks)
       .filter((check) => check.status === "missing");
-    expect(missing.map((check) => check.id)).toEqual([
-      "cross-meeting-current-recall",
-      "cross-provider-stale-inclusion"
-    ]);
+    expect(missing.map((check) => check.id)).toEqual(["cross-provider-stale-inclusion"]);
     expect(report.knowledgeSelection.relevantCurrentRecall).toEqual({
       recalled: 3,
       relevant: 3,

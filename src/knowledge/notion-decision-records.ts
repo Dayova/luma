@@ -253,7 +253,11 @@ export function createNotionDecisionRecords(
       pages,
       snapshot: {
         id: `notion-decisions:${workspaceId}:${dataSourceId}`,
-        revision: decisionDigest({ audience, records, complete }),
+        revision: decisionDigest({
+          audience: { ...audience, personIds: [...audience.personIds].sort() },
+          records,
+          complete
+        }),
         complete,
         records
       }

@@ -125,6 +125,22 @@ afterEach(() => {
 });
 
 describe("canonical Notion Decision Records", () => {
+  it("treats the same original audience as a set while rejecting changed recipients", async () => {
+    const f = fixture();
+    const snapshot = await f.records.discover({ audience, limit: 100 });
+    await expect(
+      f.records.requireCurrent({
+        audience: { ...audience, personIds: [...audience.personIds].reverse() },
+        snapshot
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      f.records.requireCurrent({
+        audience: { ...audience, personIds: audience.personIds.slice(1) },
+        snapshot
+      })
+    ).rejects.toThrow();
+  });
   it("retains literal region-marker text as evidence without making its own write unrecoverable", async () => {
     const f = fixture();
     const request = createInput();

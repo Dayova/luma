@@ -22,7 +22,10 @@ atomic exact-region operation. Content outside the owned region is preserved.
 The adapter requires the canonical data source ID, write integration token, a
 stable protected signing key of at least 32 bytes, and current authorization
 callbacks for the destination, every retained original source and each retained
-authority snapshot's own source. Every actual
+authority snapshot's own source. If a revision includes supplemental original Human
+reviews, `authorizeRetainedHumanReview` must independently verify each retained
+review's original actor, source and audience. Missing review authorization withholds
+that archive. Every actual
 recipient must belong to each revision's original audience and retain source
 access. The source callback must verify access, deletion and exclusion without
 requiring old wording to equal the latest wording: old eligible evidence is
@@ -42,13 +45,59 @@ block writes. Signing proves Luma's stored operation history, not that an AI
 interpretation is correct. Human edits can be made outside the owned region;
 changing the record itself requires a fresh reviewed operation.
 
-Discovery is bounded to 100 records, ten pages and a 15-second operation deadline.
+Discovery is bounded to 100 records, ten pages and a four-minute operation deadline.
 Owned history is bounded to 100 revisions and 180 KB; reaching a bound stops the
 operation without pruning history. Increasing these limits requires an explicit
-implementation change. Provider retries are disabled. A timeout after dispatch
-is **unknown**, and `findWritten` only accepts the exact latest signed operation
-and expected result; it never repeats a write. A proven prewrite refusal is
-distinct from an uncertain send.
+implementation change. The native SDK has retries disabled. The owned scheduler
+retries only safe reads, at most twice after an overload or transient server response,
+and honors `Retry-After`. A dispatched mutation is never retried. A timeout after
+dispatch is **unknown**, and `findWritten` only accepts the exact latest signed
+operation and expected result; it never repeats a write. A proven prewrite refusal
+is distinct from an uncertain send.
+
+`createNotionDecisionRecordCatalog` exposes only the owned read-only catalog port
+using `readOnlyApiToken`; its transport has no mutation methods. Use a dedicated
+read-only Notion integration. `read` resolves an arbitrary logical or provider ID
+against complete discovery and refuses ambiguity. `readReference` reads an exact
+previously verified provider reference, including exact parent and current source
+grants, without scanning unrelated records. Known immutable catalog snapshots are
+checked against complete ID listings and exact full Markdown plus native heads;
+timestamps alone never prove unchanged content.
+
+The native Decision writer, reader and governed ownership-page reader share a
+per-credential scheduler. It admits at most four concurrent requests and 180 starts
+in a sliding 60-second window. Notion currently documents 180 requests/minute for
+non-Business/Enterprise connections and 600 for Business/Enterprise, with additional
+workspace limits. The conservative local window covers either plan; independent
+processes and other integrations can still consume provider capacity. Native fetch
+is aborted on a four-second request timeout or the overall deadline. Queued work is
+cancelled at the deadline and cannot start a late mutation.
+
+Within each complete pass, exact retained source, authority and Human review proofs
+are deduplicated and freshly checked after the records are read. Nothing is cached
+across operations. Creating a record reuses one pre-create discovery for recovery
+and duplicate detection, rechecks all exact catalog bytes and current grants before
+dispatch, then verifies the exact native page returned by a successful create. A
+lost acknowledgement still needs complete positive recovery. The caller's exact
+source/authority guard and destination grant run after a queued wait; if their own
+reads consume the remaining window, the scheduler waits and runs the proof again.
+
+Deterministic native SDK tests with a simulated 180-request service window and
+asynchronous responses establish these request counts when all records share one
+retained source and authority snapshot:
+
+| Operation                                        | Decision connection requests | Ownership connection requests |
+| ------------------------------------------------ | ---------------------------: | ----------------------------: |
+| Discover 100 records                             |                          302 |                             3 |
+| Revalidate that complete snapshot                |                          202 |                             3 |
+| Create the 100th record from 99 existing records |                          503 |                            18 |
+| Read one known reference                         |                            3 |                             3 |
+
+The create count includes a real current authority guard. Distinct retained sources
+or authority snapshots add their own fresh proof reads. These are request-count and
+queue/deadline regressions, not measurements of live Notion latency. High contention,
+large source histories or repeated overload can still hit the bounded deadline and
+produce a visible refusal or unknown outcome rather than weaken authorization.
 
 The deterministic tests exercise the pinned SDK request shape, stale targets,
 retained history, source and destination revocation, interrupted writes, lineage,

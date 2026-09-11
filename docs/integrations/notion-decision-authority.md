@@ -34,10 +34,14 @@ The adapter verifies the whole actual audience through the catalog, exact page
 identity, content hash, and each literal excerpt. Source and policy are reread before
 and after retaining the snapshot. A durable authority snapshot contains the exact
 source reference/version, mapping-bound revision, content hash, grants and excerpts;
-its original audience is retained separately in the full Luma store. The 15-second
-operation bound prevents a stalled authorization callback from holding a command
-indefinitely. Once an in-flight catalog read settles after that deadline, it cannot
-start another authority-stage read, persist a late snapshot, or return a result.
+its original audience is retained separately in the full Luma store. A four-minute
+operation bound includes queue waits in the shared per-credential Notion scheduler;
+each native fetch has a four-second timeout. Retained authority checks also respect
+the caller's earlier cancellation deadline. Once an in-flight catalog read settles
+after that deadline, it cannot start another authority-stage read, persist a late
+snapshot, or return a result. The scheduler uses Notion's conservative 180-request
+sliding minute window, bounds active requests to four, and retries only safe reads
+under documented overload responses. See the [Decision adapter capacity contract](notion-decision-records.md).
 
 `requireCurrent` is the execution fence: it demands the same current source and
 mapping snapshot. `authorizeRetainedAuthority` is exclusively for historical reads,

@@ -11,6 +11,7 @@ const dataSourceId = "3bc2e872-28bf-8193-9669-ec8c5a94aae3";
 const firstPageId = "3d52e872-28bf-80ae-befe-d1c0e2c39df5";
 const secondPageId = "3d52e872-28bf-81f9-8d79-c1233431c8bd";
 const audience = decisionRecord().source.audience;
+const requireCurrent = () => Promise.resolve();
 function fixture() {
   const pages = new Map<string, { parent: string; markdown: string; version: string }>();
   let targetGranted = true;
@@ -117,6 +118,7 @@ function fixture() {
 const createInput = () => ({
   audience,
   stage: { type: "create-record", record: decisionRecord() } satisfies DecisionWriteStage,
+  requireCurrent,
   operationId: "approved-create-unique"
 });
 afterEach(() => {
@@ -140,6 +142,55 @@ describe("canonical Notion Decision Records", () => {
         snapshot
       })
     ).rejects.toThrow();
+  });
+  it("requires a separate current permission proof for every retained original Human review", async () => {
+    const f = fixture();
+    const request = createInput();
+    const source = request.stage.record.source;
+    request.stage.record.authority.humanReviews = [
+      {
+        id: "human-review",
+        requestId: "request-1",
+        observationId: "instruction-1",
+        subject: source.subject,
+        actor: { providerId: "discord", providerUserId: "jakob-discord" },
+        personId: "jakob",
+        audience: source.audience,
+        sourceContentHash: source.contentHash,
+        sourceAuthorizationHash: source.authorizationHash,
+        reviewToken: null,
+        acceptedCandidateHash: null,
+        evidence: source.evidence[0]!,
+        observedAt: "2026-09-11T10:00:00Z"
+      }
+    ];
+    await expect(f.records.write(request)).rejects.toBeInstanceOf(
+      DecisionWriteNotAppliedError
+    );
+    expect(f.mutationLog).toEqual([]);
+    let granted = true;
+    const proof = vi.fn(() => Promise.resolve(granted));
+    const records = createNotionDecisionRecords({
+      ...f.config,
+      transport: f.transport,
+      authorizeRetainedHumanReview: proof
+    });
+    const result = await records.write(request);
+    expect(result.record.content.authority.humanReviews).toEqual(
+      request.stage.record.authority.humanReviews
+    );
+    const snapshot = await records.discover({ audience, limit: 100 });
+    expect(snapshot.complete).toBe(true);
+    expect(
+      await f.make().readReference({ audience, reference: result.record.reference })
+    ).toBeNull();
+    granted = false;
+    expect(
+      await records.readReference({ audience, reference: result.record.reference })
+    ).toBeNull();
+    await expect(records.requireCurrent({ audience, snapshot })).rejects.toThrow();
+    expect(f.mutationLog).toEqual(["create"]);
+    expect(proof.mock.calls.length).toBeGreaterThan(0);
   });
   it("retains literal region-marker text as evidence without making its own write unrecoverable", async () => {
     const f = fixture();
@@ -184,6 +235,7 @@ describe("canonical Notion Decision Records", () => {
     content.candidate.statement.text = "The approved budget remains $30.";
     const amended = await f.records.write({
       audience,
+      requireCurrent,
       operationId: "normalized-amend",
       stage: { type: "amend-record", target: receipt.record, record: content }
     });
@@ -228,7 +280,7 @@ describe("canonical Notion Decision Records", () => {
     expect(await f.make().findWritten(input)).toMatchObject({
       operationId: input.operationId
     });
-    const changed = structuredClone(input);
+    const changed = { ...input, stage: structuredClone(input.stage) };
     changed.stage.record.candidate.statement.text = "Changed decision";
     expect(await f.make().findWritten(changed)).toBeNull();
     await expect(f.records.write(changed)).rejects.toBeInstanceOf(
@@ -249,6 +301,7 @@ describe("canonical Notion Decision Records", () => {
     content.candidate.statement.text = "Luma remains internal; revisit support later.";
     const stale = {
       audience,
+      requireCurrent,
       operationId: "amend-stale",
       stage: {
         type: "amend-record",
@@ -261,6 +314,7 @@ describe("canonical Notion Decision Records", () => {
     );
     const amended = await f.records.write({
       ...stale,
+      requireCurrent,
       operationId: "amend-current",
       stage: { ...stale.stage, target: current }
     });
@@ -281,11 +335,13 @@ describe("canonical Notion Decision Records", () => {
     successor.candidate.disposition = "pause";
     const pending = await f.records.write({
       audience,
+      requireCurrent,
       operationId: "successor-create",
       stage: { type: "create-record", record: successor }
     });
     const activation = {
       audience,
+      requireCurrent,
       operationId: "successor-activate",
       stage: {
         type: "activate-record",
@@ -297,6 +353,7 @@ describe("canonical Notion Decision Records", () => {
     );
     const retired = await f.records.write({
       audience,
+      requireCurrent,
       operationId: "original-retire",
       stage: {
         type: "retire-record",
@@ -353,6 +410,7 @@ describe("canonical Notion Decision Records", () => {
       f.records.write({
         ...createInput(),
         audience: recipients,
+        requireCurrent,
         operationId: "repeat-as-new"
       })
     ).rejects.toBeInstanceOf(DecisionWriteNotAppliedError);
@@ -377,7 +435,7 @@ describe("canonical Notion Decision Records", () => {
     });
     f.hooks.beforeList = () => held;
     const pending = expect(f.records.write(createInput())).rejects.toThrow();
-    await vi.advanceTimersByTimeAsync(15_001);
+    await vi.advanceTimersByTimeAsync(240_001);
     await pending;
     release();
     await vi.runAllTimersAsync();
@@ -430,6 +488,7 @@ describe("canonical Notion Decision Records", () => {
     content.candidate.statement.text = "Keep internal, with a later review.";
     await records.write({
       audience,
+      requireCurrent,
       operationId: "sdk-amend",
       stage: { type: "amend-record", target: original.record, record: content }
     });

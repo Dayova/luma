@@ -181,6 +181,8 @@ function fixture() {
         : Promise.reject(new Error("catalog changed")),
     read: ({ recordId }) =>
       Promise.resolve(structuredClone(records.get(recordId) ?? null)),
+    readReference: ({ audience, reference }) =>
+      provider.read({ audience, recordId: reference.externalId }),
     findWritten: vi.fn<DecisionRecords["findWritten"]>(({ operationId }) =>
       Promise.resolve(structuredClone(receipts.get(operationId) ?? null))
     ),

@@ -1,35 +1,12 @@
 import type {
-  CanonicalDecisionRecord,
   DecisionAudience,
-  DecisionCatalogSnapshot,
   DecisionWriteReceipt,
   DecisionWriteStage
 } from "../domain/decision-records.js";
+import type { DecisionRecordCatalog } from "./decision-record-catalog.js";
 
 /** Canonical configured knowledge target; every operation verifies the entire actual audience. */
-export interface DecisionRecords {
-  readonly providerId: string;
-  discover(
-    this: void,
-    input: {
-      audience: DecisionAudience;
-      limit: number;
-    }
-  ): Promise<DecisionCatalogSnapshot>;
-  requireCurrent(
-    this: void,
-    input: {
-      audience: DecisionAudience;
-      snapshot: DecisionCatalogSnapshot;
-    }
-  ): Promise<void>;
-  read(
-    this: void,
-    input: {
-      audience: DecisionAudience;
-      recordId: string;
-    }
-  ): Promise<CanonicalDecisionRecord | null>;
+export interface DecisionRecords extends DecisionRecordCatalog {
   /** One bounded external mutation per stage. No follow-on mutation inside this call. */
   write(
     this: void,
@@ -37,6 +14,8 @@ export interface DecisionRecords {
       audience: DecisionAudience;
       stage: DecisionWriteStage;
       operationId: string;
+      /** Rechecks the immutable approved source and authority after any provider queue wait. */
+      requireCurrent(this: void): Promise<void>;
     }
   ): Promise<DecisionWriteReceipt>;
   /** Exact positive evidence only. Absence never authorizes another uncertain write. */

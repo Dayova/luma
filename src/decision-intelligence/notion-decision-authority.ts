@@ -18,6 +18,7 @@ import {
 import type { LumaDatabase } from "../persistence/db.js";
 import type { DecisionAuthority } from "./ports.js";
 import { decisionDigest } from "./persistence.js";
+import { NOTION_OPERATION_TIMEOUT_MS } from "../knowledge/notion-request-scheduler.js";
 
 const id = z.string().trim().min(1).max(512);
 const grantSchema = z
@@ -55,6 +56,7 @@ export type SourceBackedDecisionAuthority = DecisionAuthority & {
   authorizeRetainedAuthority(input: {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
+    signal?: AbortSignal;
   }): Promise<boolean>;
 };
 export function decisionAuthorityContentHash(markdown: string): string {
@@ -126,7 +128,7 @@ export function createNotionDecisionAuthority(input: {
     return { ...parsed, personIds: [...parsed.personIds].sort() };
   };
   const read: DecisionAuthority["read"] = (request) =>
-    bounded(async (check) => {
+    bounded(async (check, signal) => {
       const bound = audience(request.audience),
         policy = await readPolicy(input.policyPath, input.workspaceId);
       if (
@@ -141,6 +143,7 @@ export function createNotionDecisionAuthority(input: {
       check();
       const document = await input.knowledge.readDocument({
         audience: bound,
+        signal,
         documentId: policy.documentId
       });
       if (
@@ -189,6 +192,7 @@ export function createNotionDecisionAuthority(input: {
       check();
       const current = await input.knowledge.readDocument({
         audience: bound,
+        signal,
         documentId: policy.documentId
       });
       check();
@@ -213,6 +217,7 @@ export function createNotionDecisionAuthority(input: {
       check();
       const finalDocument = await input.knowledge.readDocument({
         audience: bound,
+        signal,
         documentId: policy.documentId
       });
       check();
@@ -231,8 +236,9 @@ export function createNotionDecisionAuthority(input: {
   const retained = (request: {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
+    signal?: AbortSignal;
   }): Promise<boolean> =>
-    bounded(async (check) => {
+    bounded(async (check, signal) => {
       try {
         const bound = audience(request.audience),
           snapshot = decisionAuthoritySnapshotSchema.parse(
@@ -267,6 +273,7 @@ export function createNotionDecisionAuthority(input: {
         if (!original) return false;
         const document = await input.knowledge.readDocument({
           audience: bound,
+          signal,
           documentId: snapshot.source.externalId
         });
         check();
@@ -279,7 +286,7 @@ export function createNotionDecisionAuthority(input: {
       } catch {
         return false;
       }
-    }).catch(() => false);
+    }, request.signal).catch(() => false);
   return {
     read,
     requireCurrent: async (request) => {
@@ -291,22 +298,30 @@ export function createNotionDecisionAuthority(input: {
   };
 }
 
-function bounded<T>(operation: (check: () => void) => Promise<T>): Promise<T> {
-  let active = true;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+function bounded<T>(
+  operation: (check: () => void, signal: AbortSignal) => Promise<T>,
+  outer?: AbortSignal
+): Promise<T> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (outer?.aborted) abort();
+  else outer?.addEventListener("abort", abort, { once: true });
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      active = false;
-      reject(unavailable());
-    }, 15000);
+    if (controller.signal.aborted) reject(unavailable());
+    else
+      controller.signal.addEventListener("abort", () => reject(unavailable()), {
+        once: true
+      });
   });
+  const timer = setTimeout(abort, NOTION_OPERATION_TIMEOUT_MS);
   return Promise.race([
     operation(() => {
-      if (!active) throw unavailable();
-    }),
+      if (controller.signal.aborted) throw unavailable();
+    }, controller.signal),
     timeout
   ]).finally(() => {
-    active = false;
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
+    outer?.removeEventListener("abort", abort);
+    controller.abort();
   });
 }

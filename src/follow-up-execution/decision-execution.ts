@@ -208,9 +208,9 @@ export function createDecisionFollowUpExecution(
           });
           const target = intent.target;
           if (!target) throw new Error("The approved link has no canonical target");
-          const current = await input.records.read({
+          const current = await input.records.readReference({
             audience: intent.source.audience,
-            recordId: target.reference.externalId
+            reference: target.reference
           });
           if (!current || decisionDigest(current) !== decisionDigest(target))
             throw new Error("The selected canonical decision changed");
@@ -301,9 +301,9 @@ export function createDecisionFollowUpExecution(
                 snapshot: intent.catalog
               });
             if ("target" in active.stage) {
-              const current = await input.records.read({
+              const current = await input.records.readReference({
                 audience: intent.source.audience,
-                recordId: active.stage.target.reference.externalId
+                reference: active.stage.target.reference
               });
               if (
                 !current ||
@@ -360,7 +360,8 @@ export function createDecisionFollowUpExecution(
               const receipt = await input.records.write({
                 audience: intent.source.audience,
                 stage: structuredClone(active.stage),
-                operationId: active.operationId
+                operationId: active.operationId,
+                requireCurrent: () => requireDecisionRequestCurrent(input, stored)
               });
               active.receipt = verifyReceipt(receipt, active, input.records.providerId);
               active.state = "succeeded";

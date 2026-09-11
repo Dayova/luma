@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
-import type { Client } from "@notionhq/client";
-import type * as NotionSdk from "@notionhq/client";
 import { z } from "zod";
+import { createScheduledNotionClient } from "./notion-scheduled-client.js";
+import { NOTION_OPERATION_TIMEOUT_MS } from "./notion-request-scheduler.js";
 import {
   isKnowledgeStanding,
   type KnowledgeStanding
@@ -17,13 +16,15 @@ import type { KnowledgeAudience, KnowledgeCatalog } from "./knowledge-catalog.js
 
 export const NOTION_CONTEXT_API_VERSION = "2026-03-11";
 const MAX_PAGES = 100;
-const requireSdk = createRequire(import.meta.url);
 const issuedCatalogs = new WeakSet<object>();
 export const notionKnowledgeCatalogBrand: unique symbol = Symbol(
   "NotionKnowledgeCatalog"
 );
 export interface NotionKnowledgeCatalog extends KnowledgeCatalog {
   readonly [notionKnowledgeCatalogBrand]: true;
+  readDocument(
+    input: Parameters<KnowledgeCatalog["readDocument"]>[0] & { signal?: AbortSignal }
+  ): ReturnType<KnowledgeCatalog["readDocument"]>;
 }
 export type NotionKnowledgeCatalogConfig = {
   workspaceId: string;
@@ -36,8 +37,8 @@ export type NotionKnowledgeCatalogConfig = {
   client?: never;
 };
 type RawTransport = {
-  retrievePage(pageId: string): Promise<unknown>;
-  retrieveMarkdown(pageId: string): Promise<unknown>;
+  retrievePage(pageId: string, signal?: AbortSignal): Promise<unknown>;
+  retrieveMarkdown(pageId: string, signal?: AbortSignal): Promise<unknown>;
 };
 /** Finite deterministic read seam only; production accepts no injected client. */
 export type NotionKnowledgeTransportForTest = RawTransport & {
@@ -57,16 +58,7 @@ export function createNotionReadOnlyKnowledgeCatalog(
   config: NotionKnowledgeCatalogConfig
 ): NotionKnowledgeCatalog {
   const bound = validateConfig(config);
-  const { Client } = requireSdk("@notionhq/client") as Pick<typeof NotionSdk, "Client">;
-  const client = new Client({
-    auth: bound.readOnlyApiToken,
-    notionVersion: NOTION_CONTEXT_API_VERSION,
-    timeoutMs: 4_000,
-    retry: false,
-    // Provider diagnostics can contain private request material.
-    logger: () => undefined
-  });
-  return createCatalog(bound, sdkTransport(client));
+  return createCatalog(bound, sdkTransport(bound.readOnlyApiToken));
 }
 
 export function createNotionReadOnlyKnowledgeCatalogForTest(
@@ -152,20 +144,22 @@ function createCatalog(
     },
     async readDocument(input) {
       const audience = copyAudience(input.audience);
+      const signal = input.signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS);
+      if (signal.aborted) throw new NotionKnowledgeReadError();
       const documentId = input.documentId;
       const pageId = canonicalNotionObjectId(documentId);
       if (!pageId || !(await allowed(audience, pageId))) return null;
       try {
-        const before = parsePage(await transport.retrievePage(pageId), pageId);
+        const before = parsePage(await transport.retrievePage(pageId, signal), pageId);
         if (!(await allowed(audience, pageId))) return null;
         const contentMarkdown = parseMarkdown(
-          await transport.retrieveMarkdown(pageId),
+          await transport.retrieveMarkdown(pageId, signal),
           pageId
         );
         if (!(await allowed(audience, pageId))) return null;
-        const after = parsePage(await transport.retrievePage(pageId), pageId);
+        const after = parsePage(await transport.retrievePage(pageId, signal), pageId);
         if (!(await allowed(audience, pageId))) return null;
-        if (JSON.stringify(before) !== JSON.stringify(after))
+        if (signal.aborted || JSON.stringify(before) !== JSON.stringify(after))
           throw new NotionKnowledgeReadError();
         return {
           id: pageId,
@@ -301,11 +295,22 @@ function parseMarkdown(raw: unknown, pageId: string): string {
     throw new NotionKnowledgeReadError();
   return markdown.markdown;
 }
-function sdkTransport(client: Client): RawTransport {
+function sdkTransport(token: string): RawTransport {
+  const { client, request } = createScheduledNotionClient(token);
   return {
-    retrievePage: (pageId) => client.pages.retrieve({ page_id: pageId }),
-    retrieveMarkdown: (pageId) =>
-      client.pages.retrieveMarkdown({ page_id: pageId, include_transcript: true })
+    retrievePage: (pageId, signal) =>
+      request({
+        signal: signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
+        readOnly: true,
+        send: () => client.pages.retrieve({ page_id: pageId })
+      }),
+    retrieveMarkdown: (pageId, signal) =>
+      request({
+        signal: signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
+        readOnly: true,
+        send: () =>
+          client.pages.retrieveMarkdown({ page_id: pageId, include_transcript: true })
+      })
   };
 }
 

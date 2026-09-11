@@ -81,7 +81,7 @@ export async function requireDecisionRequestCurrent(
     await input.records.requireCurrent({ audience, snapshot: stored.catalog });
   const refs = stored.state.execution?.outcome.references ?? [];
   for (const ref of refs) {
-    const record = await input.records.read({ audience, recordId: ref.externalId });
+    const record = await input.records.readReference({ audience, reference: ref });
     if (
       !record ||
       record.reference.providerId !== ref.providerId ||

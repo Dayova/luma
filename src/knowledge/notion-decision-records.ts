@@ -1,9 +1,13 @@
-import { Client } from "@notionhq/client";
 import { z } from "zod";
+import type { DecisionRecordCatalog } from "./decision-record-catalog.js";
+import type { ExternalReference } from "../domain/model.js";
+import { createScheduledNotionClient } from "./notion-scheduled-client.js";
+import { NOTION_OPERATION_TIMEOUT_MS } from "./notion-request-scheduler.js";
 import type {
   CanonicalDecisionRecord,
   DecisionAudience,
   DecisionAuthoritySnapshot,
+  DecisionHumanReview,
   DecisionCatalogSnapshot,
   DecisionRecordContent,
   DecisionSource,
@@ -12,6 +16,7 @@ import type {
 } from "../domain/decision-records.js";
 import {
   decisionAudienceSchema,
+  canonicalDecisionRecordSchema,
   decisionWriteStageSchema
 } from "../domain/decision-record-schemas.js";
 import {
@@ -26,17 +31,34 @@ import {
   type DecisionRecordArchive
 } from "./notion-decision-record-format.js";
 
-export type NotionDecisionTransport = {
-  list(dataSourceId: string, cursor?: string): Promise<unknown>;
-  readPage(pageId: string): Promise<unknown>;
-  readMarkdown(pageId: string): Promise<unknown>;
-  create(input: {
-    dataSourceId: string;
-    titleProperty: string;
-    title: string;
-    markdown: string;
-  }): Promise<unknown>;
-  replace(input: { pageId: string; before: string; after: string }): Promise<unknown>;
+export type NotionDecisionRequestContext = {
+  signal: AbortSignal;
+  beforeDispatch?: () => Promise<void>;
+  onDispatch?: () => void;
+};
+export type NotionDecisionReadTransport = {
+  list(
+    dataSourceId: string,
+    cursor?: string,
+    context?: NotionDecisionRequestContext
+  ): Promise<unknown>;
+  readPage(pageId: string, context?: NotionDecisionRequestContext): Promise<unknown>;
+  readMarkdown(pageId: string, context?: NotionDecisionRequestContext): Promise<unknown>;
+};
+export type NotionDecisionTransport = NotionDecisionReadTransport & {
+  create(
+    input: {
+      dataSourceId: string;
+      titleProperty: string;
+      title: string;
+      markdown: string;
+    },
+    context?: NotionDecisionRequestContext
+  ): Promise<unknown>;
+  replace(
+    input: { pageId: string; before: string; after: string },
+    context?: NotionDecisionRequestContext
+  ): Promise<unknown>;
 };
 export type NotionDecisionRecordsConfig = {
   workspaceId: string;
@@ -55,37 +77,97 @@ export type NotionDecisionRecordsConfig = {
   authorizeRetainedSource(input: {
     audience: DecisionAudience;
     source: DecisionSource;
+    signal?: AbortSignal;
   }): Promise<boolean>;
   /** Historical authority evidence has its own current source permission fence. */
   authorizeRetainedAuthority(input: {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
+    signal?: AbortSignal;
+  }): Promise<boolean>;
+  /** Supplemental original Human reviews have independent retained actor/source/audience proofs. */
+  authorizeRetainedHumanReview?(input: {
+    audience: DecisionAudience;
+    review: DecisionHumanReview;
+    signal?: AbortSignal;
   }): Promise<boolean>;
   transport?: NotionDecisionTransport;
   now?: () => Date;
 };
-type Deadline = { check(): void };
+export type NotionDecisionRecordCatalogConfig = Omit<
+  NotionDecisionRecordsConfig,
+  "token" | "transport"
+> & {
+  readOnlyApiToken: string;
+  transport?: NotionDecisionReadTransport;
+  token?: never;
+};
+type Deadline = { signal: AbortSignal; check(): void };
+type ProofPass = {
+  sources: Map<string, DecisionSource>;
+  authorities: Map<string, DecisionAuthoritySnapshot>;
+  humanReviews: Map<string, DecisionHumanReview>;
+};
+const proofPass = (): ProofPass => ({
+  sources: new Map(),
+  authorities: new Map(),
+  humanReviews: new Map()
+});
 type ReadRecord = {
   record: CanonicalDecisionRecord;
   section: string;
   archive: DecisionRecordArchive;
 };
 const MAX_RECORDS = 100;
-const TIMEOUT_MS = 15_000;
+
 const safeFailure = () =>
   new Error(
     "Canonical Decision Records could not be verified completely for this audience."
   );
 
+/** A dedicated read-only native client; its public object/transport cannot mutate Notion. */
+export function createNotionDecisionRecordCatalog(
+  config: NotionDecisionRecordCatalogConfig
+): DecisionRecordCatalog {
+  if (
+    !config.readOnlyApiToken?.trim() ||
+    "token" in config ||
+    (config.transport &&
+      Object.keys(config.transport).some(
+        (key) => !["list", "readPage", "readMarkdown"].includes(key)
+      ))
+  )
+    throw safeFailure();
+  const records = createCapability(
+    config,
+    config.transport ?? sdkReadTransport(config.readOnlyApiToken)
+  );
+  return Object.freeze({
+    providerId: records.providerId,
+    discover: records.discover,
+    requireCurrent: records.requireCurrent,
+    read: records.read,
+    readReference: records.readReference
+  });
+}
 /** One configured canonical location; each approved stage performs at most one provider mutation. */
 export function createNotionDecisionRecords(
   config: NotionDecisionRecordsConfig
+): DecisionRecords {
+  if (!config.token.trim()) throw safeFailure();
+  const transport = config.transport ?? sdkTransport(config.token);
+  return createCapability(config, transport, transport, config.transport === undefined);
+}
+function createCapability(
+  config: Omit<NotionDecisionRecordsConfig, "token" | "transport">,
+  api: NotionDecisionReadTransport,
+  mutations?: Pick<NotionDecisionTransport, "create" | "replace">,
+  nativeMutations = false
 ): DecisionRecords {
   const dataSourceId = canonicalNotionObjectId(config.dataSourceId);
   if (
     !dataSourceId ||
     !config.workspaceId.trim() ||
-    !config.token.trim() ||
     Buffer.byteLength(config.signingKey) < 32 ||
     typeof config.authorize !== "function" ||
     typeof config.authorizeRetainedSource !== "function" ||
@@ -96,7 +178,6 @@ export function createNotionDecisionRecords(
   const signingKey = config.signingKey;
   const titleProperty = config.titleProperty ?? "title";
   const now = config.now ?? (() => new Date());
-  const api = config.transport ?? sdkTransport(config.token);
   const scope = { workspaceId, dataSourceId, signingKey };
 
   async function grant(
@@ -117,13 +198,11 @@ export function createNotionDecisionRecords(
       throw safeFailure();
     deadline.check();
   }
-  async function originalGrants(
-    deadline: Deadline,
+  function collectOriginalProofs(
     audience: DecisionAudience,
-    archive: DecisionRecordArchive
+    archive: DecisionRecordArchive,
+    proofs: ProofPass
   ) {
-    const sources = new Set<string>();
-    const authorities = new Set<string>();
     for (const revision of archive.revisions) {
       const source = revision.content.source;
       if (
@@ -131,50 +210,91 @@ export function createNotionDecisionRecords(
         !audience.personIds.every((person) => source.audience.personIds.includes(person))
       )
         throw safeFailure();
-      deadline.check();
-      const sourceKey = decisionDigest(source);
-      if (!sources.has(sourceKey)) {
-        if (
-          !(await config.authorizeRetainedSource({
-            audience: structuredClone(audience),
-            source: structuredClone(source)
-          }))
-        )
-          throw safeFailure();
-        sources.add(sourceKey);
-      }
+      proofs.sources.set(decisionDigest(source), source);
       const snapshot = revision.content.authority.snapshot;
-      const authorityKey = decisionDigest(snapshot);
-      if (!authorities.has(authorityKey)) {
-        deadline.check();
+      proofs.authorities.set(decisionDigest(snapshot), snapshot);
+      for (const review of revision.content.authority.humanReviews ?? []) {
         if (
-          !(await config.authorizeRetainedAuthority({
-            audience: structuredClone(audience),
-            snapshot: structuredClone(snapshot)
-          }))
+          review.audience.workspaceId !== workspaceId ||
+          !audience.personIds.every((person) =>
+            review.audience.personIds.includes(person)
+          )
         )
           throw safeFailure();
-        authorities.add(authorityKey);
+        proofs.humanReviews.set(decisionDigest(review), review);
       }
-      deadline.check();
     }
+  }
+  async function currentOriginalProofs(
+    deadline: Deadline,
+    audience: DecisionAudience,
+    proofs: ProofPass
+  ) {
+    await boundedMap([...proofs.sources.values()], async (source) => {
+      deadline.check();
+      if (
+        !(await config.authorizeRetainedSource({
+          audience: structuredClone(audience),
+          source: structuredClone(source),
+          signal: deadline.signal
+        }))
+      )
+        throw safeFailure();
+      deadline.check();
+    });
+    await boundedMap([...proofs.authorities.values()], async (snapshot) => {
+      deadline.check();
+      if (
+        !(await config.authorizeRetainedAuthority({
+          audience: structuredClone(audience),
+          snapshot: structuredClone(snapshot),
+          signal: deadline.signal
+        }))
+      )
+        throw safeFailure();
+      deadline.check();
+    });
+    await boundedMap([...proofs.humanReviews.values()], async (review) => {
+      deadline.check();
+      if (
+        !config.authorizeRetainedHumanReview ||
+        !(await config.authorizeRetainedHumanReview({
+          audience: structuredClone(audience),
+          review: structuredClone(review),
+          signal: deadline.signal
+        }))
+      )
+        throw safeFailure();
+      deadline.check();
+    });
+  }
+  async function originalGrants(
+    deadline: Deadline,
+    audience: DecisionAudience,
+    archive: DecisionRecordArchive
+  ) {
+    const proofs = proofPass();
+    collectOriginalProofs(audience, archive, proofs);
+    await currentOriginalProofs(deadline, audience, proofs);
   }
   async function readPage(
     deadline: Deadline,
     audience: DecisionAudience,
-    pageId: string
+    pageId: string,
+    proofs?: ProofPass
   ): Promise<ReadRecord> {
     if (canonicalNotionObjectId(pageId) !== pageId) throw safeFailure();
     await grant(deadline, audience, pageId);
-    const before = pageHead(await api.readPage(pageId), pageId, dataSourceId!);
+    const before = pageHead(await api.readPage(pageId, deadline), pageId, dataSourceId!);
     await grant(deadline, audience, pageId);
-    const markdown = pageMarkdown(await api.readMarkdown(pageId), pageId);
+    const markdown = pageMarkdown(await api.readMarkdown(pageId, deadline), pageId);
     await grant(deadline, audience, pageId);
-    const after = pageHead(await api.readPage(pageId), pageId, dataSourceId!);
+    const after = pageHead(await api.readPage(pageId, deadline), pageId, dataSourceId!);
     await grant(deadline, audience, pageId);
     if (decisionDigest(before) !== decisionDigest(after)) throw safeFailure();
     const parsed = parseNotionDecisionRecord({ ...scope, markdown });
-    await originalGrants(deadline, audience, parsed.archive);
+    if (proofs) collectOriginalProofs(audience, parsed.archive, proofs);
+    else await originalGrants(deadline, audience, parsed.archive);
     await grant(deadline, audience, pageId);
     const version = decisionDigest({ after, markdown });
     return {
@@ -211,7 +331,7 @@ export function createNotionDecisionRecords(
           has_more: z.boolean(),
           next_cursor: z.string().nullable()
         })
-        .parse(await api.list(dataSourceId!, cursor));
+        .parse(await api.list(dataSourceId!, cursor, deadline));
       await grant(deadline, audience);
       for (const entry of result.results) {
         const id = canonicalNotionObjectId(entry.id);
@@ -237,9 +357,10 @@ export function createNotionDecisionRecords(
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECORDS)
       throw safeFailure();
     const first = await list(deadline, audience, limit);
-    const pages: ReadRecord[] = [];
-    if (first.complete)
-      for (const id of first.ids) pages.push(await readPage(deadline, audience, id));
+    const proofs = proofPass();
+    const pages = first.complete
+      ? await boundedMap(first.ids, (id) => readPage(deadline, audience, id, proofs))
+      : [];
     const last = await list(deadline, audience, limit);
     const complete =
       first.complete &&
@@ -248,6 +369,10 @@ export function createNotionDecisionRecords(
     const records = complete ? pages.map((page) => page.record) : [];
     if (new Set(records.map((record) => record.content.id)).size !== records.length)
       throw safeFailure();
+    if (complete) {
+      await currentOriginalProofs(deadline, audience, proofs);
+      await boundedMap(first.ids, (id) => grant(deadline, audience, id));
+    }
     await grant(deadline, audience);
     return {
       pages,
@@ -263,21 +388,12 @@ export function createNotionDecisionRecords(
       }
     };
   }
-  async function find(
-    deadline: Deadline,
-    audience: DecisionAudience,
+  function receiptFrom(
+    pages: ReadRecord[],
     stage: DecisionWriteStage,
     operationId: string
-  ): Promise<DecisionWriteReceipt | null> {
-    const pages =
-      stage.type === "create-record"
-        ? await discover(deadline, audience, MAX_RECORDS)
-        : {
-            snapshot: { complete: true },
-            pages: [await readPage(deadline, audience, targetPage(stage.target))]
-          };
-    if (!pages.snapshot.complete) return null;
-    const matches = pages.pages.filter((page) => {
+  ): DecisionWriteReceipt | null {
+    const matches = pages.filter((page) => {
       const latest = page.archive.revisions.at(-1)!;
       return (
         latest.operationId === operationId &&
@@ -285,8 +401,82 @@ export function createNotionDecisionRecords(
         decisionDigest(latest.content) === decisionDigest(nextContent(stage))
       );
     });
-    if (matches.length !== 1) return null;
-    return { record: matches[0]!.record, operationId, observedAt: now().toISOString() };
+    return matches.length === 1
+      ? { record: matches[0]!.record, operationId, observedAt: now().toISOString() }
+      : null;
+  }
+  async function find(
+    deadline: Deadline,
+    audience: DecisionAudience,
+    stage: DecisionWriteStage,
+    operationId: string
+  ): Promise<DecisionWriteReceipt | null> {
+    if (stage.type !== "create-record")
+      return receiptFrom(
+        [await readPage(deadline, audience, targetPage(stage.target))],
+        stage,
+        operationId
+      );
+    const current = await discover(deadline, audience, MAX_RECORDS);
+    return current.snapshot.complete
+      ? receiptFrom(current.pages, stage, operationId)
+      : null;
+  }
+  async function requireKnownCatalog(
+    deadline: Deadline,
+    audience: DecisionAudience,
+    records: CanonicalDecisionRecord[]
+  ): Promise<ProofPass> {
+    if (records.length > MAX_RECORDS) throw safeFailure();
+    const ids = records.map((record) => referencePage(record.reference)).sort();
+    if (
+      new Set(ids).size !== records.length ||
+      new Set(records.map((record) => record.content.id)).size !== records.length
+    )
+      throw safeFailure();
+    const current = await list(deadline, audience, MAX_RECORDS);
+    if (!current.complete || decisionDigest(current.ids) !== decisionDigest(ids))
+      throw safeFailure();
+    const proofs = proofPass();
+    await boundedMap(records, async (expected) => {
+      const id = expected.reference.externalId;
+      await grant(deadline, audience, id);
+      const markdown = pageMarkdown(await api.readMarkdown(id, deadline), id);
+      await grant(deadline, audience, id);
+      const after = pageHead(await api.readPage(id, deadline), id, dataSourceId!);
+      const version = decisionDigest({ after, markdown });
+      // A known immutable version binds both complete bytes and the native head;
+      // matching only timestamps would miss edits with an unchanged timestamp.
+      if (version !== expected.version) throw safeFailure();
+      const parsed = parseNotionDecisionRecord({ ...scope, markdown });
+      const actual: CanonicalDecisionRecord = {
+        content: parsed.archive.revisions.at(-1)!.content,
+        reference: {
+          providerId: "notion",
+          objectType: "document",
+          externalId: id,
+          url: after.url,
+          version
+        },
+        version
+      };
+      if (decisionDigest(actual) !== decisionDigest(expected)) throw safeFailure();
+      collectOriginalProofs(audience, parsed.archive, proofs);
+      await grant(deadline, audience, id);
+    });
+    const last = await list(deadline, audience, MAX_RECORDS);
+    if (!last.complete || decisionDigest(last.ids) !== decisionDigest(current.ids))
+      throw safeFailure();
+    return proofs;
+  }
+  function referencePage(reference: ExternalReference): string {
+    if (
+      reference.providerId !== "notion" ||
+      reference.objectType !== "document" ||
+      canonicalNotionObjectId(reference.externalId) !== reference.externalId
+    )
+      throw safeFailure();
+    return reference.externalId;
   }
   function targetPage(target: CanonicalDecisionRecord): string {
     if (
@@ -317,13 +507,29 @@ export function createNotionDecisionRecords(
     requireCurrent(input) {
       const bound = structuredClone(input);
       return withinDeadline(async (deadline) => {
-        const current = (await discover(deadline, bound.audience, MAX_RECORDS)).snapshot;
+        const records = bound.snapshot.records.map((record) =>
+          canonicalDecisionRecordSchema.parse(record)
+        );
         if (
           !bound.snapshot.complete ||
-          !current.complete ||
-          decisionDigest(bound.snapshot) !== decisionDigest(current)
+          bound.snapshot.id !== `notion-decisions:${workspaceId}:${dataSourceId}` ||
+          bound.snapshot.revision !==
+            decisionDigest({
+              audience: {
+                ...bound.audience,
+                personIds: [...bound.audience.personIds].sort()
+              },
+              records,
+              complete: true
+            })
         )
           throw safeFailure();
+        const proofs = await requireKnownCatalog(deadline, bound.audience, records);
+        await currentOriginalProofs(deadline, bound.audience, proofs);
+        await boundedMap(records, (record) =>
+          grant(deadline, bound.audience, record.reference.externalId)
+        );
+        await grant(deadline, bound.audience);
       });
     },
     read(input) {
@@ -343,22 +549,48 @@ export function createNotionDecisionRecords(
         }
       });
     },
-    findWritten(input) {
+    readReference(input) {
       const bound = structuredClone(input);
+      return withinDeadline(async (deadline) => {
+        try {
+          return (
+            await readPage(deadline, bound.audience, referencePage(bound.reference))
+          ).record;
+        } catch {
+          return null;
+        }
+      });
+    },
+    findWritten(input) {
+      const bound = structuredClone({
+        audience: input.audience,
+        stage: input.stage,
+        operationId: input.operationId
+      });
       return withinDeadline(async (deadline) => {
         const stage = decisionWriteStageSchema.parse(bound.stage);
         return find(deadline, bound.audience, stage, bound.operationId);
       });
     },
     write(input) {
-      const bound = structuredClone(input);
+      const { requireCurrent, ...request } = input;
+      const bound = structuredClone(request);
+      let dispatched = false;
       return withinDeadline(async (deadline) => {
-        let dispatched = false;
         try {
+          if (!mutations || typeof requireCurrent !== "function") throw safeFailure();
           const stage = decisionWriteStageSchema.parse(bound.stage);
           if (!bound.operationId || bound.operationId.length > 512) throw safeFailure();
           await grant(deadline, bound.audience);
-          const existing = await find(deadline, bound.audience, stage, bound.operationId);
+          const creationCatalog =
+            stage.type === "create-record"
+              ? await discover(deadline, bound.audience, MAX_RECORDS)
+              : null;
+          const existing = creationCatalog
+            ? creationCatalog.snapshot.complete
+              ? receiptFrom(creationCatalog.pages, stage, bound.operationId)
+              : null
+            : await find(deadline, bound.audience, stage, bound.operationId);
           if (existing) return existing;
           const archive: DecisionRecordArchive = {
             format: 1,
@@ -368,7 +600,7 @@ export function createNotionDecisionRecords(
           };
           let prior: ReadRecord | undefined;
           if (stage.type === "create-record") {
-            const current = await discover(deadline, bound.audience, MAX_RECORDS);
+            const current = creationCatalog!;
             if (
               !current.snapshot.complete ||
               current.snapshot.records.length >= MAX_RECORDS ||
@@ -445,28 +677,82 @@ export function createNotionDecisionRecords(
             stageDigest: decisionDigest(stage),
             content: nextContent(stage)
           });
-          await originalGrants(deadline, bound.audience, archive);
           const markdown = renderNotionDecisionRecord(archive, signingKey);
           parseNotionDecisionRecord({ ...scope, markdown });
-          await grant(deadline, bound.audience, prior?.record.reference.externalId);
-          deadline.check();
-          dispatched = true;
+          const beforeDispatch = async () => {
+            deadline.check();
+            const proofs = creationCatalog
+              ? await requireKnownCatalog(
+                  deadline,
+                  bound.audience,
+                  creationCatalog.snapshot.records
+                )
+              : proofPass();
+            if (prior) {
+              const current = await readPage(
+                deadline,
+                bound.audience,
+                prior.record.reference.externalId
+              );
+              if (decisionDigest(current.record) !== decisionDigest(prior.record))
+                throw safeFailure();
+            }
+            collectOriginalProofs(bound.audience, archive, proofs);
+            await currentOriginalProofs(deadline, bound.audience, proofs);
+            await requireCurrent();
+            await grant(deadline, bound.audience, prior?.record.reference.externalId);
+            deadline.check();
+          };
+          if (!nativeMutations) await beforeDispatch();
+          let receipt: DecisionWriteReceipt | null;
+          if (!nativeMutations) dispatched = true;
           if (stage.type === "create-record") {
-            await api.create({
-              dataSourceId: dataSourceId,
-              titleProperty,
-              title: `Decision DR-${decisionDigest(stage.record.id).slice(0, 10)}`,
-              markdown
-            });
+            const response = await mutations.create(
+              {
+                dataSourceId,
+                titleProperty,
+                title: `Decision DR-${decisionDigest(stage.record.id).slice(0, 10)}`,
+                markdown
+              },
+              {
+                signal: deadline.signal,
+                beforeDispatch,
+                onDispatch: () => {
+                  dispatched = true;
+                }
+              }
+            );
+            dispatched = true;
+            deadline.check();
+            const created = z
+              .object({ object: z.literal("page"), id: z.string() })
+              .parse(response);
+            const pageId = canonicalNotionObjectId(created.id);
+            if (!pageId) throw safeFailure();
+            receipt = receiptFrom(
+              [await readPage(deadline, bound.audience, pageId)],
+              stage,
+              bound.operationId
+            );
           } else {
-            await api.replace({
-              pageId: targetPage(stage.target),
-              before: prior!.section,
-              after: markdown
-            });
+            await mutations.replace(
+              {
+                pageId: targetPage(stage.target),
+                before: prior!.section,
+                after: markdown
+              },
+              {
+                signal: deadline.signal,
+                beforeDispatch,
+                onDispatch: () => {
+                  dispatched = true;
+                }
+              }
+            );
+            dispatched = true;
+            deadline.check();
+            receipt = await find(deadline, bound.audience, stage, bound.operationId);
           }
-          deadline.check();
-          const receipt = await find(deadline, bound.audience, stage, bound.operationId);
           if (!receipt) throw safeFailure();
           return receipt;
         } catch {
@@ -479,6 +765,13 @@ export function createNotionDecisionRecords(
             "Decision write outcome is unknown; recover from positive provider evidence before any further mutation."
           );
         }
+      }).catch((error: unknown) => {
+        if (!dispatched)
+          throw new DecisionWriteNotAppliedError(
+            "notion-decision-prewrite-refused",
+            "The decision could not be verified before its deadline; no provider write was sent."
+          );
+        throw error;
       });
     }
   };
@@ -541,63 +834,117 @@ function pageMarkdown(raw: unknown, pageId: string): string {
   return value.markdown;
 }
 function withinDeadline<T>(work: (deadline: Deadline) => Promise<T>): Promise<T> {
-  let expired = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      expired = true;
-      reject(safeFailure());
-    }, TIMEOUT_MS);
+    controller.signal.addEventListener("abort", () => reject(safeFailure()), {
+      once: true
+    });
   });
+  const timer = setTimeout(() => controller.abort(), NOTION_OPERATION_TIMEOUT_MS);
   return Promise.race([
     work({
+      signal: controller.signal,
       check() {
-        if (expired) throw safeFailure();
+        if (controller.signal.aborted) throw safeFailure();
       }
     }),
     timeout
   ]).finally(() => {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
+    controller.abort();
   });
 }
-function sdkTransport(token: string): NotionDecisionTransport {
-  const client = new Client({
-    auth: token,
-    notionVersion: "2026-03-11",
-    timeoutMs: 4_000,
-    retry: false,
-    logger: () => undefined
+async function boundedMap<T, R>(
+  values: readonly T[],
+  work: (value: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array<R>(values.length);
+  let next = 0;
+  let failed = false;
+  const workers = Array.from({ length: Math.min(4, values.length) }, async () => {
+    while (!failed && next < values.length) {
+      const index = next++;
+      try {
+        results[index] = await work(values[index]!);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
   });
+  const settled = await Promise.allSettled(workers);
+  const failure = settled.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  return results;
+}
+function sdkReadTransport(token: string): NotionDecisionReadTransport {
+  const { client, request } = createScheduledNotionClient(token);
+  const run = <T>(
+    context: NotionDecisionRequestContext | undefined,
+    send: () => Promise<T>
+  ) =>
+    request({
+      signal: context?.signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
+      readOnly: true,
+      send
+    });
   return {
-    list: (dataSourceId, cursor) =>
-      client.dataSources.query({
-        data_source_id: dataSourceId,
-        page_size: 100,
-        ...(cursor ? { start_cursor: cursor } : {})
-      }),
-    readPage: (pageId) => client.pages.retrieve({ page_id: pageId }),
-    readMarkdown: (pageId) => client.pages.retrieveMarkdown({ page_id: pageId }),
-    create: (input) =>
-      client.pages.create({
-        parent: { type: "data_source_id", data_source_id: input.dataSourceId },
-        properties: {
-          [input.titleProperty]: {
-            type: "title",
-            title: [{ type: "text", text: { content: input.title } }]
+    list: (dataSourceId, cursor, context) =>
+      run(context, () =>
+        client.dataSources.query({
+          data_source_id: dataSourceId,
+          page_size: 100,
+          ...(cursor ? { start_cursor: cursor } : {})
+        })
+      ),
+    readPage: (pageId, context) =>
+      run(context, () => client.pages.retrieve({ page_id: pageId })),
+    readMarkdown: (pageId, context) =>
+      run(context, () => client.pages.retrieveMarkdown({ page_id: pageId }))
+  };
+}
+function sdkTransport(token: string): NotionDecisionTransport {
+  const { client, request } = createScheduledNotionClient(token);
+  const write = <T>(
+    context: NotionDecisionRequestContext | undefined,
+    send: () => Promise<T>
+  ) =>
+    request({
+      signal: context?.signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
+      readOnly: false,
+      ...(context?.beforeDispatch ? { beforeDispatch: context.beforeDispatch } : {}),
+      send: () => {
+        context?.onDispatch?.();
+        return send();
+      }
+    });
+  return {
+    ...sdkReadTransport(token),
+    create: (input, context) =>
+      write(context, () =>
+        client.pages.create({
+          parent: { type: "data_source_id", data_source_id: input.dataSourceId },
+          properties: {
+            [input.titleProperty]: {
+              type: "title",
+              title: [{ type: "text", text: { content: input.title } }]
+            }
+          },
+          markdown: input.markdown
+        })
+      ),
+    replace: (input, context) =>
+      write(context, () =>
+        client.pages.updateMarkdown({
+          page_id: input.pageId,
+          type: "update_content",
+          update_content: {
+            content_updates: [
+              { old_str: input.before, new_str: input.after, replace_all_matches: false }
+            ],
+            allow_deleting_content: false
           }
-        },
-        markdown: input.markdown
-      }),
-    replace: (input) =>
-      client.pages.updateMarkdown({
-        page_id: input.pageId,
-        type: "update_content",
-        update_content: {
-          content_updates: [
-            { old_str: input.before, new_str: input.after, replace_all_matches: false }
-          ],
-          allow_deleting_content: false
-        }
-      })
+        })
+      )
   };
 }

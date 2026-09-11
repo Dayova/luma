@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AiServiceError } from "../../src/ai/ai-service-error.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createMeetingCaptureIngestion } from "../../src/knowledge/meeting-capture-ingestion.js";
 import { createGranolaMeetingCaptureAccess } from "../../src/granola/meeting-capture-access.js";
@@ -6,7 +7,11 @@ import type { CaptureSynthesisProposal } from "../../src/ai/capture-synthesis-pr
 import type { StructuredReasoningRequest } from "../../src/ai/reasoning-model.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createGranolaCaptureIngestionRuntime } from "../../src/granola/capture-ingestion-runtime.js";
-import type { GranolaMcpClient, GranolaReadTool } from "../../src/granola/mcp-client.js";
+import {
+  GranolaSourceError,
+  type GranolaMcpClient,
+  type GranolaReadTool
+} from "../../src/granola/mcp-client.js";
 import type { GranolaConnectionPolicy } from "../../src/granola/policy.js";
 import { granolaAccountFingerprint } from "../../src/granola/wire-format.js";
 import type { MeetingCaptureRevision } from "../../src/logical-meetings/interface.js";
@@ -100,10 +105,126 @@ async function latest(
 }
 
 describe("Granola capture ingestion through LogicalMeetings", () => {
+  it("reports each connection's actual scan and failures without borrowing another owner's result", async () => {
+    const database = await createPgliteDatabase();
+    const first = fixture("jakob"),
+      second = fixture("fabius");
+    second.policy.ownerPersonId = "person_fabius";
+    second.policy.audiencePersonIds = ["person_fabius"];
+    first.beforeCall(() => Promise.reject(new GranolaSourceError("rate-limited")));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    second.beforeCall(() => held);
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      database,
+      workspaceId,
+      connections: [
+        { connectionId: "jakob", client: first.client },
+        { connectionId: "fabius", client: second.client }
+      ],
+      policy: {
+        read: (id) =>
+          Promise.resolve(structuredClone(id === "jakob" ? first.policy : second.policy))
+      }
+    });
+    try {
+      expect(runtime.connectionStatus("unknown")).toBeNull();
+      expect(runtime.connectionStatus("fabius")).toMatchObject({
+        active: false,
+        checked: false,
+        scheduled: false,
+        failureCodes: []
+      });
+      runtime.start();
+      await vi.waitFor(() =>
+        expect(runtime.connectionStatus("fabius")?.active).toBe(true)
+      );
+      expect(runtime.connectionStatus("jakob")).toEqual({
+        active: false,
+        checked: true,
+        scheduled: true,
+        failureCodes: ["rate-limited"]
+      });
+      expect(runtime.connectionStatus("fabius")).toEqual({
+        active: true,
+        checked: false,
+        scheduled: true,
+        failureCodes: []
+      });
+      release();
+      await vi.waitFor(() => expect(runtime.status().active).toBe(false));
+      expect(runtime.connectionStatus("fabius")).toEqual({
+        active: false,
+        checked: true,
+        scheduled: true,
+        failureCodes: []
+      });
+    } finally {
+      release();
+      await runtime.stop();
+      await database.close();
+    }
+  });
+  it("never reports an interrupted or unvisited connection as a completed scan", async () => {
+    const database = await createPgliteDatabase();
+    const first = fixture("jakob"),
+      second = fixture("fabius");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    first.beforeCall(() => held);
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      database,
+      workspaceId,
+      connections: [
+        { connectionId: "jakob", client: first.client },
+        { connectionId: "fabius", client: second.client }
+      ],
+      policy: {
+        read: (id) =>
+          Promise.resolve(structuredClone(id === "jakob" ? first.policy : second.policy))
+      }
+    });
+    try {
+      runtime.start();
+      await vi.waitFor(() => expect(first.calls.length).toBeGreaterThan(0));
+      const stopping = runtime.stop();
+      expect(runtime.connectionStatus("jakob")).toEqual({
+        active: true,
+        checked: false,
+        scheduled: false,
+        failureCodes: []
+      });
+      release();
+      await stopping;
+      expect(runtime.connectionStatus("jakob")).toEqual({
+        active: false,
+        checked: false,
+        scheduled: false,
+        failureCodes: []
+      });
+      expect(runtime.connectionStatus("fabius")).toEqual({
+        active: false,
+        checked: false,
+        scheduled: false,
+        failureCodes: []
+      });
+      expect(second.calls).toEqual([]);
+    } finally {
+      release();
+      await runtime.stop();
+      await database.close();
+    }
+  });
+
   it("delivers the actual guarded Basic capture into MI synthesis within the owned ingestion run", async () => {
     const database = await createPgliteDatabase();
     const f = fixture();
     const requests: StructuredReasoningRequest<unknown>[] = [];
+    let exhausted = false;
     let meetingId = "";
     const runtime = await createGranolaCaptureIngestionRuntime({
       database,
@@ -120,6 +241,10 @@ describe("Granola capture ingestion through LogicalMeetings", () => {
       reasoningModel: {
         generateStructured: <T>(request: StructuredReasoningRequest<T>) => {
           requests.push(request);
+          if (exhausted)
+            throw new AiServiceError("budget-exhausted", "Budget is exhausted", {
+              requestDispatched: false
+            });
           const evidence = request.evidence[0]!;
           const value: CaptureSynthesisProposal = {
             claims: [
@@ -177,6 +302,18 @@ describe("Granola capture ingestion through LogicalMeetings", () => {
       expect(requests[0]?.evidence[0]?.source).toBe("knowledge");
       expect(await runtime.syncOnce()).toMatchObject({ unchanged: 1, failures: [] });
       expect(requests).toHaveLength(1);
+      exhausted = true;
+      f.documents.set(
+        "work",
+        document("work", "A revised, still conditional launch proposal.")
+      );
+      expect(await runtime.syncOnce()).toMatchObject({
+        failures: [{ connectionId: "jakob", code: "analysis-budget-exhausted" }]
+      });
+      expect(runtime.connectionStatus("jakob")).toMatchObject({
+        checked: true,
+        failureCodes: ["analysis-budget-exhausted"]
+      });
       f.policy.excludedMeetingIds.push("work");
       expect(await query()).toMatchObject({
         availability: "unavailable",

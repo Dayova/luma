@@ -227,6 +227,14 @@ founder identity and current founder-only Discord channel audience.
      least one other founder. Provider names never create identity mappings.
 4. `/granola status` shows the owner's connection, current source choices and
    Basic capability limitation. Long lists are available through `page`.
+   The optional owned `sourceStatus(connectionId)` port reports only that owner's
+   actual intake state, scheduled retry status and safe failure codes. The source
+   scheduler tracks each connection separately: another owner's completed scan
+   cannot make this connection look checked, and interruption never completes a
+   first scan. Budget
+   blocking points to `/meeting usage`; unsupported provider output and unknown
+   AI outcomes remain explicit. Missing health is shown as unavailable, never as
+   a successful scan. The snapshot is rechecked at final delivery.
    `/granola configure sharing:four-founders` changes only supplied choices and
    preserves omitted included/excluded lists, founder mappings and the automatic
    capture setting. A concurrent policy change rejects the command instead of

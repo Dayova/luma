@@ -5,7 +5,10 @@ import { Events, MessageFlags } from "discord.js";
 import { discordAudienceFixture } from "./discord-audience-fixture.js";
 import { createDiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../../src/discord/discord-meeting-bot.js";
-import { createDiscordGranolaRuntime } from "../../src/discord/discord-granola-runtime.js";
+import {
+  createDiscordGranolaRuntime,
+  type DiscordGranolaSourceStatus
+} from "../../src/discord/discord-granola-runtime.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createGranolaOAuthConnections } from "../../src/granola/oauth-connections.js";
 import { createGranolaOAuthCallbackHost } from "../../src/app/granola-oauth-callback-host.js";
@@ -110,6 +113,8 @@ async function setup() {
     accountGate: ReturnType<typeof deferred> | undefined;
   let beforeReply: (() => Promise<void> | void) | undefined;
   let beforeOwner: (() => Promise<void>) | undefined;
+  let intakeStatus: DiscordGranolaSourceStatus | null = null;
+  const statusConnections: string[] = [];
   const methods: string[] = [];
   const fetcher: typeof fetch = async (url, init) => {
     const address =
@@ -244,6 +249,10 @@ async function setup() {
     workspaceId: workspace.workspaceId,
     connections: manager,
     begin: (request) => callback.begin(request),
+    sourceStatus: (connectionId) => {
+      statusConnections.push(connectionId);
+      return Promise.resolve(intakeStatus);
+    },
     afterConnectionsChanged: changed,
     now: () => new Date(time)
   });
@@ -373,6 +382,10 @@ async function setup() {
     advance: (ms: number) => {
       time += ms;
     },
+    intakeStatus: (value: DiscordGranolaSourceStatus | null) => {
+      intakeStatus = value;
+    },
+    statusConnections,
     beforeOwner: (hook: () => Promise<void>) => {
       beforeOwner = hook;
     },
@@ -581,8 +594,53 @@ describe("native owner Granola onboarding", () => {
       });
     });
     const response = await f.command("status");
-    expect(response).toContain("sharing changed");
+    expect(response).toContain("status changed");
     expect(response).not.toContain("https://notes.granola.ai/d/work");
+  });
+  it("shows owner-only source retry and budget blocking without raw provider errors", async () => {
+    const f = await setup();
+    await f.connect();
+    await f.command("inspect");
+    await f.command("attest", grant);
+    f.intakeStatus({
+      active: false,
+      scheduled: true,
+      checked: true,
+      failureCodes: ["analysis-budget-exhausted", "PRIVATE OTHER OWNER TOKEN"]
+    });
+    const message = await f.command("status");
+    expect(message).toContain("AI synthesis is blocked by the current usage limit");
+    expect(message).toContain("/meeting usage");
+    expect(message).toContain("Scheduled source scans will retry");
+    expect(message).not.toContain("PRIVATE OTHER OWNER TOKEN");
+    expect(new Set(f.statusConnections)).toEqual(
+      new Set([f.registry()[0]!.connectionId])
+    );
+    f.statusConnections.length = 0;
+    expect(await f.command("status", {}, another)).not.toContain("budget");
+    expect(f.statusConnections).toEqual([]);
+    f.intakeStatus({ active: false, scheduled: false, checked: false, failureCodes: [] });
+    expect(await f.command("status")).toContain("Automatic source scans are paused");
+    f.intakeStatus(null);
+    expect(await f.command("status")).toContain("Meeting intake status is unavailable");
+  });
+  it("withholds obsolete intake health if the source fails before final delivery", async () => {
+    const f = await setup();
+    await f.connect();
+    await f.command("inspect");
+    await f.command("attest", grant);
+    f.intakeStatus({ active: false, scheduled: true, checked: true, failureCodes: [] });
+    f.beforeReply(() =>
+      f.intakeStatus({
+        active: false,
+        scheduled: true,
+        checked: true,
+        failureCodes: ["analysis-budget-exhausted"]
+      })
+    );
+    const message = await f.command("status");
+    expect(message).toContain("ingestion status changed");
+    expect(message).not.toContain("reported no failure");
   });
   it("disconnects the original managed client and refreshes the registry without deleting captured originals", async () => {
     const f = await setup();

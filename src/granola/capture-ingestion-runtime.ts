@@ -21,6 +21,13 @@ export type GranolaSyncResult = {
   coverageReasons: readonly string[];
 };
 
+export type GranolaConnectionIntakeStatus = {
+  active: boolean;
+  scheduled: boolean;
+  checked: boolean;
+  failureCodes: readonly string[];
+};
+
 /** Composition seam: one shared owned store, one OAuth client per opted-in user. */
 export async function createGranolaCaptureIngestionRuntime(input: {
   database: LumaDatabase;
@@ -43,6 +50,7 @@ export async function createGranolaCaptureIngestionRuntime(input: {
     lastResult: GranolaSyncResult | null;
     lastFailure: string | null;
   };
+  connectionStatus(connectionId: string): GranolaConnectionIntakeStatus | null;
   logicalMeetings: LogicalMeetings;
   sources: Awaited<ReturnType<typeof createGranolaMeetingCaptureSource>>[];
 }> {
@@ -90,6 +98,12 @@ export async function createGranolaCaptureIngestionRuntime(input: {
   let lastResult: GranolaSyncResult | null = null;
   let lastFailure: string | null = null;
   const offsets = new Map<string, number>();
+  const connectionStates = new Map(
+    input.connections.map(({ connectionId }) => [
+      connectionId,
+      { active: false, checked: false, failureCodes: [] as string[] }
+    ])
+  );
   const run = async (): Promise<GranolaSyncResult> => {
     const result: GranolaSyncResult = {
       status: "partial",
@@ -103,6 +117,13 @@ export async function createGranolaCaptureIngestionRuntime(input: {
     for (const [index, source] of sources.entries()) {
       if (stopped) break;
       const connectionId = input.connections[index]!.connectionId;
+      const state = connectionStates.get(connectionId)!;
+      state.active = true;
+      const failures: string[] = [];
+      const failed = (code: string) => {
+        failures.push(code);
+        result.failures.push({ connectionId, code });
+      };
       try {
         // Revisit known addresses too, so policy exclusions are delivered even
         // when the provider's rolling recent window no longer lists a capture.
@@ -117,7 +138,7 @@ export async function createGranolaCaptureIngestionRuntime(input: {
             })
           ).captures;
         } catch (error) {
-          result.failures.push({ connectionId, code: code(error) });
+          failed(code(error));
         }
         const all = [
           ...new Map(
@@ -143,16 +164,23 @@ export async function createGranolaCaptureIngestionRuntime(input: {
               result.accepted += 1;
               if (outcome.decision.effect === "unchanged") result.unchanged += 1;
               const update = await input.onResolved?.(outcome.decision.logicalMeeting);
-              for (const error of update?.errors ?? [])
-                result.failures.push({ connectionId, code: error.code });
+              for (const error of update?.errors ?? []) failed(error.code);
             } else if (outcome.status === "excluded") result.withheld += 1;
-            else result.failures.push({ connectionId, code: outcome.code });
+            else failed(outcome.code);
           } catch (error) {
-            result.failures.push({ connectionId, code: code(error) });
+            failed(code(error));
           }
         }
       } catch (error) {
-        result.failures.push({ connectionId, code: code(error) });
+        failed(code(error));
+      } finally {
+        state.active = false;
+        // Stop may interrupt the connection between provider calls or captures.
+        // Retain its previous completed scan; another owner's scan grants no status.
+        if (!stopped) {
+          state.checked = true;
+          state.failureCodes = [...new Set(failures)];
+        }
       }
     }
     if (result.failures.length && !result.accepted && !result.withheld)
@@ -177,6 +205,10 @@ export async function createGranolaCaptureIngestionRuntime(input: {
     sources,
     logicalMeetings,
     syncOnce,
+    connectionStatus(connectionId) {
+      const state = connectionStates.get(connectionId);
+      return state ? { ...structuredClone(state), scheduled: Boolean(timer) } : null;
+    },
     status: () => ({
       active: Boolean(running),
       scheduled: Boolean(timer),

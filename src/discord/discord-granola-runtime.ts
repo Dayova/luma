@@ -37,6 +37,13 @@ export type DiscordGranolaCommand = DiscordCommandBase &
         founderEmails?: string;
       }
   );
+export type DiscordGranolaSourceStatus = {
+  active: boolean;
+  scheduled: boolean;
+  /** A completed scan of this exact connection, not a different owner's scan. */
+  checked: boolean;
+  failureCodes: readonly string[];
+};
 export type DiscordGranolaRuntime = {
   handle(input: {
     command: DiscordGranolaCommand;
@@ -80,6 +87,7 @@ export async function createDiscordGranolaRuntime(input: {
   >;
   begin: Manager["begin"];
   afterConnectionsChanged(): Promise<void>;
+  sourceStatus?(connectionId: string): Promise<DiscordGranolaSourceStatus | null>;
   now?: () => Date;
 }): Promise<DiscordGranolaRuntime> {
   await input.database.exec(`CREATE TABLE IF NOT EXISTS discord_granola_account_reviews (
@@ -90,6 +98,16 @@ export async function createDiscordGranolaRuntime(input: {
   const now = input.now ?? (() => new Date());
   const statusFor = async (owner: string) =>
     (await input.connections.status()).find((s) => s.ownerPersonId === owner);
+  async function sourceStatus(
+    connectionId: string
+  ): Promise<DiscordGranolaSourceStatus | null> {
+    try {
+      const status = await input.sourceStatus?.(connectionId);
+      return status ? structuredClone(status) : null;
+    } catch {
+      return null;
+    }
+  }
   const actorFor = (command: DiscordGranolaCommand): GranolaOwnerActor => ({
     providerId: "discord",
     providerUserId: command.actorDiscordUserId
@@ -164,8 +182,14 @@ export async function createDiscordGranolaRuntime(input: {
             policySnapshot = JSON.stringify(policy);
             scope = `Sharing: ${policy.audiencePersonIds.length === 4 ? "all four founders" : "restricted existing audience"}.\nAutomatic mapped internal meetings: ${policy.automaticInternalMeetings ? "on" : "off"}.\nExclusions take priority.\nIncluded meeting URLs:\n${policy.includedMeetingIds.map((id) => `https://notes.granola.ai/d/${id}`).join("\n") || "none"}\nExcluded meeting URLs:\n${policy.excludedMeetingIds.map((id) => `https://notes.granola.ai/d/${id}`).join("\n") || "none"}\nExplicit founder email mappings:\n${policy.participantDirectory.map((item) => `${item.personId.replace("person_", "")}: ${item.email}`).join("\n") || "none"}`;
           }
+          const intake =
+            state?.status === "connected" ? await sourceStatus(state.connectionId) : null;
+          const intakeText =
+            state?.status === "connected"
+              ? renderSourceStatus(intake)
+              : "Source intake remains disabled until the account is connected and attested.";
           const pages = split(
-            `${state?.lastFailure ? "The connection needs attention.\n" : ""}${scope}\n${nextStep(state?.status)}\nGranola Basic does not provide raw transcripts; notes remain provider-derived.`.replaceAll(
+            `${intakeText}\n${state?.lastFailure ? "The connection needs attention.\n" : ""}${scope}\n${nextStep(state?.status)}\nGranola Basic does not provide raw transcripts; notes remain provider-derived.`.replaceAll(
               "@",
               "@\u200b"
             )
@@ -188,10 +212,13 @@ export async function createDiscordGranolaRuntime(input: {
                   state &&
                   JSON.stringify(
                     await input.connections.policy.read(state.connectionId)
-                  ) !== policySnapshot)
+                  ) !== policySnapshot) ||
+                (state?.status === "connected" &&
+                  JSON.stringify(await sourceStatus(state.connectionId)) !==
+                    JSON.stringify(intake))
               )
                 throw new DiscordGranolaUnavailableError(
-                  "Connection status or sharing changed. Use /granola status again."
+                  "Connection, sharing or ingestion status changed. Use /granola status again."
                 );
             }
           };
@@ -423,4 +450,59 @@ function nextStep(status: string | undefined): string {
   if (status === "awaiting-authorization")
     return "Finish the private login link, then return to /granola inspect.";
   return "Use /granola connect to start a new login for your own account.";
+}
+
+function renderSourceStatus(status: DiscordGranolaSourceStatus | null): string {
+  if (!status)
+    return "Meeting intake status is unavailable. This does not confirm that discovery or synthesis is working. Check /granola status again after the runtime is available.";
+  const state = status.active
+    ? "A source scan is in progress."
+    : status.checked
+      ? "A source scan has completed."
+      : "Waiting for the first source scan.";
+  const retry = status.scheduled
+    ? "Scheduled source scans will retry eligible work; unresolved AI attempts still require review."
+    : "Automatic source scans are paused. They will not retry until intake resumes.";
+  const reasons: Record<string, string> = {
+    "analysis-budget-exhausted":
+      "AI synthesis is blocked by the current usage limit. Use /meeting usage for spending and reset information; processing can resume when budget is available.",
+    "analysis-provider-quota":
+      "AI synthesis is blocked by the provider's quota. Check /meeting usage and the provider account before retrying.",
+    "analysis-rate-limited":
+      "The AI provider is rate limiting synthesis. A later eligible scan can retry.",
+    "analysis-timeout":
+      "AI synthesis timed out. Use /meeting synthesis to check whether review is required before another attempt.",
+    "analysis-request-indeterminate":
+      "A previous AI request has an unknown outcome. Review it before another paid attempt; scheduled scans cannot safely resend it.",
+    "analysis-not-configured":
+      "AI synthesis is not configured. The runtime configuration needs attention.",
+    "analysis-request-too-large":
+      "The captured material exceeds the AI request limit. The retained capture needs a bounded processing adjustment.",
+    "analysis-unavailable": "AI synthesis is temporarily unavailable.",
+    "rate-limited": "Granola is rate limiting source reads. A later scan can retry.",
+    "reauthentication-required":
+      "Granola requires a new login. Use /granola connect for your own account.",
+    "connection-unavailable":
+      "The Granola connection is unavailable. Inspect /granola status and reconnect if needed.",
+    "provider-shape-unsupported":
+      "Granola returned an unsupported response. Source compatibility needs an implementation fix before these captures can be processed.",
+    "policy-withheld":
+      "The source sharing policy withheld material. Review your account and explicit choices with /granola inspect and /granola configure.",
+    "source-changed":
+      "Source material changed during its proof. A later scan can retry the current revision.",
+    "source-unavailable":
+      "Granola source material is unavailable. A later scan can retry if access is restored.",
+    "context-unavailable":
+      "Synthesis cannot currently prove access to all required capture context. A later scan can retry after that access is restored."
+  };
+  const failures = [
+    ...new Set(
+      status.failureCodes.map(
+        (code) =>
+          (Object.hasOwn(reasons, code) ? reasons[code] : undefined) ??
+          "A source or synthesis step failed. Its safe operational details need review."
+      )
+    )
+  ];
+  return `Meeting intake: ${state}\n${retry}\n${failures.length ? failures.join("\n") : status.checked ? "The last completed scan reported no failure for your connection. Discovery is bounded and does not promise a complete history." : "No completed scan is available yet."}`;
 }

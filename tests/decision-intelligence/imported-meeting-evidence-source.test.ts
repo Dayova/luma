@@ -830,6 +830,39 @@ describe("Native imported Decision commands through the actual MI facade", () =>
       await live.bot.stop();
     }
   });
+  it("does not analyze or record a bound Meeting when the original command says not yet", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const live = await importedDecisionBot(f);
+    try {
+      await live.bind();
+      await live.invoke({
+        ...live.base,
+        type: "decision-record-meeting",
+        instruction: "Create a decision record, but not yet."
+      });
+      expect(f.interpret).not.toHaveBeenCalled();
+      expect(f.write).not.toHaveBeenCalled();
+      const original = f.request.observations[0];
+      if (original?.type !== "decision-record-requested") {
+        throw new Error("Expected the fixture's decision recording request");
+      }
+      await expect(
+        f.mi.observe({
+          ...f.request,
+          observations: [
+            {
+              ...original,
+              instruction: "Record this decision, but not now."
+            }
+          ]
+        })
+      ).rejects.toThrow("refusal");
+      expect(f.interpret).not.toHaveBeenCalled();
+    } finally {
+      await live.bot.stop();
+    }
+  });
   it("binds the actual import, reviews and accepts its candidate, then records once without another model call", async () => {
     const f = await fixture();
     f.allowWrites();

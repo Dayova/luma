@@ -285,19 +285,33 @@ export function createDiscordJsTransport(
 
     const originalInstruction =
       questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
-    const decisionRequest =
+    const usageRequest = /^(?:usage|status)$/iu.test(originalInstruction.trim());
+    let decisionRequest = Boolean(
       config.decisionRecords &&
-      (isExplicitDecisionRecordInstruction(originalInstruction) ||
-        /^(?:usage|status)$/iu.test(originalInstruction.trim()));
+      (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+    );
     const captureConfig = decisionRequest ? config.decisionRecords : config.contextAsk;
     if (!captureConfig) return;
 
-    const ask = discordContextAskMentionFromCandidate({
-      candidate: discordContextAskMessageCandidate(message),
+    const candidate = discordContextAskMessageCandidate(message);
+    let ask = discordContextAskMentionFromCandidate({
+      candidate,
       botUserId,
       guildId: config.guildId,
       config: captureConfig
     });
+
+    // Usage is a deterministic shared service. Its admission may come from the
+    // Ask scope when this channel is outside the separately enabled write scope.
+    if (!ask && decisionRequest && usageRequest && config.contextAsk) {
+      ask = discordContextAskMentionFromCandidate({
+        candidate,
+        botUserId,
+        guildId: config.guildId,
+        config: config.contextAsk
+      });
+      decisionRequest = false;
+    }
 
     if (!ask) {
       return;

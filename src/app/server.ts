@@ -1,3 +1,4 @@
+import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
   organizationalContextCatalogsFromEnv
@@ -179,6 +180,12 @@ export async function startServer(
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
       database
     });
+    const importedSourceAnalysis = importedSourceAnalysisFromEnv({
+      workspaceId,
+      env,
+      ledger: observedSourceLedger,
+      operationalOutcomeMarkerVerifier
+    });
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
@@ -191,6 +198,7 @@ export async function startServer(
     const meetingIntelligence = createMeetingIntelligence({
       database,
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
+      ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
       reasoningModel: reasoningModelFromEnv(
         env,
         openAIReasoningModelName,
@@ -239,7 +247,8 @@ export async function startServer(
       database,
       organizationalContextGuard: createMeetingContextGuard({
         database,
-        ...(organizationalContext ? { organizationalContext, contextAudience } : {})
+        ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
+        ...(importedSourceAnalysis ? { importedSourceAnalysis } : {})
       }),
       meetingIntelligence,
       identityDirectory,
@@ -347,7 +356,9 @@ const unavailableReasoningModel: ReasoningModel = {
   ): Promise<StructuredReasoningResult<T>> {
     void _request;
     return Promise.reject(
-      new AiServiceError("not-configured", "Meeting analysis is not configured")
+      new AiServiceError("not-configured", "Meeting analysis is not configured", {
+        requestDispatched: false
+      })
     );
   }
 };

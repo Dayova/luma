@@ -1,4 +1,12 @@
 import {
+  prepareImportedSourceAnalysisReceipt,
+  readImportedSourceAnalysisReceipt,
+  sameImportedSourceRevision,
+  retainImportedSourceAnalysisReceipt,
+  type ImportedSourceAnalysisConfiguration,
+  type ImportedSourceAnalysisReceipt
+} from "./imported-source-analysis.js";
+import {
   createMeetingContextGuard,
   MeetingContextUnavailableError,
   contextItems,
@@ -116,6 +124,7 @@ export type CreateMeetingIntelligenceInput = {
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
   importedSourceObservationVerifier?: ImportedSourceObservationVerifier;
+  importedSourceAnalysis?: ImportedSourceAnalysisConfiguration;
   organizationalContext?: OrganizationalContext;
   contextAudience?: (workspaceId: WorkspaceId) => Promise<ContextAudience | null>;
   now?: () => Date;
@@ -216,8 +225,12 @@ export function createMeetingIntelligence(
   const importedSourceObservationVerifier =
     input.importedSourceObservationVerifier ?? rejectUnverifiedImportedSource;
   const reconciliationFlights = new Map<string, ReconciliationFlight>();
+  const importedObservationFlights = new Map<string, Promise<MeetingUpdate>>();
   const contextConfiguration: MeetingContextConfiguration = {
     database: input.database,
+    ...(input.importedSourceAnalysis
+      ? { importedSourceAnalysis: input.importedSourceAnalysis }
+      : {}),
     ...(input.organizationalContext
       ? { organizationalContext: input.organizationalContext }
       : {}),
@@ -226,18 +239,47 @@ export function createMeetingIntelligence(
   const contextGuard = createMeetingContextGuard(contextConfiguration);
 
   return {
-    observe: (observeInput) =>
-      observeMeeting(
-        input.database,
-        input.reasoningModel,
-        workCatalogs,
-        importedSourceObservationVerifier,
-        reconciliationFlights,
-        contextConfiguration,
-        contextGuard,
-        now,
-        observeInput
-      ),
+    observe: (observeInput) => {
+      const bound = structuredClone(observeInput);
+      const run = () =>
+        observeMeeting(
+          input.database,
+          input.reasoningModel,
+          workCatalogs,
+          importedSourceObservationVerifier,
+          reconciliationFlights,
+          contextConfiguration,
+          contextGuard,
+          now,
+          bound
+        );
+      // One process owns the store. Serialize source deliveries for a Meeting so
+      // an identical webhook cannot advance automatic reconciliation underneath
+      // its own paid analysis. Human Judgments remain concurrent and authoritative.
+      if (
+        !contextConfiguration.importedSourceAnalysis ||
+        !Array.isArray(bound.observations) ||
+        !bound.observations.length ||
+        bound.observations.some(
+          (observation) => observation.type !== "meeting-imported-from-source"
+        )
+      )
+        return run();
+      const key = JSON.stringify([
+        bound.workspace.workspaceId,
+        bound.observations[0]!.meetingId
+      ]);
+      const prior = importedObservationFlights.get(key);
+      const next = prior ? prior.catch(() => undefined).then(run) : run();
+      importedObservationFlights.set(key, next);
+      void next
+        .finally(() => {
+          if (importedObservationFlights.get(key) === next)
+            importedObservationFlights.delete(key);
+        })
+        .catch(() => undefined);
+      return next;
+    },
     query: (queryInput) =>
       freshContextOutput(
         (guard) => queryMeeting(input.database, guard, queryInput),
@@ -275,7 +317,21 @@ async function freshContextOutput<T>(
   }
   // Continued source churn cannot deadlock unrelated Meeting work. This guard
   // withholds all external-dependent items and never substitutes cached text.
-  return operation(createMeetingContextGuard({ database: config.database }));
+  return operation(
+    createMeetingContextGuard({
+      database: config.database,
+      ...(config.importedSourceAnalysis
+        ? {
+            importedSourceAnalysis: {
+              audience: () => Promise.resolve(null),
+              access: {
+                requireCurrent: () => Promise.reject(new MeetingContextUnavailableError())
+              }
+            }
+          }
+        : {})
+    })
+  );
 }
 function queryContextReceiptIds(result: MeetingQueryResult): string[] {
   switch (result.type) {
@@ -330,6 +386,26 @@ async function observeMeeting(
     requestedWorkspace,
     importedSourceObservationVerifier
   );
+
+  const sourceAnalysisReceipts = new Map<string, ImportedSourceAnalysisReceipt>();
+  if (contextConfiguration.importedSourceAnalysis) {
+    for (const observation of input.observations.slice(0, 20)) {
+      if (
+        observation.type !== "meeting-imported-from-source" ||
+        sourceVerificationErrors.has(observation)
+      )
+        continue;
+      try {
+        const receipt = await prepareImportedSourceAnalysisReceipt(
+          contextConfiguration.importedSourceAnalysis,
+          observation
+        );
+        sourceAnalysisReceipts.set(observation.observationId, receipt);
+      } catch {
+        /* Retain accepted Evidence without treating a missing grant as permission. */
+      }
+    }
+  }
 
   const acceptance = await database.transaction(async (transaction) => {
     // Keep the configuration mutex until either a validated Observation claims
@@ -490,6 +566,22 @@ async function observeMeeting(
 
       acceptedObservationIds.push(observation.observationId);
       state = applied.state;
+      if (
+        observation.type === "meeting-imported-from-source" &&
+        contextConfiguration.importedSourceAnalysis
+      ) {
+        const receipt = sourceAnalysisReceipts.get(observation.observationId);
+        if (receipt) await retainImportedSourceAnalysisReceipt(transaction, receipt);
+        state = {
+          ...state,
+          importedSourceAnalysisReceiptIds: [
+            ...new Set([
+              ...(state.importedSourceAnalysisReceiptIds ?? []),
+              ...(receipt ? [receipt.id] : [])
+            ])
+          ]
+        };
+      }
       evidenceForAnalysis.push(...applied.evidenceForAnalysis);
       events.push(...applied.events);
     }
@@ -535,10 +627,98 @@ async function observeMeeting(
     events,
     evidenceForAnalysis
   } = acceptance;
+  const importedAnalysisObservations: MeetingImportedFromSource[] = [];
+  if (contextConfiguration.importedSourceAnalysis) {
+    const admitted = await database.transaction(async (transaction) => {
+      let latest = await loadMeetingStateForMutation(transaction, workspaceId, meetingId);
+      let changed = false;
+      for (const observation of input.observations) {
+        if (
+          observation.type !== "meeting-imported-from-source" ||
+          ![...acceptedObservationIds, ...duplicateObservationIds].includes(
+            observation.observationId
+          )
+        )
+          continue;
+        const receipt = sourceAnalysisReceipts.get(observation.observationId);
+        if (!receipt) continue;
+        const attempts = await transaction.query(
+          `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+          [workspaceId, meetingId, observation.observationId]
+        );
+        if (attempts.rows.length) continue;
+        const priorReceipts = await Promise.all(
+          (latest.importedSourceAnalysisReceiptIds ?? []).map((id) =>
+            readImportedSourceAnalysisReceipt(transaction, workspaceId, meetingId, id)
+          )
+        );
+        const priorGrant = priorReceipts.find((item) =>
+          sameImportedSourceRevision(item.source, receipt.source)
+        );
+        if (priorGrant && priorGrant.id !== receipt.id) continue;
+        if (!priorGrant) {
+          await retainImportedSourceAnalysisReceipt(transaction, receipt);
+          latest = {
+            ...latest,
+            importedSourceAnalysisReceiptIds: [
+              ...(latest.importedSourceAnalysisReceiptIds ?? []),
+              receipt.id
+            ]
+          };
+          changed = true;
+        }
+        if (
+          observation.sourceSections.some(
+            (section) => section.section === "transcript" && section.excerpt.trim()
+          )
+        )
+          importedAnalysisObservations.push(observation);
+      }
+      if (changed) {
+        latest = advanceRevision(latest, now().toISOString());
+        await saveMeetingState(
+          transaction,
+          latest,
+          "imported-source-analysis-admitted",
+          now
+        );
+      }
+      return latest;
+    });
+    state = admitted;
+    evidenceForAnalysis.push(
+      ...importedAnalysisObservations.flatMap((observation) =>
+        observation.sourceSections.map((section) =>
+          importedSourceSectionEvidence(observation.source, section)
+        )
+      )
+    );
+  }
   const interventions: MeetingIntervention[] = [];
-  let analysisStatus: MeetingUpdate["analysisStatus"] = "not-needed";
+  const deniedSourceAnalysis =
+    Boolean(contextConfiguration.importedSourceAnalysis) &&
+    input.observations.some(
+      (observation) =>
+        observation.type === "meeting-imported-from-source" &&
+        acceptedObservationIds.includes(observation.observationId) &&
+        !sourceAnalysisReceipts.has(observation.observationId) &&
+        observation.sourceSections.some(
+          (section) => section.section === "transcript" && section.excerpt.trim()
+        )
+    );
+  let analysisStatus: MeetingUpdate["analysisStatus"] = deniedSourceAnalysis
+    ? "deferred"
+    : "not-needed";
+  if (deniedSourceAnalysis)
+    errors.push({
+      code: "context-unavailable",
+      retryable: true,
+      partialResultAvailable: true
+    });
 
   if (evidenceForAnalysis.length > 0) {
+    let claimedImportedAnalysis = false;
+    let modelDispatched = false;
     try {
       // A model result is valid only for the exact canonical state it saw. It
       // must never reapply over a later utterance revision or Human Judgment.
@@ -549,6 +729,31 @@ async function observeMeeting(
         state,
         evidenceForAnalysis
       );
+      if (importedAnalysisObservations.length)
+        analysisContext.context.push(
+          JSON.stringify({
+            type: "imported-meeting-captures",
+            sources: importedAnalysisObservations.map((observation) => ({
+              source: observation.source,
+              sections: observation.sourceSections.map((section) => ({
+                section: section.section,
+                evidenceId: importedSourceSectionEvidence(observation.source, section)
+                  .evidenceId
+              }))
+            })),
+            interpretation:
+              "Transcript Evidence preserves original speech. Summaries and notes are derived provider material, not exact speech or certain speaker identity. Preserve contradictory claims and German/English modality. A person's name in the transcript does not resolve who spoke or establish ownership. Human Judgment outranks source/model inference. This analysis neither edits provider captures nor authorizes external writes."
+          })
+        );
+      analysisContext.receiptIds = [
+        ...new Set([
+          ...analysisContext.receiptIds,
+          ...importedAnalysisObservations.flatMap((observation) => {
+            const receipt = sourceAnalysisReceipts.get(observation.observationId);
+            return receipt ? [receipt.id] : [];
+          })
+        ])
+      ];
       if (analysisContext.unavailable)
         errors.push({
           code: "context-unavailable",
@@ -560,6 +765,14 @@ async function observeMeeting(
         meetingId,
         receiptIds: analysisContext.receiptIds
       });
+      claimedImportedAnalysis = await claimImportedAnalysisAttempts(
+        database,
+        state,
+        importedAnalysisObservations,
+        sourceAnalysisReceipts
+      );
+      if (!claimedImportedAnalysis) throw new MeetingContextUnavailableError();
+      modelDispatched = true;
       const analysis =
         await reasoningModel.generateStructured<MeetingAnalysisProposalBatch>({
           workspaceId,
@@ -608,6 +821,17 @@ async function observeMeeting(
         analysisStatus = "deferred";
       }
     } catch (error: unknown) {
+      if (
+        claimedImportedAnalysis &&
+        (!modelDispatched ||
+          (error instanceof AiServiceError && error.requestDispatched === false))
+      ) {
+        for (const observation of importedAnalysisObservations)
+          await database.query(
+            `DELETE FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+            [workspaceId, meetingId, observation.observationId]
+          );
+      }
       analysisStatus = "deferred";
       if (error instanceof MeetingContextUnavailableError) {
         errors.push({
@@ -671,6 +895,41 @@ async function observeMeeting(
     events,
     errors
   };
+}
+
+async function claimImportedAnalysisAttempts(
+  database: LumaDatabase,
+  state: MeetingState,
+  observations: MeetingImportedFromSource[],
+  receipts: Map<string, ImportedSourceAnalysisReceipt>
+): Promise<boolean> {
+  if (!observations.length) return true;
+  return database.transaction(async (transaction) => {
+    const latest = await loadMeetingStateForMutation(
+      transaction,
+      state.workspaceId,
+      state.meetingId
+    );
+    if (latest.revision !== state.revision) return false;
+    for (const observation of observations) {
+      const existing = await transaction.query(
+        `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+        [state.workspaceId, state.meetingId, observation.observationId]
+      );
+      if (existing.rows.length) return false;
+    }
+    for (const observation of observations)
+      await transaction.query(
+        `INSERT INTO meeting_imported_source_analysis_attempts (workspace_id,meeting_id,observation_id,receipt_id) VALUES ($1,$2,$3,$4)`,
+        [
+          state.workspaceId,
+          state.meetingId,
+          observation.observationId,
+          receipts.get(observation.observationId)!.id
+        ]
+      );
+    return true;
+  });
 }
 
 const RECONCILIATION_POLICY_VERSION = "v1";
@@ -2190,7 +2449,10 @@ async function queryMeeting(
         state,
         query,
         uniqueEvidence([
-          ...(await loadEvidenceReferences(database, input.workspaceId, input.meetingId)),
+          ...(await contextGuard.filterEvidence(
+            state,
+            await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
+          )),
           ...contextItems(state).flatMap((item) => item.provenance.evidence)
         ])
       );

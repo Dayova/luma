@@ -1,4 +1,17 @@
-import type { MeetingState, Provenance, WorkspaceId } from "../domain/model.js";
+import {
+  currentImportedSourceReceiptIds,
+  isImportedSourceAnalysisReceipt,
+  requireImportedSourceAnalysisReceiptCurrent,
+  projectImportedSourceMaterial,
+  filterImportedSourceEvidence,
+  type ImportedSourceAnalysisConfiguration
+} from "./imported-source-analysis.js";
+import type {
+  EvidenceReference,
+  MeetingState,
+  Provenance,
+  WorkspaceId
+} from "../domain/model.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
   ContextAudience,
@@ -15,6 +28,7 @@ export type MeetingContextExecutionGuard = {
 };
 export type MeetingContextConfiguration = {
   database: LumaDatabase;
+  importedSourceAnalysis?: ImportedSourceAnalysisConfiguration;
   organizationalContext?: OrganizationalContext;
   /** Configured actual shared audience; never inferred from Meeting attendance. */
   contextAudience?: (workspaceId: WorkspaceId) => Promise<ContextAudience | null>;
@@ -29,6 +43,14 @@ export async function migrateMeetingContext(database: LumaDatabase): Promise<voi
   await database.exec(`CREATE TABLE IF NOT EXISTS meeting_context_receipts (
     workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, receipt_id TEXT NOT NULL,
     request_json TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, meeting_id, receipt_id)
+  );
+  CREATE TABLE IF NOT EXISTS meeting_imported_source_analysis_attempts (
+    workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, observation_id TEXT NOT NULL, receipt_id TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, meeting_id, observation_id)
+  );
+  CREATE TABLE IF NOT EXISTS meeting_imported_source_receipts (
+    workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, receipt_id TEXT NOT NULL, receipt_json TEXT NOT NULL,
     PRIMARY KEY (workspace_id, meeting_id, receipt_id)
   )`);
 }
@@ -45,9 +67,10 @@ export async function retainMeetingContextReceipt(
 
 export function contextReceiptIds(state: MeetingState): string[] {
   return [
-    ...new Set(
-      contextItems(state).flatMap((item) => item.provenance.contextReceiptIds ?? [])
-    )
+    ...new Set([
+      ...(state.importedSourceAnalysisReceiptIds ?? []),
+      ...contextItems(state).flatMap((item) => item.provenance.contextReceiptIds ?? [])
+    ])
   ];
 }
 type ContextItem = {
@@ -88,6 +111,16 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
     meetingId: string,
     receiptId: string
   ): Promise<void> => {
+    if (isImportedSourceAnalysisReceipt(receiptId)) {
+      await requireImportedSourceAnalysisReceiptCurrent(
+        config.database,
+        config.importedSourceAnalysis,
+        workspaceId,
+        meetingId,
+        receiptId
+      );
+      return;
+    }
     if (!config.organizationalContext || !config.contextAudience || !receiptId)
       throw new MeetingContextUnavailableError();
     const audience = await config.contextAudience(workspaceId);
@@ -130,9 +163,32 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
   };
   const project = async (state: MeetingState): Promise<MeetingState> => {
     const eligible = await eligibleReceipts(state);
-    const itemAllowed = (item: { provenance: Provenance }): boolean =>
-      (item.provenance.contextReceiptIds ?? []).every((id) => eligible.has(id));
+    const governedSources =
+      Boolean(config.importedSourceAnalysis) ||
+      state.importedSourceAnalysisReceiptIds !== undefined;
+    const projectedSources = await projectImportedSourceMaterial(
+      config.database,
+      governedSources
+        ? {
+            ...state,
+            importedSourceAnalysisReceiptIds: state.importedSourceAnalysisReceiptIds ?? []
+          }
+        : state,
+      eligible
+    );
     const items = contextItems(state);
+    const allowedEvidence = new Set(
+      (
+        await filterImportedSourceEvidence(
+          config.database,
+          projectedSources,
+          items.flatMap((item) => item.provenance.evidence)
+        )
+      ).map((item) => item.evidenceId)
+    );
+    const itemAllowed = (item: { provenance: Provenance }): boolean =>
+      (item.provenance.contextReceiptIds ?? []).every((id) => eligible.has(id)) &&
+      item.provenance.evidence.every((item) => allowedEvidence.has(item.evidenceId));
     const blocked = new Set(
       items.filter((item) => !itemAllowed(item)).map((item) => item.id)
     );
@@ -143,13 +199,25 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
     }
     const visible = <T extends { id: string }>(values: T[]): T[] =>
       values.filter((item) => !blocked.has(item.id));
-    const count = blocked.size;
+    const latestSources = state.importedSources.filter(
+      (source) =>
+        !state.importedSources.some(
+          (other) =>
+            other.providerId === source.providerId &&
+            other.sourceObjectId === source.sourceObjectId &&
+            other.sourceRevision > source.sourceRevision
+        )
+    );
+    const withheldSources = !governedSources
+      ? 0
+      : latestSources.length - projectedSources.importedSources.length;
+    const count = blocked.size + withheldSources;
     const partial = items.some(
       (item) =>
         !blocked.has(item.id) && item.provenance.contextCoverage?.complete === false
     );
     return {
-      ...state,
+      ...projectedSources,
       topics: visible(state.topics),
       proposals: visible(state.proposals),
       decisions: visible(state.decisions),
@@ -164,7 +232,7 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
           : state.currentTopicId,
       contextAvailability: {
         status: count
-          ? count === items.length
+          ? count === items.length + latestSources.length
             ? "unavailable"
             : "partial"
           : config.organizationalContext
@@ -228,12 +296,31 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
             for (const id of relatedIds(item)) selectedIds.add(id);
       }
       const selected = items.filter((item) => selectedIds.has(item.id));
+      let sourceReceiptIds: string[];
+      try {
+        sourceReceiptIds = await currentImportedSourceReceiptIds(
+          config.database,
+          state,
+          Boolean(config.importedSourceAnalysis)
+        );
+      } catch {
+        throw new MeetingContextUnavailableError();
+      }
       await requireReceiptsCurrent({
         ...input,
-        receiptIds: selected.flatMap((item) => item.provenance.contextReceiptIds ?? [])
+        receiptIds: [
+          ...sourceReceiptIds,
+          ...selected.flatMap((item) => item.provenance.contextReceiptIds ?? [])
+        ]
       });
     };
-  return { project, requireReceiptsCurrent, requireIntentCurrent };
+  return {
+    project,
+    requireReceiptsCurrent,
+    requireIntentCurrent,
+    filterEvidence: (state: MeetingState, evidence: EvidenceReference[]) =>
+      filterImportedSourceEvidence(config.database, state, evidence)
+  };
 }
 
 async function withinDeadline<T>(operation: Promise<T>, deadlineAt: number): Promise<T> {

@@ -81,3 +81,10 @@ receipts. Provider failures do not cause cached private text to be substituted.
 These controls preserve evidence; they do not delete history or change the USD
 30 shared AI allowance. More retrieved text can increase model cost, and the
 same durable AI budget still controls admission.
+
+The Notion provider configuration also enables [governed imported Meeting
+understanding](../imported-meeting-understanding.md) in the main runtime. Existing
+and new accepted Meeting Note imports use the same exact-page founder grants and
+dedicated reader, with a fresh capture comparison and durable original-audience
+receipt before model analysis. Source-only observation proof hosts do not gain a
+second AI budget.

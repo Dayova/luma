@@ -15,3 +15,14 @@ LUM-33 deliberately leaves LUM-2's Notion Meeting Notes source and observed-sour
 Automatic matching ranks shared calendar identity above shared conference identity, then overlapping time with resolved attendees. Each candidate Logical Meeting uses its strongest capture evidence; equal strongest matches remain ambiguous. A capture whose current evidence becomes uncertain or disappears is isolated from any other current members, even when it originally founded the Logical Meeting. Named Human separations exclude the other capture's whole current Logical Meeting from automatic matching, including when that capture is now withheld, so another member cannot bypass the decision. Replaying a recorded Human Judgment acknowledges the current binding rather than resurrecting a superseded decision; current privacy eligibility still applies.
 
 Later synthesis may consume active Capture Bindings to form a Luma Synthesis, but it must preserve per-capture provenance, capability gaps, and disagreement; it must never present a concatenated provider artifact as original speech. A withheld revision records only a minimal opaque eligibility watermark. A later private/policy decision for the same source revision is an append-only terminal withdrawal: it fences current admission without rewriting the earlier importable decision or Human-import audit, and it prevents delayed older deliveries from reactivating private material. An ambiguous or `requires-human-import` revision can enter only through an actor-attested exact-revision import; a private/policy exclusion cannot be overridden there. A later current revision re-checks every automatic binding, including a former high-confidence match, while preserving its history; Human bindings and separations remain authoritative. A compact Operational Outcome remains a distinct, authorized execution/writeback record rather than a raw source or Luma Synthesis. Full capture-graph topology, runtime activation, and external writes remain outside this decision.
+
+## Follow-on Notion understanding
+
+The Notion-only prerequisite now admits accepted original transcript Evidence to
+general Meeting analysis under an immutable original-recipient grant and a fresh
+source-currentness proof. Existing source-only imports may be analyzed once when
+their first explicit grant is configured; this does not synthesize multiple Capture
+Bindings or turn a source page into a Logical Meeting. A durable per-source attempt
+prevents replaying possibly paid model work. See
+[Imported Meeting understanding](../imported-meeting-understanding.md) for its
+currentness, projection, budget and runtime boundaries.

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
-import { candidates, ComparisonError } from "./providers.js";
+import { candidates, ComparisonError, defaultLimits } from "./providers.js";
 import { corpusSchema } from "./corpus.js";
 import { renderReport, runComparison, type Report } from "./runner.js";
 
@@ -14,13 +14,15 @@ async function main() {
       providers: { type: "string" },
       "max-requests": { type: "string", default: "4" },
       repeats: { type: "string", default: "1" },
+      fixtures: { type: "string" },
+      "max-output-tokens": { type: "string", default: "4096" },
       "output-dir": { type: "string" },
       help: { type: "boolean", default: false }
     }
   });
   if (values.help) {
     console.log(
-      "pnpm eval:providers [--live] [--providers=openai,anthropic,google,deepseek] [--max-requests=4] [--repeats=1] [--output-dir=PATH]\nDefault: offline preflight. Live sends only the committed synthetic corpus. No production sources or provider writes. Credentials come from environment / local .env."
+      "pnpm eval:providers [--live] [--providers=openai,anthropic,google,deepseek] [--max-requests=4] [--repeats=1] [--fixtures=case-id,...] [--max-output-tokens=4096] [--output-dir=PATH]\nDefault: offline preflight. Live sends only the committed synthetic corpus. No production sources or provider writes. Credentials come from environment / local .env."
     );
     return;
   }
@@ -36,6 +38,22 @@ async function main() {
       await readFile("evals/fixtures/provider-comparison.json", "utf8")
     ) as unknown
   );
+  if (values.fixtures !== undefined) {
+    const fixtureIds = values.fixtures.split(",");
+    if (
+      new Set(fixtureIds).size !== fixtureIds.length ||
+      fixtureIds.some((id) => !corpus.fixtures.some((f) => f.id === id))
+    )
+      throw new ComparisonError("invalid-fixtures");
+    corpus.fixtures = corpus.fixtures.filter((f) => fixtureIds.includes(f.id));
+  }
+  const maxOutputTokens = Number(values["max-output-tokens"]);
+  if (
+    !Number.isSafeInteger(maxOutputTokens) ||
+    maxOutputTokens < 1 ||
+    maxOutputTokens > 16_384
+  )
+    throw new ComparisonError("invalid-output-limit");
   const directory = resolve(
     values["output-dir"] ??
       `.luma/provider-comparison/${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`
@@ -70,6 +88,7 @@ async function main() {
     env: process.env,
     live: values.live,
     maxRequests: Number(values["max-requests"]),
+    limits: { ...defaultLimits, maxOutputTokens },
     repeats: Number(values.repeats),
     selected,
     gitRevision,

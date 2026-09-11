@@ -60,6 +60,17 @@ fixture/repetition pairs. A live run exits 2 when any case is missing, unrun,
 limited, or failed; exit 0 means all requested cases produced validated output,
 **not** that semantic checks passed. Invalid setup exits 1.
 
+For a separately reported budget-sensitivity run, select fixed fixtures and raise
+only the output limit (maximum 16,384). For example, each selected provider gets
+three repetitions of the four stress cases:
+
+```bash
+pnpm eval:providers --live --providers=deepseek --max-requests=12 --repeats=3 --max-output-tokens=8192 --fixtures=long-owner-handoff,long-decision-correction,berlin-midnight-deadline,long-quoted-injection
+```
+
+Keep these results separate from the 4,096-token run. A truncated response remains
+a failure in the original condition, even if the larger-budget run completes.
+
 ## Anthropic schema compilation compatibility
 
 The live Sonnet 5 API rejected this full contract with a compiled-grammar-size
@@ -115,7 +126,7 @@ account-specific credits and discounts are excluded.
 
 ## Bounds and accounting
 
-Each request has a 32,000-byte serialized body limit, 4,096 maximum output tokens,
+Each request has a 32,000-byte serialized body limit, a default of 4,096 maximum output tokens,
 a 45-second deadline, and no automatic retries. The CLI defaults to four total
 requests, accepts at most 200, and allows one to five repetitions. These are
 request/token limits, not a hard USD billing cap; use the provider's own account

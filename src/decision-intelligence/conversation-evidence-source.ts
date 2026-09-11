@@ -281,7 +281,16 @@ function safeUrl(value: string): boolean {
   }
 }
 function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash("sha256")
+    .update(
+      JSON.stringify(value, (_key, child: unknown) => {
+        if (!child || typeof child !== "object" || Array.isArray(child)) return child;
+        return Object.fromEntries(
+          Object.entries(child).sort(([left], [right]) => left.localeCompare(right))
+        );
+      })
+    )
+    .digest("hex");
 }
 function unavailable(): Error {
   return new Error(

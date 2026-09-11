@@ -1,3 +1,4 @@
+import { decisionSourceSchema } from "../../src/domain/decision-record-schemas.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConversationDecisionEvidenceSource } from "../../src/decision-intelligence/conversation-evidence-source.js";
 import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
@@ -108,6 +109,12 @@ describe("Bounded Conversation Decision Evidence", () => {
     ).toEqual(before);
     expect((await database.query("SELECT * FROM observed_sources")).rows).toEqual(heads);
     expect(await f.source.capture(f.request)).toEqual(source);
+  });
+  it("retains source proof through the owned wire schema without depending on object key insertion order", async () => {
+    const f = fixture();
+    const captured = await f.source.capture(f.request);
+    const wire = decisionSourceSchema.parse(JSON.parse(JSON.stringify(captured)));
+    await expect(f.source.requireCurrent(wire)).resolves.toBeUndefined();
   });
   it("rejects wrong actors, guests, an expanded audience and actual Meetings without retaining a substitute source", async () => {
     const f = fixture();

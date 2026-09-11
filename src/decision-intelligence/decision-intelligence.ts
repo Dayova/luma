@@ -654,14 +654,31 @@ export function createDecisionIntelligence(
             );
             if (
               observation.targetRecordId &&
-              !(
-                "targetRecordId" in interpretation.reconciliation &&
-                interpretation.reconciliation.targetRecordId ===
-                  observation.targetRecordId
-              ) &&
               !["reject", "clarify"].includes(interpretation.reconciliation.action)
-            )
-              throw new Error("The model changed the explicitly selected target");
+            ) {
+              const selected = (identity: string) =>
+                catalog.records.filter(
+                  (record) =>
+                    record.content.id === identity ||
+                    record.reference.externalId === identity
+                );
+              const explicit = selected(observation.targetRecordId);
+              const interpreted =
+                "targetRecordId" in interpretation.reconciliation
+                  ? selected(interpretation.reconciliation.targetRecordId)
+                  : [];
+              // Logical record IDs and provider page IDs may name one record.
+              // Both must resolve uniquely; comparing only one ID field would
+              // admit cross-record collisions or refuse a valid alternate ID.
+              if (
+                explicit.length !== 1 ||
+                interpreted.length !== 1 ||
+                explicit[0] !== interpreted[0]
+              )
+                throw new Error(
+                  "The model changed or ambiguously selected the explicit target"
+                );
+            }
             await requireDecisionRequestCurrent(input, stored, { catalog: true });
             stored = reconcileDecision(
               stored,

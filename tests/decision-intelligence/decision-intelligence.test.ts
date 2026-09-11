@@ -16,6 +16,9 @@ import {
 import { decisionDigest } from "../../src/decision-intelligence/persistence.js";
 import { decisionRecord } from "../knowledge/decision-record-fixture.js";
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
+import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
+import { createOpenAIDecisionInterpreter } from "../../src/decision-intelligence/openai-decision-interpreter.js";
+import type { DecisionInterpreter } from "../../src/decision-intelligence/ports.js";
 
 let database: LumaDatabase;
 beforeEach(async () => {
@@ -133,13 +136,16 @@ function fixture() {
     },
     audience: () => Promise.resolve(structuredClone(source.audience))
   };
-  const make = () => {
+  const make = (interpreter?: DecisionInterpreter) => {
     const mi = createMeetingIntelligence({
       database,
       reasoningModel: {
         generateStructured: () => Promise.reject(new Error("No Meeting model call"))
       },
-      decisionIntelligence: configuration,
+      decisionIntelligence: {
+        ...configuration,
+        ...(interpreter ? { interpreter } : {})
+      },
       now: () => new Date("2026-09-11T10:00:00Z")
     });
     return {
@@ -224,18 +230,121 @@ function fixture() {
   };
 }
 describe("MI-owned first-class Decision Records", () => {
+  it.each(["external-page", "canonical-record"])(
+    "amends the explicitly selected %s identity through the production interpreter and owned execution",
+    async (identity) => {
+      const f = fixture();
+      const target = f.addRecord();
+      const pageId = "63ae3b42-8991-4fbc-981e-3c3cf6b36b3a";
+      target.reference.externalId = pageId;
+      target.reference.url = `https://notion.so/${pageId}`;
+      f.records.delete("previous");
+      f.records.set(pageId, target);
+      const observation = f.request.observations[0];
+      if (observation.type !== "decision-record-requested") throw new Error("fixture");
+      observation.targetRecordId =
+        identity === "external-page" ? pageId : target.content.id;
+      const { relatedWork, implementationEvidence, ...candidate } = f.candidate();
+      expect(relatedWork).toEqual([]);
+      expect(implementationEvidence).toEqual([]);
+      const budget = createAiUsageBudget({ database });
+      const model = vi.fn(() =>
+        Promise.resolve({
+          outputText: JSON.stringify({
+            candidate: {
+              ...candidate,
+              relatedWorkReferenceIds: [],
+              implementationReferenceIds: []
+            },
+            reconciliation: { action: "amend", targetRecordId: target.content.id }
+          }),
+          model: "gpt-5.6-luna",
+          serviceTier: "default",
+          status: "completed",
+          usage: {
+            inputTokens: 100,
+            cachedInputTokens: 0,
+            cacheWriteTokens: 0,
+            outputTokens: 10,
+            reasoningTokens: 0
+          }
+        })
+      );
+      const current = f.make(
+        createOpenAIDecisionInterpreter({ budget, client: { create: model } })
+      );
+      const update = await current.mi.observe(f.request);
+      expect(update.state).toBe("confirmed");
+      expect(update.approvedIntentId).not.toBeNull();
+      expect(f.provider.write).not.toHaveBeenCalled();
+      if (!update.approvedIntentId) throw new Error(update.message);
+      const executed = await current.execution.execute({
+        workspace: f.request.workspace,
+        subject: f.request.subject,
+        decisionRequestId: update.requestId,
+        intentId: update.approvedIntentId
+      });
+      expect(executed.record.outcome.references).toEqual([
+        expect.objectContaining({ externalId: pageId })
+      ]);
+      expect(f.provider.write).toHaveBeenCalledTimes(1);
+      expect(f.records.size).toBe(1);
+      expect(f.records.get(pageId)?.content.id).toBe(target.content.id);
+      const replay = await current.mi.observe(f.request);
+      expect(replay).toMatchObject({ state: "recorded", duplicate: true });
+      expect(model).toHaveBeenCalledTimes(1);
+      expect((await budget.getStatus("dayova")).requestCount).toBe(1);
+    }
+  );
+  it.each([
+    "same-record-alias",
+    "explicit-collision",
+    "interpreted-collision",
+    "retarget"
+  ])("resolves both explicit and interpreted target identities: %s", async (scenario) => {
+    const f = fixture();
+    const target = f.addRecord();
+    target.reference.externalId = "original-page";
+    f.records.delete("previous");
+    f.records.set("original-page", target);
+    const observation = f.request.observations[0];
+    if (observation.type !== "decision-record-requested") throw new Error("fixture");
+    observation.targetRecordId = "previous";
+    let interpretedTarget = "original-page";
+    if (scenario !== "same-record-alias") {
+      const other = structuredClone(target);
+      other.content.id = scenario === "explicit-collision" ? "original-page" : "other";
+      other.reference.externalId =
+        scenario === "interpreted-collision" ? "previous" : "other-page";
+      other.reference.url = `https://notion.so/${other.reference.externalId}`;
+      f.records.set("other-key", other);
+      observation.targetRecordId =
+        scenario === "explicit-collision" || scenario === "interpreted-collision"
+          ? "original-page"
+          : "previous";
+      interpretedTarget = scenario === "retarget" ? "other" : "previous";
+    }
+    f.setInterpretation({
+      candidate: f.candidate(),
+      reconciliation: { action: "amend", targetRecordId: interpretedTarget }
+    });
+    const update = await f.make().mi.observe(f.request);
+    expect(update.state).toBe(
+      scenario === "same-record-alias" ? "confirmed" : "needs-clarification"
+    );
+    if (scenario !== "same-record-alias") expect(update.approvedIntentId).toBeNull();
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
   it("preserves a definitive pre-write refusal in status instead of reporting unknown remote work", async () => {
     const f = fixture(),
       e = await f.executable();
     f.setWrite("not-applied");
     await e.current.execution.execute(e.input);
-    const status = await f
-      .make()
-      .mi.query({
-        workspaceId: "dayova",
-        subject: f.request.subject,
-        query: { type: "decision-request", requestId: "request-1" }
-      });
+    const status = await f.make().mi.query({
+      workspaceId: "dayova",
+      subject: f.request.subject,
+      query: { type: "decision-request", requestId: "request-1" }
+    });
     expect(status.state).toBe("confirmed");
     expect(status.execution?.outcome).toMatchObject({
       status: "failed",

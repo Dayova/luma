@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-11T16:43:04.600Z",
+  "gitRevision": "e5a968a9a8274c803754061f300529298fe9e375-dirty",
+  "corpusHash": "8c1a7de524a694af1d032dcdddad7a47474f4ba8e60fe5aeec3707e3a27258de",
+  "corpusProvenance": "agent-authored-synthetic-not-human-labeled",
+  "promptVersion": "provider-comparison-v1",
+  "mode": "live",
+  "limits": {
+    "maxOutputTokens": 4096,
+    "timeoutMs": 45000,
+    "maxInputBytes": 32000,
+    "maxRequests": 1,
+    "repeats": 1
+  },
+  "candidateConfig": [
+    {
+      "id": "google",
+      "model": "gemini-3.8-flash",
+      "key": "GEMINI_API_KEY",
+      "inputRate": 0.75,
+      "outputRate": 3.75,
+      "pricing": "https://ai.google.dev/gemini-api/docs/pricing"
+    }
+  ],
+  "googleEndpoint": {
+    "backend": "vertex"
+  },
+  "anthropicOutputMode": "prompt-json",
+  "googlePricingSource": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+  "pricingVerifiedAt": "2026-09-10",
+  "pricingNotes": "USD estimates use uncached input and billed output at published standard rates; DeepSeek peak rates, Google promotional rates through 2026-12-31. Cache discounts and actual invoice adjustments are not modeled. Missing usage is unknown, never zero. Request and output caps are enforced; USD estimates are not a provider billing cap.",
+  "interpretation": "Component comparison through ReasoningModel, not an end-to-end product or retrieval evaluation. Synthetic expectations are agent-authored and require human review. Automated checks do not prove citation entailment, complete recall, or overall semantic correctness. No automatic winner. Compare matched fixture/repetition coverage; missing and failed requests are not passes. Provider-specific reasoning settings are recorded in the request implementation and are not equivalent compute budgets.",
+  "rows": [
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "fixture": "explicit-german-commitment",
+      "repetition": 1,
+      "requestHash": "d608db685375324cbc26f269c4e47d96d1e2eb705ea70a157b13c94d9eb39eaa",
+      "status": "error",
+      "latencyMs": 445,
+      "errorCode": "http-401",
+      "response": null,
+      "checks": null,
+      "output": null
+    }
+  ]
+}

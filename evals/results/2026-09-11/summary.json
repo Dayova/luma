@@ -1,0 +1,78 @@
+{
+  "main-openai": {
+    "attempts": 48,
+    "valid": 48,
+    "full": 48,
+    "checksPassed": 120,
+    "checksAssessed": 120,
+    "medianSuccessMs": 5246.0,
+    "p95AllMs": 7979,
+    "cost": 0.0564696,
+    "knownCostAttempts": 48,
+    "errors": {}
+  },
+  "main-anthropic": {
+    "attempts": 48,
+    "valid": 45,
+    "full": 43,
+    "checksPassed": 111,
+    "checksAssessed": 113,
+    "medianSuccessMs": 6213,
+    "p95AllMs": 16060,
+    "cost": 0.65564,
+    "knownCostAttempts": 48,
+    "errors": {
+      "invalid-json-or-schema": 3
+    }
+  },
+  "main-deepseek": {
+    "attempts": 48,
+    "valid": 42,
+    "full": 42,
+    "checksPassed": 102,
+    "checksAssessed": 102,
+    "medianSuccessMs": 7544.5,
+    "p95AllMs": 18339,
+    "cost": 0.1530966,
+    "knownCostAttempts": 48,
+    "errors": {
+      "incomplete-or-refused": 6
+    }
+  },
+  "8k-openai": {
+    "attempts": 12,
+    "valid": 12,
+    "full": 12,
+    "checksPassed": 39,
+    "checksAssessed": 39,
+    "medianSuccessMs": 6514.0,
+    "p95AllMs": 9854,
+    "cost": 0.0195528,
+    "knownCostAttempts": 12,
+    "errors": {}
+  },
+  "8k-anthropic": {
+    "attempts": 12,
+    "valid": 12,
+    "full": 12,
+    "checksPassed": 39,
+    "checksAssessed": 39,
+    "medianSuccessMs": 10444.0,
+    "p95AllMs": 18979,
+    "cost": 0.236164,
+    "knownCostAttempts": 12,
+    "errors": {}
+  },
+  "8k-deepseek": {
+    "attempts": 12,
+    "valid": 12,
+    "full": 12,
+    "checksPassed": 39,
+    "checksAssessed": 39,
+    "medianSuccessMs": 14029.0,
+    "p95AllMs": 27251,
+    "cost": 0.0599037,
+    "knownCostAttempts": 12,
+    "errors": {}
+  }
+}

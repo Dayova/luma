@@ -1159,6 +1159,12 @@ export type MeetingIntelligenceError =
       retryable: true;
     }
   | {
+      code: "publication-unavailable";
+      observationId: ObservationId;
+      message: string;
+      retryable: true;
+    }
+  | {
       code: "context-unavailable";
       retryable: true;
       partialResultAvailable: boolean;

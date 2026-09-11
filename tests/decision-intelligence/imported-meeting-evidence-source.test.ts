@@ -176,6 +176,8 @@ async function fixture() {
           }),
         requireCurrent: () => Promise.resolve(),
         read: ({ recordId }) => Promise.resolve(written.get(recordId) ?? null),
+        readReference: ({ reference }) =>
+          Promise.resolve(written.get(reference.externalId) ?? null),
         findWritten: () => Promise.resolve(null),
         write
       },

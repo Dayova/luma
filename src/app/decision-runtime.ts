@@ -3,6 +3,7 @@ import { createConversationDecisionEvidenceSource } from "../decision-intelligen
 import { createImportedMeetingDecisionEvidenceSource } from "../decision-intelligence/imported-meeting-evidence-source.js";
 import type { ImportedSourceHistoryAccess } from "../meeting-intelligence/imported-source-analysis.js";
 import { createNotionDecisionAuthority } from "../decision-intelligence/notion-decision-authority.js";
+import { createDecisionHumanReviewAccess } from "../decision-intelligence/human-review.js";
 import { createOpenAIDecisionInterpreter } from "../decision-intelligence/openai-decision-interpreter.js";
 import { createNotionDecisionRecords } from "../knowledge/notion-decision-records.js";
 import { createNotionReadOnlyKnowledgeCatalog } from "../knowledge/notion-read-only-knowledge-catalog.js";
@@ -95,6 +96,14 @@ export async function createDecisionRuntime(
   dependencies: DecisionRuntimeDependencies = {}
 ): Promise<DecisionIntelligenceConfiguration> {
   const { workspaceId } = input;
+  const audience: DecisionIntelligenceConfiguration["audience"] = (
+    requestedWorkspaceId
+  ) =>
+    Promise.resolve(
+      requestedWorkspaceId === workspaceId
+        ? { workspaceId, personIds: [...dayovaFounderPersonIds] }
+        : null
+    );
   const config = structuredClone(input.config);
   const env = { ...input.env };
   const policy = createContextSharingPolicy({
@@ -138,6 +147,11 @@ export async function createDecisionRuntime(
         sourceAccess: input.importedSourceAccess
       })
     : undefined;
+  const humanReviewAccess = createDecisionHumanReviewAccess({
+    database: input.database,
+    accessPolicy: input.accessPolicy,
+    audience
+  });
   const records = (dependencies.createRecords ?? createNotionDecisionRecords)({
     workspaceId,
     dataSourceId: config.dataSourceId,
@@ -154,7 +168,10 @@ export async function createDecisionRuntime(
       request.source.subject.type === "meeting"
         ? (meetingEvidenceSource?.authorizeRetained(request) ?? Promise.resolve(false))
         : evidenceSource.authorizeRetained(request),
-    authorizeRetainedAuthority: (request) => authority.authorizeRetainedAuthority(request)
+    authorizeRetainedAuthority: (request) =>
+      authority.authorizeRetainedAuthority(request),
+    authorizeRetainedHumanReview: (request) =>
+      humanReviewAccess.authorizeRetainedHumanReview(request)
   });
   return {
     authority,
@@ -162,12 +179,7 @@ export async function createDecisionRuntime(
     evidenceSource,
     ...(meetingEvidenceSource ? { meetingEvidenceSource } : {}),
     accessPolicy: input.accessPolicy,
-    audience: (requestedWorkspaceId) =>
-      Promise.resolve(
-        requestedWorkspaceId === workspaceId
-          ? { workspaceId, personIds: [...dayovaFounderPersonIds] }
-          : null
-      ),
+    audience,
     interpreter: (dependencies.createInterpreter ?? createOpenAIDecisionInterpreter)({
       apiKey: env["OPENAI_API_KEY"]!,
       model: input.model,

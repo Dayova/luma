@@ -39,6 +39,21 @@
       "incomplete-or-refused": 6
     }
   },
+  "main-google": {
+    "attempts": 48,
+    "valid": 38,
+    "full": 36,
+    "checksPassed": 91,
+    "checksAssessed": 93,
+    "medianSuccessMs": 11578.0,
+    "p95AllMs": 45009,
+    "cost": 0.3605115,
+    "knownCostAttempts": 38,
+    "errors": {
+      "http-429": 7,
+      "timeout-usage-unknown": 3
+    }
+  },
   "8k-openai": {
     "attempts": 12,
     "valid": 12,
@@ -74,5 +89,20 @@
     "cost": 0.0599037,
     "knownCostAttempts": 12,
     "errors": {}
+  },
+  "8k-google": {
+    "attempts": 12,
+    "valid": 7,
+    "full": 7,
+    "checksPassed": 22,
+    "checksAssessed": 22,
+    "medianSuccessMs": 13214,
+    "p95AllMs": 45024,
+    "cost": 0.073263,
+    "knownCostAttempts": 7,
+    "errors": {
+      "timeout-usage-unknown": 4,
+      "http-429": 1
+    }
   }
 }

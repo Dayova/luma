@@ -102,6 +102,9 @@ VERTEX_PROJECT_ID=
 Put the key in the ignored local `.env`. Leave `VERTEX_PROJECT_ID` empty for
 an Express mode key; for a project-scoped Vertex authorization key, set the
 Google Cloud project ID or number. Both routes use the global endpoint.
+When reusing Dayova's Convex configuration, its `GOOGLE_VERTEX_API_KEY` value
+belongs in Luma's `VERTEX_API_KEY`. The evaluation reads `.env` from its current
+working directory, so a separate worktree has its own local configuration.
 This adapter accepts API keys, not service-account JSON files or OAuth tokens.
 The default backend remains `developer`, using `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
 Selecting Vertex never falls back to a Developer API key or a different model.

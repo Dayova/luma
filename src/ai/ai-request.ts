@@ -69,22 +69,31 @@ export async function runBudgetedAiRequest(input: {
   limits: AiRequestLimits;
   /** Fresh disclosure proof after durable reservation, before any provider dispatch. */
   beforeInvoke?: (signal: AbortSignal) => Promise<void>;
+  /** Non-generating native count of the exact immutable request, including its schema. */
+  countInputTokens?: (signal: AbortSignal) => Promise<number>;
   invoke: (signal: AbortSignal) => Promise<AiResponse>;
 }): Promise<AiResponse> {
   // The text tokenizer cannot have more tokens than UTF-8 bytes. Include the
   // instructions, schema and a conservative framing allowance, not chars / 4.
-  const inputTokenUpperBound =
+  const byteUpperBound =
     Buffer.byteLength(input.instructions, "utf8") +
     Buffer.byteLength(input.input, "utf8") +
     Buffer.byteLength(JSON.stringify(input.schema), "utf8") +
     1024;
-  if (inputTokenUpperBound > input.limits.maxInputTokens) {
+  const needsNativeCount = byteUpperBound > input.limits.maxInputTokens;
+  if (needsNativeCount && (!input.countInputTokens || byteUpperBound > 1_048_576)) {
     throw new AiServiceError(
       "request-too-large",
       "This AI request is too large; narrow the source or question before retrying.",
       { requestDispatched: false }
     );
   }
+  // Large text may still fit the token limit. Reserve the full permitted input
+  // before disclosing it to the non-generating count endpoint. Only a positive
+  // exact count within that reservation can proceed; never truncate the source.
+  const inputTokenUpperBound = needsNativeCount
+    ? input.limits.maxInputTokens
+    : byteUpperBound;
   const reservation = await input.budget
     ?.reserve({
       workspaceId: input.workspaceId,
@@ -121,6 +130,31 @@ export async function runBudgetedAiRequest(input: {
             "The AI request timed out before dispatch.",
             { requestDispatched: false }
           );
+        if (needsNativeCount) {
+          const count = await input.countInputTokens!(controller.signal);
+          if (
+            !Number.isSafeInteger(count) ||
+            count <= 0 ||
+            count > input.limits.maxInputTokens
+          )
+            throw new AiServiceError(
+              "request-too-large",
+              "The complete AI input could not be proved to fit its token limit. No generation was started.",
+              { requestDispatched: false }
+            );
+          if (controller.signal.aborted)
+            throw new AiServiceError("timeout", "Input counting timed out.", {
+              requestDispatched: false
+            });
+          // Counting is itself a disclosure. Reprove the source again after its
+          // network wait before starting the separately charged generation.
+          await input.beforeInvoke?.(controller.signal);
+          await requireAiRequestGuardCurrent();
+          if (controller.signal.aborted)
+            throw new AiServiceError("timeout", "AI admission timed out.", {
+              requestDispatched: false
+            });
+        }
         dispatched = true;
         return input.invoke(controller.signal);
       })(),
@@ -132,7 +166,9 @@ export async function runBudgetedAiRequest(input: {
               "timeout",
               dispatched
                 ? "The AI request timed out. Its possible charge remains reserved."
-                : "The current source could not be verified before the AI admission deadline. No request was dispatched."
+                : needsNativeCount
+                  ? "Source verification or input counting did not finish before the AI admission deadline. No generation was started."
+                  : "The current source could not be verified before the AI admission deadline. No request was dispatched."
             )
           );
         }, input.limits.timeoutMs);

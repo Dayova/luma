@@ -79,6 +79,24 @@ function fixture() {
   const access = { requireCurrent: vi.fn(() => Promise.resolve()) };
   return { request, wire, response, create, budget, interpreter, access };
 }
+function withLargeCatalog(request: StructuredWorkModelInput) {
+  request.work = Array.from({ length: 396 }, (_, index) => ({
+    id: `DAY-${index + 1}`,
+    providerId: "linear",
+    externalId: `issue-${index + 1}`,
+    title: `Preserved validation scope ${index + 1}`,
+    description: `Original independent requirements for issue ${index + 1}. ${"Measure student feedback and preserve the previous evidence. ".repeat(10)}`,
+    status: "completed" as const,
+    assignees: [],
+    dueDate: null,
+    labels: [],
+    projectId: null,
+    parentId: null,
+    url: `https://linear.app/dayova/issue/DAY-${index + 1}`,
+    updatedAt: "2026-09-11T12:00:00.000Z"
+  }));
+  return request;
+}
 describe("production structured-work interpreter and shared budget", () => {
   it("grounds the hypothesis and separate validation work, preserves source language and accounts the capability", async () => {
     const f = fixture();
@@ -274,75 +292,211 @@ describe("production structured-work interpreter and shared budget", () => {
     expect(core.createRecord).toHaveBeenCalledTimes(1);
     expect(core.createIssue).toHaveBeenCalledTimes(1);
   });
-  it("uses the real Responses SDK with a closed strict schema, no storage/tools/retries and normalized native accounting", async () => {
-    const f = fixture();
-    let body: Record<string, unknown> | null = null;
-    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
-      if (typeof init?.body !== "string") throw new Error("Expected native JSON body");
-      body = JSON.parse(init.body) as Record<string, unknown>;
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            id: "resp_native_structured",
-            object: "response",
-            created_at: 1,
-            model: "gpt-5.6-luna",
-            status: "completed",
-            service_tier: "default",
-            output: [
-              {
-                id: "msg",
-                type: "message",
-                role: "assistant",
-                status: "completed",
-                content: [
-                  { type: "output_text", text: JSON.stringify(f.wire), annotations: [] }
-                ]
+  it.each([false, true])(
+    "uses the real SDK and identical count/generation context when a large catalog is %s",
+    async (large) => {
+      const f = fixture();
+      if (large) withLargeCatalog(f.request);
+      let body: Record<string, unknown> | null = null;
+      let counted: Record<string, unknown> | null = null;
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((url, init) => {
+        if (typeof init?.body !== "string") throw new Error("Expected native JSON body");
+        body = JSON.parse(init.body) as Record<string, unknown>;
+        const requestUrl =
+          url instanceof Request ? url.url : url instanceof URL ? url.href : url;
+        if (requestUrl.endsWith("/responses/input_tokens")) {
+          counted = body;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                object: "response.input_tokens",
+                input_tokens: 75_000
+              }),
+              { headers: { "content-type": "application/json" } }
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "resp_native_structured",
+              object: "response",
+              created_at: 1,
+              model: "gpt-5.6-luna",
+              status: "completed",
+              service_tier: "default",
+              output: [
+                {
+                  id: "msg",
+                  type: "message",
+                  role: "assistant",
+                  status: "completed",
+                  content: [
+                    { type: "output_text", text: JSON.stringify(f.wire), annotations: [] }
+                  ]
+                }
+              ],
+              usage: {
+                input_tokens: 100,
+                input_tokens_details: { cached_tokens: 10, cache_write_tokens: 20 },
+                output_tokens: 10,
+                output_tokens_details: { reasoning_tokens: 5 },
+                total_tokens: 110
               }
-            ],
-            usage: {
-              input_tokens: 100,
-              input_tokens_details: { cached_tokens: 10, cache_write_tokens: 20 },
-              output_tokens: 10,
-              output_tokens_details: { reasoning_tokens: 5 },
-              total_tokens: 110
+            }),
+            {
+              status: 200,
+              headers: {
+                "content-type": "application/json",
+                "x-request-id": "req_native_structured"
+              }
             }
-          }),
-          {
-            status: 200,
-            headers: {
-              "content-type": "application/json",
-              "x-request-id": "req_native_structured"
-            }
-          }
-        )
-      );
+          )
+        );
+      });
+      await createOpenAIStructuredWorkInterpreter({
+        apiKey: "test-only",
+        budget: f.budget
+      }).interpret(f.request, f.access);
+      expect(body).toMatchObject({
+        store: false,
+        service_tier: "default",
+        text: { format: { type: "json_schema", strict: true } }
+      });
+      expect(body).not.toHaveProperty("tools");
+      if (large) {
+        expect(counted).toMatchObject({
+          model: body!["model"],
+          instructions: body!["instructions"],
+          input: body!["input"],
+          text: body!["text"]
+        });
+        const sent = JSON.parse(body!["input"] as string) as StructuredWorkModelInput;
+        expect(sent.work).toEqual(f.request.work);
+        expect(sent.work).toHaveLength(396);
+      } else expect(counted).toBeNull();
+      const checkObjects = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) {
+          value.forEach(checkObjects);
+          return;
+        }
+        const object = value as Record<string, unknown>;
+        if (object["type"] === "object")
+          expect(object["additionalProperties"]).toBe(false);
+        Object.values(object).forEach(checkObjects);
+      };
+      checkObjects(body);
+      expect(fetch).toHaveBeenCalledTimes(large ? 2 : 1);
+      expect(await f.budget.getStatus("dayova")).toMatchObject({
+        requestCount: 1,
+        unknownUsd: 0
+      });
+    }
+  );
+  it.each([0, -1, 2.5, NaN, 100_001])(
+    "does not generate on an invalid or excessive native count %s",
+    async (count) => {
+      const f = fixture();
+      const countInputTokens = vi.fn(() => Promise.resolve(count));
+      const interpreter = createOpenAIStructuredWorkInterpreter({
+        budget: f.budget,
+        client: { create: f.create, countInputTokens }
+      });
+      await expect(
+        interpreter.interpret(withLargeCatalog(f.request), f.access)
+      ).rejects.toMatchObject({ code: "request-too-large", requestDispatched: false });
+      expect(f.create).not.toHaveBeenCalled();
+      expect(await f.budget.getStatus("dayova")).toMatchObject({
+        requestCount: 1,
+        unknownUsd: 0,
+        spentUsd: 0,
+        reservedUsd: 0
+      });
+    }
+  );
+  it("admits neither counting nor generation when the budget or original grant refuses disclosure", async () => {
+    const f = fixture();
+    const countInputTokens = vi.fn(() => Promise.resolve(75_000));
+    const request = withLargeCatalog(f.request);
+    await expect(
+      createOpenAIStructuredWorkInterpreter({
+        budget: createAiUsageBudget({ database, monthlyLimitUsd: 0 }),
+        client: { create: f.create, countInputTokens }
+      }).interpret(request, f.access)
+    ).rejects.toMatchObject({ code: "budget-exhausted" });
+    await expect(
+      createOpenAIStructuredWorkInterpreter({
+        budget: f.budget,
+        client: { create: f.create, countInputTokens }
+      }).interpret(request, {
+        requireCurrent: () => Promise.reject(new Error("revoked"))
+      })
+    ).rejects.toMatchObject({ requestDispatched: false });
+    expect(countInputTokens).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+  });
+  it("reproves original access after counting without disclosing a revoked request to generation", async () => {
+    const f = fixture();
+    let granted = true;
+    const countInputTokens = vi.fn(() => {
+      granted = false;
+      return Promise.resolve(75_000);
     });
-    await createOpenAIStructuredWorkInterpreter({
-      apiKey: "test-only",
-      budget: f.budget
-    }).interpret(f.request, f.access);
-    expect(body).toMatchObject({
-      store: false,
-      service_tier: "default",
-      text: { format: { type: "json_schema", strict: true } }
+    const interpreter = createOpenAIStructuredWorkInterpreter({
+      budget: f.budget,
+      client: { create: f.create, countInputTokens }
     });
-    expect(body).not.toHaveProperty("tools");
-    const checkObjects = (value: unknown): void => {
-      if (!value || typeof value !== "object") return;
-      if (Array.isArray(value)) {
-        value.forEach(checkObjects);
-        return;
-      }
-      const object = value as Record<string, unknown>;
-      if (object["type"] === "object") expect(object["additionalProperties"]).toBe(false);
-      Object.values(object).forEach(checkObjects);
-    };
-    checkObjects(body);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(
+      interpreter.interpret(withLargeCatalog(f.request), {
+        requireCurrent: () =>
+          granted ? Promise.resolve() : Promise.reject(new Error("revoked"))
+      })
+    ).rejects.toMatchObject({ requestDispatched: false });
+    expect(countInputTokens).toHaveBeenCalledTimes(1);
+    expect(f.create).not.toHaveBeenCalled();
     expect(await f.budget.getStatus("dayova")).toMatchObject({
-      requestCount: 1,
-      unknownUsd: 0
+      unknownUsd: 0,
+      spentUsd: 0
     });
+  });
+  it("cannot generate after a token count settles beyond its admission deadline", async () => {
+    const f = fixture();
+    let release!: (count: number) => void;
+    const pending = new Promise<number>((resolve) => {
+      release = resolve;
+    });
+    const countInputTokens = vi.fn(() => pending);
+    const interpreter = createOpenAIStructuredWorkInterpreter({
+      budget: f.budget,
+      limits: { timeoutMs: 10 },
+      client: { create: f.create, countInputTokens }
+    });
+    await expect(
+      interpreter.interpret(withLargeCatalog(f.request), f.access)
+    ).rejects.toMatchObject({ code: "timeout", requestDispatched: false });
+    release(75_000);
+    await pending;
+    await Promise.resolve();
+    expect(f.create).not.toHaveBeenCalled();
+    expect(await f.budget.getStatus("dayova")).toMatchObject({
+      unknownUsd: 0,
+      spentUsd: 0
+    });
+  });
+  it("retains the serialized input bound before counting and reservation", async () => {
+    const f = fixture();
+    withLargeCatalog(f.request);
+    f.request.work[0]!.description = "x".repeat(1_048_576);
+    const countInputTokens = vi.fn(() => Promise.resolve(75_000));
+    await expect(
+      createOpenAIStructuredWorkInterpreter({
+        budget: f.budget,
+        client: { create: f.create, countInputTokens }
+      }).interpret(f.request, f.access)
+    ).rejects.toMatchObject({ code: "request-too-large" });
+    expect(countInputTokens).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+    expect((await f.budget.getStatus("dayova")).requestCount).toBe(0);
   });
 });

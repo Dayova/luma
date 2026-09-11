@@ -178,6 +178,20 @@ the standard tier and no SDK retries. A bounded field key/value array is convert
 into owned semantic fields only after validating field types/options, citations,
 people and existing reconciliation identities. An invalid output settles reported
 usage and approves nothing. Budget/quota/timeout reasons stay visible through MI.
+
+Large complete catalogs use OpenAI's [native input-token count](https://developers.openai.com/api/docs/guides/token-counting)
+when the conservative UTF-8 byte bound exceeds the configured token limit. The
+exact model, original input, instructions and strict output schema are identical
+for counting and generation. The shared budget reserves the entire permitted
+input plus output allowance before either disclosure; original access is proved
+before counting and again after its network wait. An invalid/excessive count,
+lost access, exhausted budget or timeout starts no generation. Inputs above a
+1 MiB serialized bound are refused before counting. Small requests keep the local
+byte bound and need no extra network call. No context is truncated, no model or
+monthly cap is changed, and actual generation usage still settles the reservation.
+The native SDK regression retains all 396 issues in a synthetic complete catalog;
+it does not establish the live token count, latency or answer quality of Dayova's
+current catalog.
 The native schema follows the [official Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs), checked 2026-09-11.
 
 MI supplies a final disclosure guard. The shared AI request helper runs it after

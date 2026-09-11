@@ -80,15 +80,15 @@ not configure a live project, buy credits or enable collection. See the
 
 ## Configuration
 
-| Variable                     | Default         | Purpose                                                                 |
-| ---------------------------- | --------------- | ----------------------------------------------------------------------- |
-| `LUMA_AI_MONTHLY_LIMIT_USD`  | `30`            | Shared monthly admission ceiling; `0` pauses paid dispatch.             |
-| `LUMA_AI_DAILY_LIMIT_USD`    | Unset           | Optional additional daily ceiling.                                      |
-| `LUMA_AI_BUDGET_TIMEZONE`    | `Europe/Berlin` | Calendar boundaries for this ledger.                                    |
-| `LUMA_AI_WORKFLOW_LIMIT_USD` | `0.25`          | Maximum estimated spend for one logical workflow.                       |
-| `LUMA_AI_MAX_INPUT_TOKENS`   | `100000`        | Conservative input-token upper bound, not a character-to-token average. |
-| `LUMA_AI_MAX_OUTPUT_TOKENS`  | `8192`          | Maximum total output tokens, including reasoning.                       |
-| `LUMA_AI_TIMEOUT_MS`         | `60000`         | Per-request timeout; no automatic SDK retry.                            |
+| Variable                     | Default         | Purpose                                                                       |
+| ---------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `LUMA_AI_MONTHLY_LIMIT_USD`  | `30`            | Shared monthly admission ceiling; `0` pauses paid dispatch.                   |
+| `LUMA_AI_DAILY_LIMIT_USD`    | Unset           | Optional additional daily ceiling.                                            |
+| `LUMA_AI_BUDGET_TIMEZONE`    | `Europe/Berlin` | Calendar boundaries for this ledger.                                          |
+| `LUMA_AI_WORKFLOW_LIMIT_USD` | `0.25`          | Maximum estimated spend for one logical workflow.                             |
+| `LUMA_AI_MAX_INPUT_TOKENS`   | `100000`        | Maximum admitted input tokens; conservative byte bound or exact native count. |
+| `LUMA_AI_MAX_OUTPUT_TOKENS`  | `8192`          | Maximum total output tokens, including reasoning.                             |
+| `LUMA_AI_TIMEOUT_MS`         | `60000`         | Per-request timeout; no automatic SDK retry.                                  |
 
 Limit changes are explicit operator configuration under the owner's budget
 decision. Keep the ledger with the durable application database and include it

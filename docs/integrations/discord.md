@@ -30,17 +30,20 @@ Implemented now:
 - deterministic provider-identity speaker attribution for typed Discord notes;
   speaker attribution remains distinct from Action Item ownership
 - explicit approval before the currently implemented Meeting settlement path
-- explicit Discord user mentions for Jakob, Fabius, Julius, Philipp, and configured additional People
+- explicit Discord user mentions for the four admitted founders: Jakob, Fabius, Julius and Philipp
 - bot-authored messages with restricted allowed mentions
 - graceful Gateway shutdown
 - optional, disabled-by-default bounded `@Luma` Context Ask in reviewed public
   threads
 
-Not implemented in this slice:
+Source-bound imported Meeting review, reconciliation, approved execution and
+recovery are also connected to this runtime. See the [shared capture guide](shared-meeting-capture-runtime.md),
+[Decision commands](discord-decision-records.md) and [structured work guide](../structured-work.md).
+
+Not implemented:
 
 - Discord voice connection and per-user audio capture
 - voice transcription, utterance revision, and correction UI
-- bounded Discord Verify, Reconcile, and risk-authorized Execute interactions
 - Discord voice identity/audio evidence spike; voiceprints and biometric
   recognition are not a default path
 

@@ -263,58 +263,44 @@ Then ensure all of the following are true:
 These operational steps do not authorize canonical Notion writes, Linear
 writes, or Discord execution.
 
-## Source-bound native review core
+## Source-bound native review
 
-`SourceBoundNativeReview` is a dormant, read-only core for a future native
-Notion review surface. It receives only a trusted native run ID, an
-authenticated provider actor, and an exact page identity. It does **not**
-accept a Person ID, attendee identity, Meeting Note root, ledger revision,
-content hash, model claim, or generic Linear request from that surface.
+`SourceBoundNativeReview` is the read-only core used by the shared production
+runtime's native Notion review surface. It receives a verified original native
+request, an authenticated provider actor, and an exact page identity. Caller or
+model claims do not establish the actor, Meeting Note root, source revision,
+content hash or source audience.
 
 The core resolves the actor through `IdentityDirectory`, captures exactly one
-provider-derived Meeting Note root for that requested page, records and
-re-reads its immutable ledger revision, then drives the existing ingestion and
-reconciliation seams. Its durable result is idempotent by native run ID and
-contains only the mapped actor, source revision/hash, review IDs, and opaque
-work lookup references. An unmapped/ambiguous actor, unreadable or ambiguous
-page/root, incomplete source, or read-only catalog failure produces a durable
-safe clarification and never a provider mutation.
+provider-derived Meeting Note root for that requested page, retains its immutable
+ledger revision, then uses the shared Meeting Intelligence and reconciliation
+capabilities. Its durable result is idempotent by the authenticated request
+identity. Source, original audience, current sharing and Human review state are
+proved again before delivery and receipt replay. An ambiguous actor, unreadable
+or incomplete source, or unavailable read-only work catalog withholds the result.
+No native review call executes a provider mutation.
 
-This core is intentionally **not wired into the executable yet**. The current
-server's ordinary Notion source and writer-derived Linear catalog do not prove
-the three required deployment properties:
+`createNativeNotionReviewResources` and the shared server compose authenticated
+Notion session/event discovery, exact-page source reads, the retained request
+ledger, and a dedicated read-only Linear catalog. They use the same Meeting
+Intelligence, database and AI budget as Discord. Native source provenance remains
+protected when the feature is disabled or its configuration changes; it cannot
+fall through to a broader ordinary source grant.
 
-- trusted native ingress that authenticates the provider actor and exact page;
-- direct, object-scoped read access to that exact page (not a broad source
-  scan filtered after the fact); and
-- a separately composed `LINEAR_READONLY_API_KEY` catalog, never
-  `LINEAR_API_KEY` or a `WorkProvider` writer.
+The native page reader uses only `LUMA_NATIVE_NOTION_READONLY_API_TOKEN` and
+`LUMA_NATIVE_NOTION_PAGE_ID`. Separate Agent and Admin API read tokens prove the
+original founder instruction and the complete four-founder audience. The work
+catalog uses `LINEAR_READONLY_API_KEY`; a writer-derived catalog does not satisfy
+this boundary. The older `createDormantSourceBoundNativeReview` injection-only
+factory remains available for isolated tests, but is not the shared runtime's
+production composition.
 
-`createDormantSourceBoundNativeReview` now owns the safe, inject-only assembly
-of the exact-page source, source ledger, workspace-scoped issued read-only
-Linear catalog, immutable-source verifier, durable Operational Outcome marker
-verifier, Meeting Intelligence, ingestion, and this core. It returns only
-`review(...)`; it has no environment factory, server registration, OAuth flow,
-provider SDK, or runtime export. Its catalog must be issued by the dedicated
-read-only Linear factory, so a narrowed writer catalog cannot accidentally
-enter this composition.
-
-LUM-30 separately supplies the exact-page reader that this dormant composition
-may receive. `createNotionObjectScopedMeetingNoteEvidenceReaderFromEnv` reads
-only `LUMA_NATIVE_NOTION_READONLY_API_TOKEN` and
-`LUMA_NATIVE_NOTION_PAGE_ID`; it never falls back to `NOTION_API_TOKEN` or a
-data-source credential. It constructs only the three bounded Notion read
-operations for that page, not the native-review composition or any ingress.
-This explicit reader configuration therefore does not activate the server,
-OAuth, browser/native agent, canonical write, or Discord behavior.
-
-The exact-page source owns a fresh callback-scoped reader session for every
-capture, so overlapping captures cannot share provider-derived block authority.
-Production construction exposes no raw page, Markdown, or block-read methods:
-the session is revoked as soon as its capture callback settles.
-
-Do not enable this surface through an environment flag alone. Production
-composition must supply evidence for all three properties first.
+The feature is disabled by default. Its authenticated MCP endpoint, provider
+access requirements, source permissions, authentic request discovery and live
+parity checks are documented in the [native review guide](native-notion-review.md).
+Notion's Admin API requires Enterprise access, and provider Custom Agent credits
+are separate from Luma's own API accounting. Offline tests do not activate a
+native agent, grant permissions or establish a live provider trace.
 
 ## Operational Outcome writeback
 

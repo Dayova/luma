@@ -142,6 +142,20 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("advisory Discord consultation provider", () => {
+  it("does not duplicate a matching founder poll whose closing state is unknown", async () => {
+    const f = fixture();
+    await f.provider.publish({ consultation: f.plan, operationId: "fixture" });
+    f.messages[0]!["author"] = { id: "founder", bot: false };
+    f.messages[0]!["content"] = "Our release decision";
+    const poll = f.messages[0]!["poll"] as Record<string, unknown>;
+    poll["expiry"] = null;
+    f.post.mockClear();
+    await expect(
+      f.provider.publish({ consultation: f.plan, operationId: "new" })
+    ).rejects.toMatchObject({ code: "consultation-existing-state-unknown" });
+    expect(f.post).not.toHaveBeenCalled();
+  });
+
   it("cannot read or close an identical own poll from a different discussion", async () => {
     const f = fixture();
     const original = await f.provider.publish({

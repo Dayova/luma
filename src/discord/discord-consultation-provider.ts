@@ -314,6 +314,16 @@ export function createDiscordConsultationProvider(input: {
       if (
         !onlyOperation &&
         !ownMarker &&
+        found.poll.closesAt === null &&
+        found.poll.results.status !== "finalized"
+      )
+        throw refusal(
+          "consultation-existing-state-unknown",
+          "A matching poll has no verified closing state; no additional poll was sent."
+        );
+      if (
+        !onlyOperation &&
+        !ownMarker &&
         (found.poll.closesAt === null ||
           Date.parse(found.poll.closesAt) <= now().getTime() ||
           found.poll.results.status === "finalized")

@@ -35,10 +35,10 @@ headers, read deadlines and byte limits using the
 It accepts only the three named read tools. It follows no redirects, executes no
 server-initiated requests and returns content-free errors. The same deadline
 bounds stream cancellation, including failed responses and notifications; a
-stalled cleanup cannot retain an admitted request indefinitely. A credential callback
-supplies an already authorized OAuth token with its expiry. The token stays in
-memory for one session; expiry or authorization failure requires a fresh session.
-There is no credential discovery or fallback to local Granola/other-app sessions.
+stalled cleanup cannot retain an admitted request indefinitely. A credential callback supplies an authorized OAuth token with its expiry. The
+OAuth manager below refreshes credentials and replaces the MCP session before
+expiry, while checking the live local grant before and after every read. There is
+no credential discovery or fallback to local Granola/other-app sessions.
 
 ## Opt-in and eligibility
 
@@ -107,30 +107,92 @@ A missing item in a recent page never means provider deletion. The core already
 supports richer capabilities; a future adapter can supply them without replacing
 the shared Meeting model.
 
+## Per-founder OAuth and secure credentials
+
+`granolaOAuthConnectionsFromEnv` creates the owner-authenticated connection manager
+without making a network request. Startup configuration is:
+
+- `LUMA_GRANOLA_OAUTH_ENABLED=1`
+- `LUMA_GRANOLA_CREDENTIAL_KEY_PATH`: absolute path to a separate 32-byte random key
+- `LUMA_GRANOLA_OAUTH_REDIRECT_URI`: fixed HTTPS callback; loopback HTTP is accepted
+  for local development only
+
+The key must be a regular single-link file owned by root or the runtime user,
+without symlinks or group/other permissions (for example mode `0600`). It must be
+backed up separately and restored with the database. Wrong keys and corrupted
+credential rows fail startup. Never print it, put it in source control, or replace
+it casually: it decrypts retained credentials. The existing owned Luma database
+stores AES-256-GCM ciphertext with workspace and founder identities authenticated
+as associated data. Source archives and SQL logs contain no plaintext OAuth token,
+refresh token, PKCE verifier or authorization code.
+
+The manager exposes these owner actions through a caller-supplied
+`authorizeOwner(actor)` capability. That capability must resolve the actually
+authenticated Dayova actor to exactly one of the four founders; a form field,
+OAuth response, account name or attendee cannot select the owner.
+
+1. `begin({actor})` checks the founder, discovers the official pinned OAuth
+   metadata, registers a public client and returns an authorization URL with a
+   random expiring state and S256 PKCE challenge. The callback URI is deployment
+   configuration, not supplied by a browser request.
+2. `complete({actor,callbackUrl})` requires the same authenticated founder, exact
+   callback/state/issuer, and a single-use attempt. It exchanges the code and
+   stores the encrypted credential, but does not admit a capture. Denied consent
+   consumes the attempt without a token request.
+3. `inspect({actor})` probes only the advertised read tools and account-info tool.
+   It returns the provider's account/workspace text and its exact fingerprint to
+   that founder. The UI must render this untrusted text as text, never HTML, and
+   must not log callback URLs or private account data.
+4. `attest({actor,connectionId,accountFingerprint,choices})` rechecks the account
+   and records the owner's selected founder audience and meeting eligibility.
+   Automatic internal-meeting selection defaults off. `configure` subsequently
+   updates the owner's exact inclusions/exclusions and audience while preserving
+   the original opt-in identity; retained captures still enforce their original
+   recipients. Reconnecting creates a new connection and opt-in identity instead
+   of inheriting old source grants.
+5. `disconnect({actor})` disables local access and removes usable credentials.
+   Even an initialized MCP client is denied on its next read. This is local
+   disconnection; Granola has not advertised a browser-OAuth revocation endpoint
+   in the metadata used here. The founder may also remove consent in Granola.
+
+The transport verifies Granola's protected-resource metadata and exact advertised
+issuer/endpoints, then uses authorization-code and refresh-token grants for the
+`mcp` resource with `offline_access`. All requests use fixed HTTPS origins, reject
+redirects, bound response size and time, and abort the actual request. Cleanup
+cannot hold shutdown open. Metadata and primary behavior were checked against the
+[official Granola MCP guidance](https://docs.granola.ai/help-center/sharing/integrations/mcp)
+and the provider's public metadata on 11 September 2026; no account was connected.
+
+Refresh claims are durable before dispatch, refreshes are joined for concurrent
+clients, and rotated tokens are saved before reuse. An uncertain exchange or
+rotation requires reconnection rather than replaying a possibly consumed token.
+Interrupted claims remain visibly incomplete after restart. `status()` exposes
+only owner/connection IDs, phase and safe failure codes. `stop()` stops admission
+and drains all admitted OAuth and managed MCP work before the common database
+can close. A concurrent owner disconnect cannot be overwritten by a refresh.
+
 ## Runtime composition and remaining work
 
 `createGranolaCaptureIngestionRuntime` accepts the existing owned database,
 workspace ID, policy, and up to four separately constructed MCP clients. It
 returns `start`, `stop`, `syncOnce`, content-free `status`, the guarded sources and
-LogicalMeetings.
-Periodic discovery defaults to five minutes and ten captures per connection.
-It serializes whole sync runs, rotates through known addresses, exposes partial
-coverage/failure counts, and stops admission before awaiting an active run. The
-composition owner must await `stop()` before closing the database. Reporting callbacks
-are also awaited inside the admitted run; asynchronous status writes cannot
-outlive a clean stop. No second AI
-budget or standalone source store is created.
+LogicalMeetings. Periodic discovery defaults to five minutes and ten captures per
+connection. It serializes runs, rotates known addresses, exposes partial coverage
+and failures, and stops admission before draining the active run and reporting.
+No second AI budget or standalone source store is created.
 
-The runtime seam is implemented but is not yet installed in `startServer`.
-One-time per-user OAuth onboarding, account/workspace attestation, a live supported
-shape check, and main-server scheduling/health composition remain pending. No
-personal connection has been activated by this change. Logical capture identity
-and Human binding reuse LUM-33; downstream multi-capture synthesis and canonical
-Notion Imported Meeting Records remain LUM-35 work. This slice does not complete
-that broader product promise.
+The OAuth manager supplies `policy` and `connections()` directly to this runtime.
+Main composition must refresh its connection registry after attestation,
+configuration or disconnect and must drain the capture scheduler before the OAuth
+manager and shared database. Server/Discord owner entry and browser callback
+handling belong to the unified main runtime; this module does not open a separate
+unauthenticated listener. Live consent, account attestation and compatibility
+validation of actual provider output remain activation steps. No personal source,
+OAuth registration, provider mutation or production service was activated during
+implementation. LUM-34/LUM-35 still require their connected-runtime delivery.
 
-Deterministic tests exercise the real HTTP client through decoding, archive and
-LogicalMeetings, plus replay/revision behavior, personal exclusion, original
-sharing fences, per-connection isolation, policy races, current source changes,
-protocol failures and shutdown draining. The HTTP provider responses and OAuth
-credential are synthetic; there are no live reads, paid calls or external writes.
+Deterministic tests exercise actual HTTP metadata/registration/token/MCP handling,
+PKCE and owner/state binding, explicit account attestation, encryption/recreation,
+per-founder isolation, refresh rotation, unknown outcomes, stopped/revoked access
+and ingestion that archives an included work capture while withholding a private
+capture. They use only synthetic provider responses and tokens.

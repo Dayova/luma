@@ -36,7 +36,7 @@ const prefix = "imported-meeting-item:";
 const limitation =
   "Recall scans at most 20 matching imported Meetings and 100 source-bound items per Meeting. Direct conversations, ungranted history, and claims with unprovable dependencies are excluded.";
 
-/** A persistence-owned leaf projection. It never calls MI.query or another context catalog. */
+/** A persistence-owned leaf projection. It never calls MI.query or another prior-Meeting catalog. */
 export function createImportedMeetingContextCatalog(input: {
   database: LumaDatabase;
   sourceAccess: ImportedSourceAnalysisAccess;

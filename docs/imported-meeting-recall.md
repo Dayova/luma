@@ -11,6 +11,9 @@ and the same `ImportedSourceAnalysisAccess` used for authorized transcript
 analysis. Enabling the catalog is not a new source grant. The imported source
 configuration and exact-page grants described in
 [imported Meeting understanding](imported-meeting-understanding.md) still apply.
+`startServer` adds this catalog only when the dedicated imported-source access
+configuration is present. Its restricted verifier receives the external provider
+catalogs before the leaf is appended, preventing recursive Meeting lookups.
 
 Every returned item requires immutable original source-analysis receipts for
 that Meeting, an actual recipient set contained in every original audience,
@@ -67,3 +70,11 @@ Meetings, persisted replay, revocation at replay/final delivery, and unchanged
 retained snapshots. Only source transport and model proposals are synthetic;
 there are no network requests or paid calls. This measures the accepted-import
 recall path, not live Notion transport or subjective model quality.
+
+The runtime composition regression additionally completes normal source sync and
+analysis before asking from a separate Discord thread. It proves that a capture
+whose model analysis cited external context remains recallable, that both original
+source and external grant revocation invalidate final delivery, and that successful
+bounded retrieval does not report the import as rejected. It uses the real ledger,
+source proof, Meeting Intelligence, retrieval and Ask implementations with
+programmable transport and model adapters.

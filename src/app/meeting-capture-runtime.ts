@@ -147,6 +147,7 @@ export async function createMeetingCaptureRuntime(input: {
   };
   let connected = false;
   let started = false;
+  let admissionPaused = false;
   let stopped = false;
   let changing: Promise<void> = Promise.resolve();
   const notionRuns = new Set<Promise<MeetingUpdate>>();
@@ -163,7 +164,8 @@ export async function createMeetingCaptureRuntime(input: {
       ingestion = createMeetingCaptureIngestion({ workspace, meetingIntelligence });
       return {
         ingest(request): Promise<MeetingUpdate> {
-          if (stopped) return Promise.reject(new Error("Capture runtime is stopped"));
+          if (stopped || admissionPaused)
+            return Promise.reject(new Error("Capture runtime is stopped"));
           const run = async (): Promise<MeetingUpdate> => {
             if (request.workspace.workspaceId !== workspace.workspaceId)
               throw new Error("Capture intake is outside this runtime's workspace");
@@ -207,7 +209,9 @@ export async function createMeetingCaptureRuntime(input: {
                 update.analysisStatus === "deferred" ||
                 synthesis.analysisStatus === "deferred"
                   ? "deferred"
-                  : update.analysisStatus
+                  : synthesis.analysisStatus === "completed"
+                    ? "completed"
+                    : update.analysisStatus
             };
           };
           const pending = run().finally(() => notionRuns.delete(pending));
@@ -218,9 +222,15 @@ export async function createMeetingCaptureRuntime(input: {
     },
     start() {
       if (!connected) throw new Error("Capture runtime is not connected");
-      if (stopped) throw new Error("Capture runtime is stopped");
+      if (stopped || admissionPaused) throw new Error("Capture runtime is stopped");
       started = true;
       activeRegistry?.runtime.start();
+    },
+    /** Stop new intake while admitted commands/callbacks may still verify sources. */
+    async pauseIntake() {
+      admissionPaused = true;
+      started = false;
+      await registry?.runtime.stop();
     },
     stop: async () => {
       stopped = true;
@@ -234,7 +244,7 @@ export async function createMeetingCaptureRuntime(input: {
       if (failure?.status === "rejected") throw failure.reason;
     },
     syncGranolaOnce: () => {
-      if (!connected || !activeRegistry || stopped)
+      if (!connected || !activeRegistry || stopped || admissionPaused)
         throw new Error("Granola capture is not configured and connected");
       return activeRegistry.runtime.syncOnce();
     },

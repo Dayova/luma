@@ -8,6 +8,47 @@ import {
 } from "../granola/oauth-connections.js";
 import { GranolaOAuthError } from "../granola/oauth-http.js";
 
+/** No credentials or network are touched by deployment preflight. */
+export function granolaOAuthRuntimeConfig(env: NodeJS.ProcessEnv) {
+  const enabled = env["LUMA_GRANOLA_OAUTH_ENABLED"];
+  if (enabled === undefined || enabled === "0") return null;
+  if (enabled !== "1") throw new GranolaOAuthError("unavailable");
+  const keyPath = env["LUMA_GRANOLA_CREDENTIAL_KEY_PATH"];
+  const redirectUri = env["LUMA_GRANOLA_OAUTH_REDIRECT_URI"];
+  const hostname = env["LUMA_GRANOLA_OAUTH_HTTP_HOST"] ?? "127.0.0.1";
+  const configuredPort = env["LUMA_GRANOLA_OAUTH_HTTP_PORT"] ?? "3002";
+  if (
+    !keyPath ||
+    !isAbsolute(keyPath) ||
+    !redirectUri ||
+    !["127.0.0.1", "::1"].includes(hostname) ||
+    !/^\d{1,5}$/u.test(configuredPort)
+  )
+    throw new GranolaOAuthError("store-unavailable");
+  const port = Number(configuredPort);
+  let redirect: URL;
+  try {
+    redirect = new URL(redirectUri);
+  } catch {
+    throw new GranolaOAuthError("unavailable");
+  }
+  if (
+    port < 1 ||
+    port > 65535 ||
+    redirect.username ||
+    redirect.password ||
+    redirect.search ||
+    redirect.hash ||
+    (redirect.protocol !== "https:" &&
+      !(
+        redirect.protocol === "http:" &&
+        ["127.0.0.1", "[::1]"].includes(redirect.hostname)
+      ))
+  )
+    throw new GranolaOAuthError("unavailable");
+  return { keyPath, redirectUri: redirect.href, hostname, port };
+}
+
 /** Startup composition only. No OAuth request, consent or personal source read occurs here. */
 export async function granolaOAuthConnectionsFromEnv(input: {
   database: LumaDatabase;
@@ -16,13 +57,9 @@ export async function granolaOAuthConnectionsFromEnv(input: {
   authorizeOwner: (actor: GranolaOwnerActor) => Promise<string | null>;
   fetch?: typeof fetch;
 }) {
-  const enabled = input.env["LUMA_GRANOLA_OAUTH_ENABLED"];
-  if (enabled === undefined || enabled === "0") return null;
-  if (enabled !== "1") throw new GranolaOAuthError("unavailable");
-  const path = input.env["LUMA_GRANOLA_CREDENTIAL_KEY_PATH"],
-    redirectUri = input.env["LUMA_GRANOLA_OAUTH_REDIRECT_URI"];
-  if (!path || !isAbsolute(path) || !redirectUri)
-    throw new GranolaOAuthError("store-unavailable");
+  const config = granolaOAuthRuntimeConfig(input.env);
+  if (!config) return null;
+  const { keyPath: path, redirectUri } = config;
   let key: Buffer | undefined;
   try {
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);

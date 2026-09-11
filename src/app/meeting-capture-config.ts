@@ -99,8 +99,8 @@ export async function createMeetingSynthesisRuntime(input: {
 }
 
 function flag(env: NodeJS.ProcessEnv, name: string): boolean {
-  const value = env[name]?.trim();
-  if (!value || value === "0" || value === "false") return false;
-  if (value === "1" || value === "true") return true;
+  const value = env[name];
+  if (value === undefined || value === "0") return false;
+  if (value === "1") return true;
   throw new Error(`${name} must be 1 or 0`);
 }

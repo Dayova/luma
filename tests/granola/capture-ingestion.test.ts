@@ -105,6 +105,109 @@ async function latest(
 }
 
 describe("Granola capture ingestion through LogicalMeetings", () => {
+  it("enumerates every retained capture beyond the first page, without duplicate revisions or foreign scopes", async () => {
+    const database = await createPgliteDatabase();
+    const f = fixture("jakob", ["work", "explicit-new"]);
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      database,
+      workspaceId,
+      connections: [{ connectionId: "jakob", client: f.client }],
+      policy: { read: () => Promise.resolve(structuredClone(f.policy)) }
+    });
+    try {
+      const source = runtime.sources[0]!;
+      await source.fetchCapture({
+        workspaceId,
+        capture: {
+          providerId: "granola",
+          providerConnectionId: "jakob",
+          externalCaptureId: "work",
+          sourceKind: "meeting-capture"
+        }
+      });
+      await database.query(
+        `INSERT INTO granola_capture_revisions
+        SELECT workspace_id,connection_id,'retained-' || lpad(n::text,4,'0'),r,
+          descriptor_json,material,audience_json,account_fingerprint,opt_in_id
+        FROM granola_capture_revisions CROSS JOIN generate_series(1,1001) n CROSS JOIN generate_series(1,2) r
+        WHERE workspace_id=$1 AND connection_id='jakob' AND capture_id='work' AND revision=1`,
+        [workspaceId]
+      );
+      await database.query(
+        `INSERT INTO granola_capture_revisions
+        SELECT 'another-workspace',connection_id,'foreign-workspace',revision,descriptor_json,material,audience_json,account_fingerprint,opt_in_id
+        FROM granola_capture_revisions WHERE workspace_id=$1 AND connection_id='jakob' AND capture_id='work' AND revision=1`,
+        [workspaceId]
+      );
+      await database.query(
+        `INSERT INTO granola_capture_revisions
+        SELECT workspace_id,'another-connection','foreign-connection',revision,descriptor_json,material,audience_json,account_fingerprint,opt_in_id
+        FROM granola_capture_revisions WHERE workspace_id=$1 AND connection_id='jakob' AND capture_id='work' AND revision=1`,
+        [workspaceId]
+      );
+      const known = await source.knownCaptures();
+      const ids = known.map((capture) => capture.externalCaptureId);
+      expect(ids).toHaveLength(1003);
+      expect(new Set(ids).size).toBe(1003);
+      expect(ids).toEqual(
+        expect.arrayContaining(["retained-0501", "retained-1001", "work", "explicit-new"])
+      );
+      expect(ids).not.toContain("foreign-workspace");
+      expect(ids).not.toContain("foreign-connection");
+      expect(f.calls.filter((call) => call.name === "get_meetings")).toHaveLength(1);
+    } finally {
+      await runtime.stop();
+      await database.close();
+    }
+  });
+  it("drains a failed in-flight report without rejecting shutdown or losing its failure status", async () => {
+    const database = await createPgliteDatabase();
+    const f = fixture();
+    let entered!: () => void, rejectReport!: (error: Error) => void;
+    const entry = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const report = new Promise<void>((_resolve, reject) => {
+      rejectReport = reject;
+    });
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      database,
+      workspaceId,
+      connections: [{ connectionId: "jakob", client: f.client }],
+      policy: { read: () => Promise.resolve(structuredClone(f.policy)) },
+      report: () => {
+        entered();
+        return report;
+      }
+    });
+    try {
+      const sync = runtime.syncOnce();
+      const failed = expect(sync).rejects.toMatchObject({ code: "source-unavailable" });
+      await entry;
+      let stopped = false;
+      const stopping = runtime.stop().then(() => {
+        stopped = true;
+      });
+      const drained = expect(stopping).resolves.toBeUndefined();
+      await Promise.resolve();
+      expect(stopped).toBe(false);
+      await expect(runtime.syncOnce()).rejects.toMatchObject({
+        code: "connection-unavailable"
+      });
+      rejectReport(new Error("Status reporting unavailable"));
+      await failed;
+      await drained;
+      expect(runtime.status()).toMatchObject({
+        active: false,
+        scheduled: false,
+        lastFailure: "source-unavailable"
+      });
+    } finally {
+      rejectReport(new Error("Cleanup"));
+      await runtime.stop();
+      await database.close();
+    }
+  });
   it("reports each connection's actual scan and failures without borrowing another owner's result", async () => {
     const database = await createPgliteDatabase();
     const first = fixture("jakob"),

@@ -228,7 +228,7 @@ export async function createGranolaCaptureIngestionRuntime(input: {
       stopped = true;
       clearInterval(timer);
       timer = undefined;
-      await running;
+      await running?.catch(() => undefined);
     }
   };
 }

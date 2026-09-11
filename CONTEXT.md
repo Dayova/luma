@@ -109,6 +109,14 @@ _Avoid_: Automatic task creation, duplicate detector
 The current, revisable understanding of a Meeting at a specific Revision.
 _Avoid_: Projection, snapshot
 
+**Synthesis Action Candidate**:
+A reviewable action interpretation tied to an exact Luma Synthesis revision, claim
+and capture set. It retains derived provenance and partial source capability;
+Human action details are separate authenticated evidence. It is never an Imported
+Meeting Note or a transcript. Reconciliation and approved execution use the same
+canonical WorkProvider and positively published Logical Meeting anchor.
+_Avoid_: Fabricated source action, merged transcript, automatic assignment
+
 **Luma Synthesis**:
 A provider-neutral, Evidence-grounded understanding of a Logical Meeting that retains each contributing capture's provenance, capability gaps, and uncertainty rather than fabricating a combined raw transcript.
 _Avoid_: Transcript merge, source replacement, Operational Outcome

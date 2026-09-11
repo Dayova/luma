@@ -1,4 +1,16 @@
 import {
+  isGranolaCommand,
+  DiscordGranolaUnavailableError,
+  type DiscordGranolaCommand,
+  type DiscordGranolaRuntime
+} from "./discord-granola-runtime.js";
+import {
+  isCaptureReviewCommand,
+  DiscordCaptureReviewUnavailableError,
+  type DiscordCaptureReviewCommand,
+  type DiscordCaptureReviewRuntime
+} from "./discord-capture-review-runtime.js";
+import {
   discordDecisionRequestId,
   handleDiscordDecisionRecordCommand,
   handleDiscordDecisionRecordMention,
@@ -76,6 +88,8 @@ export type DiscordCommandBase = {
 
 export type DiscordCommand =
   | DiscordConsultationCommand
+  | DiscordCaptureReviewCommand
+  | DiscordGranolaCommand
   | DiscordDecisionRecordCommand
   | (DiscordCommandBase & {
       type: "start";
@@ -201,6 +215,8 @@ export type CreateDiscordMeetingBotInput = {
   meetingIntelligence: MeetingIntelligence;
   followUpExecution?: FollowUpExecution;
   consultations?: DiscordConsultationRuntime;
+  captureReview?: DiscordCaptureReviewRuntime;
+  granola?: DiscordGranolaRuntime;
   decisionRecords?: DiscordDecisionRecordRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
@@ -631,33 +647,39 @@ async function handleCommand(
   try {
     const sourceFence = await commandSourceFence(input, command);
     await sourceFence?.();
-    const response =
-      command.type === "usage"
-        ? { content: await readAiUsage(input) }
-        : isConsultationCommand(command)
-          ? input.consultations
-            ? await handleDiscordConsultationCommand({
-                runtime: input.consultations,
-                workspace: input.workspace,
-                command,
-                accessPolicy
-              })
-            : { content: "Advisory consultations are not configured in this workspace." }
-          : isDecisionRecordCommand(command)
-            ? input.decisionRecords &&
-              surface.kind === "public-thread" &&
-              surface.parentChannelId &&
-              input.decisionRecords.config.parentChannelIds.includes(
-                surface.parentChannelId
-              ) &&
-              input.decisionRecords.config.allowedDiscordUserIds.includes(
-                command.actorDiscordUserId
-              )
-              ? await executeDecisionRecordCommand(input, command)
+    const response = isGranolaCommand(command)
+      ? await handleGranola(input, command, accessPolicy)
+      : isCaptureReviewCommand(command)
+        ? await handleCaptureReview(input, command, accessPolicy)
+        : command.type === "usage"
+          ? { content: await readAiUsage(input) }
+          : isConsultationCommand(command)
+            ? input.consultations
+              ? await handleDiscordConsultationCommand({
+                  runtime: input.consultations,
+                  workspace: input.workspace,
+                  command,
+                  accessPolicy
+                })
               : {
-                  content: "Decision Records are not enabled for you in this discussion."
+                  content: "Advisory consultations are not configured in this workspace."
                 }
-            : await executeAdmittedCommand(input, command, now);
+            : isDecisionRecordCommand(command)
+              ? input.decisionRecords &&
+                surface.kind === "public-thread" &&
+                surface.parentChannelId &&
+                input.decisionRecords.config.parentChannelIds.includes(
+                  surface.parentChannelId
+                ) &&
+                input.decisionRecords.config.allowedDiscordUserIds.includes(
+                  command.actorDiscordUserId
+                )
+                ? await executeDecisionRecordCommand(input, command)
+                : {
+                    content:
+                      "Decision Records are not enabled for you in this discussion."
+                  }
+              : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
         ? response.content
@@ -691,6 +713,8 @@ async function handleCommand(
       };
     return {
       content:
+        error instanceof DiscordGranolaUnavailableError ||
+        error instanceof DiscordCaptureReviewUnavailableError ||
         error instanceof ImportedMeetingReviewUnavailableError ||
         error instanceof ConversationConsultationError
           ? error.message
@@ -764,6 +788,59 @@ async function executeDecisionRecordCommand(
   };
 }
 
+async function handleGranola(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordGranolaCommand,
+  accessPolicy: WorkspaceAccessPolicy
+): Promise<DiscordCommandResponse> {
+  if (!input.granola)
+    return { content: "Granola connections are not configured in this workspace." };
+  const actor = await accessPolicy.authorize({
+    workspaceId: input.workspace.workspaceId,
+    providerId: "discord",
+    providerUserId: command.actorDiscordUserId
+  });
+  if (!actor) throw new DiscordChannelAccessError();
+  return input.granola.handle({ command, actorPersonId: actor.personId });
+}
+
+async function handleCaptureReview(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordCaptureReviewCommand,
+  accessPolicy: WorkspaceAccessPolicy
+): Promise<DiscordCommandResponse> {
+  if (!input.captureReview)
+    return { content: "Captured meeting synthesis is not configured in this workspace." };
+  const actor = await accessPolicy.authorize({
+    workspaceId: input.workspace.workspaceId,
+    providerId: "discord",
+    providerUserId: command.actorDiscordUserId
+  });
+  if (!actor) throw new DiscordChannelAccessError();
+  const thread = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  const owner =
+    "ownerDiscordUserId" in command && command.ownerDiscordUserId
+      ? await accessPolicy.authorize({
+          workspaceId: input.workspace.workspaceId,
+          providerId: "discord",
+          providerUserId: command.ownerDiscordUserId
+        })
+      : null;
+  if ("ownerDiscordUserId" in command && command.ownerDiscordUserId && !owner)
+    throw new DiscordChannelAccessError();
+  return input.captureReview.handle({
+    command,
+    ...(owner ? { ownerPersonId: owner.personId } : {}),
+    actorPersonId: actor.personId,
+    ...(thread ? { boundMeetingId: thread.meeting_id } : {})
+  });
+}
+
 async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string> {
   if (!input.aiUsage)
     return "AI usage tracking is not configured. A founder needs to check the AI provider and pricing configuration before paid AI use.";
@@ -796,7 +873,11 @@ async function executeAdmittedCommand(
   input: ScopedDiscordMeetingBotInput,
   command: Exclude<
     DiscordCommand,
-    { type: "usage" } | DiscordConsultationCommand | DiscordDecisionRecordCommand
+    | { type: "usage" }
+    | DiscordConsultationCommand
+    | DiscordDecisionRecordCommand
+    | DiscordCaptureReviewCommand
+    | DiscordGranolaCommand
   >,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -859,6 +940,8 @@ async function commandSourceFence(
   command: DiscordCommand
 ): Promise<(() => Promise<void>) | undefined> {
   if (
+    isGranolaCommand(command) ||
+    isCaptureReviewCommand(command) ||
     isConsultationCommand(command) ||
     isDecisionRecordCommand(command) ||
     command.type === "usage" ||
@@ -1967,6 +2050,7 @@ function relevantPeople(intent: FollowUpIntent, actorId: PersonId): PersonId[] {
 
 function followUpIntentLabel(intent: FollowUpIntent): string {
   switch (intent.type) {
+    case "publish-meeting-synthesis":
     case "record-meeting":
     case "update-knowledge":
     case "create-work-item":

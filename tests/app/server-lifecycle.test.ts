@@ -84,7 +84,7 @@ describe("Discord server startup resource ownership", () => {
     controller.abort();
     await result;
     expect(harness.disconnect).toHaveBeenCalledOnce();
-    expect(harness.databaseClose).toHaveBeenCalledOnce();
+    expect(harness.databaseClose).not.toHaveBeenCalled();
   });
 
   it("closes persistence when provider configuration fails before transport creation", async () => {
@@ -147,19 +147,18 @@ describe("Discord server startup resource ownership", () => {
     expect(harness.databaseClose).toHaveBeenCalledOnce();
   });
 
-  it("attempts every resource cleanup without replacing the startup failure", async () => {
+  it("preserves the store when admission cannot drain without replacing the startup failure", async () => {
     const harness = createLifecycleHarness();
     const startupFailure = new Error("Discord connection failed");
     harness.connect.mockRejectedValueOnce(startupFailure);
     harness.disconnect.mockRejectedValueOnce(new Error("transport cleanup failed"));
-    harness.databaseClose.mockRejectedValueOnce(new Error("database cleanup failed"));
 
     await expect(startServer(serverEnv, harness.dependencies)).rejects.toBe(
       startupFailure
     );
 
     expect(harness.disconnect).toHaveBeenCalledOnce();
-    expect(harness.databaseClose).toHaveBeenCalledOnce();
+    expect(harness.databaseClose).not.toHaveBeenCalled();
   });
 
   it("keeps successful resources open until the caller stops the app", async () => {

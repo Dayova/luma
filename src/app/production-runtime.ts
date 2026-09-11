@@ -1,5 +1,7 @@
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { decisionRuntimeConfig } from "./decision-runtime.js";
+import { meetingCaptureRuntimeConfig } from "./meeting-capture-config.js";
+import { granolaOAuthRuntimeConfig } from "./granola-oauth-runtime.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
 import { notionWebhookRuntimeConfig } from "./notion-webhook-runtime.js";
@@ -153,7 +155,32 @@ export async function validateProductionEnvironment(
     );
     aiRequestLimitsFromEnv(env);
     const organizational = organizationalContextRuntimeConfig(env);
-    if (notionWebhookRuntimeConfig(env, workspaceId)) {
+    const capture = meetingCaptureRuntimeConfig(env);
+    const granola = granolaOAuthRuntimeConfig(env);
+    const webhook = notionWebhookRuntimeConfig(env, workspaceId);
+    if (granola) {
+      check(
+        Boolean(capture?.granolaEnabled),
+        "Granola onboarding requires capture synthesis."
+      );
+      check(
+        new URL(granola.redirectUri).protocol === "https:",
+        "Production Granola login requires a fixed HTTPS callback."
+      );
+      check(
+        !isWithin(granola.keyPath, canonicalDirectory) &&
+          !isWithin(granola.keyPath, releaseDirectory) &&
+          !["/tmp", "/var/tmp", "/run", "/dev", "/proc", "/sys"].some((parent) =>
+            isWithin(granola.keyPath, parent)
+          ),
+        "The Granola credential key requires a protected durable path outside the store and release."
+      );
+      check(
+        !webhook || granola.port !== webhook.port,
+        "Granola and Notion callback listeners require separate ports."
+      );
+    }
+    if (webhook) {
       required(env, "NOTION_API_TOKEN");
       check(
         organizational?.providers.includes("notion") === true,

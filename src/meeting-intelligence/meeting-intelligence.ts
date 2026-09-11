@@ -1,3 +1,6 @@
+import { projectCurrentSynthesisActions } from "./synthesis-action-state.js";
+import { withCaptureSynthesis } from "./capture-synthesis.js";
+import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
 import {
   createDecisionIntelligence,
   type DecisionIntelligenceConfiguration
@@ -52,6 +55,7 @@ import type {
   ExternalReference,
   FollowUpIntent,
   HumanJudgment,
+  ActionItemCandidate,
   ImportedActionItemCandidate,
   ImportedActionItemSourceBlock,
   ImportedMeetingSource,
@@ -138,6 +142,7 @@ export type CreateMeetingIntelligenceInput = {
     meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
     meetingSourceAudience?: MeetingDecisionSourceAudience;
   };
+  captureSynthesis?: CaptureSynthesisConfiguration;
   /** Read-only catalogs; Meeting Intelligence cannot access WorkProvider writers. */
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
@@ -209,7 +214,7 @@ type ReconciliationFlight = Promise<MeetingState>;
 type ReconciliationTrigger = ActionItemReconciliationReview["trigger"];
 
 type ReconciliationCandidateRequest = {
-  candidate: ImportedActionItemCandidate;
+  candidate: ActionItemCandidate;
   trigger: ReconciliationTrigger;
 };
 
@@ -252,6 +257,10 @@ export function createMeetingIntelligence(
     input.importedSourceObservationVerifier ?? rejectUnverifiedImportedSource;
   const reconciliationFlights = new Map<string, ReconciliationFlight>();
   const importedObservationFlights = new Map<string, Promise<MeetingUpdate>>();
+  let requireSynthesisCurrent = (state: MeetingState): Promise<void> =>
+    state.captureSynthesisActionSource
+      ? Promise.reject(new Error("Capture synthesis source is unavailable"))
+      : Promise.resolve();
   const contextConfiguration: MeetingContextConfiguration = {
     database: input.database,
     ...(input.importedSourceAnalysis
@@ -264,7 +273,7 @@ export function createMeetingIntelligence(
   };
   const contextGuard = createMeetingContextGuard(contextConfiguration);
 
-  const meeting: MeetingIntelligence = {
+  const base: MeetingIntelligence = {
     observe: (observeInput) => {
       const bound = structuredClone(observeInput);
       const run = () =>
@@ -276,6 +285,7 @@ export function createMeetingIntelligence(
           reconciliationFlights,
           contextConfiguration,
           contextGuard,
+          requireSynthesisCurrent,
           now,
           bound
         );
@@ -323,6 +333,98 @@ export function createMeetingIntelligence(
         concludeInput
       )
   };
+  const meeting = withCaptureSynthesis({
+    base,
+    database: input.database,
+    reasoningModel: input.reasoningModel,
+    ...(input.captureSynthesis ? { configuration: input.captureSynthesis } : {}),
+    workProviderId:
+      workCatalogs.size === 1 ? [...workCatalogs.keys()][0]! : "unconfigured",
+    actions: {
+      bindCurrent: (verify) => {
+        requireSynthesisCurrent = verify;
+      },
+      async accept({ synthesis, candidates, requireCurrent }) {
+        await requireCurrent();
+        const accepted = await input.database.transaction(async (transaction) => {
+          const state = await loadMeetingStateForMutation(
+            transaction,
+            synthesis.workspaceId,
+            synthesis.logicalMeetingId
+          );
+          const head = await transaction.query<{ revision: number }>(
+            "SELECT revision FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
+            [synthesis.workspaceId, synthesis.logicalMeetingId]
+          );
+          if (head.rows[0]?.revision !== synthesis.revision)
+            throw new Error("Synthesis advanced before Action Item admission");
+          if (
+            state.captureSynthesisActionSource?.revision === synthesis.revision &&
+            state.captureSynthesisActionSource.sourceSetDigest ===
+              synthesis.sourceSetDigest
+          )
+            return state;
+          for (const candidate of candidates)
+            for (const evidence of candidate.evidence)
+              await insertEvidence(
+                transaction,
+                state.workspaceId,
+                state.meetingId,
+                evidence,
+                now
+              );
+          const next = advanceRevision(
+            {
+              ...state,
+              lifecycle: "ended",
+              title: state.title || "Captured Meeting",
+              importedActionItemCandidates: appendCandidatesIfNew(
+                state.importedActionItemCandidates,
+                candidates
+              ),
+              currentImportedActionItemCandidateIds: candidates.map(
+                (candidate) => candidate.id
+              ),
+              captureSynthesisActionSource: {
+                revision: synthesis.revision,
+                sourceSetDigest: synthesis.sourceSetDigest,
+                canonicalAnchorRef: synthesis.canonicalAnchorRef
+              }
+            },
+            synthesis.producedAt
+          );
+          await saveMeetingState(
+            transaction,
+            next,
+            "capture-synthesis-actions-admitted",
+            now
+          );
+          return next;
+        });
+        await requireCurrent();
+        const requests = candidates
+          .filter((candidate) =>
+            candidateNeedsReconciliation(accepted, candidate, workCatalogs, now())
+          )
+          .map((candidate): ReconciliationCandidateRequest => ({
+            candidate,
+            trigger: "initial-source-import"
+          }));
+        await reconcileAndPersistActionItemCandidates(
+          input.database,
+          accepted,
+          requests,
+          synthesis.workspaceId,
+          workCatalogs,
+          reconciliationFlights,
+          now,
+          requireCurrent
+        );
+        await requireCurrent();
+      }
+    },
+    now
+  });
   if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
   const configuration = input.decisionIntelligence;
   const meetingSource =
@@ -418,6 +520,7 @@ async function observeMeeting(
   reconciliationFlights: Map<string, ReconciliationFlight>,
   contextConfiguration: MeetingContextConfiguration,
   contextGuard: ReturnType<typeof createMeetingContextGuard>,
+  requireSynthesisCurrent: (state: MeetingState) => Promise<void>,
   now: () => Date,
   input: ObserveMeeting
 ): Promise<MeetingUpdate> {
@@ -948,7 +1051,8 @@ async function observeMeeting(
       workspaceId,
       workCatalogs,
       reconciliationFlights,
-      now
+      now,
+      () => requireSynthesisCurrent(state)
     );
   }
 
@@ -1132,7 +1236,7 @@ function candidatesNeedingReconciliationForObservations(
 
 function candidateNeedsReconciliation(
   state: MeetingState,
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   currentTime: Date
 ): boolean {
@@ -1244,13 +1348,13 @@ function latestReconciliationReviewForCandidate(
   );
 }
 
-function actionItemOwnershipClaimId(candidate: ImportedActionItemCandidate): string {
+function actionItemOwnershipClaimId(candidate: ActionItemCandidate): string {
   return `attribution:ownership:${opaqueIdentifierSegment(candidate.lineageKey)}:${opaqueIdentifierSegment(JSON.stringify(candidate.sourceOwner))}`;
 }
 
 function acceptedOwnershipResolutionsForCandidate(
   resolutions: ActionItemOwnershipHumanResolution[],
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): ActionItemOwnershipHumanResolution | null {
   const claimId = actionItemOwnershipClaimId(candidate);
 
@@ -1270,7 +1374,7 @@ function acceptedOwnershipResolutionsForCandidate(
 }
 
 function effectiveActionItemOwnershipForCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   resolution: ActionItemOwnershipHumanResolution | null
 ): ActionItemOwnershipAttribution {
   return resolution?.ownership ?? candidate.ownership;
@@ -1294,7 +1398,8 @@ async function reconcileAndPersistActionItemCandidates(
   workspaceId: WorkspaceId,
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   flights: Map<string, ReconciliationFlight>,
-  now: () => Date
+  now: () => Date,
+  requireCurrent?: () => Promise<void>
 ): Promise<MeetingState> {
   const flightKey = [
     acceptedState.workspaceId,
@@ -1308,6 +1413,20 @@ async function reconcileAndPersistActionItemCandidates(
   }
 
   const flight = (async () => {
+    await requireCurrent?.();
+    const guardedCatalogs = requireCurrent
+      ? new Map(
+          [...workCatalogs].map(([id, catalog]) => {
+            const guarded: WorkCatalog = {
+              ...catalog,
+              searchWorkItems: (query) => catalog.searchWorkItems(query),
+              getWorkItem: (key) => catalog.getWorkItem(key)
+            };
+            reconciliationSourceProofs.set(guarded, requireCurrent);
+            return [id, guarded];
+          })
+        )
+      : workCatalogs;
     const reviews = await reconcileImportedActionItemCandidates(
       requests,
       acceptedState.actionItemReconciliationReviews,
@@ -1315,10 +1434,18 @@ async function reconcileAndPersistActionItemCandidates(
       acceptedState.actionItemOwnershipHumanResolutions,
       acceptedState.actionItemReconciliationCreatedWorkMappings,
       workspaceId,
-      workCatalogs,
+      guardedCatalogs,
       now
     );
-    return persistActionItemReconciliationReviews(database, acceptedState, reviews, now);
+    await requireCurrent?.();
+    const result = await persistActionItemReconciliationReviews(
+      database,
+      acceptedState,
+      reviews,
+      now
+    );
+    await requireCurrent?.();
+    return result;
   })();
 
   flights.set(flightKey, flight);
@@ -1486,7 +1613,7 @@ async function persistActionItemReconciliationReviews(
 }
 
 async function reconcileImportedActionItemCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   existingReviews: ActionItemReconciliationReview[],
   existingResolutions: ActionItemReconciliationHumanResolution[],
   existingCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[],
@@ -1497,7 +1624,11 @@ async function reconcileImportedActionItemCandidate(
   const catalogSelection = selectWorkCatalog(candidate, workCatalogs);
 
   if (
-    candidate.source.source.completeness !== "complete" ||
+    (candidate.source.source.completeness !== "complete" &&
+      !(
+        candidate.source.source.sourceKind === "capture-synthesis" &&
+        candidate.source.source.humanActionReviewed
+      )) ||
     candidate.source.source.actionItemsAvailability !== "available"
   ) {
     return reconciliationReview(
@@ -1554,7 +1685,11 @@ async function reconcileImportedActionItemCandidate(
 
   if (
     candidate.deadline.confidence !== "exact" &&
-    candidate.deadline.confidence !== "normalized"
+    candidate.deadline.confidence !== "normalized" &&
+    !(
+      candidate.source.source.sourceKind === "capture-synthesis" &&
+      candidate.source.source.humanNoDeadline
+    )
   ) {
     return reconciliationReview(
       candidate,
@@ -1869,7 +2004,7 @@ async function reconcileImportedActionItemCandidate(
 }
 
 function selectWorkCatalog(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workCatalogs: ReadonlyMap<string, WorkCatalog>
 ): CatalogSelection {
   const explicitReference = candidate.mentionedWorkItemReferences[0];
@@ -1924,7 +2059,7 @@ function selectWorkCatalog(
 async function searchCanonicalWork(
   catalog: WorkCatalog,
   workspaceId: WorkspaceId,
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): Promise<CatalogSearchResult> {
   const queries = uniqueStrings([
     candidate.mentionedWorkItemReferences[0]?.externalId,
@@ -1935,7 +2070,7 @@ async function searchCanonicalWork(
 
   for (const query of queries) {
     try {
-      const results = await withWorkCatalogDeadline(
+      const results = await readReconciliationCatalog(catalog, () =>
         catalog.searchWorkItems({
           workspaceId,
           text: query,
@@ -1953,7 +2088,9 @@ async function searchCanonicalWork(
         let snapshot = cachedWorkItems.get(key);
 
         if (!snapshot) {
-          const hydrated = await withWorkCatalogDeadline(catalog.getWorkItem(result.id));
+          const hydrated = await readReconciliationCatalog(catalog, () =>
+            catalog.getWorkItem(result.id)
+          );
 
           if (
             hydrated.providerId !== catalog.providerId ||
@@ -2044,7 +2181,7 @@ function uniqueWorkItemSnapshots(
 }
 
 function priorMappedWorkItems(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   reviews: ActionItemReconciliationReview[],
   resolutions: ActionItemReconciliationHumanResolution[],
   createdWorkMappings: ActionItemReconciliationCreatedWorkMapping[]
@@ -2088,7 +2225,7 @@ function uniqueWorkItemIdentities(workItems: WorkItemIdentity[]): WorkItemIdenti
 }
 
 function scoreWorkItem(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot,
   priorMappings: WorkItemIdentity[]
 ): ScoredWorkItem {
@@ -2207,14 +2344,18 @@ function scoreWorkItem(
 }
 
 function hasRecentWorkActivity(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot
 ): boolean {
   if (workItem.status !== "active" && workItem.status !== "blocked") {
     return false;
   }
 
-  const sourceAt = Date.parse(candidate.source.source.capturedAt);
+  const sourceAt = Date.parse(
+    candidate.source.source.sourceKind === "capture-synthesis"
+      ? candidate.source.source.producedAt
+      : candidate.source.source.capturedAt
+  );
   const updatedAt = Date.parse(workItem.updatedAt);
 
   return (
@@ -2306,7 +2447,7 @@ function semanticScoreForSignals(signals: ActionItemReconciliationMatchSignal[])
 }
 
 function outcomeForSelectedWorkItem(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot,
   supportsConditionalUpdates: boolean
 ): ActionItemReconciliationOutcome {
@@ -2346,7 +2487,7 @@ function outcomeForSelectedWorkItem(
 }
 
 function reconciliationReview(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string,
   input: {
     searches: ActionItemReconciliationSearchReceipt[];
@@ -2381,7 +2522,7 @@ function reconciliationReview(
 }
 
 function reconciliationWorkEvidence(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot
 ): EvidenceReference {
   return {
@@ -2411,7 +2552,7 @@ function outcomeWorkItem(
 }
 
 function reconciliationReviewId(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string,
   attempt: number
 ): string {
@@ -2428,6 +2569,20 @@ function sameWorkItemIdentity(left: WorkItemIdentity, right: WorkItemIdentity): 
 
 function uniqueStrings(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+const reconciliationSourceProofs = new WeakMap<WorkCatalog, () => Promise<void>>();
+async function readReconciliationCatalog<T>(
+  catalog: WorkCatalog,
+  operation: () => Promise<T>
+): Promise<T> {
+  // Source proofs are owned to real completion. Only the provider-only operation
+  // uses the legacy read deadline, so a late response cannot start DB work after drain.
+  const requireCurrent = reconciliationSourceProofs.get(catalog);
+  await requireCurrent?.();
+  const result = await withWorkCatalogDeadline(operation());
+  await requireCurrent?.();
+  return result;
 }
 
 async function withWorkCatalogDeadline<T>(operation: Promise<T>): Promise<T> {
@@ -2451,8 +2606,8 @@ async function withWorkCatalogDeadline<T>(operation: Promise<T>): Promise<T> {
 }
 
 function sameImportedCandidate(
-  left: ImportedActionItemCandidate,
-  right: ImportedActionItemCandidate
+  left: ActionItemCandidate,
+  right: ActionItemCandidate
 ): boolean {
   return (
     left.id === right.id &&
@@ -2462,7 +2617,10 @@ function sameImportedCandidate(
     left.completion === right.completion &&
     left.source.sourceBlockId === right.source.sourceBlockId &&
     left.source.sourceExcerpt === right.source.sourceExcerpt &&
-    sameImportedMeetingSource(left.source.source, right.source.source)
+    (left.source.source.sourceKind === "capture-synthesis" ||
+    right.source.source.sourceKind === "capture-synthesis"
+      ? JSON.stringify(left.source.source) === JSON.stringify(right.source.source)
+      : sameImportedMeetingSource(left.source.source, right.source.source))
   );
 }
 
@@ -2471,13 +2629,32 @@ async function queryMeeting(
   contextGuard: ReturnType<typeof createMeetingContextGuard>,
   input: QueryMeeting
 ): Promise<{ value: MeetingQueryResult; receiptIds: string[] }> {
-  const state = await contextGuard.project(
-    await requireMeetingState(database, input.workspaceId, input.meetingId)
+  const state = projectCurrentSynthesisActions(
+    await contextGuard.project(
+      await requireMeetingState(database, input.workspaceId, input.meetingId)
+    )
   );
   return {
     value: await queryProjectedMeeting(database, contextGuard, input, state),
     receiptIds: contextReceiptIds(state)
   };
+}
+
+function filterSynthesisActionEvidence(
+  state: MeetingState,
+  evidence: EvidenceReference[]
+): EvidenceReference[] {
+  if (!state.captureSynthesisActionSource) return evidence;
+  const allowed = new Set(
+    [
+      ...state.importedActionItemCandidates.flatMap((item) => item.evidence),
+      ...state.actionItemReconciliationReviews.flatMap((item) => item.evidence),
+      ...state.actionItemReconciliationHumanResolutions.map((item) => item.evidence),
+      ...state.actionItemOwnershipHumanResolutions.map((item) => item.evidence),
+      ...state.followUpIntentions.flatMap((item) => item.provenance.evidence)
+    ].map((item) => item.evidenceId)
+  );
+  return evidence.filter((item) => allowed.has(item.evidenceId));
 }
 
 async function queryProjectedMeeting(
@@ -2504,7 +2681,16 @@ async function queryProjectedMeeting(
         query.since
       );
       const changes = deriveCatchUpChanges(
-        previousState ? await contextGuard.project(previousState) : null,
+        previousState
+          ? projectCurrentSynthesisActions(
+              await contextGuard.project({
+                ...previousState,
+                ...(state.captureSynthesisActionSource
+                  ? { captureSynthesisActionSource: state.captureSynthesisActionSource }
+                  : {})
+              })
+            )
+          : null,
         state
       );
       return {
@@ -2531,7 +2717,10 @@ async function queryProjectedMeeting(
         uniqueEvidence([
           ...(await contextGuard.filterEvidence(
             state,
-            await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
+            filterSynthesisActionEvidence(
+              state,
+              await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
+            )
           )),
           ...contextItems(state).flatMap((item) => item.provenance.evidence)
         ])
@@ -3726,6 +3915,11 @@ async function applyObservation(
         evidenceForAnalysis: [],
         events: []
       };
+    case "meeting-capture-set-observed":
+    case "capture-synthesis-judgment-recorded":
+      throw new Error(
+        "Capture Observations must pass through the owned synthesis implementation."
+      );
   }
 }
 
@@ -4300,7 +4494,7 @@ function validateImportedMeetingSourceObservation(
   }
 
   const candidateIds = new Set<string>();
-  const candidatesBySourceBlockId = new Map<string, ImportedActionItemCandidate>();
+  const candidatesBySourceBlockId = new Map<string, ActionItemCandidate>();
 
   for (const candidate of observation.candidates) {
     if (candidateIds.has(candidate.id)) {
@@ -4898,7 +5092,7 @@ function completedZeroResultSearch(review: ActionItemReconciliationReview): bool
 }
 
 function validateImportedCandidateDeadline(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   source: ImportedMeetingSource,
   workspaceTimezone: string
 ): string | null {
@@ -4981,7 +5175,7 @@ function validateImportedSourceExternalReference(
 }
 
 function validateImportedCandidateSourceSemantics(
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): string | null {
   const excerpt = candidate.source.sourceExcerpt;
   const expectedLanguage = importedActionItemLanguageFor(excerpt);
@@ -5034,7 +5228,7 @@ function isValidCalendarDate(value: string): boolean {
 }
 
 function validateImportedCandidateWorkItemReferences(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItemProviderId: string
 ): string | null {
   const references = candidate.mentionedWorkItemReferences;
@@ -5118,7 +5312,7 @@ function validateImportedCandidateWorkItemReferences(
 }
 
 function validateImportedCandidateImplementationReferences(
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): string | null {
   const references = candidate.sourceBoundImplementationReferences;
 
@@ -5194,9 +5388,7 @@ function compareImportedImplementationReference(left: string, right: string): nu
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function validateImportedCandidateHints(
-  candidate: ImportedActionItemCandidate
-): string | null {
+function validateImportedCandidateHints(candidate: ActionItemCandidate): string | null {
   for (const [kind, hints] of [
     ["project", candidate.projectHints],
     ["component", candidate.componentHints]
@@ -5442,6 +5634,7 @@ function upgradeLegacyImportedSourceAvailability(
   );
   const importedActionItemCandidates = state.importedActionItemCandidates.map(
     (candidate) =>
+      isImportedActionCandidate(candidate) &&
       importedSourceRevisionKey(candidate.source.source) === sourceKey
         ? {
             ...candidate,
@@ -5470,9 +5663,9 @@ function upgradeLegacyImportedSourceAvailability(
 }
 
 function appendCandidatesIfNew(
-  current: ImportedActionItemCandidate[],
-  next: ImportedActionItemCandidate[]
-): ImportedActionItemCandidate[] {
+  current: ActionItemCandidate[],
+  next: ActionItemCandidate[]
+): ActionItemCandidate[] {
   const byId = new Map(current.map((candidate) => [candidate.id, candidate]));
 
   for (const candidate of next) {
@@ -5488,7 +5681,7 @@ function currentCandidateIdsAfterImport(
   state: MeetingState,
   observation: MeetingImportedFromSource,
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): string[] {
   const currentIds =
     state.currentImportedActionItemCandidateIds ??
@@ -5818,7 +6011,7 @@ function normalizeActionItemReconciliationReviews(
 
 function deriveCurrentImportedActionItemCandidateIds(
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): string[] {
   const knownSources = knownImportedSourceRevisions(importedSources, importedCandidates);
 
@@ -5851,13 +6044,14 @@ function deriveCurrentImportedActionItemCandidateIds(
 
 function knownImportedSourceRevisions(
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): ImportedMeetingSource[] {
   const sourcesByRevision = new Map(
     importedSources.map((source) => [importedSourceRevisionKey(source), source])
   );
 
   for (const candidate of importedCandidates) {
+    if (!isImportedActionCandidate(candidate)) continue;
     const source = candidate.source.source;
     const key = importedSourceRevisionKey(source);
 
@@ -5871,7 +6065,7 @@ function knownImportedSourceRevisions(
 
 function latestEligibleCandidateSource(
   sourceRevisions: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): ImportedMeetingSource | undefined {
   const newestFirst = [...sourceRevisions].sort(
     (left, right) => right.sourceRevision - left.sourceRevision
@@ -5913,9 +6107,10 @@ function normalizeImportedMeetingSource(
 }
 
 function normalizeImportedActionItemCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   source: ImportedMeetingSource | undefined
-): ImportedActionItemCandidate {
+): ActionItemCandidate {
+  if (!isImportedActionCandidate(candidate)) return candidate;
   const wasLegacyCompleted = isLegacyCompletedModality(candidate.modality);
   const completion =
     candidate.completion === "completed" || candidate.completion === "open"
@@ -5960,7 +6155,7 @@ function normalizeImportedActionItemCandidate(
 
 function normalizeLegacyImportedActionItemSourceOwner(
   value: unknown
-): ImportedActionItemCandidate["sourceOwner"] | null {
+): ActionItemCandidate["sourceOwner"] | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -5990,8 +6185,8 @@ function normalizeLegacyImportedActionItemSourceOwner(
 }
 
 function normalizeImportedWorkItemReferences(
-  candidate: ImportedActionItemCandidate
-): ImportedActionItemCandidate["mentionedWorkItemReferences"] {
+  candidate: ActionItemCandidate
+): ActionItemCandidate["mentionedWorkItemReferences"] {
   if (Array.isArray(candidate.mentionedWorkItemReferences)) {
     return candidate.mentionedWorkItemReferences;
   }
@@ -6016,9 +6211,9 @@ function normalizeImportedWorkItemReferences(
 }
 
 function normalizeImportedImplementationReferences(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string
-): ImportedActionItemCandidate["sourceBoundImplementationReferences"] {
+): ActionItemCandidate["sourceBoundImplementationReferences"] {
   return Array.isArray(candidate.sourceBoundImplementationReferences)
     ? candidate.sourceBoundImplementationReferences
     : mentionedGitHubImplementationReferencesFor(
@@ -6035,12 +6230,21 @@ function isLegacyCompletedModality(value: unknown): boolean {
   );
 }
 
-function importedSourceRevisionKey(source: ImportedMeetingSource): string {
+function importedSourceRevisionKey(
+  source: Pick<
+    ImportedMeetingSource,
+    "providerId" | "sourceObjectId" | "sourceRevision" | "contentHash"
+  > & { sourceKind: string }
+): string {
   return `${importedSourceIdentityKey(source)}:r${source.sourceRevision}`;
 }
 
-function importedSourceIdentityKey(source: ImportedMeetingSource): string {
-  return `${opaqueIdentifierSegment(source.providerId)}:${opaqueIdentifierSegment(source.sourceObjectId)}`;
+function importedSourceIdentityKey(
+  source: Pick<ImportedMeetingSource, "providerId" | "sourceObjectId"> & {
+    sourceKind: string;
+  }
+): string {
+  return `${source.sourceKind === "capture-synthesis" ? "capture-synthesis:" : ""}${opaqueIdentifierSegment(source.providerId)}:${opaqueIdentifierSegment(source.sourceObjectId)}`;
 }
 
 function advanceRevision(state: MeetingState, observedAt: string): MeetingState {
@@ -6710,9 +6914,7 @@ function replaceEvidenceReferencesInState(
     ...provenance,
     evidence: provenance.evidence.map(replaceReference)
   });
-  const replaceCandidate = (
-    candidate: ImportedActionItemCandidate
-  ): ImportedActionItemCandidate => ({
+  const replaceCandidate = (candidate: ActionItemCandidate): ActionItemCandidate => ({
     ...candidate,
     evidence: candidate.evidence.map(replaceReference)
   });
@@ -8067,4 +8269,10 @@ export async function loadActiveEvidenceForMeeting(
   return evidence.map(
     (reference) => projection.evidenceById.get(reference.evidenceId) ?? reference
   );
+}
+
+function isImportedActionCandidate(
+  candidate: ActionItemCandidate
+): candidate is ImportedActionItemCandidate {
+  return candidate.source.source.sourceKind !== "capture-synthesis";
 }

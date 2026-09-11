@@ -1,3 +1,5 @@
+import { synthesisSourceFence } from "./synthesis-source-fence.js";
+import { releaseSynthesisActionFence } from "../meeting-intelligence/synthesis-action-state.js";
 import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
 import { createDecisionFollowUpExecution } from "./decision-execution.js";
 import type {
@@ -19,6 +21,8 @@ import type {
   ScopedFollowUpExecution
 } from "./interface.js";
 import { randomUUID } from "node:crypto";
+import { withSynthesisPublicationExecution } from "./synthesis-publication-execution.js";
+import type { MeetingSynthesisWriter } from "../knowledge/meeting-synthesis-writer.js";
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { OperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
 import type { OperationalOutcomeSourceExecutionFence } from "../knowledge/ledger-backed-operational-outcome-source-execution-fence.js";
@@ -82,6 +86,7 @@ import {
 } from "./operational-outcome-settlement.js";
 
 export type CreateFollowUpExecutionInput = {
+  meetingSynthesisWriter?: MeetingSynthesisWriter;
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
   conversationConsultations?: ConversationConsultations;
@@ -165,7 +170,7 @@ export function createFollowUpExecution(
 ): ScopedFollowUpExecution {
   const now = input.now ?? (() => new Date());
 
-  const meetingExecution: FollowUpExecution = {
+  const base: FollowUpExecution = {
     execute: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
       return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
@@ -183,6 +188,13 @@ export function createFollowUpExecution(
       );
     }
   };
+  const meetingExecution = withSynthesisPublicationExecution({
+    base,
+    database: input.database,
+    meetingIntelligence: input.meetingIntelligence,
+    ...(input.meetingSynthesisWriter ? { writer: input.meetingSynthesisWriter } : {}),
+    now
+  });
   const conversationExecution =
     input.conversationConsultations && input.consultationProvider
       ? createConversationFollowUpExecution({
@@ -763,6 +775,10 @@ async function runProviderMutation(
   const { intent } = input;
 
   switch (intent.type) {
+    case "publish-meeting-synthesis":
+      throw new Error(
+        "Synthesis publication requires its canonical capture execution route"
+      );
     case "settle-operational-outcome": {
       return settleOperationalOutcome(dependencies, input, idempotencyKey);
     }
@@ -1151,7 +1167,9 @@ async function assertOperationalOutcomeSourceCurrentness(
   dependencies: CreateFollowUpExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const verifier = dependencies.operationalOutcomeSourceCurrentnessVerifier;
+  const verifier = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceCurrentnessVerifier;
 
   if (!verifier) {
     return;
@@ -1178,7 +1196,9 @@ async function acquireOperationalOutcomeSourceExecutionFence(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -1224,7 +1244,9 @@ async function assertOperationalOutcomeSourceExecutionFenceHeldCurrent(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -2456,11 +2478,16 @@ function settlementFromCanonicalState(
   }
 
   const source = review.candidate.source.source;
-  const page = source.externalReference;
+  const page =
+    source.sourceKind === "capture-synthesis"
+      ? state.captureSynthesisActionSource?.canonicalAnchorRef
+      : source.externalReference;
 
   if (
-    source.completeness !== "complete" ||
+    (source.completeness !== "complete" &&
+      !(source.sourceKind === "capture-synthesis" && source.humanActionReviewed)) ||
     source.actionItemsAvailability !== "available" ||
+    !page ||
     !isDocumentReference(page)
   ) {
     return null;
@@ -2469,7 +2496,10 @@ function settlementFromCanonicalState(
   return {
     target: {
       workspaceId: state.workspaceId,
-      providerId: source.providerId,
+      providerId: page.providerId,
+      ...(source.sourceKind === "capture-synthesis"
+        ? { synthesis: { claimId: source.claimId, claimDigest: source.claimDigest } }
+        : {}),
       page,
       sourceObjectId: source.sourceObjectId,
       sourceRevision: source.sourceRevision,
@@ -3877,6 +3907,8 @@ async function recoverCreatedReferences(
 ): Promise<ExternalReference[] | null> {
   try {
     switch (input.intent.type) {
+      case "publish-meeting-synthesis":
+        return null;
       case "settle-operational-outcome":
         return null;
       case "record-meeting":
@@ -4232,6 +4264,12 @@ async function claimCanonicalExecution(
             `Execution receipt ${idempotencyKey} no longer owns its active reservation`
           );
         }
+        await releaseSynthesisActionFence({
+          database: transaction,
+          workspaceId: recovered.observation.workspaceId,
+          meetingId: recovered.observation.meetingId,
+          intentId: recovered.observation.intentId
+        });
         await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
           database: transaction,
           workspaceId: recovered.observation.workspaceId,
@@ -4789,6 +4827,12 @@ async function completeExecution(
       );
     }
 
+    await releaseSynthesisActionFence({
+      database: transaction,
+      workspaceId: result.observation.workspaceId,
+      meetingId: result.observation.meetingId,
+      intentId: result.observation.intentId
+    });
     await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
       database: transaction,
       workspaceId: result.observation.workspaceId,

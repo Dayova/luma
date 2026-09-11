@@ -36,6 +36,39 @@ S3-compatible bucket. A unique backup UUID binds the snapshot. The job downloads
 that exact snapshot to a fresh directory, verifies every manifest hash and byte
 count against the local original, makes a quarantined restore, and opens and
 serializes every public Postgres table with no live providers or migrations.
+The cold copy also contains a private `recovery/` bundle: exact
+`/etc/luma/production.env`, every referenced Decision authority and context sharing
+policy, the protected `LUMA_STRUCTURED_WORK_TARGETS_PATH` mapping, and the separately
+configured 32-byte Granola credential key. Runtime Decision, synthesis and Structured
+Work signing keys remain in the exact environment copy. Only these explicit file
+selectors are followed; arbitrary paths mentioned in source material are never read.
+Backup and restored bundle files use mode `0600` inside mode-`0700` directories;
+source files retain their existing permissions. Referenced source files must be
+owned by root or the fixed `luma` service account; the operations adapter resolves
+that account locally. The environment copy still comes from root-owned
+`/etc/luma/production.env`. Unprotected inputs, symlinks,
+shared hard links, invalid sizes, missing referenced files and concurrent changes
+are refused. The operations `check` validates these inputs without opening a store.
+
+The recovery manifest binds the backup UUID, workspace, original file paths,
+lengths and hashes. A randomly salted, memory-hard scrypt derivation from the
+protected repository password file authenticates it with HMAC-SHA256. Keep the
+original password file bytes in independent recovery custody, including when
+rotating repository credentials; the password is never included in the bundle.
+Restic encrypts the entire bundle off host. Source files and their private copies
+are never put into subprocess arguments, runtime environment variables for a
+child process, health messages or logs.
+
+After the exact download comparison, the verifier establishes the matching
+quarantine marker before acquiring a restore lease, then decrypts every retained
+Granola credential using the restored key and its original workspace/founder
+authenticated data. This is a local proof: no OAuth, refresh, personal source,
+Discord or AI call occurs. A retained credential still requires its original key
+when OAuth is disabled. Retained Decision write stages, synthesis publications and
+Structured Work requests also require their signing key and policy/mapping files,
+even when their native feature is disabled. Missing/wrong keys, corrupted
+credentials or altered downloaded material fail the backup without advancing its
+verified receipt. The original store and its ownership metadata are untouched.
 Only after all of this succeeds does it advance
 `/var/lib/luma-operations/verified-backup.json`. Backup age uses capture time,
 so slowly verifying an old backup cannot make it current.
@@ -162,7 +195,7 @@ Run the offline check first:
 sudo /usr/bin/node /opt/luma/current/dist/src/app/operations-main.js check
 ```
 
-It validates local configuration and secret-file protection, without contacting
+It validates local configuration, referenced recovery material and secret-file protection, without contacting
 storage, Discord, or the heartbeat service. It does not prove credentials work.
 Install the four reviewed units before the first manually triggered real
 backup. The following commands are host activation steps, not development

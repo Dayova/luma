@@ -1,4 +1,16 @@
 import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
+import { createMeetingCaptureRuntime } from "./meeting-capture-runtime.js";
+import {
+  meetingCaptureRuntimeConfig,
+  createMeetingSynthesisRuntime
+} from "./meeting-capture-config.js";
+import {
+  granolaOAuthRuntimeConfig,
+  granolaOAuthConnectionsFromEnv
+} from "./granola-oauth-runtime.js";
+import { createGranolaOAuthCallbackHost } from "./granola-oauth-callback-host.js";
+import { createDiscordCaptureReviewRuntime } from "../discord/discord-capture-review-runtime.js";
+import { createDiscordGranolaRuntime } from "../discord/discord-granola-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
@@ -86,6 +98,9 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  createGranolaConnections?: typeof granolaOAuthConnectionsFromEnv;
+  createGranolaCallbackHost?: typeof createGranolaOAuthCallbackHost;
+  createMeetingSynthesisWriter?: typeof createMeetingSynthesisRuntime;
   createDatabase?: typeof createPgliteDatabase;
   createDiscordTransport?: typeof createDiscordJsTransportFromEnv;
   createOpenAIReasoningModel?: typeof createOpenAIReasoningModel;
@@ -165,6 +180,12 @@ export async function startServer(
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
   const contextConfig = organizationalContextRuntimeConfig(env);
   const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
+  const captureConfig = meetingCaptureRuntimeConfig(env);
+  const granolaConfig = granolaOAuthRuntimeConfig(env);
+  if (granolaConfig && !captureConfig?.granolaEnabled)
+    throw new Error(
+      "Granola onboarding requires the configured capture synthesis runtime"
+    );
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
@@ -239,7 +260,8 @@ export async function startServer(
     : undefined;
   if (startupSignal?.aborted) throw new LumaStartupCancelledError();
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
-  const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
+  const startupCleanup: Array<() => Promise<void>> = [];
+  const startupAdmissionStops: Array<() => Promise<void>> = [];
   try {
     // A database initialization already in flight must finish before we can
     // close its owned resources; never race away from an unreturned handle.
@@ -273,13 +295,88 @@ export async function startServer(
     });
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
-    startupCleanup.push(() => discordTransport.disconnect());
+    let transportOwnedByBot = false;
+    startupCleanup.push(() =>
+      transportOwnedByBot ? Promise.resolve() : discordTransport.disconnect()
+    );
     const workspace = {
       workspaceId,
       timezone: config.defaultWorkspaceTimezone,
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
     };
+    const granolaConnections = granolaConfig
+      ? await (dependencies.createGranolaConnections ?? granolaOAuthConnectionsFromEnv)({
+          database,
+          workspaceId,
+          env,
+          authorizeOwner: async (actor) =>
+            (await accessPolicy.authorize({ workspaceId, ...actor }))?.personId ?? null
+        })
+      : null;
+    if (granolaConfig && !granolaConnections)
+      throw new Error("The configured Granola connection manager is unavailable");
+    if (granolaConnections) startupCleanup.push(() => granolaConnections.stop());
+    if (captureConfig?.notion && !importedSourceAnalysis)
+      throw new Error("Notion capture requires current imported-source access");
+    const captureRuntime = captureConfig
+      ? await createMeetingCaptureRuntime({
+          database,
+          workspace,
+          ledger: observedSourceLedger,
+          workItemProviderId,
+          ...(captureConfig.notion && importedSourceAnalysis
+            ? {
+                notion: {
+                  ...captureConfig.notion,
+                  sourceAccess: importedSourceAnalysis.access
+                }
+              }
+            : {}),
+          ...(granolaConnections
+            ? {
+                granola: {
+                  policy: granolaConnections.policy,
+                  connections: await granolaConnections.connections()
+                }
+              }
+            : {})
+        })
+      : undefined;
+    if (captureRuntime) {
+      startupAdmissionStops.push(() => captureRuntime.pauseIntake());
+      startupCleanup.push(() => captureRuntime.stop());
+    }
+    const refreshGranolaConnections = async () => {
+      if (!granolaConnections || !captureRuntime)
+        throw new Error("Granola capture is unavailable");
+      await captureRuntime.replaceGranolaConnections(
+        await granolaConnections.connections()
+      );
+    };
+    const granolaCallback =
+      granolaConfig && granolaConnections
+        ? await (
+            dependencies.createGranolaCallbackHost ?? createGranolaOAuthCallbackHost
+          )({
+            database,
+            workspaceId,
+            connections: granolaConnections,
+            redirectUri: granolaConfig.redirectUri,
+            hostname: granolaConfig.hostname,
+            port: granolaConfig.port,
+            afterConnectionsChanged: refreshGranolaConnections
+          })
+        : undefined;
+    if (granolaCallback) {
+      startupAdmissionStops.push(() => granolaCallback.stop());
+      startupCleanup.push(() => granolaCallback.stop());
+    }
+    const meetingSynthesisWriter = captureConfig
+      ? await (
+          dependencies.createMeetingSynthesisWriter ?? createMeetingSynthesisRuntime
+        )({ workspaceId, config: captureConfig, env })
+      : undefined;
     const decisionIntelligence = decisionConfig
       ? await (dependencies.createDecisionRuntime ?? createDecisionRuntime)({
           config: decisionConfig,
@@ -297,8 +394,10 @@ export async function startServer(
           model: openAIReasoningModelName
         })
       : undefined;
-    if (decisionIntelligence)
+    if (decisionIntelligence) {
+      startupAdmissionStops.push(() => decisionIntelligence.recall.stop());
       startupCleanup.push(() => decisionIntelligence.recall.stop());
+    }
     const providerContextCatalogs = [
       ...(externalContextCatalogs ?? []),
       ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
@@ -323,6 +422,7 @@ export async function startServer(
         : undefined;
     const meetingDependencies = {
       database,
+      ...(captureRuntime ? { captureSynthesis: captureRuntime.configuration } : {}),
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
       reasoningModel: reasoningModelFromEnv(
@@ -358,10 +458,13 @@ export async function startServer(
       operationalOutcomeMarkerVerifier
     );
     const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
-    const meetingNotesIngestion = createMeetingNotesIngestion({
+    const baseMeetingNotesIngestion = createMeetingNotesIngestion({
       meetingIntelligence,
       workItemProviderId
     });
+    const meetingNotesIngestion = captureRuntime
+      ? captureRuntime.connect(meetingIntelligence, baseMeetingNotesIngestion)
+      : baseMeetingNotesIngestion;
     const meetingNotesSync = meetingNotesSource
       ? createMeetingNotesSync({
           workspace,
@@ -373,6 +476,7 @@ export async function startServer(
         })
       : undefined;
     if (meetingNotesSync) {
+      startupAdmissionStops.push(() => meetingNotesSync.stop());
       startupCleanup.push(() => meetingNotesSync.stop());
     }
     const conversationConsultations = consultationConfig
@@ -415,9 +519,13 @@ export async function startServer(
               : {})
           })
         : undefined;
-    if (notionWebhook) startupCleanup.push(() => notionWebhook.stop());
+    if (notionWebhook) {
+      startupAdmissionStops.push(() => notionWebhook.stop());
+      startupCleanup.push(() => notionWebhook.stop());
+    }
     const followUpExecution = createFollowUpExecution({
       database,
+      ...(meetingSynthesisWriter ? { meetingSynthesisWriter } : {}),
       ...(conversationConsultations && consultationProvider
         ? { conversationConsultations, consultationProvider }
         : {}),
@@ -472,6 +580,32 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(granolaConnections && granolaCallback
+        ? {
+            granola: await createDiscordGranolaRuntime({
+              database,
+              workspaceId,
+              connections: granolaConnections,
+              begin: (request) => granolaCallback.begin(request),
+              afterConnectionsChanged: refreshGranolaConnections,
+              sourceStatus: (connectionId) =>
+                Promise.resolve(captureRuntime?.granolaSourceStatus(connectionId) ?? null)
+            })
+          }
+        : {}),
+      ...(captureRuntime
+        ? {
+            captureReview: createDiscordCaptureReviewRuntime({
+              database,
+              workspace,
+              logicalMeetings: captureRuntime.logicalMeetings,
+              captureAccess: captureRuntime.configuration.access,
+              meetingIntelligence,
+              followUpExecution,
+              founderPersonIds: dayovaFounderPersonIds
+            })
+          }
+        : {}),
       ...(decisionRecordConfig && decisionMeetingIntelligence
         ? {
             decisionRecords: {
@@ -520,11 +654,16 @@ export async function startServer(
         : {})
     });
 
+    transportOwnedByBot = true;
+    startupAdmissionStops.push(() => bot.stop());
+    startupCleanup.push(() => bot.stop());
+    if (granolaCallback) await granolaCallback.start();
     await bot.start(startupSignal);
     startupSignal?.throwIfAborted();
     if (notionWebhook) await notionWebhook.start();
     else meetingNotesSync?.start();
     decisionIntelligence?.recall.start();
+    captureRuntime?.start();
     startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
@@ -541,14 +680,20 @@ export async function startServer(
           // continuation: its lease must survive process termination for recovery.
           await drainBeforeClose(
             (async () => {
-              await Promise.all([
+              const drains = await Promise.allSettled([
                 bot.stop(),
+                granolaCallback?.stop(),
+                captureRuntime?.pauseIntake(),
                 notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
                 decisionIntelligence?.recall.stop()
               ]);
-              // An admitted foreground operation can begin its final retained proof
-              // after background cancellation. Drain again once ingress is settled.
+              const failure = drains.find((result) => result.status === "rejected");
+              if (failure?.status === "rejected") throw failure.reason;
+              // Foreground Decision work may have entered a retained proof after
+              // background cancellation; all command admission has now settled.
               await decisionIntelligence?.recall.stop();
+              await captureRuntime?.stop();
+              await granolaConnections?.stop();
             })()
           );
           await database.close();
@@ -557,16 +702,24 @@ export async function startServer(
       }
     };
   } catch (error) {
-    // A rejected startup cannot return stop() to its caller. Release every
-    // acquired resource in reverse order and preserve the original failure.
+    // A rejected startup cannot return stop() to its caller. Stop every ingress
+    // immediately, then drain owned dependencies before closing persistence.
+    // A failed or timed-out drain must retain the unclean store lease.
     let cleanupFailed = false;
-    for (const cleanup of startupCleanup.reverse()) {
-      try {
-        await cleanup();
-      } catch {
-        cleanupFailed = true;
-        // Continue releasing the remaining resources before rethrowing.
-      }
+    try {
+      await drainBeforeClose(
+        (async () => {
+          const drains = await Promise.allSettled(
+            startupAdmissionStops.map((stop) => Promise.resolve().then(stop))
+          );
+          const failure = drains.find((result) => result.status === "rejected");
+          if (failure?.status === "rejected") throw failure.reason;
+          for (const cleanup of startupCleanup.reverse()) await cleanup();
+        })()
+      );
+      await database.close();
+    } catch {
+      cleanupFailed = true;
     }
     if (
       !cleanupFailed &&

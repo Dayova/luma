@@ -1,4 +1,10 @@
 import OpenAI from "openai";
+import {
+  CAPTURE_SYNTHESIS_INSTRUCTIONS,
+  captureSynthesisJsonSchema,
+  captureSynthesisProposalSchema,
+  type CaptureSynthesisProposal
+} from "./capture-synthesis-proposal.js";
 import { AiServiceError } from "./ai-service-error.js";
 import type { AiUsageBudget } from "./ai-usage-budget.js";
 import {
@@ -198,7 +204,8 @@ export function createOpenAIReasoningModel(
     async generateStructured<T>(
       request: StructuredReasoningRequest<T>
     ): Promise<StructuredReasoningResult<T>> {
-      if (request.schemaName !== "MeetingAnalysisProposalBatch") {
+      const captureSynthesis = request.schemaName === "CaptureSynthesisProposal";
+      if (request.schemaName !== "MeetingAnalysisProposalBatch" && !captureSynthesis) {
         throw new OpenAIReasoningModelError(
           "openai-schema-unsupported",
           `Unsupported structured reasoning schema: ${request.schemaName}`
@@ -213,7 +220,9 @@ export function createOpenAIReasoningModel(
       }
       const outbound = {
         model,
-        instructions: MEETING_INTELLIGENCE_INSTRUCTIONS,
+        instructions: captureSynthesis
+          ? CAPTURE_SYNTHESIS_INSTRUCTIONS
+          : MEETING_INTELLIGENCE_INSTRUCTIONS,
         input: JSON.stringify({
           purpose: request.purpose,
           workspaceId: request.workspaceId,
@@ -223,7 +232,7 @@ export function createOpenAIReasoningModel(
           input: request.input
         }),
         schemaName: request.schemaName,
-        schema: meetingAnalysisJsonSchema,
+        schema: captureSynthesis ? captureSynthesisJsonSchema : meetingAnalysisJsonSchema,
         strict: true as const,
         maxOutputTokens: limits.maxOutputTokens
       };
@@ -231,7 +240,9 @@ export function createOpenAIReasoningModel(
         ...(config.budget ? { budget: config.budget } : {}),
         workspaceId: request.workspaceId,
         workflow: { model, ...request },
-        capability: `meeting-${request.purpose}`,
+        capability: captureSynthesis
+          ? "meeting-capture-synthesis"
+          : `meeting-${request.purpose}`,
         model,
         instructions: outbound.instructions,
         input: outbound.input,
@@ -247,9 +258,10 @@ export function createOpenAIReasoningModel(
         );
       }
 
-      const parsed = meetingAnalysisSchema.parse(
-        JSON.parse(response.outputText) as unknown
-      );
+      const value: unknown = JSON.parse(response.outputText);
+      const parsed = captureSynthesis
+        ? captureSynthesisProposalSchema.parse(value)
+        : meetingAnalysisSchema.parse(value);
       assertKnownEvidenceIds(parsed, request);
 
       return {
@@ -328,19 +340,25 @@ function createOpenAISdkResponseClient(
 }
 
 function assertKnownEvidenceIds<T>(
-  analysis: MeetingAnalysisProposalBatch,
+  analysis: MeetingAnalysisProposalBatch | CaptureSynthesisProposal,
   request: StructuredReasoningRequest<T>
 ): void {
   const knownEvidenceIds = new Set(
     request.evidence.map((evidence) => evidence.evidenceId)
   );
-  const citedEvidenceIds = [
-    ...analysis.actionItems.flatMap((item) => item.evidenceIds),
-    ...analysis.decisions.flatMap((item) => item.evidenceIds),
-    ...analysis.openQuestions.flatMap((item) => item.evidenceIds),
-    ...analysis.risks.flatMap((item) => item.evidenceIds),
-    ...analysis.followUpIntentions.flatMap((intent) => intent.evidenceIds)
-  ];
+  const citedEvidenceIds =
+    "claims" in analysis
+      ? analysis.claims.flatMap((claim) => [
+          ...claim.evidenceIds,
+          ...claim.quotations.map((quotation) => quotation.evidenceId)
+        ])
+      : [
+          ...analysis.actionItems.flatMap((item) => item.evidenceIds),
+          ...analysis.decisions.flatMap((item) => item.evidenceIds),
+          ...analysis.openQuestions.flatMap((item) => item.evidenceIds),
+          ...analysis.risks.flatMap((item) => item.evidenceIds),
+          ...analysis.followUpIntentions.flatMap((intent) => intent.evidenceIds)
+        ];
   const unknownEvidenceId = citedEvidenceIds.find(
     (evidenceId) => !knownEvidenceIds.has(evidenceId)
   );

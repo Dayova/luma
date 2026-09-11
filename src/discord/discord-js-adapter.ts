@@ -81,6 +81,7 @@ export type DiscordJsTransportConfig = {
   contextAsk?: DiscordContextAskConfig;
   consultations?: DiscordConsultationConfig;
   decisionRecords?: DiscordContextAskConfig;
+  granola?: boolean;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
@@ -244,7 +245,9 @@ export function createDiscordJsTransport(
     if (disconnected) return;
     if (
       !interaction.isChatInputCommand() ||
-      !["meeting", "consultation", "decision-record"].includes(interaction.commandName)
+      !["meeting", "consultation", "decision-record", "granola"].includes(
+        interaction.commandName
+      )
     ) {
       return;
     }
@@ -550,6 +553,7 @@ export function createDiscordJsTransportFromEnv(
     authorizedPersonIds: dayovaFounderPersonIds
   });
   return createDiscordJsTransport({
+    granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
     authorizeHumanReader: async (providerUserId) =>
       Boolean(
         await accessPolicy.authorize({
@@ -595,6 +599,7 @@ async function registerMeetingCommand(
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
     body: [
       meetingCommand.toJSON(),
+      ...(config.granola ? [granolaCommand.toJSON()] : []),
       ...(config.consultations ? [consultationCommand.toJSON()] : []),
       ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : [])
     ],
@@ -1055,6 +1060,45 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "granola") {
+    if (subcommand === "connect" || subcommand === "disconnect")
+      return { ...base, type: `granola-${subcommand}` };
+    if (subcommand === "status")
+      return {
+        ...base,
+        type: "granola-status",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand === "inspect")
+      return {
+        ...base,
+        type: "granola-inspect",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand !== "attest" && subcommand !== "configure")
+      throw new Error("Unknown Granola command");
+    const sharing = interaction.options.getString("sharing", true);
+    if (sharing !== "four-founders") throw new Error("Unknown Granola sharing choice");
+    const automaticInternalMeetings = interaction.options.getBoolean("internal_meetings"),
+      includeUrls = interaction.options.getString("include_urls"),
+      excludeUrls = interaction.options.getString("exclude_urls"),
+      founderEmails = interaction.options.getString("founder_emails");
+    const choice = {
+      ...base,
+      sharing: "four-founders" as const,
+      ...(automaticInternalMeetings === null ? {} : { automaticInternalMeetings }),
+      ...(includeUrls === null ? {} : { includeUrls }),
+      ...(excludeUrls === null ? {} : { excludeUrls }),
+      ...(founderEmails === null ? {} : { founderEmails })
+    };
+    return subcommand === "attest"
+      ? {
+          ...choice,
+          type: "granola-attest",
+          confirmAccount: interaction.options.getBoolean("confirm_account", true)
+        }
+      : { ...choice, type: "granola-configure" };
+  }
   if (interaction.commandName === "decision-record") {
     if (subcommand === "meeting") {
       const targetRecordId = interaction.options.getString("target_record");
@@ -1136,6 +1180,96 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
   }
 
   switch (subcommand) {
+    case "captures":
+    case "synthesis": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: subcommand,
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "actions": {
+      const choice = interaction.options.getString("choice") ?? "review";
+      if (
+        !["review", "accept", "reject", "refresh", "execute", "recover"].includes(choice)
+      )
+        throw new Error("Unknown capture action operation");
+      const meetingId = interaction.options.getString("meeting_id"),
+        reviewId = interaction.options.getString("review_id"),
+        intentId = interaction.options.getString("intent_id"),
+        revision = interaction.options.getInteger("revision");
+      return {
+        ...base,
+        type: "capture-actions",
+        choice: choice as
+          "review" | "accept" | "reject" | "refresh" | "execute" | "recover",
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {}),
+        ...(reviewId ? { reviewId } : {}),
+        ...(intentId ? { intentId } : {}),
+        ...(revision !== null ? { revision } : {})
+      };
+    }
+    case "judge": {
+      const choice = interaction.options.getString("choice", true);
+      if (
+        choice !== "confirm" &&
+        choice !== "correct" &&
+        choice !== "reject" &&
+        choice !== "resolve-action"
+      )
+        throw new Error("Unknown synthesis judgment");
+      const meetingId = interaction.options.getString("meeting_id"),
+        text = interaction.options.getString("text");
+      const modality = interaction.options.getString("modality"),
+        dueDate = interaction.options.getString("due_date"),
+        owner = choice === "resolve-action" ? interaction.options.getUser("owner") : null,
+        intentionallyUnassigned = interaction.options.getBoolean(
+          "intentionally_unassigned"
+        );
+      if (modality !== null && modality !== "commitment" && modality !== "request")
+        throw new Error("Unknown action modality");
+      return {
+        ...base,
+        type: "judge",
+        ...(modality ? { modality } : {}),
+        ...(dueDate ? { dueDate } : {}),
+        ...(owner ? { ownerDiscordUserId: owner.id } : {}),
+        ...(intentionallyUnassigned !== null ? { intentionallyUnassigned } : {}),
+        revision: interaction.options.getInteger("revision", true),
+        claimId: interaction.options.getString("claim_id", true),
+        choice,
+        ...(meetingId ? { meetingId } : {}),
+        ...(text ? { text } : {})
+      };
+    }
+    case "publish": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: "publish",
+        revision: interaction.options.getInteger("revision", true),
+        recover: interaction.options.getBoolean("recover") ?? false,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "capture-link": {
+      const choice = interaction.options.getString("choice", true);
+      if (choice !== "bind" && choice !== "separate")
+        throw new Error("Unknown capture binding judgment");
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "capture-link",
+        meetingId: interaction.options.getString("meeting_id", true),
+        captureId: interaction.options.getString("capture_id", true),
+        revision: interaction.options.getInteger("revision", true),
+        choice,
+        ...(reason ? { reason } : {})
+      };
+    }
     case "bind": {
       return {
         ...base,
@@ -1375,6 +1509,230 @@ function renderDiscordMessage(content: string, marker: string | undefined): stri
 const meetingCommand = new SlashCommandBuilder()
   .setName("meeting")
   .setDescription("Run a Luma Meeting in Discord")
+
+  .addSubcommand((command) =>
+    command
+      .setName("captures")
+      .setDescription(
+        "List shared logical meetings or inspect original capture capabilities"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise this bound thread or the shared list"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("synthesis")
+      .setDescription(
+        "Review derived claims, contradictions and canonical publication status"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise resolve this imported Meeting thread"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("actions")
+      .setDescription(
+        "Review or explicitly execute derived actions from captured meetings"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Operation (defaults to review)")
+          .addChoices(
+            ...["review", "accept", "reject", "refresh", "execute", "recover"].map(
+              (value) => ({ name: value, value })
+            )
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting from /meeting captures")
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Current synthesis revision, required for changes")
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact action review to accept, reject or refresh")
+          .setMaxLength(2000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Exact action intent to approve and execute, or recover")
+          .setMaxLength(2000)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("judge")
+      .setDescription("Confirm, correct or reject one exact synthesis claim as a founder")
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact synthesis revision from /meeting synthesis")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("claim_id")
+          .setDescription("Exact claim ID from /meeting synthesis")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Human judgment")
+          .setRequired(true)
+          .addChoices(
+            { name: "Confirm claim", value: "confirm" },
+            { name: "Correct claim", value: "correct" },
+            { name: "Reject claim", value: "reject" },
+            { name: "Resolve action details", value: "resolve-action" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("modality")
+          .setDescription("Explicit Human commitment or request for resolve-action")
+          .addChoices(
+            { name: "Commitment", value: "commitment" },
+            { name: "Request", value: "request" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("due_date")
+          .setDescription("YYYY-MM-DD, or none for explicitly no deadline")
+          .setMaxLength(10)
+      )
+      .addUserOption((option) =>
+        option
+          .setName("owner")
+          .setDescription("Founder explicitly responsible for this action")
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("intentionally_unassigned")
+          .setDescription(
+            "Explicitly leave responsibility unassigned instead of selecting an owner"
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("text")
+          .setDescription("Full replacement claim text when correcting")
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("publish")
+      .setDescription(
+        "Approve this synthesis revision for canonical publication, or recover an uncertain write"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact reviewed synthesis revision")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("recover")
+          .setDescription(
+            "Only check the result of an uncertain publication; never resend"
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("capture-link")
+      .setDescription(
+        "Explicitly bind a capture to a logical meeting or keep it separate; retain originals"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("capture_id")
+          .setDescription("Exact capture ID from /meeting captures")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting to join, or the logical meeting to remain separate from"
+          )
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact source revision from /meeting captures")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Explicit Human capture binding")
+          .setRequired(true)
+          .addChoices(
+            { name: "Bind to this logical meeting", value: "bind" },
+            { name: "Keep separate from this logical meeting", value: "separate" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason for this binding judgment")
+          .setMaxLength(1000)
+      )
+  )
   .addSubcommand((command) =>
     command
       .setName("bind")
@@ -1865,3 +2223,111 @@ function decisionRecordAddress(
           .setMaxLength(22)
       );
 }
+
+function granolaSharingOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("sharing")
+        .setDescription("Explicit recipients for eligible meetings")
+        .setRequired(true)
+        .addChoices({
+          name: "Share with all four Dayova founders",
+          value: "four-founders"
+        })
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("internal_meetings")
+        .setDescription(
+          "Opt in to internal meetings with only explicitly mapped founders; default off"
+        )
+    )
+    .addStringOption((option) =>
+      option
+        .setName("include_urls")
+        .setDescription(
+          "Exact Granola /d/ meeting URLs, comma separated; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("exclude_urls")
+        .setDescription(
+          "Exact private/excluded Granola meeting URLs; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("founder_emails")
+        .setDescription(
+          "Explicit founder mappings, e.g. Jakob=jakob@example.com,Fabius=fabius@example.com"
+        )
+        .setMaxLength(2000)
+    );
+}
+const granolaCommand = new SlashCommandBuilder()
+  .setName("granola")
+  .setDescription("Manage your own Granola connection and founder sharing")
+  .addSubcommand((command) =>
+    command
+      .setName("connect")
+      .setDescription("Start a private browser login for your own Granola account")
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("status")
+      .setDescription("Show your connection state and sharing scope without any AI call")
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Sharing status page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("inspect")
+      .setDescription(
+        "Privately review your actual account and workspace before attesting"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Account review page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("attest")
+        .setDescription(
+          "Confirm your reviewed account and explicitly choose founder sharing"
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("confirm_account")
+            .setDescription("I confirm the inspected account and workspace are mine")
+            .setRequired(true)
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("configure")
+        .setDescription(
+          "Change your own sharing choices; omitted lists and exclusions are preserved"
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("disconnect")
+      .setDescription(
+        "Disable your Granola connection in Luma; retain original shared captures"
+      )
+  );

@@ -19,6 +19,38 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("requires governed capture, HTTPS and a separately protected key for Granola onboarding", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "1",
+      LUMA_GRANOLA_OAUTH_ENABLED: "1",
+      LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/etc/luma/granola.key",
+      LUMA_GRANOLA_OAUTH_REDIRECT_URI: "https://luma.example/granola/callback",
+      LUMA_SYNTHESIS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_SYNTHESIS_IMPORTED_MEETINGS_DATA_SOURCE_ID:
+        "11111111-1111-4111-8111-111111111111",
+      LUMA_SYNTHESIS_CREDENTIAL_SCOPE_ID: "synthesis-writer",
+      LUMA_SYNTHESIS_SIGNING_KEY: "synthetic-stable-signing-key-over-32-bytes",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/sharing.json"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "0" },
+      { LUMA_GRANOLA_OAUTH_REDIRECT_URI: "http://127.0.0.1:3002/callback" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/tmp/granola.key" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/var/lib/luma/pglite/granola.key" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/opt/luma/releases/revision/granola.key" },
+      { LUMA_SYNTHESIS_NOTION_API_TOKEN: "" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
   it("validates the shared webhook subscription and analysis configuration before opening runtime resources", async () => {
     const env = {
       ...configuration(),

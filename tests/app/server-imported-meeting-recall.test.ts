@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
+import { createNotionWebhookHttpServer } from "../../src/app/notion-webhook-http-server.js";
 import { startServer } from "../../src/app/server.js";
 import { dayovaFounderPersonIds } from "../../src/app/founder-access.js";
 import * as importedRuntime from "../../src/app/imported-source-analysis-runtime.js";
@@ -93,273 +95,374 @@ const conversation: RawConversationSnapshot = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("production imported Meeting recall composition", () => {
-  it("recalls an actual runtime import with external context and fences both source and external grants", async () => {
-    const database = await createPgliteDatabase();
-    const warnings = vi.spyOn(console, "warn");
-    let finishScan: () => void = () => undefined;
-    const scanCompleted = new Promise<void>((resolve) => {
-      finishScan = resolve;
-    });
-    let sourceAllowed = true;
-    let externalAllowed = true;
-    const audiences: string[][] = [];
-    const requests: StructuredReasoningRequest<unknown>[] = [];
-    const answers: ContextAnswerRequest[] = [];
-    const external: ContextCatalog = {
-      id: "programmable-external-guide",
-      search: () =>
-        Promise.resolve({ sourceIds: ["guide"], complete: true, warnings: [] }),
-      read: ({ audience }) => {
-        audiences.push([...audience.personIds]);
-        return Promise.resolve(
-          externalAllowed
-            ? {
-                id: "guide",
-                kind: "knowledge-document",
-                title: "Luma rollout policy",
-                content: "A Luma rollout proposal still needs a founder decision.",
-                version: "1",
-                updatedAt: time,
-                externalReference: {
-                  providerId: "notion",
-                  objectType: "document",
-                  externalId: "guide",
-                  url: "https://notion.so/guide"
-                },
-                standing: "current",
-                authority: "source"
+  it.each(["scan", "webhook"])(
+    "recalls a runtime %s import with external context and fences both source and external grants",
+    async (intake) => {
+      const database = await createPgliteDatabase();
+      const warnings = vi.spyOn(console, "warn");
+      let finishScan: () => void = () => undefined;
+      const scanCompleted = new Promise<void>((resolve) => {
+        finishScan = resolve;
+      });
+      let sourceAllowed = true;
+      let externalAllowed = true;
+      const audiences: string[][] = [];
+      const requests: StructuredReasoningRequest<unknown>[] = [];
+      const answers: ContextAnswerRequest[] = [];
+      const sourceRefreshes: Array<{ workspaceId: string; pageId: string }> = [];
+      let webhookUrl = "";
+      const budgets: unknown[] = [];
+      const external: ContextCatalog = {
+        id: "programmable-external-guide",
+        search: () =>
+          Promise.resolve({ sourceIds: ["guide"], complete: true, warnings: [] }),
+        read: ({ audience }) => {
+          audiences.push([...audience.personIds]);
+          return Promise.resolve(
+            externalAllowed
+              ? {
+                  id: "guide",
+                  kind: "knowledge-document",
+                  title: "Luma rollout policy",
+                  content: "A Luma rollout proposal still needs a founder decision.",
+                  version: "1",
+                  updatedAt: time,
+                  externalReference: {
+                    providerId: "notion",
+                    objectType: "document",
+                    externalId: "guide",
+                    url: "https://notion.so/guide"
+                  },
+                  standing: "current",
+                  authority: "source"
+                }
+              : null
+          );
+        }
+      };
+      vi.spyOn(importedRuntime, "importedSourceAnalysisFromEnv").mockImplementation(
+        ({ ledger }) => ({
+          audience: () =>
+            Promise.resolve({ workspaceId, personIds: [...dayovaFounderPersonIds] }),
+          access: createGrantedImportedSourceAnalysisAccess({
+            ledger,
+            authorize: ({ audience }) => {
+              audiences.push([...audience.personIds]);
+              return Promise.resolve(sourceAllowed);
+            },
+            evidenceSource: () => ({
+              capture: () =>
+                Promise.resolve({
+                  status: "captured",
+                  evidence: {
+                    source,
+                    providerVersion: time,
+                    observedAt: time,
+                    snapshot: structuredClone(raw)
+                  }
+                })
+            })
+          })
+        })
+      );
+      vi.spyOn(sourceRuntime, "createNotionMeetingNotesSourceFromEnv").mockImplementation(
+        ({ ledger }) => ({
+          scan: async () => ({
+            records:
+              intake === "scan"
+                ? [
+                    await ledger.record({
+                      workspaceId,
+                      source,
+                      providerVersion: time,
+                      observedAt: time,
+                      snapshot: structuredClone(raw)
+                    })
+                  ]
+                : [],
+            nextCursor: null,
+            completeness: "complete",
+            partialReasons: [],
+            completeScan: {
+              reconcileAbsent: () => {
+                finishScan();
+                return Promise.resolve({ tombstones: [], partialReasons: [] });
               }
-            : null
-        );
-      }
-    };
-    vi.spyOn(importedRuntime, "importedSourceAnalysisFromEnv").mockImplementation(
-      ({ ledger }) => ({
-        audience: () =>
-          Promise.resolve({ workspaceId, personIds: [...dayovaFounderPersonIds] }),
-        access: createGrantedImportedSourceAnalysisAccess({
-          ledger,
-          authorize: ({ audience }) => {
-            audiences.push([...audience.personIds]);
-            return Promise.resolve(sourceAllowed);
-          },
-          evidenceSource: () => ({
-            capture: () =>
-              Promise.resolve({
-                status: "captured",
-                evidence: {
+            }
+          }),
+          refreshPage: async (request) => {
+            sourceRefreshes.push(request);
+            return {
+              status: "refreshed",
+              records: [
+                await ledger.record({
+                  workspaceId,
                   source,
                   providerVersion: time,
                   observedAt: time,
                   snapshot: structuredClone(raw)
-                }
-              })
+                })
+              ],
+              completeness: "complete",
+              partialReasons: []
+            };
+          }
+        })
+      );
+      let ask: Parameters<DiscordJsTransport["connect"]>[1];
+      const transport: DiscordJsTransport = {
+        connect: (_command, context) => {
+          ask = context;
+          return Promise.resolve();
+        },
+        disconnect: () => Promise.resolve(),
+        resolveChannel: ({ channelId }) =>
+          Promise.resolve({
+            id: channelId,
+            guildId: "guild",
+            kind: channelId === parent ? "text-channel" : "public-thread",
+            parentChannelId: channelId === parent ? null : parent
+          }),
+        createThread: () =>
+          Promise.reject(new Error("The existing Ask thread must be reused")),
+        sendMessage: () =>
+          Promise.reject(new Error("The Ask response is returned to its transport")),
+        capture: () =>
+          Promise.resolve({
+            source: {
+              providerId: "discord",
+              sourceKind: "conversation",
+              sourceObjectId: messageId,
+              parentObjectId: thread,
+              url: conversation.messages[0]!.url
+            },
+            providerVersion: null,
+            observedAt: time,
+            snapshot: structuredClone(conversation)
           })
-        })
-      })
-    );
-    vi.spyOn(sourceRuntime, "createNotionMeetingNotesSourceFromEnv").mockImplementation(
-      ({ ledger }) => ({
-        scan: async () => ({
-          records: [
-            await ledger.record({
-              workspaceId,
-              source,
-              providerVersion: time,
-              observedAt: time,
-              snapshot: structuredClone(raw)
-            })
-          ],
-          nextCursor: null,
-          completeness: "complete",
-          partialReasons: [],
-          completeScan: {
-            reconcileAbsent: () => {
-              finishScan();
-              return Promise.resolve({ tombstones: [], partialReasons: [] });
-            }
-          }
-        }),
-        refreshPage: () => Promise.reject(new Error("No refresh requested"))
-      })
-    );
-    let ask: Parameters<DiscordJsTransport["connect"]>[1];
-    const transport: DiscordJsTransport = {
-      connect: (_command, context) => {
-        ask = context;
-        return Promise.resolve();
-      },
-      disconnect: () => Promise.resolve(),
-      resolveChannel: ({ channelId }) =>
-        Promise.resolve({
-          id: channelId,
-          guildId: "guild",
-          kind: channelId === parent ? "text-channel" : "public-thread",
-          parentChannelId: channelId === parent ? null : parent
-        }),
-      createThread: () =>
-        Promise.reject(new Error("The existing Ask thread must be reused")),
-      sendMessage: () =>
-        Promise.reject(new Error("The Ask response is returned to its transport")),
-      capture: () =>
-        Promise.resolve({
-          source: {
-            providerId: "discord",
-            sourceKind: "conversation",
-            sourceObjectId: messageId,
-            parentObjectId: thread,
-            url: conversation.messages[0]!.url
+      };
+      const app = await startServer(
+        {
+          DISCORD_TOKEN: "test-only",
+          DISCORD_CLIENT_ID: "client_recall",
+          DISCORD_GUILD_ID: "guild",
+          OPENAI_API_KEY: "test-only",
+          LUMA_WORKSPACE_ID: workspaceId,
+          LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: parent,
+          LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
+          LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: parent,
+          LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: actor,
+          NOTION_API_TOKEN: "test-only",
+          NOTION_MEETINGS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+          LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "1",
+          LUMA_CONTEXT_SHARING_POLICY_PATH: "/test/programmable-policy.json",
+          LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "test-reader",
+          LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "test-scope",
+          LUMA_CONTEXT_NOTION_PAGE_IDS: page,
+          ...(intake === "webhook"
+            ? {
+                LUMA_NOTION_WEBHOOK_ENABLED: "1",
+                LUMA_NOTION_WEBHOOK_WORKSPACE_ID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID:
+                  "cccccccc-dddd-eeee-ffff-000000000000",
+                LUMA_NOTION_WEBHOOK_INTEGRATION_ID:
+                  "dddddddd-eeee-ffff-0000-111111111111",
+                LUMA_NOTION_WEBHOOK_VERIFICATION_TOKEN: "synthetic-webhook-secret"
+              }
+            : {})
+        },
+        {
+          createDatabase: () => Promise.resolve(database),
+          createDiscordTransport: () => transport,
+          createContextCatalogs: () => Promise.resolve([external]),
+          createNotionWebhookHttpServer: (config) => {
+            const listener = createNotionWebhookHttpServer({ ...config, port: 0 });
+            return {
+              ...listener,
+              start: async () => {
+                const address = await listener.start();
+                webhookUrl = `http://${address.hostname}:${address.port}/notion/webhook`;
+                return address;
+              }
+            };
           },
-          providerVersion: null,
-          observedAt: time,
-          snapshot: structuredClone(conversation)
-        })
-    };
-    const app = await startServer(
-      {
-        DISCORD_TOKEN: "test-only",
-        DISCORD_CLIENT_ID: "client_recall",
-        DISCORD_GUILD_ID: "guild",
-        OPENAI_API_KEY: "test-only",
-        LUMA_WORKSPACE_ID: workspaceId,
-        LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: parent,
-        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
-        LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: parent,
-        LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: actor,
-        NOTION_API_TOKEN: "test-only",
-        NOTION_MEETINGS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
-        LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "1",
-        LUMA_CONTEXT_SHARING_POLICY_PATH: "/test/programmable-policy.json",
-        LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "test-reader",
-        LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "test-scope",
-        LUMA_CONTEXT_NOTION_PAGE_IDS: page
-      },
-      {
-        createDatabase: () => Promise.resolve(database),
-        createDiscordTransport: () => transport,
-        createContextCatalogs: () => Promise.resolve([external]),
-        createOpenAIReasoningModel: () => ({
-          generateStructured: <T>(request: StructuredReasoningRequest<T>) => {
-            requests.push(structuredClone(request));
-            const transcript = request.evidence.find(
-              (entry) => entry.source === "transcript"
-            )!;
-            const context = request.evidence.find((entry) =>
-              entry.evidenceId.startsWith("organizational-context:")
-            )!;
-            return Promise.resolve({
-              value: {
-                actionItems: [],
-                decisions: [
-                  {
-                    stableKey: "rollout",
-                    statement: transcript.excerpt,
-                    rationale: [],
-                    status: "candidate",
-                    supportingParticipantIds: [],
-                    objectingParticipantIds: [],
-                    relatedTopicIds: [],
-                    evidenceIds: [transcript.evidenceId, context.evidenceId],
-                    confidence: "high"
+          createOpenAIReasoningModel: (config) => {
+            budgets.push(config.budget);
+            return {
+              generateStructured: <T>(request: StructuredReasoningRequest<T>) => {
+                requests.push(structuredClone(request));
+                const transcript = request.evidence.find(
+                  (entry) => entry.source === "transcript"
+                )!;
+                const context = request.evidence.find((entry) =>
+                  entry.evidenceId.startsWith("organizational-context:")
+                )!;
+                return Promise.resolve({
+                  value: {
+                    actionItems: [],
+                    decisions: [
+                      {
+                        stableKey: "rollout",
+                        statement: transcript.excerpt,
+                        rationale: [],
+                        status: "candidate",
+                        supportingParticipantIds: [],
+                        objectingParticipantIds: [],
+                        relatedTopicIds: [],
+                        evidenceIds: [transcript.evidenceId, context.evidenceId],
+                        confidence: "high"
+                      }
+                    ],
+                    openQuestions: [],
+                    risks: [],
+                    followUpIntentions: []
+                  } as T,
+                  metadata: {
+                    provider: "programmable",
+                    model: "synthetic",
+                    promptVersion: request.promptVersion
                   }
-                ],
-                openQuestions: [],
-                risks: [],
-                followUpIntentions: []
-              } as T,
-              metadata: {
-                provider: "programmable",
-                model: "synthetic",
-                promptVersion: request.promptVersion
+                });
               }
-            });
-          }
-        }),
-        createOpenAIContextAnswerer: () => ({
-          answer: (request) => {
-            answers.push(structuredClone(request));
-            const previous = request.organizationalEvidence?.find(
-              (entry) => entry.kind === "previous-meeting-item"
-            );
-            if (!previous) throw new Error("The main-runtime import must be recallable");
-            return Promise.resolve({
-              answer: { text: originalText, evidenceIds: [previous.evidenceId] },
-              facts: [],
-              inferences: [],
-              unresolved: [],
-              metadata: {
-                provider: "programmable",
-                model: "synthetic",
-                promptVersion: request.promptVersion
+            };
+          },
+          createOpenAIContextAnswerer: (config) => {
+            budgets.push(config.budget);
+            return {
+              answer: (request) => {
+                answers.push(structuredClone(request));
+                const previous = request.organizationalEvidence?.find(
+                  (entry) => entry.kind === "previous-meeting-item"
+                );
+                if (!previous)
+                  throw new Error("The main-runtime import must be recallable");
+                return Promise.resolve({
+                  answer: { text: originalText, evidenceIds: [previous.evidenceId] },
+                  facts: [],
+                  inferences: [],
+                  unresolved: [],
+                  metadata: {
+                    provider: "programmable",
+                    model: "synthetic",
+                    promptVersion: request.promptVersion
+                  }
+                });
               }
-            });
+            };
           }
-        })
-      }
-    );
-    try {
-      // The accepted source delivery must finish before exercising revocation;
-      // an intermediate persisted proposal is not a successful import receipt.
-      await scanCompleted;
-      expect(warnings).not.toHaveBeenCalled();
-      await vi.waitFor(async () => {
-        const rows = await database.query<{ state_json: string }>(
-          "SELECT state_json FROM meetings WHERE workspace_id=$1",
-          [workspaceId]
-        );
-        const state = rows.rows[0]
-          ? (JSON.parse(rows.rows[0].state_json) as MeetingState)
-          : null;
-        expect(state?.decisions).toHaveLength(1);
+        }
+      );
+      try {
+        // The accepted source delivery must finish before exercising revocation;
+        // an intermediate persisted proposal is not a successful import receipt.
+        await scanCompleted;
+        if (intake === "webhook") {
+          expect(app.notionObservationStatus?.()?.acceptingDeliveries).toBe(true);
+          const body = JSON.stringify({
+            id: "eeeeeeee-ffff-0000-1111-222222222222",
+            timestamp: time,
+            workspace_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            subscription_id: "cccccccc-dddd-eeee-ffff-000000000000",
+            integration_id: "dddddddd-eeee-ffff-0000-111111111111",
+            api_version: "2026-03-11",
+            type: "page.content_updated",
+            entity: { id: page, type: "page" }
+          });
+          const unsigned = await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body
+          });
+          expect(unsigned.status).toBe(204);
+          await unsigned.body?.cancel();
+          expect(sourceRefreshes).toHaveLength(0);
+          const signature = `sha256=${createHmac("sha256", "synthetic-webhook-secret").update(body).digest("hex")}`;
+          const send = async () => {
+            const response = await fetch(webhookUrl, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-notion-signature": signature
+              },
+              body
+            });
+            expect(response.ok).toBe(true);
+            await response.body?.cancel();
+          };
+          await send();
+          await vi.waitFor(() => {
+            expect(app.notionObservationStatus?.()?.backgroundDrainActive).toBe(false);
+            expect(sourceRefreshes).toEqual([{ workspaceId, pageId: page }]);
+          });
+          await send();
+          await vi.waitFor(() => {
+            expect(app.notionObservationStatus?.()?.backgroundDrainActive).toBe(false);
+          });
+          expect(sourceRefreshes).toHaveLength(1);
+        }
+        expect(warnings).not.toHaveBeenCalled();
+        await vi.waitFor(async () => {
+          const rows = await database.query<{ state_json: string }>(
+            "SELECT state_json FROM meetings WHERE workspace_id=$1",
+            [workspaceId]
+          );
+          const state = rows.rows[0]
+            ? (JSON.parse(rows.rows[0].state_json) as MeetingState)
+            : null;
+          expect(state?.decisions).toHaveLength(1);
+          expect(
+            state?.decisions[0]?.provenance.contextReceiptIds?.length
+          ).toBeGreaterThanOrEqual(2);
+        });
+        expect(requests).toHaveLength(1);
+        expect(budgets).toHaveLength(2);
+        expect(budgets[0]).toBeDefined();
+        expect(budgets[0]).toBe(budgets[1]);
         expect(
-          state?.decisions[0]?.provenance.contextReceiptIds?.length
-        ).toBeGreaterThanOrEqual(2);
-      });
-      expect(requests).toHaveLength(1);
-      expect(
-        requests[0]?.evidence.some((entry) => entry.source === "previous-meeting")
-      ).toBe(false);
-      expect(
-        requests[0]?.evidence.some((entry) =>
-          entry.evidenceId.startsWith("organizational-context:")
-        )
-      ).toBe(true);
-      if (!ask) throw new Error("Context Ask was not connected");
-      const response = await ask({
-        guildId: "guild",
-        channelId: thread,
-        parentChannelId: parent,
-        actorDiscordUserId: actor,
-        occurredAt: time,
-        messageId,
-        question: conversation.messages[0]!.text!
-      });
-      expect(response?.content).toContain(originalText);
-      expect(response?.content).toContain(source.url);
-      expect(answers).toHaveLength(1);
-      expect(
-        answers[0]?.organizationalEvidence?.find(
-          (entry) => entry.kind === "previous-meeting-item"
-        )?.content
-      ).toContain("proposal still needs a founder decision");
-      expect(
-        audiences.every(
-          (ids) =>
-            JSON.stringify([...ids].sort()) ===
-            JSON.stringify([...dayovaFounderPersonIds].sort())
-        )
-      ).toBe(true);
-      expect(response?.requireCurrent).toBeDefined();
-      await response!.requireCurrent!();
-      externalAllowed = false;
-      await expect(response!.requireCurrent!()).rejects.toThrow();
-      externalAllowed = true;
-      await response!.requireCurrent!();
-      sourceAllowed = false;
-      await expect(response!.requireCurrent!()).rejects.toThrow();
-      expect(answers).toHaveLength(1);
-    } finally {
-      await app.stop();
+          requests[0]?.evidence.some((entry) => entry.source === "previous-meeting")
+        ).toBe(false);
+        expect(
+          requests[0]?.evidence.some((entry) =>
+            entry.evidenceId.startsWith("organizational-context:")
+          )
+        ).toBe(true);
+        if (!ask) throw new Error("Context Ask was not connected");
+        const response = await ask({
+          guildId: "guild",
+          channelId: thread,
+          parentChannelId: parent,
+          actorDiscordUserId: actor,
+          occurredAt: time,
+          messageId,
+          question: conversation.messages[0]!.text!
+        });
+        expect(response?.content).toContain(originalText);
+        expect(response?.content).toContain(source.url);
+        expect(answers).toHaveLength(1);
+        expect(
+          answers[0]?.organizationalEvidence?.find(
+            (entry) => entry.kind === "previous-meeting-item"
+          )?.content
+        ).toContain("proposal still needs a founder decision");
+        expect(
+          audiences.every(
+            (ids) =>
+              JSON.stringify([...ids].sort()) ===
+              JSON.stringify([...dayovaFounderPersonIds].sort())
+          )
+        ).toBe(true);
+        expect(response?.requireCurrent).toBeDefined();
+        await response!.requireCurrent!();
+        externalAllowed = false;
+        await expect(response!.requireCurrent!()).rejects.toThrow();
+        externalAllowed = true;
+        await response!.requireCurrent!();
+        sourceAllowed = false;
+        await expect(response!.requireCurrent!()).rejects.toThrow();
+        expect(answers).toHaveLength(1);
+      } finally {
+        await app.stop();
+      }
     }
-  });
+  );
 });

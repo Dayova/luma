@@ -1,4 +1,12 @@
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
+import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
+import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
+import {
+  createNotionWebhookRuntime,
+  notionWebhookRuntimeConfig
+} from "./notion-webhook-runtime.js";
+import type { createNotionWebhookHttpServer } from "./notion-webhook-http-server.js";
+import type { NotionMeetingNotesObservationHostStatus } from "./notion-meeting-notes-observation-host.js";
 import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
@@ -58,6 +66,7 @@ import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.j
 export type RunningLumaApp = {
   stop(): Promise<void>;
   gatewayConnected(): boolean;
+  notionObservationStatus?(): NotionMeetingNotesObservationHostStatus | null;
 };
 
 /** Deliberate startup cancellation after all acquired resources were released. */
@@ -78,6 +87,7 @@ type StartServerDependencies = {
   createOpenAIReasoningModel?: typeof createOpenAIReasoningModel;
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
   createContextCatalogs?: typeof organizationalContextCatalogsFromEnv;
+  createNotionWebhookHttpServer?: typeof createNotionWebhookHttpServer;
 };
 
 const legacyMeetingNotesSourceEnvironment = [
@@ -113,6 +123,15 @@ export async function startServer(
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const allowedParentChannelIds = discordAllowedParentChannelIdsFromEnv(env);
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
+  const consultationConfig = discordConsultationConfigFromEnv(env);
+  if (
+    consultationConfig?.capture.parentChannelIds.some(
+      (id) => !allowedParentChannelIds.includes(id)
+    )
+  )
+    throw new Error(
+      "Consultation parent channels must be within the common Discord scope"
+    );
   if (
     discordContextAskConfig?.parentChannelIds.some(
       (id) => !allowedParentChannelIds.includes(id)
@@ -134,6 +153,7 @@ export async function startServer(
 
   const identityDirectory = createIdentityDirectoryFromEnv(env);
   const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
+  const webhookConfig = notionWebhookRuntimeConfig(env, workspaceId);
   const accessPolicy = createWorkspaceAccessPolicy({
     workspaceId,
     identityDirectory,
@@ -153,6 +173,34 @@ export async function startServer(
     }
   }
 
+  const resolveConsultationRecipients = async (
+    personIds: readonly string[]
+  ): Promise<string[] | null> => {
+    const ids: string[] = [];
+    for (const personId of personIds) {
+      const person = await identityDirectory.getPerson({ workspaceId, personId });
+      if (!person?.discordUserId) return null;
+      const authorized = await accessPolicy.authorize({
+        workspaceId,
+        providerId: "discord",
+        providerUserId: person.discordUserId
+      });
+      if (authorized?.personId !== personId) return null;
+      ids.push(person.discordUserId);
+    }
+    return new Set(ids).size === ids.length ? ids : null;
+  };
+  if (consultationConfig) {
+    const recipients = await resolveConsultationRecipients(dayovaFounderPersonIds);
+    if (
+      !recipients ||
+      JSON.stringify([...recipients].sort()) !==
+        JSON.stringify([...consultationConfig.capture.allowedDiscordUserIds].sort())
+    )
+      throw new Error(
+        "Consultations require the exact four uniquely mapped founder Discord users"
+      );
+  }
   const externalContextCatalogs = contextConfig
     ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
         workspaceId,
@@ -251,14 +299,15 @@ export async function startServer(
       operationalOutcomeMarkerVerifier
     );
     const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
+    const meetingNotesIngestion = createMeetingNotesIngestion({
+      meetingIntelligence,
+      workItemProviderId
+    });
     const meetingNotesSync = meetingNotesSource
       ? createMeetingNotesSync({
           workspace,
           source: meetingNotesSource,
-          ingestion: createMeetingNotesIngestion({
-            meetingIntelligence,
-            workItemProviderId
-          }),
+          ingestion: meetingNotesIngestion,
           ...(meetingNotesSyncIntervalMs !== undefined
             ? { intervalMs: meetingNotesSyncIntervalMs }
             : {})
@@ -267,8 +316,52 @@ export async function startServer(
     if (meetingNotesSync) {
       startupCleanup.push(() => meetingNotesSync.stop());
     }
+    const conversationConsultations = consultationConfig
+      ? createConversationConsultations({
+          database,
+          ledger: observedSourceLedger,
+          evidenceSource: discordTransport,
+          accessPolicy,
+          workspaceId,
+          recipientPersonIds: dayovaFounderPersonIds,
+          recipientGroupId: consultationConfig.teamRoleId
+        })
+      : undefined;
+    const consultationProvider = consultationConfig
+      ? discordTransport.createConsultationProvider?.({
+          resolveRecipients: resolveConsultationRecipients
+        })
+      : undefined;
+    if (consultationConfig && !consultationProvider)
+      throw new Error(
+        "The shared Discord transport must supply the configured consultation capability"
+      );
+    if (
+      webhookConfig &&
+      (!meetingNotesSource || !meetingNotesSync || !importedSourceAnalysis)
+    )
+      throw new Error(
+        "Notion webhook intake requires the canonical Meeting Notes source and granted imported-source analysis configuration"
+      );
+    const notionWebhook =
+      webhookConfig && meetingNotesSource && meetingNotesSync
+        ? createNotionWebhookRuntime({
+            config: webhookConfig,
+            workspace,
+            source: meetingNotesSource,
+            ingestion: meetingNotesIngestion,
+            canonicalReconciliation: meetingNotesSync,
+            ...(dependencies.createNotionWebhookHttpServer
+              ? { createHttpServer: dependencies.createNotionWebhookHttpServer }
+              : {})
+          })
+        : undefined;
+    if (notionWebhook) startupCleanup.push(() => notionWebhook.stop());
     const followUpExecution = createFollowUpExecution({
       database,
+      ...(conversationConsultations && consultationProvider
+        ? { conversationConsultations, consultationProvider }
+        : {}),
       organizationalContextGuard: createMeetingContextGuard({
         database,
         ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
@@ -320,6 +413,14 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(conversationConsultations
+        ? {
+            consultations: {
+              context: conversationConsultations,
+              execution: followUpExecution
+            }
+          }
+        : {}),
       meetingIntelligence,
       followUpExecution,
       identityDirectory,
@@ -353,18 +454,26 @@ export async function startServer(
 
     await bot.start(startupSignal);
     startupSignal?.throwIfAborted();
-    meetingNotesSync?.start();
+    if (notionWebhook) await notionWebhook.start();
+    else meetingNotesSync?.start();
+    startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
     let stopping: Promise<void> | undefined;
     return {
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
+      notionObservationStatus: () => notionWebhook?.status() ?? null,
       stop() {
         stopping ??= (async () => {
           // Stop admission and scheduled ingestion immediately, then drain both.
           // A failed/timed-out drain never closes the store later in a detached
           // continuation: its lease must survive process termination for recovery.
-          await drainBeforeClose(Promise.all([bot.stop(), meetingNotesSync?.stop()]));
+          await drainBeforeClose(
+            Promise.all([
+              bot.stop(),
+              notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop()
+            ])
+          );
           await database.close();
         })();
         return stopping;

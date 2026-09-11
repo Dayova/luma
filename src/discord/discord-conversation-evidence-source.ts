@@ -107,7 +107,13 @@ export function createDiscordConversationEvidenceSource(
       validateDiscordSubject(captureInput.workspaceId, captureInput.subject);
       const subject = captureInput.subject;
       const thread = await readThread(input, subject);
-      const anchor = await readAnchor(input, subject, thread, captureInput.question);
+      const anchor = await readAnchor(
+        input,
+        subject,
+        thread,
+        captureInput.question,
+        captureInput.purpose
+      );
       if (messageCharacters(anchor) > input.config.maxEvidenceChars) {
         throw new DiscordConversationEvidenceError(
           "discord-conversation-anchor-too-large",
@@ -272,7 +278,8 @@ async function readAnchor(
   input: CreateDiscordConversationEvidenceSourceInput,
   subject: ConversationContextSubject,
   thread: DiscordConversationThread,
-  question?: string
+  question?: string,
+  purpose?: "consultation"
 ): Promise<DiscordConversationMessage> {
   const anchor = await input.reader.readMessage({
     conversationObjectId: thread.id,
@@ -288,10 +295,12 @@ async function readAnchor(
     anchor.authorKind !== "human" ||
     !input.config.allowedDiscordUserIds.includes(anchor.author.providerUserId) ||
     !botUserId ||
-    !anchor.mentionedDiscordUserIds.includes(botUserId) ||
-    !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
-    (question !== undefined &&
-      questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question)
+    (purpose === "consultation"
+      ? !anchor.content.trim() || (question !== undefined && anchor.content !== question)
+      : !anchor.mentionedDiscordUserIds.includes(botUserId) ||
+        !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
+        (question !== undefined &&
+          questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question))
   ) {
     throw new DiscordConversationEvidenceError(
       "discord-conversation-anchor-unavailable",

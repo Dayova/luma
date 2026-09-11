@@ -1,4 +1,5 @@
 import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
+import { notionWebhookRuntimeConfig } from "./notion-webhook-runtime.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import { aiUsageBudgetSettingsFromEnv, isAiModelPriced } from "../ai/ai-usage-bu
 import { openAIReasoningModelNameFromEnv } from "../ai/openai-model-config.js";
 import { discordAllowedParentChannelIdsFromEnv } from "../discord/discord-channel-scope.js";
 import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
+import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
 import { dayovaFounderPersonIds } from "./founder-access.js";
@@ -94,6 +96,11 @@ export async function validateProductionEnvironment(
       !context?.parentChannelIds.some((id) => !parents.includes(id)),
       "Context Ask parents must be within the configured Discord channel scope."
     );
+    const consultation = discordConsultationConfigFromEnv(env);
+    check(
+      !consultation?.capture.parentChannelIds.some((id) => !parents.includes(id)),
+      "Consultation parents must be within the configured Discord channel scope."
+    );
     const workspaceId = required(env, "LUMA_WORKSPACE_ID");
     const access = createWorkspaceAccessPolicy({
       workspaceId,
@@ -106,6 +113,23 @@ export async function validateProductionEnvironment(
           await access.authorize({ workspaceId, providerId: "discord", providerUserId })
         ),
         "Context Ask users must each uniquely identify an authorized founder."
+      );
+    }
+    if (consultation) {
+      const admitted = [];
+      for (const providerUserId of consultation.capture.allowedDiscordUserIds) {
+        const person = await access.authorize({
+          workspaceId,
+          providerId: "discord",
+          providerUserId
+        });
+        if (person) admitted.push(person.personId);
+      }
+      check(
+        admitted.length === consultation.capture.allowedDiscordUserIds.length &&
+          JSON.stringify([...admitted].sort()) ===
+            JSON.stringify([...dayovaFounderPersonIds].sort()),
+        "Consultations require the exact four uniquely mapped founders."
       );
     }
     const budget = aiUsageBudgetSettingsFromEnv(env);
@@ -122,7 +146,14 @@ export async function validateProductionEnvironment(
       "The selected production model needs an audited price entry."
     );
     aiRequestLimitsFromEnv(env);
-    organizationalContextRuntimeConfig(env);
+    const organizational = organizationalContextRuntimeConfig(env);
+    if (notionWebhookRuntimeConfig(env, workspaceId)) {
+      required(env, "NOTION_API_TOKEN");
+      check(
+        organizational?.providers.includes("notion") === true,
+        "Notion webhook intake requires granted imported-source analysis configuration."
+      );
+    }
   } catch (error) {
     if (error instanceof ProductionPreflightError) throw error;
     // Adapter configuration errors may include supplied values. Never print them.
@@ -160,10 +191,10 @@ export async function verifyProductionDiscordApplication(
       (application.flags & ((1 << 14) | (1 << 15))) !== 0,
       "Enable Server Members intent for the production application so Luma can verify channel readers, even when Context Ask is disabled."
     );
-    if (discordContextAskConfigFromEnv(env)) {
+    if (discordContextAskConfigFromEnv(env) || discordConsultationConfigFromEnv(env)) {
       check(
         (application.flags & ((1 << 18) | (1 << 19))) !== 0,
-        "Enable Message Content intent for the production application before Context Ask."
+        "Enable Message Content intent for the production application before Context Ask or consultations."
       );
     }
   } catch (error) {

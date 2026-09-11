@@ -33,6 +33,10 @@ _Avoid_: Automatic merge, source rewrite, deduplication guess
 An ordered, bounded, provider-native discussion that Luma can preserve as Evidence without treating it as a Meeting or creating a Meeting Note.
 _Avoid_: Meeting, transcript dump, chat log
 
+**Advisory Consultation**:
+A source-bound request for Human input on a choice. A Conversation consultation retains its exact authorized plan, original recipients, approved Follow-up Intent and execution history without becoming a Meeting. Poll results are advisory Evidence; explicit Human choices and rationales are retained separately and do not themselves authorize external work.
+_Avoid_: Decision Record, winning decision, automatic approval
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row

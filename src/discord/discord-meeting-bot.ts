@@ -1,4 +1,10 @@
 import {
+  handleDiscordConsultationCommand,
+  type DiscordConsultationCommand,
+  type DiscordConsultationRuntime
+} from "./discord-consultation-runtime.js";
+import { ConversationConsultationError } from "../context-intelligence/conversation-consultations.js";
+import {
   createDiscordChannelScope,
   DiscordChannelAccessError,
   type DiscordChannelSurface
@@ -51,7 +57,7 @@ import {
   type DiscordContextAskMention
 } from "./discord-context-ask-runtime.js";
 
-type DiscordCommandBase = {
+export type DiscordCommandBase = {
   interactionId: string;
   guildId: string;
   channelId: string;
@@ -60,6 +66,7 @@ type DiscordCommandBase = {
 };
 
 export type DiscordCommand =
+  | DiscordConsultationCommand
   | (DiscordCommandBase & {
       type: "start";
       title: string;
@@ -183,6 +190,7 @@ export type CreateDiscordMeetingBotInput = {
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
   followUpExecution?: FollowUpExecution;
+  consultations?: DiscordConsultationRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
   authorizedPersonIds: readonly PersonId[];
@@ -568,7 +576,16 @@ async function handleCommand(
     const response =
       command.type === "usage"
         ? { content: await readAiUsage(input) }
-        : await executeAdmittedCommand(input, command, now);
+        : isConsultationCommand(command)
+          ? input.consultations
+            ? await handleDiscordConsultationCommand({
+                runtime: input.consultations,
+                workspace: input.workspace,
+                command,
+                accessPolicy
+              })
+            : { content: "Advisory consultations are not configured in this workspace." }
+          : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
         ? response.content
@@ -594,7 +611,8 @@ async function handleCommand(
   } catch (error: unknown) {
     return {
       content:
-        error instanceof ImportedMeetingReviewUnavailableError
+        error instanceof ImportedMeetingReviewUnavailableError ||
+        error instanceof ConversationConsultationError
           ? error.message
           : error instanceof DiscordChannelAccessError ||
               !(await channelScope.resolveAllowedChannel(command.channelId))
@@ -634,7 +652,7 @@ async function appendAiUsageWarning(
 
 async function executeAdmittedCommand(
   input: ScopedDiscordMeetingBotInput,
-  command: Exclude<DiscordCommand, { type: "usage" }>,
+  command: Exclude<DiscordCommand, { type: "usage" } | DiscordConsultationCommand>,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
   switch (command.type) {
@@ -695,7 +713,12 @@ async function commandSourceFence(
   input: ScopedDiscordMeetingBotInput,
   command: DiscordCommand
 ): Promise<(() => Promise<void>) | undefined> {
-  if (command.type === "usage" || command.type === "bind" || command.type === "start")
+  if (
+    isConsultationCommand(command) ||
+    command.type === "usage" ||
+    command.type === "bind" ||
+    command.type === "start"
+  )
     return undefined;
   const thread = await findMeetingThreadForChannel(
     input,
@@ -2148,4 +2171,10 @@ function renderScopedMeetingAnswer(
   }
   const omitted = unique.length - references.length;
   return `${text}\n\nEvidence: ${references.join(", ") || (omitted > 0 ? "none displayed" : "none")}${omitted > 0 ? `; ${omitted} additional reference(s) retained in the Meeting record.` : ""}`;
+}
+
+function isConsultationCommand(
+  command: DiscordCommand
+): command is DiscordConsultationCommand {
+  return command.type.startsWith("consultation-");
 }

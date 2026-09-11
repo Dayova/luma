@@ -69,6 +69,39 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("captures an ordinary founder anchor only for explicit consultation purpose, preserving the Ask mention contract", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    reader.anchor = humanMessage({
+      id: "message_ask",
+      content: "We could defer this launch.",
+      createdAt: "2026-08-08T10:00:00.000Z"
+    });
+    reader.anchor.mentionedDiscordUserIds = [];
+    const source = createSource(reader);
+    await expect(source.capture(captureInput())).rejects.toMatchObject({
+      code: "discord-conversation-anchor-unavailable"
+    });
+    const captured = await source.capture({
+      ...captureInput(),
+      purpose: "consultation",
+      question: "We could defer this launch."
+    });
+    expect(captured.snapshot.messages.at(-1)).toMatchObject({
+      text: "We could defer this launch."
+    });
+    reader.anchor.content = "We will launch.";
+    await expect(
+      source.capture({
+        ...captureInput(),
+        purpose: "consultation",
+        question: "We could defer this launch."
+      })
+    ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+    reader.anchor.author.providerUserId = "guest";
+    await expect(
+      source.capture({ ...captureInput(), purpose: "consultation" })
+    ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+  });
   it("refuses an anchor whose poll and original text exceed the evidence budget before scanning history", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     const poll = discordPollEvidence(

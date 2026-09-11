@@ -1,3 +1,6 @@
+import type { ConversationContextSubject } from "../context-intelligence/interface.js";
+import type { ConversationConsultationExecutionRecord } from "../context-intelligence/conversation-consultations.js";
+import type { ConsultationReceipt } from "../consultation/interface.js";
 import type {
   FollowUpExecutionRecorded,
   FollowUpIntentId,
@@ -28,3 +31,29 @@ export interface FollowUpExecution {
    */
   recover(input: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
 }
+
+/** An explicit Conversation subject is never represented as a synthetic Meeting. */
+export type ExecuteConversationFollowUpInput = {
+  workspace: WorkspaceConfig;
+  subject: ConversationContextSubject;
+  intentId: FollowUpIntentId;
+};
+export type ExecuteConversationFollowUpResult = {
+  observation: ConversationConsultationExecutionRecord;
+  events: Array<{
+    type: "consultation-execution-recorded";
+    record: ConversationConsultationExecutionRecord;
+  }>;
+  idempotencyKey: string;
+};
+export interface ConversationFollowUpExecution {
+  execute(
+    input: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  recover(
+    input: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  readConsultation(input: ExecuteConversationFollowUpInput): Promise<ConsultationReceipt>;
+}
+/** Overloaded execution preserves existing Meeting callers and admits typed Conversations. */
+export type ScopedFollowUpExecution = FollowUpExecution & ConversationFollowUpExecution;

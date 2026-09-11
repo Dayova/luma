@@ -1,3 +1,13 @@
+import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
+import {
+  discordConsultationConfigFromEnv,
+  type DiscordConsultationConfig
+} from "./discord-consultation-runtime.js";
+import type {
+  ConsultationProvider,
+  ConsultationSourceProof
+} from "../consultation/interface.js";
+import { consultationSourceAuthorizationHash } from "../consultation/source-proof.js";
 import { createDiscordLiveAudience } from "./discord-live-audience.js";
 import { discordPollEvidence } from "./discord-poll-evidence.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
@@ -23,6 +33,7 @@ import {
   SlashCommandBuilder,
   ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
+  type SlashCommandSubcommandBuilder,
   type Message,
   type SendableChannels,
   type TextChannel,
@@ -63,12 +74,16 @@ export type DiscordJsTransportConfig = {
   allowedParentChannelIds: readonly string[];
   authorizeHumanReader: (discordUserId: string) => Promise<boolean>;
   contextAsk?: DiscordContextAskConfig;
+  consultations?: DiscordConsultationConfig;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
 export type DiscordJsTransport = DiscordTransport &
   ConversationEvidenceSource & {
     gatewayConnected?(): boolean;
+    createConsultationProvider?(input: {
+      resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
+    }): ConsultationProvider;
   };
 
 export class DiscordJsAdapterError extends Error {
@@ -85,8 +100,8 @@ export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
   if (
-    config.contextAsk?.parentChannelIds.some(
-      (id) => !config.allowedParentChannelIds.includes(id)
+    [config.contextAsk, config.consultations?.capture].some((capture) =>
+      capture?.parentChannelIds.some((id) => !config.allowedParentChannelIds.includes(id))
     )
   ) {
     throw new Error(
@@ -96,6 +111,7 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
+    ...(config.consultations ? { retries: 0 } : {}),
     makeRequest: (
       url: string,
       init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
@@ -106,7 +122,9 @@ export function createDiscordJsTransport(
       })
   };
   const client = new Client({
-    intents: discordGatewayIntentsForContextAsk(config.contextAsk),
+    intents: discordGatewayIntentsForContextAsk(
+      config.contextAsk ?? config.consultations?.capture
+    ),
     rest: restOptions
   });
   const liveAudience = createDiscordLiveAudience({
@@ -165,15 +183,31 @@ export function createDiscordJsTransport(
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const rawConsultationEvidenceSource = config.consultations
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.consultations.capture,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
   const conversationEvidenceSource: ConversationEvidenceSource | null =
-    rawConversationEvidenceSource
+    rawConversationEvidenceSource || rawConsultationEvidenceSource
       ? {
           async capture(input) {
             await channelScope.requireChannel(
               input.subject.conversationObjectId,
               "public-thread"
             );
-            const captured = await rawConversationEvidenceSource.capture(input);
+            const source =
+              input.purpose === "consultation"
+                ? rawConsultationEvidenceSource
+                : rawConversationEvidenceSource;
+            if (!source)
+              throw new Error(
+                "The requested Conversation capture purpose is not enabled"
+              );
+            const captured = await source.capture(input);
             // Check once around the bounded capture, not once per message. No
             // captured content escapes if the channel gained another reader.
             await channelScope.requireChannel(
@@ -187,7 +221,10 @@ export function createDiscordJsTransport(
 
   client.on(Events.InteractionCreate, (interaction) => {
     if (disconnected) return;
-    if (!interaction.isChatInputCommand() || interaction.commandName !== "meeting") {
+    if (
+      !interaction.isChatInputCommand() ||
+      !["meeting", "consultation"].includes(interaction.commandName)
+    ) {
       return;
     }
 
@@ -256,6 +293,44 @@ export function createDiscordJsTransport(
 
   return {
     gatewayConnected: () => !disconnected && client.isReady(),
+    ...(config.consultations
+      ? {
+          createConsultationProvider: ({
+            resolveRecipients
+          }: {
+            resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
+          }) => {
+            const requireSourceCurrent = async (proof: ConsultationSourceProof) => {
+              if (!conversationEvidenceSource || proof.capturePurpose !== "consultation")
+                throw new Error("The original consultation source is not configured");
+              const captured = await conversationEvidenceSource.capture({
+                workspaceId: proof.workspaceId,
+                subject: proof.subject,
+                question: proof.question,
+                purpose: "consultation"
+              });
+              if (
+                consultationSourceAuthorizationHash(captured.snapshot) !==
+                proof.authorizationHash
+              )
+                throw new Error("The original consultation source changed");
+            };
+            return createDiscordConsultationProvider({
+              rest: {
+                get: (route, options) => client.rest.get(route, options),
+                post: (route, options) => client.rest.post(route, options)
+              },
+              guildId: config.guildId,
+              allowedParentChannelIds: config.consultations!.capture.parentChannelIds,
+              botUserId: () => client.user?.id ?? null,
+              teamRoleId: config.consultations!.teamRoleId,
+              resolveRecipients,
+              authorizeHumanReader: config.authorizeHumanReader,
+              requireSourceCurrent
+            });
+          }
+        }
+      : {}),
     async connect(handler, contextHandler, startupSignal) {
       startupSignal?.throwIfAborted();
       assertConnectedLifetime();
@@ -443,7 +518,10 @@ export function createDiscordJsTransportFromEnv(
     clientId,
     guildId,
     allowedParentChannelIds: discordAllowedParentChannelIdsFromEnv(env),
-    ...(contextAsk ? { contextAsk } : {})
+    ...(contextAsk ? { contextAsk } : {}),
+    ...(discordConsultationConfigFromEnv(env)
+      ? { consultations: discordConsultationConfigFromEnv(env)! }
+      : {})
   });
 }
 
@@ -462,13 +540,16 @@ export function discordGatewayIntentsForContextAsk(
 
 async function registerMeetingCommand(
   config: DiscordJsTransportConfig,
-  restOptions: typeof DefaultRestOptions,
+  restOptions: Omit<typeof DefaultRestOptions, "retries"> & { retries: number },
   signal: AbortSignal
 ): Promise<void> {
   const rest = new REST({ ...restOptions, version: "10" }).setToken(config.token);
 
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
-    body: [meetingCommand.toJSON()],
+    body: [
+      meetingCommand.toJSON(),
+      ...(config.consultations ? [consultationCommand.toJSON()] : [])
+    ],
     signal
   });
 }
@@ -926,6 +1007,53 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "consultation") {
+    const sourceMessageId = interaction.options.getString("source_message", true);
+    if (subcommand === "start") {
+      const ownerDiscordUserId = interaction.options.getUser("owner")?.id;
+      const replacesConsultationId = interaction.options.getString("replaces");
+      return {
+        ...base,
+        sourceMessageId,
+        type: "consultation-start",
+        purpose: interaction.options.getString("purpose", true),
+        question: interaction.options.getString("question", true),
+        options: interaction.options
+          .getString("options", true)
+          .split("|")
+          .map((option) => option.trim()),
+        durationHours: interaction.options.getInteger("hours") ?? 24,
+        ...(ownerDiscordUserId ? { ownerDiscordUserId } : {}),
+        ...(replacesConsultationId ? { replacesConsultationId } : {})
+      };
+    }
+    const consultationId = interaction.options.getString("consultation_id", true);
+    if (subcommand === "judgment")
+      return {
+        ...base,
+        sourceMessageId,
+        consultationId,
+        type: "consultation-judgment",
+        choice: interaction.options.getString("choice", true),
+        rationale: interaction.options.getString("rationale", true)
+      };
+    if (subcommand === "status" || subcommand === "close" || subcommand === "recover")
+      return {
+        ...base,
+        sourceMessageId,
+        consultationId,
+        type: `consultation-${subcommand}`,
+        ...(subcommand === "recover"
+          ? {
+              recovery:
+                interaction.options.getString("operation") === "closure"
+                  ? ("closure" as const)
+                  : ("publication" as const)
+            }
+          : {})
+      };
+    throw new Error("Unknown consultation command");
+  }
 
   switch (subcommand) {
     case "bind": {
@@ -1442,4 +1570,126 @@ function reportDiscordDeliveryFailure(event: {
 }): void {
   // Operational IDs aid delivery diagnosis; never log exceptions or message text.
   console.error("Luma Discord delivery failed", event);
+}
+
+const consultationCommand = new SlashCommandBuilder()
+  .setName("consultation")
+  .setDescription("Advisory founder polls in this discussion")
+  .addSubcommand((command) =>
+    command
+      .setName("start")
+      .setDescription(
+        "Authorize this exact advisory poll from an existing founder message"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Exact founder source message ID in this thread")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("purpose")
+          .setDescription("Why consultation is needed")
+          .setMaxLength(500)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("question")
+          .setDescription("Exact advisory question")
+          .setMaxLength(300)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("options")
+          .setDescription(
+            "2–10 real alternatives separated by |; each at most 55 characters"
+          )
+          .setMaxLength(559)
+          .setRequired(true)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("hours")
+          .setDescription("Duration, default 24 hours")
+          .setMinValue(1)
+          .setMaxValue(768)
+      )
+      .addUserOption((option) =>
+        option.setName("owner").setDescription("Accountable founder, if established")
+      )
+      .addStringOption((option) =>
+        option
+          .setName("replaces")
+          .setDescription("Original consultation ID when explicitly replacing it")
+      )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("status")
+        .setDescription("Read the original stored poll and advisory results")
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("recover")
+        .setDescription(
+          "Recover an uncertain original operation without another poll or mention"
+        )
+    ).addStringOption((option) =>
+      option
+        .setName("operation")
+        .setDescription("Original operation to recover")
+        .addChoices(
+          { name: "Publication", value: "publication" },
+          { name: "Closure", value: "closure" }
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("close")
+        .setDescription("Authorize closure of the positively recorded Luma poll")
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("judgment")
+        .setDescription("Retain a Human choice and reason, separately from poll results")
+    )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Human choice")
+          .setMaxLength(300)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("rationale")
+          .setDescription("Reasoning, including objections and departures from the tally")
+          .setMaxLength(2000)
+          .setRequired(true)
+      )
+  );
+function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("source_message")
+        .setDescription("Original founder source message ID")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("consultation_id")
+        .setDescription("Canonical consultation ID returned by Luma")
+        .setRequired(true)
+    );
 }

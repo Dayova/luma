@@ -19,6 +19,40 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("validates the shared webhook subscription and analysis configuration before opening runtime resources", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_NOTION_WEBHOOK_ENABLED: "1",
+      LUMA_NOTION_WEBHOOK_WORKSPACE_ID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "cccccccc-dddd-eeee-ffff-000000000000",
+      LUMA_NOTION_WEBHOOK_INTEGRATION_ID: "dddddddd-eeee-ffff-0000-111111111111",
+      LUMA_NOTION_WEBHOOK_VERIFICATION_TOKEN: "synthetic-subscription",
+      NOTION_MEETINGS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+      NOTION_API_TOKEN: "synthetic-source",
+      LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "1",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/context-sharing.json",
+      LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "synthetic-reader",
+      LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "source-read",
+      LUMA_CONTEXT_NOTION_PAGE_IDS: "00000000-0000-0000-0000-000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PORT: "70000" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PATH: "/notion/webhook?private" },
+      { LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "0" },
+      { NOTION_API_TOKEN: "" },
+      { LUMA_WORKSPACE_ID: env.LUMA_NOTION_WEBHOOK_WORKSPACE_ID }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
   it("allows temporarily pausing paid AI without disabling the runtime", async () => {
     await expect(
       validateProductionEnvironment(
@@ -70,6 +104,35 @@ describe("production deployment preflight", () => {
     await expect(
       validateProductionEnvironment(env, "/opt/luma/releases/revision")
     ).rejects.toThrow("founder");
+  });
+
+  it("requires the complete consultation configuration, four mapped founders and common parent scope", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_DISCORD_CONSULTATION_ENABLED: "1",
+      LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+      LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS: "779381502311137301" },
+      {
+        LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+          "779381502311137301,726409024894926869,1492911575806251219,777777777777777777"
+      },
+      { LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "777777777777777777" },
+      { LUMA_DISCORD_TEAM_ROLE_ID: "" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
   });
 
   it("does not disclose malformed identity configuration", async () => {
@@ -191,6 +254,31 @@ describe("production Discord application proof", () => {
       ).resolves.toBeUndefined();
     }
   );
+
+  it("requires Message Content for consultations even when Ask is disabled", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...configuration(),
+      LUMA_DISCORD_CONSULTATION_ENABLED: "1",
+      LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+      LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+    };
+    const read = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 15 }))
+      );
+    await expect(verifyProductionDiscordApplication(env, read)).rejects.toThrow(
+      "Message Content"
+    );
+    read.mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: (1 << 15) | (1 << 19) })
+      )
+    );
+    await expect(verifyProductionDiscordApplication(env, read)).resolves.toBeUndefined();
+  });
 
   it.each([undefined, "32768", -1, 32768.5])(
     "refuses an absent or malformed application intent proof (%s)",

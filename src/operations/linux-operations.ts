@@ -21,6 +21,10 @@ import { assessOperationalHealth, deliverHealthStatus } from "./health-monitor.j
 import { runScheduledBackup, type BackupReceipt } from "./maintenance.js";
 import { parseProductionEnvironmentFile } from "../app/production-runtime.js";
 import { pathExists } from "../persistence/store-ownership.js";
+import {
+  operationsWebhookUrlSchema,
+  sendOperationsDiscordAlert
+} from "./discord-alert.js";
 
 const execute = promisify(execFile);
 const stateDirectory = "/var/lib/luma-operations";
@@ -60,15 +64,7 @@ export const operationsConfigSchema = z
     }),
     resticPasswordFile: z.string().refine(isAbsolute),
     s3CredentialsFile: z.string().refine(isAbsolute),
-    alertWebhookUrl: httpsUrl.refine((value) => {
-      const url = new URL(value);
-      return (
-        url.hostname === "discord.com" &&
-        url.port === "" &&
-        /^\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]+$/u.test(url.pathname) &&
-        !url.search
-      );
-    }),
+    alertWebhookUrl: operationsWebhookUrlSchema,
     healthyHeartbeatUrl: httpsUrl
   })
   .strict();
@@ -263,7 +259,10 @@ async function boundedRequest(url: string, init: RequestInit): Promise<void> {
   if (!response.ok) throw new Error("Operational notification was not accepted");
 }
 
-async function monitor(config: OperationsConfig): Promise<void> {
+async function monitor(
+  config: OperationsConfig,
+  runtimeEnv: NodeJS.ProcessEnv
+): Promise<void> {
   const filesystems = await Promise.all(
     [runtimeDirectory, backupDirectory].map((directory) => statfs(directory))
   );
@@ -292,10 +291,10 @@ async function monitor(config: OperationsConfig): Promise<void> {
     previous: await readOptionalJson(healthStatePath),
     record: (state) => atomicJson(healthStatePath, state),
     send: (message) =>
-      boundedRequest(`${config.alertWebhookUrl}?wait=true`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: message, allowed_mentions: { parse: [] } })
+      sendOperationsDiscordAlert({
+        webhookUrl: config.alertWebhookUrl,
+        runtimeEnv,
+        message
       }),
     heartbeat: () => boundedRequest(config.healthyHeartbeatUrl, { method: "GET" })
   });
@@ -343,5 +342,5 @@ export async function runLinuxOperations(commandName: string): Promise<void> {
     return;
   }
   if (commandName === "backup") await backup(config);
-  else await monitor(config);
+  else await monitor(config, runtimeEnv);
 }

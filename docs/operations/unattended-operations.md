@@ -61,8 +61,25 @@ Failures and recovery send fixed operational messages to a configured Discord
 webhook, with all mentions disabled and no source data, provider errors, paths,
 or credentials. Unchanged failures are silent for six hours before a reminder.
 Failed delivery is retried at the next check; the state is not advanced first.
+Before every notification, including recovery, raw Discord REST reads verify the
+actual webhook ID/server/channel, the bot token's production application, and
+the current complete channel audience. This uses the same two-snapshot founder
+identity and effective-permission proof as content replies. The destination
+must be a text parent within `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`; channel
+names and webhook URLs do not establish audience. The webhook binding is read
+again and permissions rechecked just before sending. Changed bindings, guests
+with access (including administrators), ambiguous identities, incomplete member
+lists, unavailable credentials, and API failures all block the alert without
+marking it delivered. Discord cannot make separate permission reads and posting
+one atomic action; no stale positive proof is cached between notifications.
+The binding comes from Discord's documented
+[webhook-with-token read](https://docs.discord.com/developers/resources/webhook#get-webhook-with-token);
+`wait=true` requests server confirmation for the eventual post.
 These notifications use a separate webhook so they still work when the bot's
-Gateway is down. A complete Discord outage can prevent both paths.
+Gateway is down, using the protected production token only for REST audience
+verification. There is no second Gateway connection. A Discord REST outage or
+lost read permission also prevents the webhook alert; the independent external
+monitor remains the fallback.
 
 Healthy checks also ping a private endpoint on an independent monitoring
 service. Configure that service to alert the founders through an independent
@@ -105,7 +122,8 @@ selects:
   renewal if the chosen credentials expire. The runner passes only these
   credentials and the repository/password-file settings to restic.
 - `alertWebhookUrl`: the Discord webhook created in the reviewed founder-only
-  operations destination. Its URL is a credential. No webhook or message is
+  operations destination, which must be an allowed runtime text parent. Its URL
+  is a credential. No webhook or message is
   created by this code before activation.
 - `healthyHeartbeatUrl`: the private HTTPS success endpoint issued by the
   external monitor. It receives an empty GET with no runtime or source details.
@@ -119,7 +137,9 @@ The runtime environment must use these exact paths for this operations profile:
 `LUMA_PGLITE_DATA_DIR=/var/lib/luma/pglite` and
 `LUMA_RUNTIME_HEALTH_PATH=/var/lib/luma/runtime-health.json`.
 The operations preflight checks the root-owned production file but never loads
-its credentials into subprocesses. The release symlink must resolve to
+its credentials into subprocesses. Alert delivery uses that protected file's
+production bot token, application/server IDs, and current founder identity
+mappings for fresh REST verification; none are printed. The release symlink must resolve to
 `/opt/luma/releases/<40-character-commit>`, whose `REVISION` file matches it.
 
 Run the offline check first:

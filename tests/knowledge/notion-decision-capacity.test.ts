@@ -35,6 +35,7 @@ describe("native Decision Record capacity and read-only access", () => {
     const catalog = await complete(f.reader.discover({ audience, limit: 100 }));
     expect(catalog.complete).toBe(true);
     expect(catalog.records).toHaveLength(100);
+    expect(new Set(f.calls.map((call) => call.credential))).toEqual(new Set(["reader"]));
     expect(f.calls.filter((call) => call.kind === "records")).toHaveLength(302);
     expect(f.calls.filter((call) => call.kind === "authority")).toHaveLength(3);
     expect(f.sourceProof).toHaveBeenCalledTimes(1);
@@ -89,6 +90,16 @@ describe("native Decision Record capacity and read-only access", () => {
     const f = await fixture(99);
     f.clock();
     const result = await complete(f.records.write(f.create()));
+    expect(
+      new Set(
+        f.calls.filter((call) => call.kind === "records").map((call) => call.credential)
+      )
+    ).toEqual(new Set(["writer"]));
+    expect(
+      new Set(
+        f.calls.filter((call) => call.kind === "authority").map((call) => call.credential)
+      )
+    ).toEqual(new Set(["reader"]));
     expect(result.record.reference.externalId).toBe(pageId(100));
     expect(f.pages.size).toBe(100);
     expect(f.calls.filter((call) => call.kind === "records")).toHaveLength(503);

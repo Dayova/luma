@@ -258,7 +258,9 @@ describe("durable background Decision candidate discovery", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(2_000);
     expect(await runtime.status()).toMatchObject({ active: true });
-    expect(f.calls.filter((call) => call.kind === "records")).toHaveLength(10);
+    // The three retained authority reads share the actual read-only credential,
+    // leaving seven background starts in this window and 24 for foreground work.
+    expect(f.calls.filter((call) => call.kind === "records")).toHaveLength(7);
     const context = createOrganizationalContext({
       database,
       catalogs: [runtime.catalog]

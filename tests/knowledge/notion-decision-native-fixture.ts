@@ -54,7 +54,12 @@ export async function nativeDecisionFixture(
     { mode: 0o600 }
   );
   const pages = new Map<string, string>();
-  const calls: { kind: "authority" | "records"; method: string; at: number }[] = [];
+  const calls: {
+    kind: "authority" | "records";
+    method: string;
+    at: number;
+    credential: "reader" | "writer" | "unknown";
+  }[] = [];
   const windows = new Map<string, number[]>();
   let latency = 0;
   let throttled = 0;
@@ -118,7 +123,17 @@ export async function nativeDecisionFixture(
     recent.push(now);
     windows.set(authorization, recent);
     const kind = url.pathname.includes(ownershipId) ? "authority" : "records";
-    calls.push({ kind, method, at: now });
+    calls.push({
+      kind,
+      method,
+      at: now,
+      credential:
+        authorization === `Bearer ${readerToken}`
+          ? "reader"
+          : authorization === `Bearer ${writerToken}`
+            ? "writer"
+            : "unknown"
+    });
     if (latency)
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(resolve, latency);
@@ -250,7 +265,7 @@ export async function nativeDecisionFixture(
   const records = createNotionDecisionRecords({ ...config, token: writerToken });
   const reader = createNotionDecisionRecordCatalog({
     ...config,
-    readOnlyApiToken: writerToken
+    readOnlyApiToken: readerToken
   });
   const create = () => ({
     audience,
@@ -273,7 +288,13 @@ export async function nativeDecisionFixture(
       onFinalListing = change;
     },
     clock: () => {
-      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      // Begin the measured window after idle time. Bootstrap authority reads used
+      // the real clock; carrying their millisecond send skew into fake time
+      // would simulate a clock jump rather than native request contention.
+      vi.useFakeTimers({
+        now: Date.now() + 60_001,
+        toFake: ["Date", "setTimeout", "clearTimeout"]
+      });
       latency = 10;
     },
     throttled: () => throttled,

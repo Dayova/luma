@@ -152,6 +152,16 @@ export function structuredWorkFixture(database: LumaDatabase) {
   });
   const structuredRecords: StructuredRecords = {
     providerId: "notion",
+    authorizationScopeId: "notion-test-scope",
+    requireReadable: (request) => {
+      if (request.authorizationScopeId !== structuredRecords.authorizationScopeId ||
+        request.snapshot.schema.revision !== recordSchema.revision ||
+        request.snapshot.records.some((original) => {
+          const value = records.get(original.reference.externalId);
+          return !value || !value.active || operationDigest(value.reference) !== operationDigest(original.reference);
+        })) return Promise.reject(new Error("record access changed"));
+      return Promise.resolve();
+    },
     inspect: () => Promise.resolve(snapshot()),
     requireCurrent: (request) =>
       operationDigest(request.snapshot) === operationDigest(snapshot())

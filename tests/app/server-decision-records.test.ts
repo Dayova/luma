@@ -25,6 +25,13 @@ const dataSourceId = "3d52e872-28bf-80ae-befe-d1c0e2c39df5";
 const recordPageId = "3d52e872-28bf-81f9-8d79-c1233431c8bd";
 const founders =
   "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841";
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 let database: LumaDatabase, folder: string, app: RunningLumaApp | undefined;
 beforeEach(async () => {
   database = await createPgliteDatabase();
@@ -122,6 +129,9 @@ async function fixture(monthlyLimit = "30") {
   let channelCurrent = true,
     authorityCurrent = true,
     loseResponse = false;
+  let heldCapture:
+    | { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }
+    | undefined;
   let handler: Parameters<DiscordJsTransport["connect"]>[1];
   let commandHandler: Parameters<DiscordJsTransport["connect"]>[0];
   const transport: DiscordJsTransport = {
@@ -131,10 +141,14 @@ async function fixture(monthlyLimit = "30") {
       return Promise.resolve();
     },
     disconnect: () => Promise.resolve(),
-    capture: () =>
-      channelCurrent
-        ? Promise.resolve(structuredClone(raw))
-        : Promise.reject(new Error("Source permission revoked")),
+    capture: async () => {
+      if (heldCapture) {
+        heldCapture.entered.resolve();
+        await heldCapture.release.promise;
+      }
+      if (!channelCurrent) throw new Error("Source permission revoked");
+      return structuredClone(raw);
+    },
     resolveChannel: ({ channelId }) =>
       Promise.resolve(
         channelCurrent
@@ -293,6 +307,14 @@ async function fixture(monthlyLimit = "30") {
     writes,
     pages,
     model,
+    syncRecall: () => {
+      if (!runtime) throw new Error("Missing composed Decision runtime");
+      return runtime.recall.syncOnce();
+    },
+    holdCapture() {
+      heldCapture = { entered: deferred(), release: deferred() };
+      return heldCapture;
+    },
     async recall() {
       if (!runtime) throw new Error("Missing composed Decision runtime");
       // Settle a possible startup sync before explicitly refreshing the changed catalog.
@@ -349,6 +371,29 @@ async function fixture(monthlyLimit = "30") {
   };
 }
 describe("composed production Decision Records", () => {
+  it("keeps the shared store open while a cancelled recall's retained source check is still admitted", async () => {
+    const f = await fixture();
+    await f.invoke();
+    await f.syncRecall();
+    const held = f.holdCapture();
+    const sync = f.syncRecall();
+    await held.entered.promise;
+    let stopped = false;
+    const stopping = app!.stop().then(() => {
+      stopped = true;
+    });
+    try {
+      // Cancellation settles the public sync; the underlying owned proof is still held.
+      await sync;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(stopped).toBe(false);
+      expect(database.closed).toBe(false);
+    } finally {
+      held.release.resolve();
+      await stopping;
+    }
+    expect(database.closed).toBe(true);
+  });
   it("recalls the created canonical Decision through a separate read credential and withholds revoked source evidence", async () => {
     const f = await fixture();
     await f.invoke();

@@ -1,4 +1,5 @@
 import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
+import { notionWebhookRuntimeConfig } from "./notion-webhook-runtime.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { z } from "zod";
@@ -122,7 +123,14 @@ export async function validateProductionEnvironment(
       "The selected production model needs an audited price entry."
     );
     aiRequestLimitsFromEnv(env);
-    organizationalContextRuntimeConfig(env);
+    const organizational = organizationalContextRuntimeConfig(env);
+    if (notionWebhookRuntimeConfig(env, workspaceId)) {
+      required(env, "NOTION_API_TOKEN");
+      check(
+        organizational?.providers.includes("notion") === true,
+        "Notion webhook intake requires granted imported-source analysis configuration."
+      );
+    }
   } catch (error) {
     if (error instanceof ProductionPreflightError) throw error;
     // Adapter configuration errors may include supplied values. Never print them.

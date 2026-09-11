@@ -19,6 +19,40 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("validates the shared webhook subscription and analysis configuration before opening runtime resources", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_NOTION_WEBHOOK_ENABLED: "1",
+      LUMA_NOTION_WEBHOOK_WORKSPACE_ID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "cccccccc-dddd-eeee-ffff-000000000000",
+      LUMA_NOTION_WEBHOOK_INTEGRATION_ID: "dddddddd-eeee-ffff-0000-111111111111",
+      LUMA_NOTION_WEBHOOK_VERIFICATION_TOKEN: "synthetic-subscription",
+      NOTION_MEETINGS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+      NOTION_API_TOKEN: "synthetic-source",
+      LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "1",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/context-sharing.json",
+      LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "synthetic-reader",
+      LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "source-read",
+      LUMA_CONTEXT_NOTION_PAGE_IDS: "00000000-0000-0000-0000-000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PORT: "70000" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PATH: "/notion/webhook?private" },
+      { LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "0" },
+      { NOTION_API_TOKEN: "" },
+      { LUMA_WORKSPACE_ID: env.LUMA_NOTION_WEBHOOK_WORKSPACE_ID }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
   it("allows temporarily pausing paid AI without disabling the runtime", async () => {
     await expect(
       validateProductionEnvironment(

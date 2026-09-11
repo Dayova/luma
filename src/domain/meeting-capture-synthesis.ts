@@ -33,6 +33,14 @@ export type CaptureSynthesisClaim = {
   /** Verbatim material only; provider-derived notes cannot support these. */
   quotations: Array<{ evidenceId: string; text: string }>;
   conflictingClaimIds: string[];
+  /** Explicit exact-revision Human evidence for actionable details, separate from provider text. */
+  actionReview?: {
+    modality: "commitment" | "request";
+    dueDate: string | null;
+    ownerPersonId: PersonId | null;
+    participantId: PersonId;
+    judgedAt: string;
+  };
 };
 
 export type CaptureSynthesisJudgmentRecorded = ObservationBase & {
@@ -40,7 +48,15 @@ export type CaptureSynthesisJudgmentRecorded = ObservationBase & {
   participantId: PersonId;
   expectedSynthesisRevision: number;
   claimId: string;
-  judgment: { kind: "confirm" | "reject" } | { kind: "correct"; text: string };
+  judgment:
+    | { kind: "confirm" | "reject" }
+    | { kind: "correct"; text: string }
+    | {
+        kind: "resolve-action";
+        modality: "commitment" | "request";
+        dueDate: string | null;
+        ownerPersonId: PersonId | null;
+      };
 };
 
 /** Derived understanding only; this is neither a raw transcript nor an execution receipt. */

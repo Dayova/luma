@@ -221,7 +221,7 @@ export type ImportedImplementationReference = {
   url: string;
 };
 
-export type ImportedActionItemCandidate = {
+export type ActionItemCandidateFields = {
   id: string;
   lineageKey: string;
   originalText: string;
@@ -244,14 +244,49 @@ export type ImportedActionItemCandidate = {
   sourceBoundImplementationReferences: ImportedImplementationReference[];
   projectHints: string[];
   componentHints: string[];
+  evidence: EvidenceReference[];
+};
+
+export type ImportedActionItemCandidate = ActionItemCandidateFields & {
   source: {
     source: ImportedMeetingSource;
     sourceBlockId: string;
     sourceSection: "action-items-and-notes";
     sourceExcerpt: string;
   };
-  evidence: EvidenceReference[];
 };
+
+/** Derived claim identity, never a provider Meeting Note or a fabricated transcript. */
+export type SynthesisActionItemSource = {
+  providerId: "luma";
+  sourceKind: "capture-synthesis";
+  sourceObjectId: string;
+  sourceRevision: number;
+  contentHash: string;
+  logicalMeetingId: string;
+  claimId: string;
+  claimDigest: string;
+  externalReference: ExternalReference;
+  canonicalAnchorRef: ExternalReference | null;
+  workItemProviderId: string;
+  implementationReferenceProviderId: string;
+  completeness: "complete" | "partial";
+  actionItemsAvailability: "available" | "unavailable";
+  producedAt: string;
+  humanNoDeadline: boolean;
+  humanActionReviewed: boolean;
+};
+
+export type SynthesisActionItemCandidate = ActionItemCandidateFields & {
+  source: {
+    source: SynthesisActionItemSource;
+    sourceBlockId: string;
+    sourceSection: "luma-synthesis";
+    sourceExcerpt: string;
+  };
+};
+export type ActionItemCandidate =
+  ImportedActionItemCandidate | SynthesisActionItemCandidate;
 
 export type ReconciliationWorkItemSnapshot = {
   providerId: string;
@@ -366,7 +401,7 @@ export type ActionItemReconciliationReview = {
   catalogProviderId: string;
   candidateId: string;
   candidateLineageKey: string;
-  candidate: ImportedActionItemCandidate;
+  candidate: ActionItemCandidate;
   /** Immutable effective ownership snapshot used for this exact review. */
   ownership: ActionItemOwnershipAttribution;
   /** Source and hydrated canonical-work Evidence that grounds this proposal. */
@@ -937,8 +972,15 @@ export type MeetingState = {
   importedSources: ImportedMeetingSource[];
   /** Immutable original recipient grants for governed imported source material. */
   importedSourceAnalysisReceiptIds?: string[];
-  importedActionItemCandidates: ImportedActionItemCandidate[];
+  /** Historical storage field; each member explicitly distinguishes raw and derived sources. */
+  importedActionItemCandidates: ActionItemCandidate[];
   currentImportedActionItemCandidateIds: string[];
+  /** Exact derived state backing these candidates; raw captures remain in LogicalMeetings. */
+  captureSynthesisActionSource?: {
+    revision: number;
+    sourceSetDigest: string;
+    canonicalAnchorRef: ExternalReference | null;
+  };
   actionItemReconciliationReviews: ActionItemReconciliationReview[];
   actionItemReconciliationHumanResolutions: ActionItemReconciliationHumanResolution[];
   actionItemOwnershipHumanResolutions: ActionItemOwnershipHumanResolution[];

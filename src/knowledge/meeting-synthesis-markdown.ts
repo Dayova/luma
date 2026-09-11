@@ -15,7 +15,7 @@ export function canonicalSynthesisJson(value: unknown): string {
   }
   if (Array.isArray(value)) return `[${value.map(canonicalSynthesisJson).join(",")}]`;
   return `{${Object.entries(value)
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalSynthesisJson(nested)}`)
     .join(",")}}`;
 }
@@ -38,6 +38,10 @@ export function renderMeetingSynthesisSection(
   ];
   for (const claim of synthesis.claims) {
     lines.push(`### ${plain(claim.kind)} · ${plain(claim.authority)}`, plain(claim.text));
+    if (claim.actionReview)
+      lines.push(
+        `Human action details: ${plain(claim.actionReview.modality)} · Owner: ${plain(claim.actionReview.ownerPersonId ?? "intentionally unassigned")} · Due: ${plain(claim.actionReview.dueDate ?? "explicitly none")} · Reviewed by: ${plain(claim.actionReview.participantId)}`
+      );
     if (claim.conflictingClaimIds.length)
       lines.push(
         `Unresolved conflicting claims: ${claim.conflictingClaimIds.map(plain).join(", ")}`
@@ -112,7 +116,11 @@ function normalized(text: string): string {
     .join("\n");
 }
 function plain(text: string): string {
-  return text.replace(/[\r\n]+/gu, " ").replace(/[\\`*_[\]{}()#!|~$^<>]/gu, "\\$&");
+  return text
+    .replace(/[\r\n]+/gu, " ")
+    .replace(/[\\`*_[\]{}()#!|~$^<>]/gu, "\\$&")
+    .replace(/^( {0,3})([-+])(?=\s)/u, "$1\\$2")
+    .replace(/^( {0,3})(\d+)\.(?=\s)/u, "$1$2\\.");
 }
 function safeUrl(text: string): string {
   const url = new URL(text);

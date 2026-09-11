@@ -21,8 +21,21 @@ export type DiscordCaptureReviewCommand = DiscordCommandBase &
         meetingId?: string;
         revision: number;
         claimId: string;
-        choice: "confirm" | "correct" | "reject";
+        choice: "confirm" | "correct" | "reject" | "resolve-action";
         text?: string;
+        modality?: "commitment" | "request";
+        dueDate?: string;
+        ownerDiscordUserId?: string;
+        intentionallyUnassigned?: boolean;
+      }
+    | {
+        type: "capture-actions";
+        meetingId?: string;
+        page: number;
+        choice: "review" | "accept" | "reject" | "refresh" | "execute" | "recover";
+        revision?: number;
+        reviewId?: string;
+        intentId?: string;
       }
     | { type: "publish"; meetingId?: string; revision: number; recover: boolean }
     | {
@@ -38,15 +51,21 @@ export type DiscordCaptureReviewRuntime = {
   handle(input: {
     command: DiscordCaptureReviewCommand;
     actorPersonId: string;
+    ownerPersonId?: string;
     boundMeetingId?: string;
   }): Promise<DiscordCommandResponse>;
 };
 export function isCaptureReviewCommand(command: {
   type: string;
 }): command is DiscordCaptureReviewCommand {
-  return ["captures", "synthesis", "judge", "publish", "capture-link"].includes(
-    command.type
-  );
+  return [
+    "captures",
+    "synthesis",
+    "judge",
+    "publish",
+    "capture-link",
+    "capture-actions"
+  ].includes(command.type);
 }
 export class DiscordCaptureReviewUnavailableError extends Error {
   constructor(
@@ -174,13 +193,16 @@ export function createDiscordCaptureReviewRuntime(input: {
     return { content, requireCurrent };
   }
   return {
-    async handle({ command, actorPersonId, boundMeetingId }) {
+    async handle({ command, actorPersonId, ownerPersonId, boundMeetingId }) {
       if (!personIds.includes(actorPersonId))
         throw new DiscordCaptureReviewUnavailableError();
-      if (
-        !Number.isSafeInteger("revision" in command ? command.revision : command.page) ||
-        ("revision" in command ? command.revision : command.page) < 1
-      )
+      const selectedNumber =
+        command.type === "capture-actions"
+          ? command.page
+          : "revision" in command
+            ? command.revision
+            : command.page;
+      if (!Number.isSafeInteger(selectedNumber) || selectedNumber < 1)
         throw new DiscordCaptureReviewUnavailableError(
           "Use a positive revision or page number from the review."
         );
@@ -316,6 +338,152 @@ export function createDiscordCaptureReviewRuntime(input: {
           await requireSame([before]);
           return result;
         }
+        if (command.type === "capture-actions") {
+          if (command.choice !== "review" && selected.revision !== command.revision)
+            throw new DiscordCaptureReviewUnavailableError(
+              "Read the current /meeting synthesis revision before resolving or executing actions."
+            );
+          const scope = { workspaceId: workspace.workspaceId, meetingId };
+          const currentReviews = async () => {
+            const result = await meetingIntelligence.query({
+              ...scope,
+              query: { type: "action-item-reconciliation-review" }
+            });
+            if (result.type !== "action-item-reconciliation-review")
+              throw new DiscordCaptureReviewUnavailableError();
+            return result.reviews;
+          };
+          if (["accept", "reject", "refresh"].includes(command.choice)) {
+            const reviews = await currentReviews(),
+              review = reviews.find((r) => r.proposal.id === command.reviewId);
+            if (!review)
+              throw new DiscordCaptureReviewUnavailableError(
+                "Choose a current review_id from /meeting actions."
+              );
+            const update = await meetingIntelligence.observe({
+              workspace,
+              observations: [
+                {
+                  type: "human-judgment-recorded",
+                  observationId: `discord-capture-action:${command.interactionId}`,
+                  ...scope,
+                  occurredAt: command.occurredAt,
+                  observedAt: command.occurredAt,
+                  participantId: actorPersonId,
+                  judgment:
+                    command.choice === "refresh"
+                      ? {
+                          kind: "refresh-action-item-reconciliation",
+                          reviewId: review.proposal.id
+                        }
+                      : {
+                          kind: "resolve-action-item-reconciliation",
+                          reviewId: review.proposal.id,
+                          resolution: {
+                            type:
+                              command.choice === "accept"
+                                ? "accept-proposal"
+                                : "reject-proposal"
+                          }
+                        }
+                }
+              ]
+            });
+            if (update.errors.length)
+              throw new DiscordCaptureReviewUnavailableError(
+                "This action is not ready for that resolution. Review its missing evidence with /meeting actions and use /meeting judge choice:resolve-action for explicit action details."
+              );
+          }
+          if (command.choice === "execute" || command.choice === "recover") {
+            const snapshot = await meetingIntelligence.query({
+              ...scope,
+              query: { type: "snapshot" }
+            });
+            const intent =
+              snapshot.type === "snapshot"
+                ? snapshot.state.followUpIntentions.find(
+                    (i) =>
+                      i.id === command.intentId && i.type === "settle-operational-outcome"
+                  )
+                : undefined;
+            if (!intent)
+              throw new DiscordCaptureReviewUnavailableError(
+                "Choose an exact intent_id from /meeting actions."
+              );
+            if (command.choice === "execute" && intent.status === "suggested") {
+              const approved = await meetingIntelligence.observe({
+                workspace,
+                observations: [
+                  {
+                    type: "follow-up-intent-approved",
+                    observationId: `discord-capture-action-approval:${command.interactionId}`,
+                    ...scope,
+                    occurredAt: command.occurredAt,
+                    observedAt: command.occurredAt,
+                    intentId: intent.id,
+                    approvedBy: actorPersonId
+                  }
+                ]
+              });
+              if (approved.errors.length)
+                throw new DiscordCaptureReviewUnavailableError(
+                  "The exact action approval was not accepted."
+                );
+            }
+            await requireSame([before]);
+            const result = await input.followUpExecution[
+              command.choice === "recover" ? "recover" : "execute"
+            ]({ workspace, meetingId, intentId: intent.id });
+            const outcome = result.observation.outcome;
+            const status =
+              outcome.status === "succeeded"
+                ? "Action completed."
+                : outcome.status === "partially-succeeded"
+                  ? "Work is recorded; the canonical outcome is pending. Use choice:recover to resume retained progress."
+                  : outcome.requiresManualRecovery
+                    ? "Action needs manual recovery. Luma cannot safely send another mutation."
+                    : "Action could not complete. Review current source access, canonical publication and action details before continuing.";
+            return response(
+              meetingId,
+              [
+                status,
+                `Canonical record: ${selected.canonicalAnchorRef?.url ?? "not published"}`,
+                ...(outcome.externalReferences ?? []).map(
+                  (reference) =>
+                    `${reference.providerId}: ${reference.url ?? reference.externalId}`
+                )
+              ].join("\n"),
+              selected.revision
+            );
+          }
+          const reviews = await currentReviews();
+          const snapshot = await meetingIntelligence.query({
+            ...scope,
+            query: { type: "snapshot" }
+          });
+          const intents =
+            snapshot.type === "snapshot"
+              ? snapshot.state.followUpIntentions.filter(
+                  (i) => i.type === "settle-operational-outcome"
+                )
+              : [];
+          return response(
+            meetingId,
+            pageText(
+              [
+                `Derived actions · synthesis revision ${selected.revision} · ${selected.coverage} source coverage\nCanonical record: ${selected.canonicalAnchorRef?.url ?? "not published"}`,
+                ...reviews.map(
+                  (r) =>
+                    `Review: ${r.proposal.id}\n${r.proposal.candidate.description}\nOutcome: ${r.effectiveOutcome.type} · ${r.status}\nOwner: ${r.ownership.status}${r.ownership.status === "confirmed" ? ` (${r.ownership.ownerPersonId})` : ""}\nDue: ${r.proposal.candidate.deadline.normalizedDate ?? (r.proposal.candidate.source.source.sourceKind === "capture-synthesis" && r.proposal.candidate.source.source.humanNoDeadline ? "explicitly none" : "unresolved")}\n${r.effectiveOutcome.rationale}`
+                ),
+                ...intents.map((i) => `Intent: ${i.id} · ${i.status}`),
+                "Use choice:accept/reject/refresh with review_id and revision. Accepting creates a suggested intent. choice:execute with intent_id and revision explicitly approves execution; publish a canonical synthesis first. choice:recover checks and resumes only proven progress."
+              ],
+              command.page
+            ),
+            selected.revision
+          );
+        }
         if (selected.revision !== command.revision)
           throw new DiscordCaptureReviewUnavailableError(
             "This synthesis changed. Read /meeting synthesis again before acting."
@@ -328,6 +496,17 @@ export function createDiscordCaptureReviewRuntime(input: {
           if (command.choice === "correct" && !command.text?.trim())
             throw new DiscordCaptureReviewUnavailableError(
               "A correction needs the replacement claim text."
+            );
+          if (
+            command.choice === "resolve-action" &&
+            (!command.modality ||
+              command.dueDate === undefined ||
+              (command.intentionallyUnassigned === true
+                ? Boolean(ownerPersonId)
+                : !ownerPersonId))
+          )
+            throw new DiscordCaptureReviewUnavailableError(
+              "An action review needs commitment/request, due_date (YYYY-MM-DD or none), and either a founder owner or intentionally_unassigned:true."
             );
           const update = await meetingIntelligence.observe({
             workspace,
@@ -345,13 +524,25 @@ export function createDiscordCaptureReviewRuntime(input: {
                 judgment:
                   command.choice === "correct"
                     ? { kind: "correct", text: command.text! }
-                    : { kind: command.choice }
+                    : command.choice === "resolve-action"
+                      ? {
+                          kind: "resolve-action",
+                          modality: command.modality!,
+                          dueDate: command.dueDate === "none" ? null : command.dueDate!,
+                          ownerPersonId: command.intentionallyUnassigned
+                            ? null
+                            : ownerPersonId!
+                        }
+                      : { kind: command.choice }
               }
             ]
           });
           if (update.errors.length)
             throw new DiscordCaptureReviewUnavailableError(
-              "This judgment was not accepted. Refresh /meeting synthesis before retrying."
+              update.acceptedObservationIds.length ||
+                update.duplicateObservationIds.length
+                ? "The Human judgment is retained, but current action preparation is unavailable. Refresh /meeting synthesis and /meeting actions before continuing."
+                : "This judgment was not accepted. Refresh /meeting synthesis before retrying."
             );
           const next = (await synthesis(meetingId)).synthesis;
           return response(
@@ -431,9 +622,9 @@ function renderSynthesis(
     `Logical meeting: ${synthesis.logicalMeetingId}\nSynthesis revision: ${synthesis.revision} · coverage: ${synthesis.coverage}\nCanonical record: ${synthesis.canonicalAnchorRef?.url ?? "not published"}\nPublication: ${publication ?? "unavailable"}`,
     ...synthesis.claims.map(
       (c) =>
-        `Claim: ${c.id}\n${c.kind} · ${c.authority} · confidence: ${c.confidence}\n${c.text}\nConflicts: ${c.conflictingClaimIds.join(", ") || "none recorded"}\nSources: ${c.citations.map((r) => `${r.captureId} revision ${r.sourceRevision}`).join(", ")}\n${c.quotations.map((q) => `Verbatim: ${q.text}`).join("\n")}`
+        `Claim: ${c.id}\n${c.kind} · ${c.authority} · confidence: ${c.confidence}\n${c.text}\nConflicts: ${c.conflictingClaimIds.join(", ") || "none recorded"}\nSources: ${c.citations.map((r) => `${r.captureId} revision ${r.sourceRevision}`).join(", ")}\n${c.actionReview ? `Human action: ${c.actionReview.modality} · owner: ${c.actionReview.ownerPersonId ?? "intentionally unassigned"} · due: ${c.actionReview.dueDate ?? "explicitly none"}\n` : ""}${c.quotations.map((q) => `Verbatim: ${q.text}`).join("\n")}`
     ),
-    "Use /meeting judge with this revision and claim_id to confirm, correct or reject. /meeting publish approves and publishes this exact derived revision. recover:true only checks an uncertain publication; it does not send another write."
+    "Use /meeting judge with this revision and claim_id to confirm, correct or reject. choice:resolve-action adds explicit commitment/request, due_date and owner details. /meeting actions reviews canonical work reconciliation. /meeting publish approves and publishes this exact derived revision. recover:true only checks an uncertain publication; it does not send another write."
   ];
 }
 /** Preserve complete claim text across bounded pages, including long corrections/quotations. */

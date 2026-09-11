@@ -1,3 +1,6 @@
+import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
+import { createNotionOperationalOutcomeWriter } from "../../src/knowledge/notion-operational-outcome-writer.js";
+import type { WorkProvider } from "../../src/work/interface.js";
 import { describe, expect, it, vi } from "vitest";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createLogicalMeetings } from "../../src/logical-meetings/logical-meetings.js";
@@ -19,6 +22,7 @@ import type {
   StructuredReasoningRequest
 } from "../../src/ai/reasoning-model.js";
 import type { CaptureSynthesisProposal } from "../../src/ai/capture-synthesis-proposal.js";
+import type { CaptureSynthesisJudgmentRecorded } from "../../src/domain/meeting-capture-synthesis.js";
 import type { FollowUpIntentApproved } from "../../src/domain/model.js";
 import { acquireOperationalOutcomePageLease } from "../../src/follow-up-execution/operational-outcome-settlement.js";
 import { MeetingSynthesisWriteNotAppliedError } from "../../src/knowledge/meeting-synthesis-writer.js";
@@ -31,7 +35,12 @@ const parent = "11111111-1111-4111-8111-111111111111",
 const signingKey = "test-synthesis-key-012345678901234567890";
 const original =
   "Native Meeting Notes\nOriginal transcript: Wir könnten starten.\nOriginal provider summary\n## Luma — Operational Outcome\nExisting separately-owned outcome";
-async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false) {
+async function setup(
+  nativeAnchor = false,
+  useSdk = false,
+  databaseOnly = false,
+  actionMode = false
+) {
   const database = await createPgliteDatabase();
   let sourceAllowed = true,
     targetAllowed = true,
@@ -42,6 +51,7 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
   let markdownIdentity: string | undefined;
   let afterMutation: (() => Promise<void> | void) | undefined;
   let actualParent = parent;
+  let actionText = "Luma production release preparation";
   const pages = new Map<
     string,
     { markdown: string; key: string | null; version: number }
@@ -249,8 +259,10 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
         claims: [
           {
             key: "review-before-start",
-            kind: "decision",
-            text: "Wir könnten nach dem Review starten; literal `luma-synthesis:start:v1` remains source text.",
+            kind: actionMode ? "action-item" : "decision",
+            text: actionMode
+              ? actionText
+              : "Wir könnten nach dem Review starten; literal `luma-synthesis:start:v1` remains source text.",
             evidenceIds: [request.evidence[0]!.evidenceId],
             quotations: [],
             conflictingKeys: [],
@@ -268,9 +280,33 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
       });
     }
   };
+  const created = new Map<
+    string,
+    { providerId: string; objectType: "work-item"; externalId: string; url: string }
+  >();
+  const work = {
+    providerId: "linear",
+    searchWorkItems: vi.fn<WorkProvider["searchWorkItems"]>(() => Promise.resolve([])),
+    getWorkItem: () => Promise.reject(new Error("Unknown work")),
+    createWorkItem: vi.fn<WorkProvider["createWorkItem"]>((request) => {
+      const ref = {
+        providerId: "linear",
+        objectType: "work-item" as const,
+        externalId: "LUM-101",
+        url: "https://linear.app/dayova/issue/LUM-101"
+      };
+      created.set(request.idempotencyKey, ref);
+      return Promise.resolve(ref);
+    }),
+    findCreatedWorkItemByIdempotencyKey: (key) =>
+      Promise.resolve(created.get(key) ?? null),
+    updateWorkItem: () => Promise.reject(new Error("Unexpected update")),
+    addComment: () => Promise.reject(new Error("Unexpected comment"))
+  } satisfies WorkProvider;
   const mi = createMeetingIntelligence({
     database,
     reasoningModel: model,
+    workCatalogs: actionMode ? [work] : [],
     captureSynthesis: {
       logicalMeetings,
       audience: () =>
@@ -312,10 +348,29 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
       Promise.resolve(targetAllowed && (!databaseOnly || target.type === "data-source")),
     ...(useSdk ? { fetch: httpFetch } : { transport })
   });
+  const outcomeWriter = createNotionOperationalOutcomeWriter({
+    api: {
+      retrievePageMarkdown: ({ pageId }) =>
+        Promise.resolve({
+          content: pages.get(pageId)!.markdown,
+          truncated: false,
+          unknownBlockIds: []
+        }),
+      insertPageMarkdown: async ({ pageId, content }) => {
+        await transport.insert({ pageId, markdown: content });
+      },
+      updatePageMarkdown: async ({ pageId, oldContent, newContent }) => {
+        await transport.replace({ pageId, before: oldContent, after: newContent });
+      }
+    }
+  });
   const executor = createFollowUpExecution({
     database,
     meetingIntelligence: mi,
     meetingSynthesisWriter: writer,
+    workProvider: work,
+    operationalOutcomeWriter: outcomeWriter,
+    identityDirectory: createLumaTeamIdentityDirectory(),
     now: () => new Date(at)
   });
   const conclude = () => mi.conclude({ workspaceId: workspace.workspaceId, meetingId });
@@ -341,7 +396,11 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
   return {
     database,
     mi,
+    logicalMeetings,
+    revision,
+    ingestion,
     executor,
+    work,
     pages,
     conclude,
     approve,
@@ -355,6 +414,9 @@ async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false)
     },
     mutations: () => mutations,
     modelCalls: () => modelCalls,
+    setActionText: (value: string) => {
+      actionText = value;
+    },
     setSourceAllowed: (value: boolean) => {
       sourceAllowed = value;
     },
@@ -986,4 +1048,372 @@ describe("Owned Imported Record authorization through its actual database", () =
       await f.database.close();
     }
   });
+});
+
+async function resolveDerivedAction(f: Awaited<ReturnType<typeof setup>>) {
+  const current = (await f.conclude()).captureSynthesis!;
+  const judged = await f.mi.observe({
+    workspace,
+    observations: [
+      {
+        type: "capture-synthesis-judgment-recorded",
+        observationId: "human-action-details",
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        occurredAt: at,
+        observedAt: at,
+        expectedSynthesisRevision: current.revision,
+        claimId: current.claims[0]!.id,
+        participantId: "person_jakob",
+        judgment: {
+          kind: "resolve-action",
+          modality: "commitment",
+          dueDate: "2026-09-15",
+          ownerPersonId: "person_jakob"
+        }
+      }
+    ]
+  });
+  expect(judged.errors).toEqual([]);
+  const reviewed = await f.mi.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: f.meetingId,
+    query: { type: "action-item-reconciliation-review" }
+  });
+  if (reviewed.type !== "action-item-reconciliation-review")
+    throw new Error("Wrong query");
+  expect(reviewed.reviews[0]?.proposal.outcome.type).toBe("create-new");
+  const resolved = await f.mi.observe({
+    workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: "human-reconcile",
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        occurredAt: at,
+        observedAt: at,
+        participantId: "person_jakob",
+        judgment: {
+          kind: "resolve-action-item-reconciliation",
+          reviewId: reviewed.reviews[0]!.proposal.id,
+          resolution: { type: "accept-proposal" }
+        }
+      }
+    ]
+  });
+  expect(resolved.errors).toEqual([]);
+  const snapshot = await f.mi.query({
+    workspaceId: workspace.workspaceId,
+    meetingId: f.meetingId,
+    query: { type: "snapshot" }
+  });
+  if (snapshot.type !== "snapshot") throw new Error("Wrong query");
+  const intent = snapshot.state.followUpIntentions.find(
+    (item) => item.type === "settle-operational-outcome"
+  );
+  if (!intent) throw new Error("Missing exact derived intent");
+  expect(
+    (
+      await f.mi.observe({
+        workspace,
+        observations: [
+          {
+            type: "follow-up-intent-approved",
+            observationId: "approve-action",
+            workspaceId: workspace.workspaceId,
+            meetingId: f.meetingId,
+            occurredAt: at,
+            observedAt: at,
+            intentId: intent.id,
+            approvedBy: "person_jakob"
+          }
+        ]
+      })
+    ).errors
+  ).toEqual([]);
+  return intent;
+}
+describe("Derived capture actions through MI and canonical execution", () => {
+  it("keeps unsupported derived details unresolved without creating a fake Notion source", async () => {
+    const f = await setup(false, false, true, true);
+    try {
+      const review = await f.mi.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        query: { type: "action-item-reconciliation-review" }
+      });
+      if (review.type !== "action-item-reconciliation-review")
+        throw new Error("Wrong query");
+      expect(review.reviews).toHaveLength(1);
+      expect(review.reviews[0]).toMatchObject({
+        ownership: { status: "unresolved" },
+        proposal: {
+          outcome: { type: "needs-clarification" },
+          candidate: {
+            source: { source: { sourceKind: "capture-synthesis" } },
+            modality: { kind: "unknown" },
+            deadline: { confidence: "unknown" }
+          }
+        }
+      });
+      expect(f.work.searchWorkItems).not.toHaveBeenCalled();
+      const snapshot = await f.mi.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        query: { type: "snapshot" }
+      });
+      expect(snapshot.type === "snapshot" && snapshot.state.importedSources).toEqual([]);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("reports a retained Human judgment when source proof fails during canonical search and resumes the same observation without another model call", async () => {
+    const f = await setup(false, false, true, true);
+    try {
+      const current = (await f.conclude()).captureSynthesis!;
+      const observation: CaptureSynthesisJudgmentRecorded = {
+        type: "capture-synthesis-judgment-recorded",
+        observationId: "human-admission-recovery",
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        occurredAt: at,
+        observedAt: at,
+        expectedSynthesisRevision: current.revision,
+        claimId: current.claims[0]!.id,
+        participantId: "person_jakob",
+        judgment: {
+          kind: "resolve-action",
+          modality: "request",
+          dueDate: null,
+          ownerPersonId: null
+        }
+      };
+      const search = f.work.searchWorkItems;
+      f.work.searchWorkItems = vi.fn<WorkProvider["searchWorkItems"]>(async (query) => {
+        const result = await search(query);
+        f.setSourceAllowed(false);
+        return result;
+      });
+      const accepted = await f.mi.observe({ workspace, observations: [observation] });
+      expect(accepted).toMatchObject({
+        acceptedObservationIds: [observation.observationId],
+        revision: 2,
+        analysisStatus: "deferred"
+      });
+      expect(accepted.errors).not.toEqual([]);
+      f.setSourceAllowed(true);
+      f.work.searchWorkItems = search;
+      const replayed = await f.mi.observe({ workspace, observations: [observation] });
+      expect(replayed).toMatchObject({
+        duplicateObservationIds: [observation.observationId],
+        revision: 2,
+        analysisStatus: "not-needed",
+        errors: []
+      });
+      const review = await f.mi.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        query: { type: "action-item-reconciliation-review" }
+      });
+      expect(
+        review.type === "action-item-reconciliation-review" &&
+          review.reviews[0]?.effectiveOutcome.type
+      ).toBe("create-new");
+      expect(f.modelCalls()).toBe(1);
+    } finally {
+      await f.database.close();
+    }
+  }, 30_000);
+
+  it("retains old candidate history but withholds its text after the capture set changes", async () => {
+    const f = await setup(false, false, true, true);
+    try {
+      f.setActionText("Prepare current release documentation");
+      const revised = await f.logicalMeetings.resolveCapture({
+        workspaceId: workspace.workspaceId,
+        revision: {
+          ...f.revision,
+          sourceRevision: 2,
+          contentHash: "capture-hash-2",
+          providerVersion: "v2"
+        }
+      });
+      if (revised.status !== "accepted") throw new Error("Revised capture unavailable");
+      expect(
+        (await f.ingestion.ingest(revised.decision.logicalMeeting)).analysisStatus
+      ).toBe("completed");
+      const history = await f.mi.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: f.meetingId,
+        query: { type: "action-item-reconciliation-history" }
+      });
+      expect(
+        history.type === "action-item-reconciliation-history" && history.reviews
+      ).toHaveLength(1);
+      expect(JSON.stringify(history)).not.toContain(
+        "Luma production release preparation"
+      );
+      expect(JSON.stringify(history)).toContain("Prepare current release documentation");
+      const raw = await f.database.query<{ state_json: string }>(
+        "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",
+        [workspace.workspaceId, f.meetingId]
+      );
+      const retained = JSON.parse(raw.rows[0]!.state_json) as {
+        importedActionItemCandidates: unknown[];
+      };
+      expect(retained.importedActionItemCandidates).toHaveLength(2);
+    } finally {
+      await f.database.close();
+    }
+  }, 30_000);
+
+  it("uses Human action details, the same Granola-only canonical anchor and source-set proof to create once and write its real Notion outcome", async () => {
+    const f = await setup(false, true, true, true);
+    try {
+      const action = await resolveDerivedAction(f);
+      const published = await f.approve();
+      expect(
+        (
+          await f.executor.execute({
+            workspace,
+            meetingId: f.meetingId,
+            intentId: published.intentId
+          })
+        ).observation.outcome.status
+      ).toBe("succeeded");
+      const result = await f.executor.execute({
+        workspace,
+        meetingId: f.meetingId,
+        intentId: action.id
+      });
+      expect(result.observation.outcome.status).toBe("succeeded");
+      expect(f.work.createWorkItem).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          title: "Luma production release preparation",
+          dueDate: "2026-09-15"
+        })
+      );
+      expect(f.pages).toHaveLength(1);
+      expect(f.pages.get(imported)?.markdown).toContain("LUM-101");
+      expect(f.pages.get(imported)?.markdown).toContain("Luma — Operational Outcome");
+      expect(f.modelCalls()).toBe(1);
+      await f.executor.execute({
+        workspace,
+        meetingId: f.meetingId,
+        intentId: action.id
+      });
+      expect(f.work.createWorkItem).toHaveBeenCalledTimes(1);
+    } finally {
+      await f.database.close();
+    }
+  }, 30_000);
+
+  it.each(["source", "destination"])(
+    "withholds derived source review or execution after the %s grant is revoked",
+    async (kind) => {
+      const f = await setup(false, true, true, true);
+      try {
+        const action = await resolveDerivedAction(f),
+          published = await f.approve();
+        await f.executor.execute({
+          workspace,
+          meetingId: f.meetingId,
+          intentId: published.intentId
+        });
+        if (kind === "source") f.setSourceAllowed(false);
+        else f.setTargetAllowed(false);
+        expect(
+          (
+            await f.executor.execute({
+              workspace,
+              meetingId: f.meetingId,
+              intentId: action.id
+            })
+          ).observation.outcome.status
+        ).toBe("failed");
+        expect(f.work.createWorkItem).not.toHaveBeenCalled();
+        if (kind === "source")
+          await expect(
+            f.mi.query({
+              workspaceId: workspace.workspaceId,
+              meetingId: f.meetingId,
+              query: { type: "action-item-reconciliation-history" }
+            })
+          ).rejects.toThrow();
+        expect(f.pages.get(imported)?.markdown).not.toContain(
+          "Luma — Operational Outcome"
+        );
+      } finally {
+        await f.database.close();
+      }
+    },
+    30_000
+  );
+
+  it("requires a positive canonical publication before a derived work mutation", async () => {
+    const f = await setup(false, true, true, true);
+    try {
+      const action = await resolveDerivedAction(f);
+      expect(
+        (
+          await f.executor.execute({
+            workspace,
+            meetingId: f.meetingId,
+            intentId: action.id
+          })
+        ).observation.outcome.status
+      ).toBe("failed");
+      expect(f.work.createWorkItem).not.toHaveBeenCalled();
+      expect(f.pages.size).toBe(0);
+    } finally {
+      await f.database.close();
+    }
+  }, 30_000);
+
+  it("retains positive work when access changes after creation and recovers without another create", async () => {
+    const f = await setup(false, true, true, true);
+    try {
+      const action = await resolveDerivedAction(f),
+        published = await f.approve();
+      await f.executor.execute({
+        workspace,
+        meetingId: f.meetingId,
+        intentId: published.intentId
+      });
+      const create = f.work.createWorkItem;
+      f.work.createWorkItem = vi.fn<WorkProvider["createWorkItem"]>(async (request) => {
+        const reference = await create(request);
+        f.setSourceAllowed(false);
+        return reference;
+      });
+      expect(
+        (
+          await f.executor.execute({
+            workspace,
+            meetingId: f.meetingId,
+            intentId: action.id
+          })
+        ).observation.outcome.status
+      ).toBe("partially-succeeded");
+      expect(create).toHaveBeenCalledTimes(1);
+      const work = await f.database.query<{ status: string; reference_json: string }>(
+        "SELECT status,reference_json FROM operational_outcome_settlement_stages WHERE intent_id=$1 AND stage='work'",
+        [action.id]
+      );
+      expect(work.rows[0]).toMatchObject({ status: "succeeded" });
+      expect(work.rows[0]?.reference_json).toContain("LUM-101");
+      expect(f.pages.get(imported)?.markdown).not.toContain("Luma — Operational Outcome");
+      f.setSourceAllowed(true);
+      await f.executor.recover({
+        workspace,
+        meetingId: f.meetingId,
+        intentId: action.id
+      });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(f.pages.get(imported)?.markdown).toContain("LUM-101");
+    } finally {
+      await f.database.close();
+    }
+  }, 30_000);
 });

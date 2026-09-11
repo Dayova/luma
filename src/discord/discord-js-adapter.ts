@@ -1190,15 +1190,54 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         ...(meetingId ? { meetingId } : {})
       };
     }
+    case "actions": {
+      const choice = interaction.options.getString("choice") ?? "review";
+      if (
+        !["review", "accept", "reject", "refresh", "execute", "recover"].includes(choice)
+      )
+        throw new Error("Unknown capture action operation");
+      const meetingId = interaction.options.getString("meeting_id"),
+        reviewId = interaction.options.getString("review_id"),
+        intentId = interaction.options.getString("intent_id"),
+        revision = interaction.options.getInteger("revision");
+      return {
+        ...base,
+        type: "capture-actions",
+        choice: choice as
+          "review" | "accept" | "reject" | "refresh" | "execute" | "recover",
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {}),
+        ...(reviewId ? { reviewId } : {}),
+        ...(intentId ? { intentId } : {}),
+        ...(revision !== null ? { revision } : {})
+      };
+    }
     case "judge": {
       const choice = interaction.options.getString("choice", true);
-      if (choice !== "confirm" && choice !== "correct" && choice !== "reject")
+      if (
+        choice !== "confirm" &&
+        choice !== "correct" &&
+        choice !== "reject" &&
+        choice !== "resolve-action"
+      )
         throw new Error("Unknown synthesis judgment");
       const meetingId = interaction.options.getString("meeting_id"),
         text = interaction.options.getString("text");
+      const modality = interaction.options.getString("modality"),
+        dueDate = interaction.options.getString("due_date"),
+        owner = choice === "resolve-action" ? interaction.options.getUser("owner") : null,
+        intentionallyUnassigned = interaction.options.getBoolean(
+          "intentionally_unassigned"
+        );
+      if (modality !== null && modality !== "commitment" && modality !== "request")
+        throw new Error("Unknown action modality");
       return {
         ...base,
         type: "judge",
+        ...(modality ? { modality } : {}),
+        ...(dueDate ? { dueDate } : {}),
+        ...(owner ? { ownerDiscordUserId: owner.id } : {}),
+        ...(intentionallyUnassigned !== null ? { intentionallyUnassigned } : {}),
         revision: interaction.options.getInteger("revision", true),
         claimId: interaction.options.getString("claim_id", true),
         choice,
@@ -1509,6 +1548,50 @@ const meetingCommand = new SlashCommandBuilder()
   )
   .addSubcommand((command) =>
     command
+      .setName("actions")
+      .setDescription(
+        "Review or explicitly execute derived actions from captured meetings"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Operation (defaults to review)")
+          .addChoices(
+            ...["review", "accept", "reject", "refresh", "execute", "recover"].map(
+              (value) => ({ name: value, value })
+            )
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting from /meeting captures")
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Current synthesis revision, required for changes")
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact action review to accept, reject or refresh")
+          .setMaxLength(2000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Exact action intent to approve and execute, or recover")
+          .setMaxLength(2000)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
       .setName("judge")
       .setDescription("Confirm, correct or reject one exact synthesis claim as a founder")
       .addIntegerOption((option) =>
@@ -1533,7 +1616,35 @@ const meetingCommand = new SlashCommandBuilder()
           .addChoices(
             { name: "Confirm claim", value: "confirm" },
             { name: "Correct claim", value: "correct" },
-            { name: "Reject claim", value: "reject" }
+            { name: "Reject claim", value: "reject" },
+            { name: "Resolve action details", value: "resolve-action" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("modality")
+          .setDescription("Explicit Human commitment or request for resolve-action")
+          .addChoices(
+            { name: "Commitment", value: "commitment" },
+            { name: "Request", value: "request" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("due_date")
+          .setDescription("YYYY-MM-DD, or none for explicitly no deadline")
+          .setMaxLength(10)
+      )
+      .addUserOption((option) =>
+        option
+          .setName("owner")
+          .setDescription("Founder explicitly responsible for this action")
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("intentionally_unassigned")
+          .setDescription(
+            "Explicitly leave responsibility unassigned instead of selecting an owner"
           )
       )
       .addStringOption((option) =>

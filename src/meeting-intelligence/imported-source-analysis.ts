@@ -175,8 +175,10 @@ export async function projectImportedSourceMaterial(
   const allowedSource = (source: ImportedMeetingSource) =>
     receipts.some((receipt) => sameImportedSourceRevision(source, receipt.source));
   const sources = state.importedSources.filter(allowedSource);
-  const candidates = state.importedActionItemCandidates.filter((item) =>
-    allowedSource(item.source.source)
+  const candidates = state.importedActionItemCandidates.filter(
+    (item) =>
+      item.source.source.sourceKind === "capture-synthesis" ||
+      allowedSource(item.source.source)
   );
   const candidateIds = new Set(candidates.map((item) => item.id));
   const reviews = state.actionItemReconciliationReviews.filter((item) =>

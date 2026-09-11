@@ -13,7 +13,8 @@ configuration and exact-page grants described in
 [imported Meeting understanding](imported-meeting-understanding.md) still apply.
 `startServer` adds this catalog only when the dedicated imported-source access
 configuration is present. Its restricted verifier receives the external provider
-catalogs before the leaf is appended, preventing recursive Meeting lookups.
+catalogs before the leaf is appended. The owned verifier binds the read-only
+Meeting proof leaf into a bounded receipt graph; no caller adds extraction stages.
 
 Every returned item requires immutable original source-analysis receipts for
 that Meeting, an actual recipient set contained in every original audience,
@@ -49,17 +50,33 @@ original request and audience, current external catalog membership, exact source
 versions, current grants, and the original external discovery state. Cited
 external Evidence must exactly match the originally selected source bytes.
 
-The verifier never calls a prior-Meeting catalog. A receipt containing prior-Meeting
-source material, unavailable prior-Meeting reads, or nonempty/failed prior-Meeting
-discovery is withheld. An explicitly empty prior-Meeting search can be skipped
-because it contributed no borrowed text; external discovery and source proofs
-are still revalidated, including receipts with no selected external sources.
-New external discovery, changed versions, or lost grants invalidate recall.
-Multi-hop Meeting dependencies need a separate bounded graph proof and remain
-excluded. Direct Discord utterances without durable original audience grants,
-legacy imported items without grants, and inactive or mismatched Evidence are
-also withheld. Direct Discord historical capture admission and Granola ingestion
-remain separate capabilities.
+The external-only verifier still refuses prior-Meeting material. Its owned graph
+extension can prove an imported item's earlier Meeting dependencies using the
+persisted receipt graph. Every edge rechecks the original request and audience,
+exact selected source snapshots, discovery membership, source grants, and Human
+revision heads. It verifies provider receipts again after graph traversal and
+fences all admitted original sources before returning. It performs no model calls,
+new captures, provider writes, or receipt writes. The graph is bounded to four
+Meeting identities on a path, 40 leaf reads, 40 receipt proofs and one 15-second
+deadline. Exhaustion withholds the item; it cannot produce a successful empty proof.
+
+Discovery and reproof use the same current-subject/path exclusions. For A → B → C,
+C cannot become new independent evidence for A or B: proving C from those subjects
+would require a Meeting already on that path. Such circular descendants are
+ineligible; actual cyclic dependencies are also refused. Unrelated newly eligible
+Meeting evidence still changes discovery and invalidates the earlier receipt.
+An originally empty, successful Meeting search contributed no borrowed text and
+can be skipped; external discovery and source proofs are always revalidated,
+including receipts with no selected external sources.
+
+Direct Discord utterances without durable original audience grants, legacy
+imported items without grants, and inactive or mismatched Evidence remain withheld
+in current and historical recall. The partial-coverage warning states this exclusion.
+Current channel readers, founder roles, Meeting participants or later successful
+access never backfill a missing original audience. Canonical speech and prior
+snapshots remain retained. Forward admission of governed Conversation captures
+and Granola LogicalMeeting evidence are separate source capabilities; this catalog
+does not convert them into imported Meeting rows.
 
 The version-five evaluation creates real immutable Notion-shaped captures,
 accepts and analyzes them through Meeting Intelligence with external context,
@@ -78,3 +95,10 @@ source and external grant revocation invalidate final delivery, and that success
 bounded retrieval does not report the import as rejected. It uses the real ledger,
 source proof, Meeting Intelligence, retrieval and Ask implementations with
 programmable transport and model adapters.
+
+The multi-hop behavioral checks analyze three successive imports through actual
+Meeting Intelligence and the combined catalogs, then query and conclude each
+Meeting and recall them from a separate conversation. They cover circular
+subject exclusion, changed original sources and grants, Human rejection, external
+revocation, unrelated new discovery, and zero additional model interpretation on
+reproof. Additional actual receipt-store checks reject cycles and graph bounds.

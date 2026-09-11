@@ -83,11 +83,31 @@ export interface OrganizationalContext {
   requireCurrent(request: OrganizationalContextRequest, receiptId: string): Promise<void>;
 }
 
-/** Restricted proof capability; it cannot discover context or call prior-Meeting catalogs. */
-export interface ExternalContextReceiptVerifier {
+/** Internal read-only proof leaf. It never calls another context verifier or catalog. */
+export interface MeetingContextProofLeaves {
+  readonly id: string;
+  search: ContextCatalog["search"];
+  read(input: Parameters<ContextCatalog["read"]>[0]): Promise<{
+    source: ContextSource;
+    meetingId: string;
+    receipts: Array<{ id: string; request: OrganizationalContextRequest }>;
+    requireCurrent(
+      this: void,
+      dependencies: Array<{ id: string; sources: RetrievedContextSource[] }>
+    ): Promise<void>;
+  } | null>;
+}
+export interface ContextReceiptVerifier {
   requireCurrent(input: {
     originalRequest: OrganizationalContextRequest;
+    /** Outer retrieval subject remains excluded through every dependency edge. */
+    subject?: OrganizationalContextRequest["subject"];
     receiptId: string;
     audience: ContextAudience;
   }): Promise<{ sources: RetrievedContextSource[] }>;
+}
+
+/** External verification stays restricted; only this owned constructor admits bounded leaf graphs. */
+export interface ExternalContextReceiptVerifier extends ContextReceiptVerifier {
+  withMeetingLeaves?(leaves: MeetingContextProofLeaves): ContextReceiptVerifier;
 }

@@ -3,6 +3,9 @@ import type { EvidenceReference, MeetingState, Provenance } from "../domain/mode
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
   ContextAudience,
+  ContextReceiptVerifier,
+  MeetingContextProofLeaves,
+  RetrievedContextSource,
   ContextCatalog,
   ContextSource,
   ExternalContextReceiptVerifier,
@@ -43,6 +46,7 @@ export function createImportedMeetingContextCatalog(input: {
   externalContext?: ExternalContextReceiptVerifier;
 }): ContextCatalog {
   const { database, sourceAccess } = input;
+  let contextVerifier: ContextReceiptVerifier | undefined = input.externalContext;
   const load = async (workspaceId: string, meetingId: string) => {
     const rows = await database.query<{ state_json: string }>(
       "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",
@@ -159,23 +163,22 @@ export function createImportedMeetingContextCatalog(input: {
     }
     return result;
   };
-  const prove = async (leaf: Leaf, audience: ContextAudience) => {
-    for (const receipt of leaf.receipts)
-      await sourceAccess.requireCurrent({
-        source: structuredClone(receipt.source),
-        audience: structuredClone(audience)
-      });
+  const checkEvidence = (
+    leaf: Leaf,
+    proofs: Array<{ id: string; sources: RetrievedContextSource[] }>
+  ) => {
+    if (
+      proofs.length !== leaf.externalReceipts.length ||
+      leaf.externalReceipts.some(
+        (receipt) => !proofs.some((proof) => proof.id === receipt.id)
+      )
+    )
+      throw unavailable();
     const externalEvidence = new Map<string, EvidenceReference>();
-    for (const receipt of leaf.externalReceipts) {
-      if (!input.externalContext) throw unavailable();
-      const proof = await input.externalContext.requireCurrent({
-        originalRequest: receipt.request,
-        receiptId: receipt.id,
-        audience
-      });
+    for (const proof of proofs) {
       for (const source of proof.sources) {
         const evidence: EvidenceReference = {
-          evidenceId: `organizational-context:${receipt.id}:${source.snapshotId}`,
+          evidenceId: `organizational-context:${proof.id}:${source.snapshotId}`,
           source:
             source.kind === "knowledge-document"
               ? "knowledge"
@@ -201,110 +204,145 @@ export function createImportedMeetingContextCatalog(input: {
       )
     )
       throw unavailable();
-    // Human rejection/correction or a new capture during the external proof must
-    // invalidate the exact persisted projection before it can leave the catalog.
+  };
+  const prove = async (
+    leaf: Leaf,
+    audience: ContextAudience,
+    dependencies = true,
+    subject?: OrganizationalContextRequest["subject"]
+  ) => {
+    for (const receipt of leaf.receipts)
+      await sourceAccess.requireCurrent({
+        source: structuredClone(receipt.source),
+        audience: structuredClone(audience)
+      });
+    if (dependencies) {
+      const proofs = [];
+      for (const receipt of leaf.externalReceipts) {
+        if (!contextVerifier) throw unavailable();
+        const proof = await contextVerifier.requireCurrent({
+          originalRequest: receipt.request,
+          receiptId: receipt.id,
+          ...(subject ? { subject } : {}),
+          audience
+        });
+        proofs.push({ id: receipt.id, sources: proof.sources });
+      }
+      checkEvidence(leaf, proofs);
+      // The item's own grant may change while the dependency graph is read.
+      if (leaf.externalReceipts.length)
+        for (const receipt of leaf.receipts)
+          await sourceAccess.requireCurrent({
+            source: structuredClone(receipt.source),
+            audience: structuredClone(audience)
+          });
+    }
     const current = await load(audience.workspaceId, leaf.state.meetingId);
     return current?.revision === leaf.state.revision;
   };
-  return {
-    id: importedMeetingContextCatalogId,
-    dependencyKind: "meeting",
-    async search({ audience, concepts, limit, subject }) {
-      audience = structuredClone(audience);
-      concepts = [...concepts];
-      subject = subject ? structuredClone(subject) : undefined;
-      if (
-        !validAudience(audience) ||
-        !Number.isSafeInteger(limit) ||
-        limit < 1 ||
-        limit > 100
-      )
-        throw unavailable();
-      const terms = [
-        ...new Set(concepts.map((term) => term.trim().toLowerCase()).filter(Boolean))
-      ].slice(0, 8);
-      if (!terms.length || terms.some((term) => term.length > 80))
-        return { sourceIds: [], complete: false, warnings: [limitation] };
-      const rows = await database.query<{ state_json: string }>(
-        `SELECT state_json FROM meetings WHERE workspace_id=$1
+  const search = async (
+    { audience, concepts, limit, subject }: Parameters<ContextCatalog["search"]>[0],
+    dependencies = true
+  ) => {
+    audience = structuredClone(audience);
+    concepts = [...concepts];
+    subject = subject ? structuredClone(subject) : undefined;
+    if (
+      !validAudience(audience) ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 100
+    )
+      throw unavailable();
+    const terms = [
+      ...new Set(concepts.map((term) => term.trim().toLowerCase()).filter(Boolean))
+    ].slice(0, 8);
+    if (!terms.length || terms.some((term) => term.length > 80))
+      return { sourceIds: [], complete: false, warnings: [limitation] };
+    const rows = await database.query<{ state_json: string }>(
+      `SELECT state_json FROM meetings WHERE workspace_id=$1
          AND EXISTS (SELECT 1 FROM meeting_imported_source_receipts receipt WHERE receipt.workspace_id=meetings.workspace_id AND receipt.meeting_id=meetings.meeting_id)
          AND EXISTS (SELECT 1 FROM unnest($2::text[]) term WHERE position(term in lower(state_json))>0)
          ORDER BY created_at,meeting_id LIMIT 20`,
-        [audience.workspaceId, terms]
-      );
-      const selected: Leaf[] = [];
-      for (const row of rows.rows) {
-        const state = JSON.parse(row.state_json) as MeetingState;
-        if (excluded(state.meetingId, subject)) continue;
-        for (const leaf of await leaves(state, audience)) {
-          if (selected.length >= limit) break;
-          if (!terms.some((term) => leaf.item.text.toLowerCase().includes(term)))
-            continue;
-          selected.push(leaf);
-        }
+      [audience.workspaceId, terms]
+    );
+    const selected: Leaf[] = [];
+    for (const row of rows.rows) {
+      const state = JSON.parse(row.state_json) as MeetingState;
+      if (excluded(state.meetingId, subject)) continue;
+      for (const leaf of await leaves(state, audience)) {
+        if (selected.length >= limit) break;
+        if (!terms.some((term) => leaf.item.text.toLowerCase().includes(term))) continue;
+        selected.push(leaf);
       }
-      const sourceIds: string[] = [];
-      for (const leaf of selected) {
-        try {
-          if (await prove(leaf, audience)) sourceIds.push(leaf.id);
-        } catch {
-          /* Never disclose an unverifiable discovery. */
-        }
-      }
-      return { sourceIds, complete: false, warnings: [limitation] };
-    },
-    async read({ audience, sourceId, subject }) {
-      audience = structuredClone(audience);
-      subject = subject ? structuredClone(subject) : undefined;
-      if (!validAudience(audience)) return null;
-      const identity = decode(sourceId);
-      if (!identity || excluded(identity.meetingId, subject)) return null;
-      const state = await load(audience.workspaceId, identity.meetingId);
-      if (!state) return null;
-      const leaf = (await leaves(state, audience)).find((item) => item.id === sourceId);
-      if (!leaf) return null;
-      const evidence = leaf.item.provenance.evidence.filter((entry) =>
-        leaf.receipts.some((receipt) => receipt.evidenceIds.includes(entry.evidenceId))
-      );
-      const supportingReceipts = leaf.receipts.filter((receipt) =>
-        evidence.some((entry) => receipt.evidenceIds.includes(entry.evidenceId))
-      );
-      const human =
-        state.humanJudgmentItemIds.includes(leaf.item.id) &&
-        leaf.item.provenance.analysisVersion === "human-judgment";
-      // Source time, never retrieval/replay time. A regenerated inference does not
-      // make old speech newer or independently corroborated.
-      const judgmentRevision = human
-        ? await database.query<{ created_at: string }>(
-            "SELECT created_at FROM meeting_revisions WHERE workspace_id=$1 AND meeting_id=$2 AND revision=$3",
-            [state.workspaceId, state.meetingId, leaf.item.provenance.producedAtRevision]
-          )
-        : null;
-      if (human && !judgmentRevision?.rows[0]) return null;
+    }
+    const sourceIds: string[] = [];
+    for (const leaf of selected) {
       try {
-        if (!(await prove(leaf, audience))) return null;
+        if (await prove(leaf, audience, dependencies, subject)) sourceIds.push(leaf.id);
       } catch {
-        throw unavailable();
+        /* Never disclose an unverifiable discovery. */
       }
-      const instants = judgmentRevision?.rows[0]
-        ? [Date.parse(judgmentRevision.rows[0].created_at)]
-        : supportingReceipts.map((receipt) => Date.parse(receipt.source.capturedAt));
-      if (!instants.length || instants.some((instant) => !Number.isFinite(instant)))
-        return null;
-      const updatedAt = new Date(Math.max(...instants)).toISOString();
-      const content = JSON.stringify({
-        kind: leaf.item.kind,
-        statement: leaf.item.text,
-        detail: leaf.item.detail,
-        confidence: leaf.item.provenance.confidence,
-        evidence: leaf.item.provenance.evidence.filter(
-          (entry) => entry.source !== "human-judgment"
-        ),
-        interpretation:
-          "Persisted Meeting understanding, not a canonical Decision Record or executed work. Original wording and qualification remain in the evidence. Human confirmation is an explicit overlay; source speaker names alone do not confirm ownership."
-      });
-      if (content.length > 100_000) throw unavailable();
-      return {
+    }
+    return { sourceIds, complete: false, warnings: [limitation] };
+  };
+  const read = async (
+    { audience, sourceId, subject }: Parameters<ContextCatalog["read"]>[0],
+    dependencies = true
+  ) => {
+    audience = structuredClone(audience);
+    subject = subject ? structuredClone(subject) : undefined;
+    if (!validAudience(audience)) return null;
+    const identity = decode(sourceId);
+    if (!identity || excluded(identity.meetingId, subject)) return null;
+    const state = await load(audience.workspaceId, identity.meetingId);
+    if (!state) return null;
+    const leaf = (await leaves(state, audience)).find((item) => item.id === sourceId);
+    if (!leaf) return null;
+    const evidence = leaf.item.provenance.evidence.filter((entry) =>
+      leaf.receipts.some((receipt) => receipt.evidenceIds.includes(entry.evidenceId))
+    );
+    const supportingReceipts = leaf.receipts.filter((receipt) =>
+      evidence.some((entry) => receipt.evidenceIds.includes(entry.evidenceId))
+    );
+    const human =
+      state.humanJudgmentItemIds.includes(leaf.item.id) &&
+      leaf.item.provenance.analysisVersion === "human-judgment";
+    // Source time, never retrieval/replay time. A regenerated inference does not
+    // make old speech newer or independently corroborated.
+    const judgmentRevision = human
+      ? await database.query<{ created_at: string }>(
+          "SELECT created_at FROM meeting_revisions WHERE workspace_id=$1 AND meeting_id=$2 AND revision=$3",
+          [state.workspaceId, state.meetingId, leaf.item.provenance.producedAtRevision]
+        )
+      : null;
+    if (human && !judgmentRevision?.rows[0]) return null;
+    try {
+      if (!(await prove(leaf, audience, dependencies, subject))) return null;
+    } catch {
+      throw unavailable();
+    }
+    const instants = judgmentRevision?.rows[0]
+      ? [Date.parse(judgmentRevision.rows[0].created_at)]
+      : supportingReceipts.map((receipt) => Date.parse(receipt.source.capturedAt));
+    if (!instants.length || instants.some((instant) => !Number.isFinite(instant)))
+      return null;
+    const updatedAt = new Date(Math.max(...instants)).toISOString();
+    const content = JSON.stringify({
+      kind: leaf.item.kind,
+      statement: leaf.item.text,
+      detail: leaf.item.detail,
+      confidence: leaf.item.provenance.confidence,
+      evidence: leaf.item.provenance.evidence.filter(
+        (entry) => entry.source !== "human-judgment"
+      ),
+      interpretation:
+        "Persisted Meeting understanding, not a canonical Decision Record or executed work. Original wording and qualification remain in the evidence. Human confirmation is an explicit overlay; source speaker names alone do not confirm ownership."
+    });
+    if (content.length > 100_000) throw unavailable();
+    return {
+      leaf,
+      source: {
         id: sourceId,
         kind: "previous-meeting-item",
         title: `Meeting ${leaf.item.kind}: ${leaf.item.text.slice(0, 160)}`,
@@ -322,8 +360,33 @@ export function createImportedMeetingContextCatalog(input: {
         externalReference: { ...supportingReceipts[0]!.source.externalReference },
         standing: leaf.item.standing,
         authority: human ? "human-confirmed" : "ai-inference"
-      } satisfies ContextSource;
+      } satisfies ContextSource
+    };
+  };
+  const proofLeaves: MeetingContextProofLeaves = {
+    id: importedMeetingContextCatalogId,
+    search: (request) => search(request, false),
+    read: async (request) => {
+      const result = await read(request, false);
+      if (!result) return null;
+      return {
+        source: result.source,
+        meetingId: result.leaf.state.meetingId,
+        receipts: result.leaf.externalReceipts,
+        requireCurrent: async (proofs) => {
+          checkEvidence(result.leaf, proofs);
+          if (!(await prove(result.leaf, request.audience, false))) throw unavailable();
+        }
+      };
     }
+  };
+  contextVerifier =
+    input.externalContext?.withMeetingLeaves?.(proofLeaves) ?? input.externalContext;
+  return {
+    id: importedMeetingContextCatalogId,
+    dependencyKind: "meeting",
+    search: (request) => search(request),
+    read: async (request) => (await read(request))?.source ?? null
   };
 }
 

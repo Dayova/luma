@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
-import { Routes } from "discord.js";
+import { MessageFlags, Routes } from "discord.js";
 import { z } from "zod";
 import {
   ConsultationNotPublishedError,
   type AdvisoryConsultation,
+  type ConsultationSourceProof,
   type ConsultationProvider,
   type ConsultationReceipt
 } from "../consultation/interface.js";
 import type { ExternalReference } from "../domain/model.js";
-import type { ConversationEvidenceProof } from "../context-intelligence/conversation-evidence-source.js";
 import {
   createDiscordLiveAudience,
   type DiscordAudienceReader
@@ -36,6 +36,8 @@ const messageSchema = z.object({
   webhook_id: id.nullable().optional(),
   content: z.string().max(4_000),
   timestamp: z.string().datetime({ offset: true }),
+  flags: z.number().int().nonnegative().optional(),
+  mention_roles: z.array(id).optional(),
   message_reference: z
     .object({ message_id: id.optional(), channel_id: id.optional() })
     .optional(),
@@ -61,7 +63,7 @@ export function createDiscordConsultationProvider(input: {
   /** Configured policy maps immutable people; display names never grant recipients. */
   resolveRecipients(personIds: readonly string[]): Promise<string[] | null>;
   authorizeHumanReader(discordUserId: string): Promise<boolean>;
-  requireSourceCurrent(proof: ConversationEvidenceProof): Promise<void>;
+  requireSourceCurrent(proof: ConsultationSourceProof): Promise<void>;
   now?: () => Date;
 }): ConsultationProvider {
   const now = input.now ?? (() => new Date());
@@ -89,15 +91,6 @@ export function createDiscordConsultationProvider(input: {
         "The authenticated Luma bot is unavailable."
       );
     await bounded(input.requireSourceCurrent(plan.source), signal);
-    const channel = await bounded(
-      audience.resolveChannel(plan.source.subject.conversationObjectId),
-      signal
-    );
-    if (!channel || channel.kind !== "public-thread")
-      throw refusal(
-        "consultation-destination-refused",
-        "The poll destination is not an admitted founder-only thread."
-      );
     const recipients = await bounded(
       input.resolveRecipients(plan.recipientPersonIds),
       signal
@@ -110,6 +103,15 @@ export function createDiscordConsultationProvider(input: {
       throw refusal(
         "consultation-recipients-unresolved",
         "The intended poll recipients cannot be mapped uniquely."
+      );
+    const channel = await bounded(
+      audience.resolveChannel(plan.source.subject.conversationObjectId, recipients),
+      signal
+    );
+    if (!channel || channel.kind !== "public-thread")
+      throw refusal(
+        "consultation-destination-refused",
+        "The poll destination does not admit exactly the intended founder audience."
       );
     const [rawRoles, rawMembers] = await Promise.all([
       bounded(input.rest.get(Routes.guildRoles(input.guildId), { signal }), signal),
@@ -178,6 +180,7 @@ export function createDiscordConsultationProvider(input: {
     );
     const parsed = messageSchema.safeParse(raw);
     return parsed.success &&
+      reference.version === bindingVersion(plan, parsed.data) &&
       parsed.data.id === reference.externalId &&
       parsed.data.channel_id === plan.source.subject.conversationObjectId
       ? parsed.data
@@ -192,7 +195,8 @@ export function createDiscordConsultationProvider(input: {
   ): Promise<ConsultationReceipt | null> {
     if (
       candidate.channel_id !== plan.source.subject.conversationObjectId ||
-      candidate.webhook_id
+      candidate.webhook_id ||
+      !sameSourceDiscussion(plan, candidate)
     )
       return null;
     const origin = candidate.author.bot
@@ -225,11 +229,20 @@ export function createDiscordConsultationProvider(input: {
         providerId: "discord",
         objectType: "other",
         externalId: candidate.id,
-        url: `https://discord.com/channels/${input.guildId}/${candidate.channel_id}/${candidate.id}`
+        url: `https://discord.com/channels/${input.guildId}/${candidate.channel_id}/${candidate.id}`,
+        version: bindingVersion(plan, candidate)
       },
       origin,
       disposition,
       observedAt: now().toISOString(),
+      mention:
+        origin === "human"
+          ? "not-requested"
+          : ((candidate.flags ?? 0) & MessageFlags.FailedToMentionSomeRolesInThread) !== 0
+            ? "incomplete"
+            : candidate.mention_roles?.includes(plan.recipientGroupId)
+              ? "verified-role"
+              : "unknown",
       poll
     };
   }
@@ -259,16 +272,33 @@ export function createDiscordConsultationProvider(input: {
         "The bounded discussion cannot establish whether a matching poll already exists."
       );
     const matches: ConsultationReceipt[] = [];
-    for (const candidate of parsed.data) {
+    const candidates = new Map(parsed.data.map((candidate) => [candidate.id, candidate]));
+    for (const candidateId of plan.choice.pollMessageIds) {
+      const rawCandidate = await bounded(
+        input.rest.get(
+          Routes.channelMessage(plan.source.subject.conversationObjectId, candidateId),
+          { signal }
+        ),
+        signal
+      );
+      const candidate = messageSchema.safeParse(rawCandidate);
+      if (
+        !candidate.success ||
+        candidate.data.id !== candidateId ||
+        candidate.data.channel_id !== plan.source.subject.conversationObjectId
+      )
+        throw refusal(
+          "consultation-captured-poll-unavailable",
+          "A captured poll cannot be verified; no new poll will be posted."
+        );
+      candidates.set(candidateId, candidate.data);
+    }
+    for (const candidate of candidates.values()) {
       const ownMarker =
         candidate.author.bot &&
         candidate.author.id === input.botUserId() &&
-        candidate.content.includes(operationMarker(request.operationId));
-      const sameDiscussion =
-        candidate.message_reference?.message_id === anchor &&
-        (!candidate.message_reference.channel_id ||
-          candidate.message_reference.channel_id ===
-            plan.source.subject.conversationObjectId);
+        candidate.content.includes(operationPrefix(request.operationId));
+      const sameDiscussion = sameSourceDiscussion(plan, candidate);
       if (!ownMarker && (onlyOperation || !sameDiscussion)) continue;
       const found = await receipt(plan, candidate, "reused", signal);
       if (
@@ -347,7 +377,7 @@ export function createDiscordConsultationProvider(input: {
                       users: [],
                       replied_user: false
                     },
-                    nonce: operationMarker(request.operationId).slice(-25),
+                    nonce: digest([request.operationId, plan]).slice(0, 25),
                     enforce_nonce: true,
                     flags: 4
                   }
@@ -478,6 +508,21 @@ function validPlan(plan: AdvisoryConsultation, roleId: string): boolean {
     plan.recipientPersonIds.length <= 20 &&
     new Set(plan.recipientPersonIds).size === plan.recipientPersonIds.length &&
     plan.recipientPersonIds.every((person) => typeof person === "string" && !!person) &&
+    !!plan.choice &&
+    ["conversation-evidence", "meeting-item"].includes(plan.choice.type) &&
+    Array.isArray(plan.choice.pollMessageIds) &&
+    plan.choice.pollMessageIds.length <= 10 &&
+    new Set(plan.choice.pollMessageIds).size === plan.choice.pollMessageIds.length &&
+    plan.choice.pollMessageIds.every((messageId) => id.safeParse(messageId).success) &&
+    (plan.choice.type !== "conversation-evidence" ||
+      (Array.isArray(plan.choice.messageIds) &&
+        plan.choice.messageIds.length > 0 &&
+        plan.choice.messageIds.length <= 500 &&
+        plan.choice.pollMessageIds.every(
+          (messageId) =>
+            plan.choice.type === "conversation-evidence" &&
+            plan.choice.messageIds.includes(messageId)
+        ))) &&
     !!plan.source &&
     plan.source.subject?.providerId === "discord" &&
     plan.source.subject.type === "conversation-thread" &&
@@ -498,7 +543,7 @@ function validReference(
       `https://discord.com/channels/${guildId}/${plan.source.subject.conversationObjectId}/${reference.externalId}`
   );
 }
-function operationMarker(operationId: string): string {
+function operationPrefix(operationId: string): string {
   return `Luma advisory ${createHash("sha256").update(operationId).digest("hex")}`;
 }
 function validOperationId(value: string): boolean {
@@ -510,7 +555,32 @@ function renderContent(
   guildId: string
 ): string {
   const source = `https://discord.com/channels/${guildId}/${plan.source.subject.conversationObjectId}/${plan.source.subject.anchorMessageId}`;
-  return `<@&${plan.recipientGroupId}> Advisory consultation\n${plan.purpose}\nOwner: ${plan.owner ? plan.owner.personId : "not established"}. Open for ${plan.durationHours} hours; Discord shows the exact closing time.\nSource: ${source}\nThe result informs a Human decision. Objections and owner reasoning remain relevant; no execution is authorized by votes.\n${operationMarker(operationId)}`;
+  return `<@&${plan.recipientGroupId}> Advisory consultation\n${plan.purpose}\nOwner: ${plan.owner ? plan.owner.personId : "not established"}. Open for ${plan.durationHours} hours; Discord shows the exact closing time.\nSource: ${source}\nThe result informs a Human decision. Objections and owner reasoning remain relevant; no execution is authorized by votes.\n${operationPrefix(operationId)} ${digest(plan)}`;
+}
+function sameSourceDiscussion(plan: AdvisoryConsultation, message: PollMessage): boolean {
+  return (
+    plan.choice.pollMessageIds.includes(message.id) ||
+    (message.message_reference?.message_id === plan.source.subject.anchorMessageId &&
+      (!message.message_reference.channel_id ||
+        message.message_reference.channel_id ===
+          plan.source.subject.conversationObjectId))
+  );
+}
+function bindingVersion(plan: AdvisoryConsultation, message: PollMessage): string {
+  return `consultation:${digest([plan, message.id, message.channel_id, message.author, message.content, message.message_reference])}`;
+}
+function digest(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .filter((key) => object[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
+    .join(",")}}`;
 }
 function refusal(code: string, message: string): ConsultationNotPublishedError {
   return new ConsultationNotPublishedError(code, message);

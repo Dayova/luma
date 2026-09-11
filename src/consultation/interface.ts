@@ -2,10 +2,22 @@ import type { ExternalReference, PersonId, Provenance } from "../domain/model.js
 import type { ConversationPoll } from "../domain/conversation-poll.js";
 import type { ConversationEvidenceProof } from "../context-intelligence/conversation-evidence-source.js";
 
+export type ConsultationSourceProof = ConversationEvidenceProof & {
+  /** Stable instruction/discussion identity; poll outcomes are observed separately. */
+  authorizationHash: string;
+};
+
 /** Immutable advisory communication, separate from a confirmed Decision or work. */
 export type AdvisoryConsultation = {
   id: string;
-  meetingItemId: string;
+  choice:
+    | { type: "conversation-evidence"; messageIds: string[]; pollMessageIds: string[] }
+    | {
+        type: "meeting-item";
+        meetingId: string;
+        itemId: string;
+        pollMessageIds: string[];
+      };
   purpose: string;
   question: string;
   options: string[];
@@ -15,7 +27,7 @@ export type AdvisoryConsultation = {
   owner: { personId: PersonId; authorityEvidenceId: string } | null;
   recipientPersonIds: PersonId[];
   recipientGroupId: string;
-  source: ConversationEvidenceProof;
+  source: ConsultationSourceProof;
   authorization: {
     basis: "explicit-instruction" | "standing-policy";
     evidenceId: string;
@@ -32,6 +44,8 @@ export type ConsultationReceipt = {
   disposition: "published" | "reused";
   observedAt: string;
   poll: ConversationPoll;
+  /** Native delivery evidence; an incomplete mention never permits another send. */
+  mention: "verified-role" | "incomplete" | "not-requested" | "unknown";
 };
 
 /** A proof of no mutation, including admission, input, or provider refusal. */

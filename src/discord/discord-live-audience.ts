@@ -67,7 +67,8 @@ export function createDiscordLiveAudience(input: {
 
   /** The entire resolution is bounded; no SDK lookup precedes this proof. */
   async function resolveChannel(
-    channelId: string
+    channelId: string,
+    requiredHumanReaders: readonly string[] = []
   ): Promise<DiscordChannelSurface | null> {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -80,7 +81,7 @@ export function createDiscordLiveAudience(input: {
     try {
       // No positive cache survives this call, including retries of an old reply.
       return await Promise.race([
-        verify(channelId, controller.signal).catch(() => null),
+        verify(channelId, controller.signal, requiredHumanReaders).catch(() => null),
         expired
       ]);
     } finally {
@@ -169,7 +170,8 @@ export function createDiscordLiveAudience(input: {
 
   async function verify(
     channelId: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    requiredHumanReaders: readonly string[]
   ): Promise<DiscordChannelSurface | null> {
     if (!input.botUserId() || allowedParents.size === 0) return null;
     const first = await readSnapshot(channelId, signal);
@@ -177,6 +179,15 @@ export function createDiscordLiveAudience(input: {
     const bot = first.members.find((member) => member.user.id === input.botUserId());
     if (!bot || !mayView(bot, first.roles, first.guild.owner_id, first.parent))
       return null;
+    for (const userId of requiredHumanReaders) {
+      const member = first.members.find((candidate) => candidate.user.id === userId);
+      if (
+        !member ||
+        member.user.bot ||
+        !mayView(member, first.roles, first.guild.owner_id, first.parent)
+      )
+        return null;
+    }
     for (const member of first.members) {
       if (member.user.bot) continue;
       if (

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Routes } from "discord.js";
+import { MessageFlags, PermissionFlagsBits, Routes } from "discord.js";
 import { createDiscordConsultationProvider } from "../../src/discord/discord-consultation-provider.js";
 import {
   ConsultationNotPublishedError,
@@ -10,7 +10,7 @@ import { discordAudienceFixture } from "./discord-audience-fixture.js";
 function consultation(): AdvisoryConsultation {
   return {
     id: "consultation-one",
-    meetingItemId: "decision-one",
+    choice: { type: "conversation-evidence", messageIds: ["anchor"], pollMessageIds: [] },
     purpose: "Collect objections before choosing the internal release date.",
     question: "Release Luma internally?",
     options: ["Proceed", "Pause"],
@@ -28,7 +28,8 @@ function consultation(): AdvisoryConsultation {
         anchorMessageId: "anchor"
       },
       question: "Discuss release",
-      contentHash: "source-hash"
+      contentHash: "source-hash",
+      authorizationHash: "stable-source-hash"
     },
     authorization: {
       basis: "explicit-instruction",
@@ -75,6 +76,8 @@ function fixture() {
         content: data.content,
         timestamp: now.toISOString(),
         message_reference: data.message_reference,
+        mention_roles: ["team"],
+        flags: 4,
         poll: {
           question: { text: plan.question },
           answers: plan.options.map((text, index) => ({
@@ -102,6 +105,12 @@ function fixture() {
     }
   );
   const requireSourceCurrent = vi.fn(() => Promise.resolve());
+  const resolveRecipients = vi.fn((people: readonly string[]) =>
+    Promise.resolve(people.length === 1 && people[0] === "jakob" ? ["founder"] : null)
+  );
+  const authorizeHumanReader = vi.fn((user: string) =>
+    Promise.resolve(user === "founder")
+  );
   const create = () =>
     createDiscordConsultationProvider({
       rest: { get, post },
@@ -109,11 +118,8 @@ function fixture() {
       allowedParentChannelIds: ["parent"],
       botUserId: () => "bot",
       teamRoleId: "team",
-      resolveRecipients: (people) =>
-        Promise.resolve(
-          people.length === 1 && people[0] === "jakob" ? ["founder"] : null
-        ),
-      authorizeHumanReader: (user) => Promise.resolve(user === "founder"),
+      resolveRecipients,
+      authorizeHumanReader,
       requireSourceCurrent,
       now: () => now
     });
@@ -126,6 +132,8 @@ function fixture() {
     post,
     get,
     requireSourceCurrent,
+    resolveRecipients,
+    authorizeHumanReader,
     advance: () => {
       now = new Date("2026-09-15T12:00:00Z");
     }
@@ -134,6 +142,139 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("advisory Discord consultation provider", () => {
+  it("cannot read or close an identical own poll from a different discussion", async () => {
+    const f = fixture();
+    const original = await f.provider.publish({
+      consultation: f.plan,
+      operationId: "op"
+    });
+    const otherDiscussion = structuredClone(f.plan);
+    otherDiscussion.source.subject.anchorMessageId = "unrelated-anchor";
+    otherDiscussion.choice = {
+      type: "conversation-evidence",
+      messageIds: ["unrelated-anchor"],
+      pollMessageIds: []
+    };
+    expect(
+      await f.provider.read({
+        consultation: otherDiscussion,
+        reference: original.reference
+      })
+    ).toBeNull();
+    await expect(
+      f.provider.close({ consultation: otherDiscussion, reference: original.reference })
+    ).rejects.toMatchObject({ code: "consultation-close-refused" });
+    expect(f.post).toHaveBeenCalledOnce();
+  });
+
+  it.each(["source", "authorization", "identity", "choice"])(
+    "binds operation recovery to the approved %s",
+    async (variant) => {
+      const f = fixture();
+      const original = await f.provider.publish({
+        consultation: f.plan,
+        operationId: "same-operation"
+      });
+      const changed = structuredClone(f.plan);
+      if (variant === "source") changed.source.contentHash = "different-source";
+      if (variant === "authorization")
+        changed.authorization.evidenceId = "different-instruction";
+      if (variant === "identity") changed.id = "different-consultation";
+      if (variant === "choice")
+        changed.choice = {
+          type: "conversation-evidence",
+          messageIds: ["anchor", "different-message"],
+          pollMessageIds: []
+        };
+      await expect(
+        f.provider.findPublished({ consultation: changed, operationId: "same-operation" })
+      ).rejects.toMatchObject({ code: "consultation-operation-conflict" });
+      await expect(
+        f.provider.publish({ consultation: changed, operationId: "same-operation" })
+      ).rejects.toMatchObject({ code: "consultation-operation-conflict" });
+      expect(
+        await f.provider.read({ consultation: changed, reference: original.reference })
+      ).toBeNull();
+      expect(f.post).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("requires every intended founder to be able to read the destination", async () => {
+    const f = fixture();
+    f.plan.recipientPersonIds.push("fabius");
+    f.resolveRecipients.mockResolvedValue(["founder", "second-founder"]);
+    f.authorizeHumanReader.mockImplementation((user) =>
+      Promise.resolve(["founder", "second-founder"].includes(user))
+    );
+    f.audience.state.members.push({
+      user: { id: "second-founder", bot: false },
+      roles: ["team"]
+    });
+    f.audience.state.overwrites.push({
+      id: "second-founder",
+      type: 1,
+      allow: "0",
+      deny: String(PermissionFlagsBits.ViewChannel)
+    });
+    await expect(
+      f.provider.publish({ consultation: f.plan, operationId: "op" })
+    ).rejects.toMatchObject({ code: "consultation-destination-refused" });
+    expect(f.post).not.toHaveBeenCalled();
+  });
+
+  it("preserves incomplete role notification as a successful publication without repeating the ping", async () => {
+    const f = fixture();
+    const actualPost = f.post.getMockImplementation()!;
+    f.post.mockImplementation(async (route, options) => {
+      const result = await actualPost(route, options);
+      f.messages[0]!["flags"] = MessageFlags.FailedToMentionSomeRolesInThread;
+      return { ...result, flags: MessageFlags.FailedToMentionSomeRolesInThread };
+    });
+    const request = { consultation: f.plan, operationId: "op" };
+    expect(await f.provider.publish(request)).toMatchObject({
+      disposition: "published",
+      mention: "incomplete"
+    });
+    expect(await f.create().findPublished(request)).toMatchObject({
+      disposition: "reused",
+      mention: "incomplete"
+    });
+    expect(await f.create().publish(request)).toMatchObject({
+      disposition: "reused",
+      mention: "incomplete"
+    });
+    expect(f.post).toHaveBeenCalledOnce();
+  });
+
+  it("reuses a captured founder poll that preceded the trigger without a reply reference", async () => {
+    const f = fixture();
+    await f.provider.publish({ consultation: f.plan, operationId: "fixture" });
+    f.messages[0]!["author"] = { id: "founder", bot: false };
+    f.messages[0]!["content"] = "Our release decision";
+    delete f.messages[0]!["message_reference"];
+    const get = f.get.getMockImplementation()!;
+    f.get.mockImplementation((route, options) =>
+      route === Routes.channelMessages("thread")
+        ? Promise.resolve([])
+        : get(route, options)
+    );
+    f.plan.choice = {
+      type: "conversation-evidence",
+      messageIds: ["published", "anchor"],
+      pollMessageIds: ["published"]
+    };
+    f.post.mockClear();
+    expect(
+      await f.provider.publish({ consultation: f.plan, operationId: "new" })
+    ).toMatchObject({
+      disposition: "reused",
+      origin: "human",
+      mention: "not-requested",
+      reference: { externalId: "published" }
+    });
+    expect(f.post).not.toHaveBeenCalled();
+  });
+
   it("does not report closure when Discord returns the unchanged open poll", async () => {
     const f = fixture();
     const published = await f.provider.publish({

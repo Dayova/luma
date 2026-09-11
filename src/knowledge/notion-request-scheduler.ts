@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
 export const NOTION_OPERATION_TIMEOUT_MS = 240_000;
 const WINDOW_MS = 60_000;
@@ -17,8 +17,11 @@ export class NotionRequestUnavailableError extends Error {
 
 /** Shared by actual clients using the same credential; never stores or exposes its raw token. */
 const schedules = new Map<string, NotionRequestScheduler>();
+// This is an in-memory credential grouping key, never a password verifier.
+// A process-local secret avoids retaining a stable cross-process token fingerprint.
+const groupingKey = randomBytes(32);
 export function sharedNotionRequestScheduler(token: string): NotionRequestScheduler {
-  const key = createHash("sha256").update(token).digest("hex");
+  const key = createHmac("sha256", groupingKey).update(token).digest("hex");
   const prior = schedules.get(key);
   if (prior) return prior;
   const scheduler = createNotionRequestScheduler();

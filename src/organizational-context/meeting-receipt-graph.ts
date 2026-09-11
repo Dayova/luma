@@ -48,7 +48,13 @@ export function createMeetingReceiptGraph(input: {
           args: Parameters<ContextCatalog["read"]>[0]
         ): Promise<ContextSource | null> => {
           bounded();
-          const key = JSON.stringify([args.audience, args.subject, args.sourceId, path]);
+          const key = JSON.stringify([
+            args.audience,
+            args.subject,
+            args.sourceId,
+            args.time,
+            path
+          ]);
           if (snapshots.has(key)) return snapshots.get(key)!;
           if (++leafReads > 40) exhaust();
           const leaf = await input.leaves.read(args);

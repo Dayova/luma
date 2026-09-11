@@ -24,10 +24,10 @@ cannot silently select a different record.
 
 The retained Organizational Context history stays stored after an amendment or
 permission revocation. Returning it still requires current source access and its
-original recipient grant. This catalog currently exposes each page's latest signed
-record revision and previously retrieved revisions. Retrieving older archive
-revisions that were never previously observed requires the pending bounded native
-history capability; this implementation does not claim that behavior yet.
+original recipient grant. The native reader additionally exposes bounded signed
+archive revisions through an optional read-only history capability. Previously unseen revisions are therefore
+available without first querying their earlier live state. Ordinary Decision
+reconciliation still receives only the current catalog.
 
 The behavioral tests use real Organizational Context and PGlite with a programmable
 external Decision reader. They cover current/historical selection, pending lineage,
@@ -83,4 +83,42 @@ Notion responses and a simulated 180/minute window. They prove a 100-record refr
 stays outside Ask, candidate search makes zero provider calls, selected records are
 read live, and foreground recall still works while a background refresh waits.
 These tests establish request and deadline behavior, not measured live latency.
-Unseen archive revisions remain the explicit pending history capability above.
+The same native background scan now supplies previously unseen archive revision
+candidates as described below.
+
+## Signed history and as-of questions
+
+The optional `DecisionRecordCatalog.history` capability returns a bounded archive
+manifest and exact revision reads. Native discovery shares the existing complete
+100-page scan and original-source/authority/Human-review proof pass. Archives retain
+their existing 100-revision and byte limits. Background recall stores at most 1,000
+revision hints, each with an opaque revision identity, ordinal, recorded time and
+at most 64 lexical terms; omitted revisions produce an explicit coverage limitation.
+It stores no signed archive or raw conversation in the discovery index. Earlier
+indexes remain readable and report missing history until the next successful scan.
+
+`ContextCatalog` receives the explicit request time mode. Current search uses only
+current hints, and current reads refuse historical IDs even if an earlier history
+query stored them locally. History search uses the signed revision hints and labels
+all such results historical, including each revision's actual recorded lifecycle.
+Every selected revision is fetched from its exact live canonical page through the
+dedicated reader. The native proof checks the complete signed archive, original
+recipients and current original source, authority and supplemental Human-review
+permissions. A revision version also binds the current archive head; an amendment,
+source revocation, removed page or changed signed region invalidates prior receipts.
+
+An as-of question selects the latest signed revision **recorded by** the requested
+instant for each candidate page, using the signed archive revision time. Exact reads enforce the same selection so older
+locally retained IDs cannot bypass it. Every new native write records this timestamp separately from the Decision's original
+recorded date, so a later retirement or activation cannot be backdated to creation.
+Recorded revision time means when Luma recorded that state; it is not a claim of the
+provider's exact transaction commit time. Legacy revisions without this field remain
+readable as labeled history; a requested as-of state is withheld if a later undated
+revision makes ordering uncertain. Existing signed payloads retain their original
+format and signature; no timestamp is fabricated or backfilled. Effective time is shown separately only when explicitly evidenced; it
+cannot make a later record known earlier, or automatically activate pending or
+provisional responsibility. Historical context does not claim that a record active
+at that time remains current now. Full history can return multiple labeled revisions
+within the ordinary context character, candidate and live-read deadlines. Matching
+revisions with equal relevance prefer the most recently recorded history within
+that bound; omissions remain explicit.

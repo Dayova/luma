@@ -41,6 +41,8 @@ export interface ContextCatalog {
     audience: ContextAudience;
     /** Allows prior-state catalogs to exclude the current subject. */
     subject?: OrganizationalContextRequest["subject"];
+    /** Explicit mode; absent means current-only. */
+    time?: OrganizationalContextRequest["time"];
     concepts: string[];
     limit: number;
   }): Promise<{ sourceIds: string[]; complete: boolean; warnings: string[] }>;
@@ -48,6 +50,8 @@ export interface ContextCatalog {
   read(input: {
     audience: ContextAudience;
     subject?: OrganizationalContextRequest["subject"];
+    /** Explicit mode; absent means current-only. */
+    time?: OrganizationalContextRequest["time"];
     sourceId: string;
   }): Promise<ContextSource | null>;
 }

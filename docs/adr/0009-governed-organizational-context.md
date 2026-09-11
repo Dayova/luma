@@ -16,7 +16,11 @@ is no age-based deletion. Current retrieval excludes historical/superseded
 versions, preserves old still-valid decisions, ranks Human-confirmed statements
 ahead of unaccepted proposals, discloses conflicts, and treats mirrors as duplicate
 citations rather than independent corroboration. Explicit historical queries can
-retrieve prior observed versions after fresh source eligibility checks.
+retrieve prior observed versions and bounded signed provider archive revisions after
+fresh source eligibility checks. Archived Decision versions are a separate read-only
+capability, labeled historical and excluded from current-default discovery and reads.
+As-of selection uses recorded time; explicitly evidenced effective time remains a
+separate applicability fact and never upgrades proposed authority.
 
 Returned excerpts and source scans are bounded and omissions are disclosed. Each
 bundle has a durable receipt binding the workspace, recipient set, question scope,

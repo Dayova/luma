@@ -1,4 +1,7 @@
-import type { DecisionRecordCatalog } from "../knowledge/decision-record-catalog.js";
+import type {
+  DecisionRecordCatalog,
+  DecisionRecordHistoricalRevision
+} from "../knowledge/decision-record-catalog.js";
 import type { CanonicalDecisionRecord } from "../domain/decision-records.js";
 import type { ExternalReference } from "../domain/model.js";
 import {
@@ -14,7 +17,7 @@ export function createDecisionContextCatalog(input: {
   /** Background candidates are discovery only; every returned source is still read live. */
   candidates?: {
     search(request: Parameters<ContextCatalog["search"]>[0]): Promise<{
-      references: ExternalReference[];
+      references: Array<{ reference: ExternalReference; revisionId?: string }>;
       complete: boolean;
       warnings: string[];
     }>;
@@ -37,10 +40,63 @@ export function createDecisionContextCatalog(input: {
     async search(request) {
       if (input.candidates) {
         const found = await input.candidates.search(request);
-        const ids = found.references.map(sourceId);
+        const ids = found.references.map((item) =>
+          item.revisionId
+            ? historicalSourceId(item.reference, item.revisionId)
+            : sourceId(item.reference)
+        );
         if (new Set(ids).size !== ids.length || ids.length > request.limit)
           throw new Error("Decision candidate discovery is ambiguous or unbounded");
         return { sourceIds: ids, complete: found.complete, warnings: found.warnings };
+      }
+      if (request.time?.mode === "history" && records.history) {
+        const found = await records.history.discover({
+          audience: request.audience,
+          limit: request.limit,
+          historyLimit: 1000
+        });
+        if (!found.current.complete)
+          return {
+            sourceIds: [],
+            complete: false,
+            warnings: ["Canonical Decision history could not be verified completely."]
+          };
+        let revisions = found.revisions
+          .filter((item) => historicalAt(item.recordedAt, request.time))
+          .sort((a, b) => b.ordinal - a.ordinal);
+        if (request.time.asOf) {
+          const pages = new Set<string>();
+          revisions = revisions.filter((item) => {
+            const id = sourceId(item.record.reference);
+            if (pages.has(id)) return false;
+            pages.add(id);
+            return !found.revisions.some(
+              (later) =>
+                sourceId(later.record.reference) === id &&
+                later.ordinal > item.ordinal &&
+                later.recordedAt === null
+            );
+          });
+        }
+        revisions.sort(
+          (a, b) =>
+            Date.parse(b.recordedAt ?? "1970-01-01T00:00:00Z") -
+              Date.parse(a.recordedAt ?? "1970-01-01T00:00:00Z") || b.ordinal - a.ordinal
+        );
+        const warnings = [];
+        if (!found.complete || revisions.length > request.limit)
+          warnings.push("Canonical Decision history exceeded its bounded revision scan.");
+        if (found.revisions.some((item) => item.recordedAt === null))
+          warnings.push(
+            "Legacy Decision revisions lack recorded revision time; as-of ordering may be unavailable."
+          );
+        return {
+          sourceIds: revisions
+            .slice(0, request.limit)
+            .map((item) => historicalSourceId(item.record.reference, item.revisionId)),
+          complete: warnings.length === 0,
+          warnings
+        };
       }
       const result = await records.discover({
         audience: request.audience,
@@ -59,9 +115,12 @@ export function createDecisionContextCatalog(input: {
         throw new Error("Canonical Decision discovery is ambiguous or unbounded");
       return { sourceIds: ids.sort(), complete: true, warnings: [] };
     },
-    async read({ audience, sourceId: id }) {
+    async read({ audience, sourceId: id, time }) {
       if (input.signal?.aborted) return null;
-      const reference = sourceReference(id);
+      const historical = historicalReference(id);
+      if (historical && (time?.mode !== "history" || !records.history)) return null;
+      if (!historical && time?.mode === "history" && records.history) return null;
+      const reference = historical?.reference ?? sourceReference(id);
       if (!reference || reference.providerId !== records.providerId) return null;
       const controller = new AbortController();
       const abort = () => controller.abort();
@@ -81,11 +140,23 @@ export function createDecisionContextCatalog(input: {
         Promise.resolve().then(() => {
           if (controller.signal.aborted)
             throw new Error("Decision context read was cancelled");
-          return records.readReference({
-            audience,
-            reference,
-            signal: controller.signal
-          });
+          return historical
+            ? records
+                .history!.readReference({
+                  audience,
+                  reference,
+                  revisionId: historical.revisionId,
+                  ...(time?.mode === "history" && time.asOf ? { asOf: time.asOf } : {}),
+                  signal: controller.signal
+                })
+                .then((revision) =>
+                  revision?.revisionId === historical.revisionId
+                    ? { record: revision.record, recordedAt: revision.recordedAt }
+                    : null
+                )
+            : records
+                .readReference({ audience, reference, signal: controller.signal })
+                .then((record) => (record ? { record, recordedAt: null } : null));
         }),
         timeout
       ]).finally(() => {
@@ -94,10 +165,16 @@ export function createDecisionContextCatalog(input: {
         controller.abort();
       });
       if (!raw) return null;
-      const record = canonicalDecisionRecordSchema.parse(raw);
-      if (sourceId(record.reference) !== id || !hasRecordedHumanAcceptance(record))
+      const record = canonicalDecisionRecordSchema.parse(raw.record);
+      if (
+        (historical
+          ? historicalSourceId(record.reference, historical.revisionId)
+          : sourceId(record.reference)) !== id ||
+        !hasRecordedHumanAcceptance(record) ||
+        (historical && !historicalAt(raw.recordedAt, time))
+      )
         return null;
-      return project(record, id);
+      return project(record, id, historical ? { recordedAt: raw.recordedAt } : undefined);
     }
   } satisfies ContextCatalog);
 }
@@ -171,7 +248,11 @@ function hasRecordedHumanAcceptance({ content }: CanonicalDecisionRecord): boole
     )
   );
 }
-function project(record: CanonicalDecisionRecord, id: string): ContextSource {
+function project(
+  record: CanonicalDecisionRecord,
+  id: string,
+  historical?: Pick<DecisionRecordHistoricalRevision, "recordedAt">
+): ContextSource {
   const { candidate, authority, status } = record.content;
   const lines = [
     `Decision: ${candidate.statement.text}`,
@@ -183,6 +264,17 @@ function project(record: CanonicalDecisionRecord, id: string): ContextSource {
       : []),
     `Accountable decision-maker: ${authority.decisionMakerPersonIds.join(", ")}.`,
     `Recorded at: ${record.content.recordedAt}.`,
+    `Effective at: ${candidate.effectiveAt ?? "not explicitly recorded"}.`,
+    ...(historical
+      ? [
+          `Revision recorded at: ${historical.recordedAt ?? "unknown in this legacy signed archive; as-of timing is unavailable"}.`
+        ]
+      : []),
+    ...(historical
+      ? [
+          "Historical signed revision: this is an archived state, not current organizational policy. Revision recording time describes knowledge history; effective time describes explicitly evidenced applicability."
+        ]
+      : []),
     ...(candidate.context ? [`Context: ${candidate.context.text}`] : []),
     ...candidate.rationale.map((claim) => `Rationale: ${claim.text}`),
     ...candidate.alternatives.map((claim) => `Alternative considered: ${claim.text}`),
@@ -217,13 +309,42 @@ function project(record: CanonicalDecisionRecord, id: string): ContextSource {
     title: candidate.statement.text.slice(0, 300),
     content: lines.join("\n"),
     version: record.version,
-    updatedAt: record.content.recordedAt,
+    updatedAt: historical?.recordedAt ?? record.content.recordedAt,
     externalReference: record.reference,
-    standing:
-      status === "active" ? "current" : status === "pending" ? "proposed" : "superseded",
+    standing: historical
+      ? "historical"
+      : status === "active"
+        ? "current"
+        : status === "pending"
+          ? "proposed"
+          : "superseded",
     authority: "human-confirmed",
     decisionKey: record.content.id,
-    ...(candidate.effectiveAt ? { effectiveAt: candidate.effectiveAt } : {}),
+    ...(candidate.effectiveAt && !historical
+      ? { effectiveAt: candidate.effectiveAt }
+      : {}),
     supersedes: record.content.supersedes.map(sourceId)
   };
+}
+
+function historicalSourceId(reference: ExternalReference, revisionId: string): string {
+  return `decision-history:${revisionId}:${sourceId(reference).slice(9)}`;
+}
+function historicalReference(
+  id: string
+): { reference: ExternalReference; revisionId: string } | null {
+  const match = /^decision-history:([a-f0-9]{64}):(.+)$/u.exec(id);
+  if (!match) return null;
+  const reference = sourceReference(`decision:${match[2]!}`);
+  return reference ? { reference, revisionId: match[1]! } : null;
+}
+function historicalAt(
+  recordedAt: string | null,
+  time: Parameters<ContextCatalog["search"]>[0]["time"]
+): boolean {
+  return (
+    time?.mode !== "history" ||
+    !time.asOf ||
+    (recordedAt !== null && Date.parse(recordedAt) <= Date.parse(time.asOf))
+  );
 }

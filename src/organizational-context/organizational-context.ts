@@ -74,6 +74,7 @@ export function createOrganizationalContext(input: {
       catalog.read({
         audience: structuredClone(request.audience),
         subject: structuredClone(request.subject),
+        time: structuredClone(request.time),
         sourceId
       }),
       Math.min(input.timeoutMs ?? 5_000, deadlineAt - Date.now())
@@ -109,6 +110,7 @@ export function createOrganizationalContext(input: {
             catalog.search({
               audience: structuredClone(request.audience),
               subject: structuredClone(request.subject),
+              time: structuredClone(request.time),
               concepts: [...request.concepts],
               limit: remaining
             }),
@@ -449,6 +451,7 @@ async function verifyReceipt(
       catalog.read({
         audience: structuredClone(bound.audience),
         subject: structuredClone(bound.subject),
+        time: structuredClone(bound.time),
         sourceId
       }),
       Math.min(input.timeoutMs ?? 5000, deadlineAt - Date.now())
@@ -514,6 +517,7 @@ async function verifyReceipt(
         catalog.search({
           audience: structuredClone(request.audience),
           subject: structuredClone(request.subject),
+          time: structuredClone(request.time),
           concepts: [...request.concepts],
           limit: search.limit
         }),

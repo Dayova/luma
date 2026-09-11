@@ -97,6 +97,13 @@ founder sharing policy; the writer creates no schema or sharing grants itself.
 A verified existing Notion Meeting Note is reused. Without one, the writer queries
 a deterministic Logical Meeting key and creates one ordinary Imported Meeting
 Record. It never creates a native Meeting Notes block or modifies source captures.
+A created Imported Record can subsequently use the original data-source grant only
+after its current parent, deterministic Logical Meeting key, signed owned region
+and original recipient audience are verified. That bounded proof is repeated
+after the page lease and before an update. It covers recovery and the persisted
+canonical anchor; it does not grant access to unrelated native source pages, which
+still require their exact document grant.
+
 Only the signed `Luma Synthesis` region is appended or exactly replaced. Existing
 Human text, original notes and separately owned Operational Outcome content stay
 outside that region. Contradictions, Human authority, source links and raw/derived

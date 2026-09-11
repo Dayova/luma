@@ -103,9 +103,18 @@ export function createNotionMeetingSynthesisWriter(config: {
     pageId: string,
     current: () => Promise<void>
   ) => {
-    await grant(p, current, pageId);
+    await current();
+    const documentGranted = await config.authorize({
+      audience: structuredClone(p.audience),
+      target: { type: "document", externalId: pageId }
+    });
+    // A database grant covers only a positively identified owned Imported Record.
+    // It never becomes a general grant for arbitrary native source pages.
+    const requireGrant = () => grant(p, current, documentGranted ? pageId : undefined);
+    await requireGrant();
     const before = page(await api.readPage(pageId), pageId);
-    await grant(p, current, pageId);
+    if (!documentGranted) requireImportedIdentity(p, before);
+    await requireGrant();
     const body = z
       .object({
         object: z.literal("page_markdown"),
@@ -118,12 +127,14 @@ export function createNotionMeetingSynthesisWriter(config: {
     if (requiredId(body.id) !== pageId)
       throw new Error("Notion returned another page's Markdown");
     const markdown = body.markdown;
-    await grant(p, current, pageId);
+    await requireGrant();
     const after = page(await api.readPage(pageId), pageId);
-    await grant(p, current, pageId);
+    await requireGrant();
     if (synthesisDigest(before) !== synthesisDigest(after))
       throw new Error("Synthesis target changed during read");
     const owned = parseMeetingSynthesisSection(markdown, config.signingKey);
+    if (!documentGranted && !owned)
+      throw new Error("A database grant requires a signed owned Imported Meeting Record");
     if (
       owned &&
       (owned.publication.workspaceId !== p.workspaceId ||
@@ -133,7 +144,32 @@ export function createNotionMeetingSynthesisWriter(config: {
         ))
     )
       throw new Error("Synthesis region belongs to another meeting or audience");
-    return { reference: reference(after), markdown, owned };
+    return {
+      reference: reference(after),
+      markdown,
+      owned,
+      documentGranted,
+      metadata: after
+    };
+  };
+  const requireImportedIdentity = (
+    p: MeetingSynthesisPublication,
+    metadata: ReturnType<typeof page>
+  ) => {
+    const key = z
+      .object({
+        type: z.literal("rich_text"),
+        rich_text: z.array(z.object({ plain_text: z.string() })).max(100)
+      })
+      .safeParse(metadata.properties?.[keyProperty]);
+    if (
+      metadata.parent.type !== "data_source_id" ||
+      canonicalNotionObjectId(metadata.parent.data_source_id) !== dataSourceId ||
+      !key.success ||
+      key.data.rich_text.map((value) => value.plain_text).join("") !==
+        synthesisRecordKey(p.workspaceId, p.logicalMeetingId)
+    )
+      throw new Error("Imported Meeting Record identity or actual parent is unverified");
   };
   const target = async (p: MeetingSynthesisPublication, current: () => Promise<void>) => {
     if (p.anchor) {
@@ -163,8 +199,7 @@ export function createNotionMeetingSynthesisWriter(config: {
     const id = matches.results[0]?.id;
     if (!id) return null;
     const result = await read(p, requiredId(id), current);
-    const metadata = page(await api.readPage(requiredId(id)), requiredId(id));
-    await grant(p, current, requiredId(id));
+    const metadata = result.metadata;
     if (
       metadata.parent.type !== "data_source_id" ||
       canonicalNotionObjectId(metadata.parent.data_source_id) !== dataSourceId ||
@@ -208,7 +243,15 @@ export function createNotionMeetingSynthesisWriter(config: {
           return result;
         }
         await input.beforeWrite(found?.reference ?? null);
-        await grant(p, input.requireCurrent, found?.reference.externalId);
+        if (found && !found.documentGranted) {
+          // Revalidate actual parent, signed ownership and original recipients after
+          // acquiring the page lease, immediately before a database-authorized write.
+          const fresh = await read(p, found.reference.externalId, input.requireCurrent);
+          if (synthesisDigest(fresh) !== synthesisDigest(found))
+            throw new Error("Imported publication target changed before dispatch");
+        } else {
+          await grant(p, input.requireCurrent, found?.reference.externalId);
+        }
         dispatched = true;
         let externalReference: ExternalReference;
         if (!found) {
@@ -264,6 +307,7 @@ const pageSchema = z.object({
   archived: z.literal(false),
   in_trash: z.literal(false),
   last_edited_time: z.string(),
+  properties: z.record(z.unknown()).optional(),
   parent: z.discriminatedUnion("type", [
     z.object({ type: z.literal("data_source_id"), data_source_id: z.string() }),
     z.object({ type: z.literal("page_id"), page_id: z.string() }),

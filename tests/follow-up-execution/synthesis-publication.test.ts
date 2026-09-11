@@ -9,7 +9,10 @@ import {
   createNotionMeetingSynthesisWriter,
   type NotionMeetingSynthesisTransport
 } from "../../src/knowledge/notion-meeting-synthesis-writer.js";
-import { parseMeetingSynthesisSection } from "../../src/knowledge/meeting-synthesis-markdown.js";
+import {
+  parseMeetingSynthesisSection,
+  renderMeetingSynthesisSection
+} from "../../src/knowledge/meeting-synthesis-markdown.js";
 import { readSynthesisPublication } from "../../src/meeting-intelligence/synthesis-publication-state.js";
 import type {
   ReasoningModel,
@@ -28,7 +31,7 @@ const parent = "11111111-1111-4111-8111-111111111111",
 const signingKey = "test-synthesis-key-012345678901234567890";
 const original =
   "Native Meeting Notes\nOriginal transcript: Wir könnten starten.\nOriginal provider summary\n## Luma — Operational Outcome\nExisting separately-owned outcome";
-async function setup(nativeAnchor = false, useSdk = false) {
+async function setup(nativeAnchor = false, useSdk = false, databaseOnly = false) {
   const database = await createPgliteDatabase();
   let sourceAllowed = true,
     targetAllowed = true,
@@ -38,6 +41,7 @@ async function setup(nativeAnchor = false, useSdk = false) {
     applyUnknown = true;
   let markdownIdentity: string | undefined;
   let afterMutation: (() => Promise<void> | void) | undefined;
+  let actualParent = parent;
   const pages = new Map<
     string,
     { markdown: string; key: string | null; version: number }
@@ -50,7 +54,13 @@ async function setup(nativeAnchor = false, useSdk = false) {
     archived: false,
     in_trash: false,
     last_edited_time: `v${pages.get(id)!.version}`,
-    parent: { type: "data_source_id", data_source_id: parent }
+    parent: { type: "data_source_id", data_source_id: actualParent },
+    properties: {
+      "Luma Meeting ID": {
+        type: "rich_text",
+        rich_text: pages.get(id)!.key ? [{ plain_text: pages.get(id)!.key }] : []
+      }
+    }
   });
   const normalize = (markdown: string) =>
     markdown
@@ -298,7 +308,8 @@ async function setup(nativeAnchor = false, useSdk = false) {
     importedMeetingsDataSourceId: parent,
     token: "test-token",
     signingKey,
-    authorize: () => Promise.resolve(targetAllowed),
+    authorize: ({ target }) =>
+      Promise.resolve(targetAllowed && (!databaseOnly || target.type === "data-source")),
     ...(useSdk ? { fetch: httpFetch } : { transport })
   });
   const executor = createFollowUpExecution({
@@ -336,6 +347,9 @@ async function setup(nativeAnchor = false, useSdk = false) {
     approve,
     meetingId,
     writer,
+    setActualParent: (value: string) => {
+      actualParent = value;
+    },
     setMarkdownIdentity: (id: string) => {
       markdownIdentity = id;
     },
@@ -839,6 +853,135 @@ describe("Capture synthesis approved canonical publication", () => {
       expect((await f.executor.execute(request)).observation.outcome.status).toBe(
         "succeeded"
       );
+    } finally {
+      await f.database.close();
+    }
+  });
+});
+
+describe("Owned Imported Record authorization through its actual database", () => {
+  it("creates, recovers, reopens its canonical anchor and updates with only the original database grant", async () => {
+    const f = await setup(false, true, true);
+    try {
+      const { intentId } = await f.approve();
+      const request = { workspace, meetingId: f.meetingId, intentId };
+      f.setLostResponse(true);
+      expect((await f.executor.execute(request)).observation.outcome.status).toBe(
+        "failed"
+      );
+      const restarted = createFollowUpExecution({
+        database: f.database,
+        meetingIntelligence: f.mi,
+        meetingSynthesisWriter: f.writer,
+        now: () => new Date(at)
+      });
+      expect((await restarted.recover(request)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect((await f.conclude()).captureSynthesis?.canonicalAnchorRef?.externalId).toBe(
+        imported
+      );
+      expect((await restarted.execute(request)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      const first = (await f.conclude()).captureSynthesis!;
+      expect(
+        (
+          await f.mi.observe({
+            workspace,
+            observations: [
+              {
+                type: "capture-synthesis-judgment-recorded",
+                observationId: "parent-grant-human-review",
+                workspaceId: workspace.workspaceId,
+                meetingId: f.meetingId,
+                occurredAt: at,
+                observedAt: at,
+                participantId: "person_jakob",
+                expectedSynthesisRevision: first.revision,
+                claimId: first.claims[0]!.id,
+                judgment: { kind: "confirm" }
+              }
+            ]
+          })
+        ).errors
+      ).toEqual([]);
+      const next = await f.approve();
+      // The fixture still loses the response; the new canonical-anchor path must recover
+      // the exact signed update without a newly invented document grant or second write.
+      expect(
+        (await restarted.execute({ ...request, intentId: next.intentId })).observation
+          .outcome.status
+      ).toBe("failed");
+      expect(
+        (await restarted.recover({ ...request, intentId: next.intentId })).observation
+          .outcome.status
+      ).toBe("succeeded");
+      expect(f.mutations()).toBe(2);
+      expect(f.pages.size).toBe(1);
+      expect(
+        parseMeetingSynthesisSection(f.pages.get(imported)!.markdown, signingKey)
+          ?.publication.synthesis.revision
+      ).toBe(2);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it.each(["parent", "key", "signature", "meeting", "audience"])(
+    "withholds a database-only recovery after %s changes",
+    async (change) => {
+      const f = await setup(false, true, true);
+      try {
+        const { intentId } = await f.approve();
+        const request = { workspace, meetingId: f.meetingId, intentId };
+        f.setLostResponse(true);
+        await f.executor.execute(request);
+        const page = f.pages.get(imported)!;
+        if (change === "parent") f.setActualParent(native);
+        if (change === "key") page.key = "another-meeting";
+        if (change === "signature")
+          page.markdown = page.markdown.replace('"signature":"', '"signature":"0');
+        if (change === "meeting" || change === "audience") {
+          const original = parseMeetingSynthesisSection(page.markdown, signingKey)!;
+          const changed = structuredClone(original.publication);
+          if (change === "meeting") changed.logicalMeetingId = "another-meeting";
+          if (change === "audience") changed.audience.personIds = ["person_fabius"];
+          page.markdown = page.markdown.replace(
+            original.section,
+            renderMeetingSynthesisSection(changed, signingKey)
+          );
+        }
+        if (change === "key")
+          expect((await f.executor.recover(request)).observation.outcome).toMatchObject({
+            status: "failed",
+            requiresManualRecovery: true
+          });
+        else await expect(f.executor.recover(request)).rejects.toThrow();
+        expect(f.mutations()).toBe(1);
+        expect(
+          (
+            await readSynthesisPublication(
+              f.database,
+              workspace.workspaceId,
+              f.meetingId,
+              intentId
+            )
+          )?.applied
+        ).toBeNull();
+      } finally {
+        await f.database.close();
+      }
+    }
+  );
+  it("does not extend the database grant to an unrelated native source anchor", async () => {
+    const f = await setup(true, true, true);
+    try {
+      const { intentId } = await f.approve();
+      await expect(
+        f.executor.execute({ workspace, meetingId: f.meetingId, intentId })
+      ).rejects.toBeInstanceOf(MeetingSynthesisWriteNotAppliedError);
+      expect(f.mutations()).toBe(0);
+      expect(f.pages.get(native)!.markdown).toBe(original);
     } finally {
       await f.database.close();
     }

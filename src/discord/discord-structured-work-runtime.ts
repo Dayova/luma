@@ -4,6 +4,7 @@ import type { WorkspaceConfig } from "../domain/model.js";
 import type {
   StructuredWorkConversationSubject,
   StructuredWorkState,
+  StructuredWorkUpdateValue,
   StructuredWorkSubject
 } from "../domain/structured-work.js";
 import type {
@@ -261,6 +262,16 @@ export function renderStructuredWorkResponse(
     if (result.reference && safeUrl(result.reference.url))
       details.push(`<${result.reference.url}>`);
   }
+  for (const proposal of state.updateProposals ?? []) {
+    details.push(
+      `${proposal.target === "record" ? "Notion record" : "Linear task"}: apply these proposed changes manually.`
+    );
+    if (safeUrl(proposal.reference.url)) details.push(`<${proposal.reference.url}>`);
+    for (const change of proposal.changes)
+      details.push(
+        `${change.label}: ${renderUpdateValue(change.before)} → ${renderUpdateValue(change.after)}`
+      );
+  }
   if (state.preview) {
     const preview = state.preview;
     details.push(
@@ -284,8 +295,26 @@ export function renderStructuredWorkResponse(
   const selected =
     Number.isSafeInteger(page) && page >= 1 ? Math.min(page, pages.length) : 1;
   const source = state.source.instructionSource?.subject ?? state.source.subject;
-  return `Structured work: ${state.state}. Page ${selected}/${pages.length}.\n${pages[selected - 1]}\nRequest ID: ${state.requestId}\nSource message: ${source.type === "conversation-thread" ? source.anchorMessageId : "unavailable"}. Meeting: ${state.subject.type === "meeting" ? "true" : "false"}.\n${selected < pages.length ? `Read all details with /structured-work status page:${selected + 1}.` : "Use /structured-work status for this receipt; recover checks an uncertain write without resending it."}`;
+  const nextStep =
+    state.state === "manual-application-required"
+      ? "Apply the proposed changes in the linked targets, then send a new command to reconcile their current state. Use /structured-work status to review this proposal."
+      : "Use /structured-work status for this receipt; recover checks an uncertain write without resending it.";
+  return `Structured work: ${state.state}. Page ${selected}/${pages.length}.\n${pages[selected - 1]}\nRequest ID: ${state.requestId}\nSource message: ${source.type === "conversation-thread" ? source.anchorMessageId : "unavailable"}. Meeting: ${state.subject.type === "meeting" ? "true" : "false"}.\n${selected < pages.length ? `Read all details with /structured-work status page:${selected + 1}.` : nextStep}`;
 }
+function renderUpdateValue(value: StructuredWorkUpdateValue | null): string {
+  if (value === null) return "not set";
+  if (value.type === "people")
+    return value.value.length
+      ? value.value
+          .map(
+            (person) =>
+              `${person.displayName} (${person.providerId}:${person.providerUserId})`
+          )
+          .join(", ")
+      : "unassigned";
+  return JSON.stringify(value.value);
+}
+
 function safeUrl(value: string): boolean {
   try {
     const url = new URL(value);

@@ -591,6 +591,49 @@ describe("native structured work runtime", () => {
     expect(f.external.createIssue).toHaveBeenCalledTimes(1);
   });
 
+  it("returns an actionable current manual update proposal from a native mention when the provider cannot update conditionally", async () => {
+    const f = await setup();
+    f.external.existingRecord();
+    f.external.override((plan) => {
+      plan.record.reconciliation = { action: "update", targetId: "existing-hypothesis" };
+    });
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Update this hypothesis in our Hypotheses table and create a Linear task to validate it.";
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    const content = sent.reply.mock.calls[0]![0].content;
+    expect(content).toContain("manual-application-required");
+    expect(content).toContain("<https://notion.so/existing-hypothesis>");
+    expect(content).toContain("not set →");
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+    expect(f.external.createIssue).not.toHaveBeenCalled();
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+    const id = requestId(content);
+    const current = await f.command("status", { request_id: id });
+    expect(current).toContain("manual-application-required");
+    f.external.records.get("existing-hypothesis")!.version = "changed-after-proposal";
+    const stale = await f.command("status", { request_id: id });
+    expect(stale).not.toContain("notion.so/existing-hypothesis");
+    expect(stale).not.toContain("not set →");
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+    expect(f.external.createIssue).not.toHaveBeenCalled();
+  });
+
+  it("keeps embedded quoted hypothesis text intact while resolving only its unquoted destination", async () => {
+    const f = await setup();
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Add the hypothesis “flexible learning times improve engagement” to our Hypotheses table and create a Linear task to validate it.";
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("completed");
+    expect(f.interpret.mock.calls[0]![0].instruction).toContain(
+      "“flexible learning times improve engagement”"
+    );
+    expect(f.external.createRecord).toHaveBeenCalledTimes(1);
+    expect(f.external.createIssue).toHaveBeenCalledTimes(1);
+  });
+
   it("resolves a configured full schema label without a hard-coded domain name", async () => {
     const f = await setup(false, "Product Experiments & Validation");
     f.messages.at(-1)!.content =
@@ -626,6 +669,22 @@ describe("native structured work runtime", () => {
     expect(sent.reply.mock.calls[0]![0].content).toContain(
       "more than one configured table"
     );
+    expect(sdk.fetch).not.toHaveBeenCalled();
+    expect(f.interpret).not.toHaveBeenCalled();
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+    expect(f.external.createIssue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Add the hypothesis Customer Feedback improves learning to our research table and create a validation task.",
+    String.raw`Add the hypothesis "students say \"learning in Customer Feedback\"" and create a task`
+  ])("does not use hypothesis content as a destination: %s", async (instruction) => {
+    const f = await setup(false, "Customer Feedback");
+    f.messages.at(-1)!.content = `<@bot_luma> ${instruction}`;
+    sdk.fetch.mockClear();
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("Name exactly one target");
     expect(sdk.fetch).not.toHaveBeenCalled();
     expect(f.interpret).not.toHaveBeenCalled();
     expect(f.external.createRecord).not.toHaveBeenCalled();

@@ -1,5 +1,8 @@
 import type { WorkspaceConfig } from "../domain/model.js";
-import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
+import {
+  isExplicitStructuredWorkInstruction,
+  parseExplicitStructuredWorkInstruction
+} from "../structured-work/explicit-instruction.js";
 import type { DiscordContextAskMention } from "./discord-context-ask-runtime.js";
 import type { DiscordCommandResponse } from "./discord-meeting-bot.js";
 import {
@@ -22,21 +25,37 @@ export function resolveStructuredWorkMentionTarget(
       .trim();
   // A destination mentioned only in the requested task is not a table selection.
   const knowledgeClause =
-    instruction.split(
-      /\b(?:and|und)\s+(?:(?:please|bitte)\s+)?(?:create|add|open|erstelle|lege|erzeuge)\b/iu
-    )[0] ?? "";
-  const clause = ` ${normalize(knowledgeClause)} `;
+    parseExplicitStructuredWorkInstruction(instruction)?.unquotedRecordClause ?? "";
+  const clause = normalize(knowledgeClause);
+  const preposition = "(?:to|into|in|zu|zur|zum)";
+  const article = "(?:(?:the|our|die|der|das|unsere|unser|unserer|eine|einer|einen) )?";
+  const table = "(?:table|database|data source|tabelle|datenbank)";
+  const mentioned = targets.filter((target) =>
+    [target.key, target.label].some((name) =>
+      ` ${clause} `.includes(` ${normalize(name)} `)
+    )
+  );
   const selected = targets.filter((target) =>
     [target.key, target.label].some((name) => {
       const literal = normalize(name);
-      return literal.length > 0 && clause.includes(` ${literal} `);
+      if (!literal) return false;
+      const destination = new RegExp(
+        `(?:^| )${preposition} ${article}(?:${table} )?${literal}(?: ${table})?(?: (?:ein|hinzu))?$`,
+        "u"
+      ).exec(clause);
+      if (!destination) return false;
+      // Extra destination-like constructions require clarification. Otherwise an
+      // incidental hypothesis name or a later source qualifier could retarget it.
+      return !new RegExp(`(?:^| )${preposition}(?: |$)`, "u").test(
+        clause.slice(0, destination.index)
+      );
     })
   );
   if (selected.length === 1) return { type: "selected", key: selected[0]!.key };
   const choices = targets.map((target) => target.key).join(", ");
   return {
     type: "clarify",
-    message: `${selected.length ? "The command names more than one configured table." : "I could not identify a configured table in the command."} Name exactly one target: ${choices}. No source analysis or writes were started. You can also use /structured-work request with this source message and the exact target alias.`
+    message: `${mentioned.length > 1 ? "The command names more than one configured table." : "I could not identify a configured table in the command."} Name exactly one target: ${choices}. No source analysis or writes were started. You can also use /structured-work request with this source message and the exact target alias.`
   };
 }
 

@@ -58,9 +58,11 @@ Post the actual explicit instruction with a leading @Luma mention in an admitted
 thread, for example: “Add this hypothesis to our Hypotheses table and create a
 Linear task to validate it.” This directly starts the owned compound workflow and
 returns one source-thread receipt. Name a configured target alias or its full label
-in the table clause. Missing or multiple target matches produce a focused
-clarification before source analysis, model calls or writes. A target mentioned only
-in the task clause does not select the table. Current provider schema, source and
+in an explicit destination such as “to our Hypotheses table” or “in experiments”.
+Quoted hypothesis text is preserved, but does not select a destination. Missing or
+multiple target matches produce a focused clarification before source analysis,
+model calls or writes. A target mentioned only in hypothesis content or the task
+clause does not select the table. Current provider schema, source and
 owner checks still run inside MI; the literal name does not grant authority.
 
 The exact original anchor must remain unchanged between the Gateway event and
@@ -93,8 +95,9 @@ page:<number>` exposes every preview field, uncertainty and per-target result in
   slash interactions and process restarts, so this does not repeat inference.
 
 The optional explicit commands take a source message ID, available through Discord's **Copy Message ID** action with Developer Mode enabled. The direct mention flow needs no copied ID. Conceptual questions and quoted/negated instructions
-remain outside this command's execution admission. Requests and status replies are
-founder-only and ephemeral, with mentions disabled; there is no guest support mode.
+remain outside this command's execution admission. Direct mention receipts stay in the admitted founder-only source thread. Slash
+request and status replies are ephemeral. All replies disable mentions; there is
+no guest support mode.
 
 `structuredWorkRuntimeConfig(env)` validates presence and safe scope before resource
 allocation. `validateStructuredWorkFounderScope(...)` verifies the live identity

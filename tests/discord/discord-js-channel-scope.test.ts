@@ -897,6 +897,63 @@ describe("Discord explicit Decision Record entry", () => {
     );
     await live.disconnect();
   });
+  it.each(["structured-only", "decision-fallback", "ask-fallback"] as const)(
+    "keeps deterministic usage reachable with %s admission",
+    async (mode) => {
+      const scope = {
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32000,
+        minIntervalMs: 60000
+      };
+      const live = createDiscordJsTransport({
+        token: "test-only",
+        clientId: "application",
+        guildId: "guild",
+        allowedParentChannelIds: ["parent", "structured-parent"],
+        authorizeHumanReader: (id) => Promise.resolve(id === "founder"),
+        structuredWork: {
+          ...scope,
+          parentChannelIds: [mode === "structured-only" ? "parent" : "structured-parent"]
+        },
+        ...(mode === "decision-fallback"
+          ? { decisionRecords: { ...scope, parentChannelIds: ["parent"] } }
+          : {}),
+        ...(mode === "ask-fallback"
+          ? { contextAsk: { ...scope, parentChannelIds: ["parent"] } }
+          : {})
+      });
+      const handler = vi.fn(() =>
+        Promise.resolve({ content: "Usage without AI", idempotencyKey: "usage" })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      const candidate = mention();
+      sdk.emit(Events.MessageCreate, candidate);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ question: "usage" })
+      );
+      expect(handler.mock.calls[0]).toEqual([
+        expect.objectContaining(
+          mode === "structured-only"
+            ? { purpose: "structured-work" }
+            : mode === "decision-fallback"
+              ? { purpose: "decision-record" }
+              : { question: "usage" }
+        )
+      ]);
+      if (mode === "ask-fallback")
+        expect(handler.mock.calls[0]).toEqual([
+          expect.not.objectContaining({ purpose: "structured-work" })
+        ]);
+      if (mode === "ask-fallback")
+        expect(handler.mock.calls[0]).toEqual([
+          expect.not.objectContaining({ purpose: "decision-record" })
+        ]);
+      await live.disconnect();
+    }
+  );
+
   it("keeps deterministic usage mentions reachable with Decision Records enabled and Ask off", async () => {
     const live = decisionTransport();
     const handler = vi.fn(() =>

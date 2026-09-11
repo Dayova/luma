@@ -325,6 +325,13 @@ updates need the same authenticated ownership proof as creation before Luma offe
 an applicable update proposal. A create-if-absent instruction cannot authorize an
 inferred overwrite; the two imperative clauses explicitly distinguish creating,
 updating and linking. Conceptual, quoted or negated examples stay outside Execute.
+Quoted hypothesis content remains valid inside an actual instruction, including
+escaped delimiters, but it cannot select a destination or introduce another
+imperative clause. A model's `link` classification cannot hide a requested update:
+proposed fields, task text and any requested assignment must already match the
+selected record. Otherwise Luma asks for a corrected update proposal. A proposed
+update with no changed values reports that no change is needed instead of issuing
+an empty manual action.
 
 Retained previews can contain any row supplied to the model, so they require the
 original knowledge credential/target scope, current original-audience access to

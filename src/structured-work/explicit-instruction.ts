@@ -34,7 +34,11 @@ function unquoted(text: string): string | null {
       /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
     if (end) {
       result += " ";
-      if (character === end && !apostrophe) end = null;
+      if (character === "\\") {
+        if (index + 1 === text.length) return null;
+        result += " ";
+        index++;
+      } else if (character === end && !apostrophe) end = null;
     } else if (endings[character] && !apostrophe) {
       end = endings[character]!;
       result += " ";

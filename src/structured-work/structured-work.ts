@@ -73,6 +73,13 @@ function policyHash(input: StructuredWorkDependencies): string {
     workResource: input.workAuthorization.resource
   });
 }
+function needsOwnershipProof(stored: StoredStructuredWork): boolean {
+  return (
+    stored.state.preview?.work.reconciliation.action !== "link" ||
+    parseExplicitStructuredWorkInstruction(stored.request.observations[0].instruction)
+      ?.workAction === "update"
+  );
+}
 export async function requireStructuredWorkCurrent(
   input: StructuredWorkDependencies,
   stored: StoredStructuredWork
@@ -120,7 +127,7 @@ export async function requireStructuredWorkCurrent(
   if (
     (stored.intent || stored.state.updateProposals?.length) &&
     stored.state.preview &&
-    stored.state.preview.work.reconciliation.action !== "link"
+    needsOwnershipProof(stored)
   ) {
     const owner = requireStructuredWorkOwnership(
       stored.state.source,
@@ -308,6 +315,25 @@ function prepare(stored: StoredStructuredWork, plan: StructuredWorkInterpretatio
         "The proposed operation differs from the explicit create, update or link instruction"
       );
   }
+  if (
+    command.recordAction === "update" &&
+    plan.record.reconciliation.action === "link" &&
+    Object.entries(plan.record.fields).some(
+      ([key, value]) =>
+        operationDigest(value) !== operationDigest(record?.fields[key] ?? null)
+    )
+  )
+    throw new StructuredWorkClarification(
+      "Linking would leave the requested record changes unapplied. Review an explicit update proposal instead."
+    );
+  if (
+    command.workAction === "update" &&
+    plan.work.reconciliation.action === "link" &&
+    (plan.work.title !== work?.title || plan.work.description !== work?.description)
+  )
+    throw new StructuredWorkClarification(
+      "Linking would leave the requested task changes unapplied. Review an explicit update proposal instead."
+    );
   if (plan.record.reconciliation.action === "create") {
     const titleKey = stored.records.schema.titleField;
     const title = fields[titleKey];
@@ -670,13 +696,24 @@ export function createStructuredWorkIntelligence(
             )
           );
           prepare(stored, plan);
-          const owner =
-            plan.work.reconciliation.action === "link"
-              ? null
-              : requireStructuredWorkOwnership(source, plan.work.ownership);
+          const owner = needsOwnershipProof(stored)
+            ? requireStructuredWorkOwnership(source, plan.work.ownership)
+            : null;
           stored.ownerProviderUserId = owner
             ? await ownerMapping(input, address.workspaceId, owner)
             : null;
+          if (plan.work.reconciliation.action === "link" && needsOwnershipProof(stored)) {
+            const selected = selectWork(stored)!;
+            if (
+              operationDigest(selected.assignees.map((person) => person.id).sort()) !==
+              operationDigest(
+                stored.ownerProviderUserId ? [stored.ownerProviderUserId] : []
+              )
+            )
+              throw new StructuredWorkClarification(
+                "Linking would leave the requested owner change unapplied. Review an explicit update proposal instead."
+              );
+          }
           await requireStructuredWorkCurrent(input, stored);
           await input.records.requireCurrent({ audience, snapshot: records });
           if (

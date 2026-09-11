@@ -151,6 +151,9 @@ describe("retained manual update proposals through Meeting Intelligence", () => 
   });
   it("requires Human ownership for unsupported work updates before presenting an applicable proposal", async () => {
     const f = updateFixture();
+    f.request.observations[0].instruction =
+      "Link this hypothesis in Hypotheses and update the Linear task DAY-1.";
+    f.source.evidence.at(-1)!.text = f.request.observations[0].instruction;
     f.override((plan) => {
       plan.record.reconciliation = { action: "link", targetId: "existing-hypothesis" };
       plan.work.reconciliation = { action: "update", targetId: "DAY-1" };
@@ -164,6 +167,9 @@ describe("retained manual update proposals through Meeting Intelligence", () => 
   });
   it("renders an explicitly unassigned update as an exact owner removal, without applying it", async () => {
     const f = updateFixture();
+    f.request.observations[0].instruction =
+      "Link this hypothesis in Hypotheses and update the Linear task DAY-1.";
+    f.source.evidence.at(-1)!.text = f.request.observations[0].instruction;
     f.source.evidence[6]!.text = "Leave this task intentionally unassigned.";
     f.override((plan) => {
       plan.record.reconciliation = { action: "link", targetId: "existing-hypothesis" };
@@ -275,6 +281,9 @@ describe("retained manual update proposals through Meeting Intelligence", () => 
       extra.reference.url = "https://notion.so/other-private-row";
       f.records.set(extra.reference.externalId, extra);
       if (kind !== "manual") {
+        f.request.observations[0].instruction =
+          "Link this hypothesis in Hypotheses and link the existing Linear task DAY-1.";
+        f.source.evidence.at(-1)!.text = f.request.observations[0].instruction;
         f.override((plan) => {
           plan.record.reconciliation = {
             action: "link",
@@ -365,6 +374,59 @@ describe("retained manual update proposals through Meeting Intelligence", () => 
     expect(state.state).toBe("needs-clarification");
     expect(state.message).toContain("differs from the explicit");
     expect(state.updateProposals ?? []).toEqual([]);
+  });
+  it.each(["record", "work", "owner"])(
+    "does not complete a requested update by linking away an unapplied %s change",
+    async (target) => {
+      const f = updateFixture();
+      if (target === "owner")
+        f.work.get("DAY-1")!.assignee = {
+          id: "linear-fabius",
+          displayName: "Fabius",
+          email: "fabius@example.test"
+        };
+      f.override((plan) => {
+        plan.record.fields =
+          target === "record"
+            ? { evidence: { type: "text", value: "Changed observation" } }
+            : {};
+        plan.record.reconciliation = { action: "link", targetId: "existing-hypothesis" };
+        plan.work.reconciliation = { action: "link", targetId: "DAY-1" };
+        if (target === "work") plan.work.title = "Changed requested validation scope";
+      });
+      const state = await f.make().mi.observe(f.request);
+      expect(state.state).toBe("needs-clarification");
+      expect(state.message).toContain("unapplied");
+      expect(state.approvedIntentId).toBeNull();
+      expect(f.createRecord).not.toHaveBeenCalled();
+      expect(f.createIssue).not.toHaveBeenCalled();
+    }
+  );
+  it("can link a requested update only when its proposed values and Human-confirmed assignment already match", async () => {
+    const f = updateFixture();
+    f.override((plan) => {
+      plan.record.fields = {
+        evidence: { type: "text", value: "Original Human observation" }
+      };
+      plan.record.reconciliation = { action: "link", targetId: "existing-hypothesis" };
+      plan.work.reconciliation = { action: "link", targetId: "DAY-1" };
+    });
+    const { mi, execution } = f.make();
+    const state = await mi.observe(f.request);
+    expect(state.state).toBe("validated");
+    const completed = await execution.execute({
+      workspace,
+      subject,
+      structuredWorkRequestId: state.requestId,
+      intentId: state.approvedIntentId!
+    });
+    expect(completed.state).toBe("completed");
+    expect(completed.outcomes.map((outcome) => outcome.disposition)).toEqual([
+      "linked",
+      "linked"
+    ]);
+    expect(f.createRecord).not.toHaveBeenCalled();
+    expect(f.createIssue).not.toHaveBeenCalled();
   });
   it.each([
     "How would we update the hypothesis and update the Linear task?",

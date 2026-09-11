@@ -1,3 +1,4 @@
+import { nativeNotionReviewConfig } from "./native-notion-review-config.js";
 import {
   structuredWorkRuntimeConfig,
   readStructuredWorkTargetPolicy
@@ -90,10 +91,9 @@ export async function validateProductionEnvironment(
       ([key, value]) =>
         Boolean(value?.trim()) &&
         (key.startsWith("LUMA_NOTION_OBSERVATION_") ||
-          key.startsWith("LUMA_NATIVE_") ||
           key === "LUMA_OBSERVATION_WORKSPACE_ID")
     ),
-    "Observer and native-review configuration must remain outside this deployment."
+    "The separate observer configuration must remain outside this deployment."
   );
 
   try {
@@ -104,6 +104,7 @@ export async function validateProductionEnvironment(
       !context?.parentChannelIds.some((id) => !parents.includes(id)),
       "Context Ask parents must be within the configured Discord channel scope."
     );
+    const nativeReview = nativeNotionReviewConfig(env);
     const structured = structuredWorkRuntimeConfig(env);
     const decision = discordDecisionRecordConfigFromEnv(env);
     decisionRuntimeConfig(env, decision !== undefined);
@@ -185,6 +186,13 @@ export async function validateProductionEnvironment(
       check(
         !webhook || granola.port !== webhook.port,
         "Granola and Notion callback listeners require separate ports."
+      );
+    }
+    if (nativeReview) {
+      check(
+        (!webhook || nativeReview.port !== webhook.port) &&
+          (!granola || nativeReview.port !== granola.port),
+        "Native review, Granola and Notion listeners require separate ports."
       );
     }
     if (webhook) {

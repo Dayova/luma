@@ -18,7 +18,7 @@ native Notion review has a separate authenticated-ingress acceptance gate.
 Use Node.js 24 at `/usr/bin/node`, pnpm 11.12.0 for building, and `flock` from
 util-linux at `/usr/bin/flock`. Pin the exact application commit for each release.
 The Discord transport opens outbound connections. Enabled Notion webhooks and
-Granola browser OAuth add separate loopback HTTP listeners (defaults 3001 and 3002) and need HTTPS forwarding to their exact configured paths. Granola's
+Granola browser OAuth add separate loopback HTTP listeners (defaults 3001 and 3002) and need HTTPS forwarding to their exact configured paths. Optional native Notion review uses its own loopback port 3003 and authenticated `/notion/review/mcp` path. Granola's
 production redirect must be HTTPS. Those callback paths are not health endpoints;
 the application has no HTTP readiness endpoint. Do not configure a hosting HTTP
 health check against an invented port.
@@ -116,7 +116,8 @@ Before first activation, verify these existing product requirements:
   [current reader verification](../integrations/discord.md#current-reader-verification).
 - Give the production bot only the channel permissions needed for the approved
   surface: View Channel, Read Message History, Send Messages, Create Public
-  Threads, and Send Messages in Threads. Administrator is unnecessary. The
+  Threads, and Send Messages in Threads. Enabled advisory consultations also
+  require Send Polls in their destination threads. Administrator is unnecessary. The
   development bot's current role grants do not give it private team-channel
   access and are not evidence of the production bot's access.
 - For Context Ask, complete participant notice and source participation approval,
@@ -138,8 +139,9 @@ Install the policy as `root:luma`, mode `0640`, so the service can read it witho
 being able to modify it. Provider source readability and permission for the full
 four-founder audience are separate requirements. Notion/Linear writer and
 personal capture credentials are not implied by this configuration. Do not
-inject observer/native-review variables into this service. The launcher
-intentionally rejects that mixed topology.
+inject the separate observer configuration into this service. The launcher
+rejects that topology; the optional native review listener is composed in this
+shared process and does not create another store.
 
 Configure the other enabled workflows from their owned guides:
 
@@ -149,6 +151,11 @@ Configure the other enabled workflows from their owned guides:
 - [Shared meeting capture](../integrations/shared-meeting-capture-runtime.md),
   including per-founder Granola account attestation and source exclusions.
 - [Founder consultations](../integrations/discord-consultations.md).
+- [Native Notion review](../integrations/native-notion-review.md), requiring
+  verified original founder events, existing Enterprise Admin API access, separate
+  read credentials and HTTPS forwarding. Notion's own Custom Agent credits are
+  separate from Luma's API accounting; leave this capability disabled until its
+  provider access and cost arrangement are established.
 - [Compound structured work](../structured-work.md), with
   protected target mappings and independently checked Notion/Linear grants.
 

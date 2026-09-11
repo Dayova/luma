@@ -118,7 +118,7 @@ Grant only these bot permissions:
 - Send Messages in Threads
 - Read Message History
 
-The resulting permission integer is `309237713920`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. The standard Meeting bot does not ingest member message content. The optional Context Ask capability below is separately opt-in and bounded. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
+The base permission integer is `309237713920`. When advisory consultations are enabled, also grant **Send Polls** (`1 << 49`); the combined integer is `563259191135232`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. The standard Meeting bot does not ingest member message content. The optional Context Ask capability below is separately opt-in and bounded. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
 
 Do not grant Administrator, Manage Server, Manage Roles, Manage Webhooks, or
 Manage Messages. Server Members is a privileged intent needed for audience

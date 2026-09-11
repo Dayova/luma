@@ -1,3 +1,8 @@
+import {
+  nativeNotionReviewConfig,
+  createNativeNotionReviewResources
+} from "./native-notion-review-config.js";
+import { createImportedSourceAnalysisRouter } from "./imported-source-analysis-router.js";
 import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
 import {
   createAutomaticDecisionProcessing,
@@ -112,6 +117,7 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  createNativeNotionReviewResources?: typeof createNativeNotionReviewResources;
   createStructuredWorkRuntime?: typeof createStructuredWorkRuntime;
   createWorkProvider?: typeof createLinearWorkProviderFromEnv;
   createGranolaConnections?: typeof granolaOAuthConnectionsFromEnv;
@@ -197,6 +203,7 @@ export async function startServer(
   const contextConfig = organizationalContextRuntimeConfig(env);
   const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
   const structuredWorkConfig = structuredWorkRuntimeConfig(env);
+  const nativeReviewConfig = nativeNotionReviewConfig(env);
   const captureConfig = meetingCaptureRuntimeConfig(env);
   const granolaConfig = granolaOAuthRuntimeConfig(env);
   if (granolaConfig && !captureConfig?.granolaEnabled)
@@ -309,18 +316,21 @@ export async function startServer(
       );
     const workProvider = dependencies.createWorkProvider
       ? dependencies.createWorkProvider(env)
-      : optionalLinearWorkProvider(env);
+      : env["LINEAR_READONLY_API_KEY"]?.trim() && !env["LINEAR_API_KEY"]?.trim()
+        ? undefined
+        : optionalLinearWorkProvider(env);
     const observedSourceLedger = createObservedSourceLedger({ database });
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
       database
     });
-    const importedSourceAnalysis = importedSourceAnalysisFromEnv({
+    const genericImportedSourceAnalysis = importedSourceAnalysisFromEnv({
       workspaceId,
       env,
       ledger: observedSourceLedger,
       operationalOutcomeMarkerVerifier
     });
-    const workItemProviderId = workProvider?.providerId ?? "linear";
+    const workItemProviderId =
+      workProvider?.providerId ?? nativeReviewConfig?.workItemProviderId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     let transportOwnedByBot = false;
     startupCleanup.push(() =>
@@ -332,6 +342,33 @@ export async function startServer(
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
     };
+    const nativeReviewResources = nativeReviewConfig
+      ? (
+          dependencies.createNativeNotionReviewResources ??
+          createNativeNotionReviewResources
+        )({
+          config: nativeReviewConfig,
+          database,
+          workspace,
+          ledger: observedSourceLedger,
+          identityDirectory,
+          accessPolicy,
+          operationalOutcomeMarkerVerifier
+        })
+      : undefined;
+    if (nativeReviewResources) startupCleanup.push(() => nativeReviewResources.stop());
+    await nativeReviewResources?.validate();
+    const importedSourceRouter = createImportedSourceAnalysisRouter({
+      database,
+      workspaceId,
+      audience: contextAudience,
+      ...(genericImportedSourceAnalysis
+        ? { generic: genericImportedSourceAnalysis }
+        : {}),
+      ...(nativeReviewResources ? { native: nativeReviewResources } : {})
+    });
+    startupCleanup.push(() => importedSourceRouter.stop());
+    const importedSourceAnalysis = importedSourceRouter.configuration;
     const granolaConnections = granolaConfig
       ? await (dependencies.createGranolaConnections ?? granolaOAuthConnectionsFromEnv)({
           database,
@@ -512,8 +549,13 @@ export async function startServer(
         aiUsage,
         aiRequestLimits
       ),
-      ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
-      ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
+      ...(nativeReviewResources
+        ? { workCatalogs: [nativeReviewResources.workCatalog] }
+        : workProvider
+          ? { workCatalogs: [toWorkCatalog(workProvider)] }
+          : {}),
+      ...(nativeReviewConfig ||
+      hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
         ? {
             importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
               ledger: observedSourceLedger,
@@ -532,6 +574,11 @@ export async function startServer(
         : undefined;
     const meetingIntelligence =
       scopedMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+    const nativeReview = nativeReviewResources?.createRuntime({ meetingIntelligence });
+    if (nativeReview) {
+      startupAdmissionStops.push(() => nativeReview.stop());
+      startupCleanup.push(() => nativeReview.stop());
+    }
     const decisionMeetingIntelligence = decisionIntelligence
       ? scopedMeetingIntelligence
       : undefined;
@@ -789,6 +836,7 @@ export async function startServer(
     transportOwnedByBot = true;
     startupAdmissionStops.push(() => bot.stop());
     startupCleanup.push(() => bot.stop());
+    if (nativeReview) await nativeReview.start();
     if (granolaCallback) await granolaCallback.start();
     await bot.start(startupSignal);
     startupSignal?.throwIfAborted();
@@ -866,6 +914,7 @@ export async function startServer(
             (async () => {
               const drains = await Promise.allSettled([
                 bot.stop(),
+                nativeReview?.stop(),
                 granolaCallback?.stop(),
                 captureRuntime?.pauseIntake(),
                 automaticDecisions?.pause(),
@@ -883,6 +932,8 @@ export async function startServer(
               await automaticDecisions?.stop();
               await decisionIntelligence?.standingPolicy?.stop();
               await granolaConnections?.stop();
+              await importedSourceRouter.stop();
+              await nativeReviewResources?.stop();
             })()
           );
           await database.close();

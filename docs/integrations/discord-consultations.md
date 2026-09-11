@@ -19,6 +19,11 @@ model runs on the consultation path, including capture, publication, results,
 closure and recovery. The model usage limit therefore does not prevent these
 operational commands.
 
+The bot needs **Send Polls** in the destination thread in addition to its base
+message/thread permissions. Check channel overwrites when activating consultations;
+a missing permission is reported as a provider refusal and no successful poll
+receipt is fabricated. See [Discord permissions](https://docs.discord.com/developers/topics/permissions).
+
 Context owns the canonical Conversation consultation, immutable original plan,
 source proof, four intended founders and approved provider-neutral Follow-up
 Intent. Follow-up Execution loads this intent by workspace, typed Conversation

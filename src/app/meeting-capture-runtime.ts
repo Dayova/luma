@@ -20,6 +20,14 @@ import { observedNotionMeetingCapture } from "../knowledge/notion-meeting-captur
 import { observedMeetingNoteToObservation } from "../knowledge/meeting-notes-ingestion.js";
 import { dayovaFounderPersonIds } from "./founder-access.js";
 
+type GranolaConnection = { connectionId: string; client: GranolaMcpClient };
+type GranolaRuntime = Awaited<ReturnType<typeof createGranolaCaptureIngestionRuntime>>;
+type GranolaRegistry = {
+  runtime: GranolaRuntime;
+  connections: readonly GranolaConnection[];
+  access: ReturnType<typeof createGranolaMeetingCaptureAccess>;
+};
+
 /** Construction and lifecycle only; capture interpretation stays inside MI.observe. */
 export async function createMeetingCaptureRuntime(input: {
   database: LumaDatabase;
@@ -34,7 +42,7 @@ export async function createMeetingCaptureRuntime(input: {
   };
   granola?: {
     policy: GranolaPolicy;
-    connections: readonly { connectionId: string; client: GranolaMcpClient }[];
+    connections: readonly GranolaConnection[];
     intervalMs?: number;
     perConnectionLimit?: number;
   };
@@ -50,23 +58,33 @@ export async function createMeetingCaptureRuntime(input: {
       throw new Error("Capture intake started before Meeting Intelligence was connected");
     return ingestion.ingest(meeting);
   };
-  const granola = input.granola
-    ? await createGranolaCaptureIngestionRuntime({
-        ...input.granola,
-        database,
-        workspaceId: workspace.workspaceId,
-        onResolved: deliver
+  const buildGranola = async (
+    connections: readonly GranolaConnection[]
+  ): Promise<GranolaRegistry | undefined> => {
+    if (!input.granola) throw new Error("Granola capture is not configured");
+    if (!connections.length) return undefined;
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      ...input.granola,
+      connections,
+      database,
+      workspaceId: workspace.workspaceId,
+      onResolved: deliver
+    });
+    return {
+      runtime,
+      connections,
+      access: createGranolaMeetingCaptureAccess({
+        sources: connections.map((connection, index) => ({
+          connectionId: connection.connectionId,
+          source: runtime.sources[index]!
+        }))
       })
+    };
+  };
+  let registry = input.granola
+    ? await buildGranola([...input.granola.connections])
     : undefined;
-  const granolaAccess =
-    granola && input.granola
-      ? createGranolaMeetingCaptureAccess({
-          sources: input.granola.connections.map((connection, index) => ({
-            connectionId: connection.connectionId,
-            source: granola.sources[index]!
-          }))
-        })
-      : undefined;
+  let activeRegistry = registry;
   const notionAccess = input.notion
     ? createNotionMeetingCaptureAccess({
         ...input.notion,
@@ -91,12 +109,16 @@ export async function createMeetingCaptureRuntime(input: {
         )
           return notionVerifier.verify(request);
         const index =
-          input.granola?.connections.findIndex(
+          activeRegistry?.connections.findIndex(
             (connection) =>
               connection.connectionId === request.revision.address.providerConnectionId
           ) ?? -1;
-        if (request.revision.address.providerId === "granola" && granola && index >= 0)
-          return granola.sources[index]!.verifier.verify(request);
+        if (
+          request.revision.address.providerId === "granola" &&
+          activeRegistry &&
+          index >= 0
+        )
+          return activeRegistry.runtime.sources[index]!.verifier.verify(request);
         return Promise.resolve({
           status: "rejected",
           message: "Capture source is outside this runtime."
@@ -117,13 +139,16 @@ export async function createMeetingCaptureRuntime(input: {
         const provider = request.capture.address.providerId;
         if (provider === input.notion?.providerId && notionAccess)
           return notionAccess.readCurrent(request);
-        if (provider === "granola" && granolaAccess)
-          return granolaAccess.readCurrent(request);
+        if (provider === "granola" && activeRegistry)
+          return activeRegistry.access.readCurrent(request);
         throw new Error("Capture source is outside this runtime.");
       }
     }
   };
   let connected = false;
+  let started = false;
+  let stopped = false;
+  let changing: Promise<void> = Promise.resolve();
   return {
     configuration,
     logicalMeetings,
@@ -186,16 +211,44 @@ export async function createMeetingCaptureRuntime(input: {
     },
     start() {
       if (!connected) throw new Error("Capture runtime is not connected");
-      granola?.start();
+      if (stopped) throw new Error("Capture runtime is stopped");
+      started = true;
+      activeRegistry?.runtime.start();
     },
     stop: async () => {
-      await granola?.stop();
+      stopped = true;
+      activeRegistry = undefined;
+      await Promise.all([registry?.runtime.stop(), changing.catch(() => undefined)]);
     },
     syncGranolaOnce: () => {
-      if (!connected || !granola)
+      if (!connected || !activeRegistry || stopped)
         throw new Error("Granola capture is not configured and connected");
-      return granola.syncOnce();
+      return activeRegistry.runtime.syncOnce();
     },
-    status: () => granola?.status() ?? null
+    /** Owner-attested connection changes are serialized and drain old intake first. */
+    replaceGranolaConnections(connections: readonly GranolaConnection[]) {
+      if (!connected || !input.granola || stopped)
+        return Promise.reject(new Error("Granola capture cannot change connections"));
+      const replacement = connections.map((connection) => ({ ...connection }));
+      changing = changing
+        .catch(() => undefined)
+        .then(async () => {
+          if (stopped) throw new Error("Capture runtime is stopped");
+          activeRegistry = undefined;
+          await registry?.runtime.stop();
+          registry = undefined;
+          if (stopped) throw new Error("Capture runtime is stopped");
+          const next = await buildGranola(replacement);
+          if (stopped) {
+            await next?.runtime.stop();
+            throw new Error("Capture runtime is stopped");
+          }
+          registry = next;
+          activeRegistry = next;
+          if (started) next?.runtime.start();
+        });
+      return changing;
+    },
+    status: () => registry?.runtime.status() ?? null
   };
 }

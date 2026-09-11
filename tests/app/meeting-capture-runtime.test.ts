@@ -276,7 +276,7 @@ describe("meeting capture application composition", () => {
             path: policyPath,
             workspaceId: workspace.workspaceId
           }),
-          connections: [{ connectionId: "jakob", client }]
+          connections: allFounders ? [] : [{ connectionId: "jakob", client }]
         }
       });
       const f = reasoning();
@@ -300,6 +300,10 @@ describe("meeting capture application composition", () => {
         createMeetingNotesIngestion({ meetingIntelligence: mi })
       );
       try {
+        if (allFounders) {
+          expect(runtime.status()).toBeNull();
+          await runtime.replaceGranolaConnections([{ connectionId: "jakob", client }]);
+        }
         await runtime.syncGranolaOnce();
         const query = () =>
           mi.query({
@@ -321,6 +325,13 @@ describe("meeting capture application composition", () => {
             failures: []
           });
           expect(f.requests).toHaveLength(1);
+          await runtime.replaceGranolaConnections([]);
+          expect(await query()).toMatchObject({
+            availability: "unavailable",
+            synthesis: null
+          });
+          await runtime.replaceGranolaConnections([{ connectionId: "jakob", client }]);
+          expect(await query()).toMatchObject({ availability: "available" });
           connection.excludedMeetingIds.push("work");
           await savePolicy();
           expect(await query()).toMatchObject({
@@ -336,7 +347,7 @@ describe("meeting capture application composition", () => {
         }
         await runtime.stop();
         expect(runtime.status()).toMatchObject({ active: false, scheduled: false });
-        await expect(runtime.syncGranolaOnce()).rejects.toThrow("connection-unavailable");
+        expect(() => runtime.syncGranolaOnce()).toThrow("not configured");
       } finally {
         await runtime.stop();
         await database.close();

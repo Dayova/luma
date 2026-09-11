@@ -19,7 +19,8 @@
     "format:check": "prettier --check .",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "eval:providers": "pnpm build && node --env-file-if-exists=.env dist/src/evaluation/provider-comparison/main.js",
-    "eval:quality": "pnpm build && node --env-file-if-exists=.env dist/src/evaluation/quality/main.js"
+    "eval:quality": "pnpm build && node --env-file-if-exists=.env dist/src/evaluation/quality/main.js",
+    "eval:ai-review": "pnpm build && node dist/src/evaluation/quality/ai-review-main.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.12",

@@ -1,5 +1,8 @@
 # Meeting model evaluation v2
 
+For a separate, Notion-grounded AI assessment of saved answers, use the
+[independent semantic review](ai-semantic-review.md). The [first review results](../evaluations/independent-ai-review-2026-09-11.md) preserve automatic scores and human review gates.
+
 LUM-53 strengthens the component evaluation behind the owned `ReasoningModel`
 Interface. It preserves the [v1 regression corpus and reports](provider-comparison.md)
 and adds calibrated grading, harder development cases, exact-answer review packets,

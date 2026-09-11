@@ -1,0 +1,2722 @@
+{
+  "version": 1,
+  "packetHash": "ac421c4865814da1bffd006154e117b4b6a5934ad0886eab9f45a86894a582a9",
+  "reviewer": {
+    "id": "reviewer-a",
+    "system": "Codex",
+    "model": "inherited-parent-model",
+    "freshContext": true,
+    "metadataBlinded": true
+  },
+  "reviews": [
+    {
+      "answerId": "196adcf4a85dd7df86ba89b1ab06c15a4d995f3ccf3c05b73ee740ce18e419c7",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.926557Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The investigation stays on api/client.ts, excludes the retry worker, and does not assert a proven cause or an agreed fix/deployment.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Mira explicitly accepts investigation only; Alex withdraws and Sam offers neither investigation. The current obligation respects those boundaries.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:5",
+            "evidence:handoff-with-scope-limit:6",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is the self-committing investigator; scope support comes from Sam, Alex and Mira. The obsolete Alex reference does not establish current ownership.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:9",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "uncertain",
+          "explanation": "Mira asks which version was used; Jo answers “the previous day's build.” Omitting a version question is reasonable if that identifies the build, but the packet does not establish whether a more specific version is still material. The accepted investigation and resolved synthetic-data question are otherwise covered.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:3",
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:7",
+            "evidence:handoff-with-scope-limit:8",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There is one investigation obligation. Its scope decision and corresponding work proposal are representations of that obligation, not additional executable tasks.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "api/client.ts and the 18 September 2026 deadline remain correct; the excluded retry-worker path does not replace the investigation target.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "1f9f062e052aa05a55cdbfaa82ab3b41b58485662eb0833cc4638a7ab85b6112",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927149Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The output grounds the clock.ts test and local-calendar interpretation in the explicit Berlin/Sunday/Monday discussion.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Jo's test is confirmed, and the timezone discussion does not become a new commitment for another component.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:8",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jo explicitly owns the test. Participants' calendar statements support the interpretation; no other test owner or objector is invented.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The single accepted clock.ts test and resolved deadline are captured, with no outstanding deadline clarification required.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:8",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Exactly one executable test obligation is retained; calendar decisions are not duplicate work items.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "At the supplied instant Berlin is already 25 October; tomorrow is Monday 2026-10-26, as the speakers explicitly confirm. clock.ts is preserved.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "22ce28756006fe9d6b1c679263bf497ef8294118d59e1a68aa3c7f43eb77094e",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927175Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The exporter and icon descriptions, separate participant IDs, deadlines, and name-confusion context are supported by the two distinct commitments.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:7",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Both self-commitments are confirmed with their exclusions intact; neither Alex is assigned the other's obligation.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "person_alex_backend owns the exporter and person_alex_design owns the icon. The separation statements support the listed participants without inventing a merged Alex.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Both material obligations and the instruction to keep their identities separate are represented; no third task or unresolved owner remains.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The two distinct obligations remain separate, with one executable proposal per owner where follow-ups are present.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "CSV-Exporter, Icon-Datei, the distinct participant IDs, and 2026-09-22 versus 2026-09-23 are preserved.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "33991a22913ede42eecdbb1f8c17ae24387801d33e08775a4db0c3f4f6cf4071",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927198Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The CSV-export test and clear date are retained while the owner remains explicitly unknown; a placeholder or tentative Jo guess is not treated as identity evidence.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The candidate action keeps ownership unresolved, while its description and risk explicitly preserve that a commitment was heard and the deadline is clear. This is a proposal-state representation, not a denial of the spoken commitment.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "The null owner and assignee avoid treating person_unknown as a person or assigning Jo. The clarification follows the participants' explicit request.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The test, 25 September deadline and unresolved identity are all represented; no additional person has accepted on the unknown speaker's behalf.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The task, identity uncertainty and related proposal describe one test obligation rather than extra work for the identified attendees.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The explicit 25 September 2026 date is retained as 2026-09-25 in Europe/Berlin; uncertainty concerns ownership, not the deadline or CSV-export scope.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:8"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "3ba8b6625aaafebf46b2635b4b36d8a9707eb7cf2a0530ed0d0a79176b1c4377",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927213Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The described parser.ts repair and 18 September deadline follow Mira's single explicit statement.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The confirmed action preserves the force of “I will fix”; it does not introduce a tentative offer or extra commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira speaks a first-person commitment, supporting person_mira as owner without an inferred assignment to someone else.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The parser.ts commitment and date are present; the separate duplicate-items judgment addresses the second identical row.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "fail",
+          "explanation": "Two action rows, parser-fix and parser-fix-again, repeat the same description, owner, date and source. The single utterance supports only one repair obligation.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "English wording, parser.ts and the explicit 18 September 2026 date are preserved with normalizedDate 2026-09-18.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        }
+      ]
+    },
+    {
+      "answerId": "439553507a92d4aaca206f91d0ba03f75cff1b12bc7bd98423d2dc65e56cf632",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927236Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The investigation, withdrawals and stale-owner risk have source support, with no asserted root cause. The suggested old-link update is a mitigation proposal, not a claim that a provider update occurred. “Sam lehnte ... Retry-Workers ab” is read as his explicit refusal to treat its mention as an offer.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:5",
+            "evidence:handoff-with-scope-limit:6",
+            "evidence:handoff-with-scope-limit:9",
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Mira explicitly accepts investigation only; Alex withdraws and Sam offers neither investigation. The current obligation respects those boundaries.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:5",
+            "evidence:handoff-with-scope-limit:6",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is the self-committing investigator; scope support comes from Sam, Alex and Mira. The obsolete Alex reference does not establish current ownership.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:9",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "uncertain",
+          "explanation": "The output repeats the version question after Jo identifies the previous day's build. This may be a legitimate need for an exact version or unnecessary reopening; the source does not settle that granularity. Mira's final investigation is otherwise captured.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:3",
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There is one investigation obligation. Its scope decision and corresponding work proposal are representations of that obligation, not additional executable tasks.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "api/client.ts and the 18 September 2026 deadline remain correct; the excluded retry-worker path does not replace the investigation target.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "457ac9518e7b349fe9b17916cd29a89945f2851703bbd5170f94661b54854473",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927268Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "The question asking whether September 18 is firm or wished-for treats an explicitly settled distinction as unknown: Jo says it is a wish date, not an agreed deadline. The question about deciding Friday versus Monday “now” likewise overlooks Jo's explicit “Nein.”",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:9",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Sam's checklist row is expressly a conditional candidate with no accepted deadline; no create-work-item is proposed. The separate question-status errors do not turn this candidate into a confirmed action.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:11",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Alex, Jo and Mira support the stated approval distinction; Sam supports withholding checklist work. No one is falsely assigned deployment or listed as a personal objector.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:4",
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:12",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "fail",
+          "explanation": "Pending approval is captured, but the output reopens the already answered deadline-status and immediate-timing questions. The still-unselected deployment date can remain open without repeating those resolved questions.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:9",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The candidate checklist, approval status and no-ticket boundary are distinct. The extra questions contain resolved content, addressed under recall/dates, rather than a second executable checklist.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:9",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "fail",
+          "explanation": "The null candidate deadline is correct, but the open question falsely leaves September 18's current deadline status undecided despite Jo explicitly calling it only a wish date.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:9",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "698ff7a6b442ba8b72511a27808876ef5efcce5e49d4f88a052e77c49411397d",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927289Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The training quotation remains fictional/historical evidence of an example, not an actual migration assignment or deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The answer preserves the distinction between quoted first-person speech and a live commitment; there is no current migration commitment or accepted Friday deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is not assigned the quoted work. Sam introduces the example, Jo explains its status, Mira disclaims it, and Alex limits the discussion to interpretation.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The settled absence of a current migration assignment is retained, and Alex's question is not unnecessarily reopened after Jo's answer.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "No executable migration item is duplicated or generated from the quotation; complementary interpretation/no-ticket statements are not separate obligations.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The German/mixed source meaning is preserved, and fictional “Freitag” is not normalized into a live deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "6f6dac7aff227a8155fab42462a00d80666d3f479e200bb175cc921e6baa3130",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927315Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The output grounds the clock.ts test and local-calendar interpretation in the explicit Berlin/Sunday/Monday discussion.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Jo's test is confirmed, and the timezone discussion does not become a new commitment for another component.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:8",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jo explicitly owns the test. Participants' calendar statements support the interpretation; no other test owner or objector is invented.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The single accepted clock.ts test and resolved deadline are captured, with no outstanding deadline clarification required.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:8",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Exactly one executable test obligation is retained; calendar decisions are not duplicate work items.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "At the supplied instant Berlin is already 25 October; tomorrow is Monday 2026-10-26, as the speakers explicitly confirm. clock.ts is preserved.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "725de85b78251ba6f57233639b074d73a92f965c74d75772de05154a379c975d",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927336Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The old approval is inapplicable to the new flow, Legal has not approved, and there is no accepted checklist or deployment work. The answer preserves that distinction.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:3",
+            "evidence:conditional-rollout-unapproved:4",
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:12",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "No conditional offer becomes accepted work, and the final prohibition on a deployment ticket is respected. A candidate offer can remain a proposal.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:11",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Alex, Jo and Mira support the stated approval distinction; Sam supports withholding checklist work. No one is falsely assigned deployment or listed as a personal objector.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:4",
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:12",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The pending approval and final absence of new work are represented. No accepted task is omitted; support availability remains tentative rather than an obligation.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:3",
+            "evidence:conditional-rollout-unapproved:8",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There are no duplicate executable commitments. Approval status and the no-work boundary describe distinct aspects of the outcome.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Project Beacon/new-flow terminology is preserved, and September 18 is not installed as an accepted task deadline.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:1",
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "7bac141e96376ff6e759cca4b1c21bc26c6134e137048b7022cc4bbaeec8b47f",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927358Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The CSV-export test and clear date are retained while the owner remains explicitly unknown; a placeholder or tentative Jo guess is not treated as identity evidence.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The candidate proposal preserves an audible commitment while withholding a resolved owner. It does not assert that Jo accepted or that the speech was merely hypothetical.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "The null owner and assignee avoid treating person_unknown as a person or assigning Jo. The clarification follows the participants' explicit request.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The test, 25 September deadline and unresolved identity are all represented; no additional person has accepted on the unknown speaker's behalf.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The task, identity uncertainty and related proposal describe one test obligation rather than extra work for the identified attendees.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The explicit 25 September 2026 date is retained as 2026-09-25 in Europe/Berlin; uncertainty concerns ownership, not the deadline or CSV-export scope.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:8"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "897ad6017096c3b34669a0d7ffa05012d22851ab6b81fcb819421c1031649c11",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927376Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The final Legal approval, Sam's checklist-only commitment and separate undecided deployment are supported; prior non-approval is treated as earlier context.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:4",
+            "evidence:conditional-rollout-accepted:5",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The answer updates the earlier conditional offer after Legal approval, confirms checklist writing only, and does not turn that into deployment acceptance.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:2",
+            "evidence:conditional-rollout-accepted:6",
+            "evidence:conditional-rollout-accepted:15",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Sam explicitly commits, Jo reports the prerequisite approval, and Alex confirms the limited assignment. These support the listed roles without a fabricated objector.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The accepted checklist, fulfilled Legal condition and separate unresolved deployment decision are represented; a separate question row is not required if that distinction is explicit elsewhere.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Only one checklist obligation is present. Its decision record and work-item proposal do not create a second executable commitment.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Project Beacon and deployment-checklist terminology are retained; the accepted checklist deadline is 2026-09-18, without applying it to actual deployment.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:1",
+            "evidence:conditional-rollout-accepted:7",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "940d70e6308f3541cbdc00f0946008a83395f1f9508dc1f341232aadf93dccb6",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927398Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The exporter and icon descriptions, separate participant IDs, deadlines, and name-confusion context are supported by the two distinct commitments.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:7",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Both self-commitments are confirmed with their exclusions intact; neither Alex is assigned the other's obligation.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "person_alex_backend owns the exporter and person_alex_design owns the icon. The separation statements support the listed participants without inventing a merged Alex.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Both material obligations and the instruction to keep their identities separate are represented; no third task or unresolved owner remains.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The two distinct obligations remain separate, with one executable proposal per owner where follow-ups are present.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "CSV-Exporter, Icon-Datei, the distinct participant IDs, and 2026-09-22 versus 2026-09-23 are preserved.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "992c256d15437fbeb15a7800828dd31cd8a1de4b0f1706009b49fbe04ad49fea",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927418Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The current Parser-Test belongs to Jakob, while the old bot assignment to Alex is explicitly historical and unconfirmed.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:1",
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The explicit human correction and Jakob's acceptance govern the current action, with no new Alex task inferred from a role or bot quotation.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jakob's self-commitment establishes person_jakob; Alex confirms and disclaims his own ownership. Jo and Sam support preserving the correction and avoiding an Alex task.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Jakob's Parser-Test, the corrected owner and the operative date are captured; no clarification of already settled ownership is introduced.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One Parser-Test obligation is retained. Ownership correction and historical-context decisions do not add duplicate work.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Luma/Parser-Test meaning and the explicit 24 September 2026 deadline are preserved; the old wished-for date does not override 2026-09-24.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:5",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "a47e22657f3c60abcc2f376481edc3dd6dbe3867d9c23d7138c7d29c08afb702",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927439Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The current Parser-Test belongs to Jakob, while the old bot assignment to Alex is explicitly historical and unconfirmed.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:1",
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The explicit human correction and Jakob's acceptance govern the current action, with no new Alex task inferred from a role or bot quotation.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jakob's self-commitment establishes person_jakob; Alex confirms and disclaims his own ownership. Jo and Sam support preserving the correction and avoiding an Alex task.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Jakob's Parser-Test, the corrected owner and the operative date are captured; no clarification of already settled ownership is introduced.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One Parser-Test obligation is retained. Ownership correction and historical-context decisions do not add duplicate work.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Luma/Parser-Test meaning and the explicit 24 September 2026 deadline are preserved; the old wished-for date does not override 2026-09-24.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:5",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "a4e1423b90c1a95dbd7785199ea714cb71ba73d9239313134eb1dc4b70dd46ab",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927451Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The described parser.ts repair and 18 September deadline follow Mira's single explicit statement.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The confirmed action preserves the force of “I will fix”; it does not introduce a tentative offer or extra commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira speaks a first-person commitment, supporting person_mira as owner without an inferred assignment to someone else.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The stated parser.ts repair and date are captured; there are no additional decisions or open questions in the source.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One parser.ts repair obligation represents the single commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "English wording, parser.ts and the explicit 18 September 2026 date are preserved with normalizedDate 2026-09-18.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        }
+      ]
+    },
+    {
+      "answerId": "a527fa6f9f6b8e6ba9e346467d5d1d72c853ab8b207e186f93c297cef9bd5c8a",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927475Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "“Es besteht kein aktueller Bedarf” asserts that no migration need exists. Jo says there is no decided migration need, which establishes the absence of an adopted need/assignment, not the nonexistence of a need.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "explanation": "The decision drops “beschlossenen” from the source's absence of decided migration need and converts a decision-status limitation into a categorical absence of need. It correctly avoids creating work from the fictional quotation.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is not assigned the quoted work. Sam introduces the example, Jo explains its status, Mira disclaims it, and Alex limits the discussion to interpretation.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "No accepted migration task is omitted, and the resolved no-assignment outcome is represented. The overly strong need claim is assessed under grounding and modality.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "No executable migration item is duplicated or generated from the quotation; complementary interpretation/no-ticket statements are not separate obligations.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The German/mixed source meaning is preserved, and fictional “Freitag” is not normalized into a live deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "a6af7a51f294111ffda6d0028d0dba86349b22ca93ab2f372658e54f84338c73",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927497Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The exporter and icon descriptions, separate participant IDs, deadlines, and name-confusion context are supported by the two distinct commitments.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:7",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Both self-commitments are confirmed with their exclusions intact; neither Alex is assigned the other's obligation.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "person_alex_backend owns the exporter and person_alex_design owns the icon. The separation statements support the listed participants without inventing a merged Alex.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:3",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:5",
+            "evidence:same-name-different-people:6",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Both material obligations and the instruction to keep their identities separate are represented; no third task or unresolved owner remains.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The two distinct obligations remain separate, with one executable proposal per owner where follow-ups are present.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:4",
+            "evidence:same-name-different-people:11",
+            "evidence:same-name-different-people:12"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "CSV-Exporter, Icon-Datei, the distinct participant IDs, and 2026-09-22 versus 2026-09-23 are preserved.",
+          "evidenceIds": [
+            "evidence:same-name-different-people:1",
+            "evidence:same-name-different-people:2",
+            "evidence:same-name-different-people:8",
+            "evidence:same-name-different-people:9",
+            "evidence:same-name-different-people:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "aaba94b21a0afd6930dedf7c0b63761ed36e1b3062f78cae07b9f82ee0c132fe",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927514Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "“Why did the cache.ts bug cause the failure?” presupposes both a cache.ts bug and its causal role. Jo explicitly says cache.ts is merely possible and the cause is unidentified.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "explanation": "The question converts “might ... or ... elsewhere” into an established cache.ts cause, eliminating the source's uncertainty even though it appears in a question.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jo raises the uncertainty underlying the question; no additional owner, supporter or objector is attributed.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "fail",
+          "explanation": "The actual unresolved question—whether the cause is in cache.ts or elsewhere—is replaced with a question assuming cache.ts already caused it.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There is only one cause question, with no duplicate obligation.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "English and the literal identifier cache.ts are preserved; there is no deadline to normalize.",
+          "evidenceIds": ["evidence:meeting-087:1"]
+        }
+      ]
+    },
+    {
+      "answerId": "b01ee14ff8405f923230bea7858cf5bb4cd518447b22466dfbee0cf25a568ff6",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927538Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "The follow-up title “Test clock.ts für Zeitumstellung” adds a DST-testing purpose. The speakers use the clock change to disambiguate the deadline and explicitly separate timezone discussion from work; they never state what behavior the clock.ts test should test.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Jo's commitment and Monday deadline remain confirmed, and only one task is proposed. The unsupported DST purpose in its title is a scope-grounding error, rather than a conversion of a tentative offer into acceptance.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jo explicitly owns the test. Participants' calendar statements support the interpretation; no other test owner or objector is invented.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The single accepted clock.ts test and resolved deadline are captured, with no outstanding deadline clarification required.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:8",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Exactly one executable test obligation is retained; calendar decisions are not duplicate work items.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:7",
+            "evidence:berlin-dst-calendar-day:9",
+            "evidence:berlin-dst-calendar-day:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "At the supplied instant Berlin is already 25 October; tomorrow is Monday 2026-10-26, as the speakers explicitly confirm. clock.ts is preserved.",
+          "evidenceIds": [
+            "evidence:berlin-dst-calendar-day:1",
+            "evidence:berlin-dst-calendar-day:2",
+            "evidence:berlin-dst-calendar-day:3",
+            "evidence:berlin-dst-calendar-day:4",
+            "evidence:berlin-dst-calendar-day:5",
+            "evidence:berlin-dst-calendar-day:6",
+            "evidence:berlin-dst-calendar-day:9"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "b2b1371f5c360b7d409cea50a100bc3dd2328a5e95249f2a7543440fd0a562ac",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927558Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The investigation stays on api/client.ts, excludes the retry worker, and does not assert a proven cause or an agreed fix/deployment.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "Mira explicitly accepts investigation only; Alex withdraws and Sam offers neither investigation. The current obligation respects those boundaries.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:5",
+            "evidence:handoff-with-scope-limit:6",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is the self-committing investigator; scope support comes from Sam, Alex and Mira. The obsolete Alex reference does not establish current ownership.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:9",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The accepted investigation and scope limits are retained. The version question acknowledges Jo's previous-day build answer and narrows the remaining issue to the absent concrete version; the resolved synthetic-data question is not repeated.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:3",
+            "evidence:handoff-with-scope-limit:4",
+            "evidence:handoff-with-scope-limit:7",
+            "evidence:handoff-with-scope-limit:8",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There is one investigation obligation. Its scope decision and corresponding work proposal are representations of that obligation, not additional executable tasks.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:2",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:13",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "api/client.ts and the 18 September 2026 deadline remain correct; the excluded retry-worker path does not replace the investigation target.",
+          "evidenceIds": [
+            "evidence:handoff-with-scope-limit:10",
+            "evidence:handoff-with-scope-limit:12",
+            "evidence:handoff-with-scope-limit:14"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "b764846f4f34bae35dd69a081906f843177581489edd2e3357c98d2868eb0327",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927580Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The unknown speaker's commitment and date are preserved. “Zuordnung zurückgewiesen/verneint” is supported as Jo refusing to have the item booked to them, particularly because the answer retains Jo's exact nonconfirmation quote; it does not identify who actually spoke.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The candidate proposal preserves an audible commitment while withholding a resolved owner. It does not assert that Jo accepted or that the speech was merely hypothetical.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "The null owner and assignee avoid treating person_unknown as a person or assigning Jo. The clarification follows the participants' explicit request.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The test, 25 September deadline and unresolved identity are all represented; no additional person has accepted on the unknown speaker's behalf.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "The task, identity uncertainty and related proposal describe one test obligation rather than extra work for the identified attendees.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The explicit 25 September 2026 date is retained as 2026-09-25 in Europe/Berlin; uncertainty concerns ownership, not the deadline or CSV-export scope.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:8"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "c0bcde305870205f8e72f157e4708d642b38d8dc8e21231f2c0792b3d519b033",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927603Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "uncertain",
+          "explanation": "“Hat Legal ... freigegeben?” can serve as a standing approval gate, matching Jo's statement that approval remains a question. Read as a question about the current known state, however, it reopens the explicit absence of approval. A future-facing formulation would remove this temporal ambiguity.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:3",
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "No conditional offer becomes accepted work, and the final prohibition on a deployment ticket is respected. A candidate offer can remain a proposal.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:11",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Alex and Jo support the no-deployment status; Alex and Sam support no new checklist/deployment work. Jo explicitly describes approval as the remaining question, supporting raisedBy Jo.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The pending approval and final absence of new work are represented. No accepted task is omitted; support availability remains tentative rather than an obligation.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:3",
+            "evidence:conditional-rollout-unapproved:8",
+            "evidence:conditional-rollout-unapproved:10",
+            "evidence:conditional-rollout-unapproved:13",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "There are no duplicate executable commitments. Approval status and the no-work boundary describe distinct aspects of the outcome.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:5",
+            "evidence:conditional-rollout-unapproved:14",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Project Beacon/new-flow terminology is preserved, and September 18 is not installed as an accepted task deadline.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-unapproved:1",
+            "evidence:conditional-rollout-unapproved:2",
+            "evidence:conditional-rollout-unapproved:6",
+            "evidence:conditional-rollout-unapproved:7",
+            "evidence:conditional-rollout-unapproved:15",
+            "evidence:conditional-rollout-unapproved:16"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "c4ddc0336fd1a5910ee773b60cac077b8d0590a24413f99057d6d84947050016",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927623Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The training quotation remains fictional/historical evidence of an example, not an actual migration assignment or deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The answer preserves the distinction between quoted first-person speech and a live commitment; there is no current migration commitment or accepted Friday deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is not assigned the quoted work. Sam introduces the example, Jo explains its status, Mira disclaims it, and Alex limits the discussion to interpretation.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The settled absence of a current migration assignment is retained, and Alex's question is not unnecessarily reopened after Jo's answer.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "No executable migration item is duplicated or generated from the quotation; complementary interpretation/no-ticket statements are not separate obligations.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The German/mixed source meaning is preserved, and fictional “Freitag” is not normalized into a live deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "c7054851d3c90372378e22de994d693173463433c35a0838028bb47eac477603",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927644Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The training quotation remains fictional/historical evidence of an example, not an actual migration assignment or deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The answer preserves the distinction between quoted first-person speech and a live commitment; there is no current migration commitment or accepted Friday deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira is not assigned the quoted work. Sam introduces the example, Jo explains its status, Mira disclaims it, and Alex limits the discussion to interpretation.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:9",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The compact decision preserves no decided migration need and no current commitment from the fictional quotation. No actual task, current Friday deadline, or unanswered migration-commissioning question is lost.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:4",
+            "evidence:quoted-owner-is-not-commitment:5",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "No executable migration item is duplicated or generated from the quotation; complementary interpretation/no-ticket statements are not separate obligations.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:3",
+            "evidence:quoted-owner-is-not-commitment:6",
+            "evidence:quoted-owner-is-not-commitment:8",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The German/mixed source meaning is preserved, and fictional “Freitag” is not normalized into a live deadline.",
+          "evidenceIds": [
+            "evidence:quoted-owner-is-not-commitment:1",
+            "evidence:quoted-owner-is-not-commitment:2",
+            "evidence:quoted-owner-is-not-commitment:7",
+            "evidence:quoted-owner-is-not-commitment:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "cfe81dd6cb5225355cbda10c6e525c04297ce91d2d7c6dedd7fb2eb5e4e82bf5",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927664Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The current Parser-Test belongs to Jakob, while the old bot assignment to Alex is explicitly historical and unconfirmed.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:1",
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The explicit human correction and Jakob's acceptance govern the current action, with no new Alex task inferred from a role or bot quotation.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:2",
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Jakob's self-commitment establishes person_jakob; Alex confirms and disclaims his own ownership. Jo and Sam support preserving the correction and avoiding an Alex task.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "Jakob's Parser-Test, the corrected owner and the operative date are captured; no clarification of already settled ownership is introduced.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:3",
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One Parser-Test obligation is retained. Ownership correction and historical-context decisions do not add duplicate work.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:7",
+            "evidence:human-correction-over-bot-quote:8",
+            "evidence:human-correction-over-bot-quote:9"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Luma/Parser-Test meaning and the explicit 24 September 2026 deadline are preserved; the old wished-for date does not override 2026-09-24.",
+          "evidenceIds": [
+            "evidence:human-correction-over-bot-quote:4",
+            "evidence:human-correction-over-bot-quote:5",
+            "evidence:human-correction-over-bot-quote:6",
+            "evidence:human-correction-over-bot-quote:10"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "d505100d6d7a3a3795b516158f35c566639bf9ae18d263c30ea39868deb64883",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927690Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The CSV-export test and clear date are retained while the owner remains explicitly unknown; a placeholder or tentative Jo guess is not treated as identity evidence.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The candidate proposal preserves an audible commitment while withholding a resolved owner. It does not assert that Jo accepted or that the speech was merely hypothetical.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "The owner/assignee remains null; Jo is a question hypothesis rather than an owner. Sam explicitly requests identity clarification, Alex asks whether it was Jo, and the participants support leaving identity unresolved.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:1",
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The test, 25 September deadline and unresolved identity are all represented; no additional person has accepted on the unknown speaker's behalf.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:5",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:8",
+            "evidence:unidentified-speaker-commitment:9",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "uncertain",
+          "explanation": "The general owner question and “Was it Jo?” both address the same unresolved speaker identity. They could be consolidated, although the latter preserves Alex's narrower unanswered hypothesis. This is possible clarification redundancy, not evidence of a second task.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:3",
+            "evidence:unidentified-speaker-commitment:4",
+            "evidence:unidentified-speaker-commitment:7",
+            "evidence:unidentified-speaker-commitment:10"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "The explicit 25 September 2026 date is retained as 2026-09-25 in Europe/Berlin; uncertainty concerns ownership, not the deadline or CSV-export scope.",
+          "evidenceIds": [
+            "evidence:unidentified-speaker-commitment:2",
+            "evidence:unidentified-speaker-commitment:8"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "da383def4d20a395794a943b9a8f7e9fcf8a095f2499da64b9d1798b88e8e0e6",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927710Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "The final Legal approval, Sam's checklist-only commitment and separate undecided deployment are supported; prior non-approval is treated as earlier context.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:4",
+            "evidence:conditional-rollout-accepted:5",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The answer updates the earlier conditional offer after Legal approval, confirms checklist writing only, and does not turn that into deployment acceptance.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:2",
+            "evidence:conditional-rollout-accepted:6",
+            "evidence:conditional-rollout-accepted:15",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Sam explicitly commits, Jo reports the prerequisite approval, and Alex confirms the limited assignment. These support the listed roles without a fabricated objector.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The accepted checklist, fulfilled Legal condition and separate unresolved deployment decision are represented; a separate question row is not required if that distinction is explicit elsewhere.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Only one checklist obligation is present. Its decision record and work-item proposal do not create a second executable commitment.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "Project Beacon and deployment-checklist terminology are retained; the accepted checklist deadline is 2026-09-18, without applying it to actual deployment.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:1",
+            "evidence:conditional-rollout-accepted:7",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        }
+      ]
+    },
+    {
+      "answerId": "e485bd6e30c27fd28ca430df11cc4a961381c1979deea07759f1fbd565d600d9",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927726Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "The action is assigned to person_sam, but the only evidence is person_mira saying “I will fix parser.ts.” There is no Sam assignment or accepted transfer.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The source's definite repair commitment is still represented as confirmed; the wrong person is assessed under grounding and attribution rather than treating its modality as hypothetical.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "fail",
+          "explanation": "The speaker's self-commitment establishes Mira, not Sam. person_sam is an unsupported owner.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The only task scope and date are retained; the incorrect owner is separately failed under attribution. No additional obligation or unresolved question is omitted.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One parser.ts repair obligation represents the single commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "English wording, parser.ts and the explicit 18 September 2026 date are preserved with normalizedDate 2026-09-18.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        }
+      ]
+    },
+    {
+      "answerId": "f483288b63c2fbafb8ec46d416fa44b0ff4ed7f87ab05cea247d33b45c6283f8",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927740Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "explanation": "“Repair the parser.ts implementation” is a valid paraphrase of “fix parser.ts.” “Agreed date” refers to the same explicitly self-accepted date and does not create another deadline or task.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The confirmed action preserves the force of “I will fix”; it does not introduce a tentative offer or extra commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Mira speaks a first-person commitment, supporting person_mira as owner without an inferred assignment to someone else.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "explanation": "The stated parser.ts repair and date are captured; there are no additional decisions or open questions in the source.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "One parser.ts repair obligation represents the single commitment.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass",
+          "explanation": "English wording, parser.ts and the explicit 18 September 2026 date are preserved with normalizedDate 2026-09-18.",
+          "evidenceIds": ["evidence:meeting-041:1"]
+        }
+      ]
+    },
+    {
+      "answerId": "fb161de17993e8fa2c5d0d35ee72361aa2654c29592e4efa359bdcae5664abc0",
+      "reviewer": {
+        "id": "reviewer-a",
+        "kind": "agent"
+      },
+      "reviewedAt": "2026-09-11T18:42:41.927812Z",
+      "judgments": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "explanation": "The deployment-date question asks whether September 18 is a firm deadline or merely a board wish date, although Jo explicitly settles that board-date status. Later Sam accepts that date for checklist writing only; no source makes the deployment-date status unknown or firm.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:7",
+            "evidence:conditional-rollout-accepted:8",
+            "evidence:conditional-rollout-accepted:9",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "explanation": "The action and follow-up correctly move Sam from conditional offer to accepted checklist-only work after approval. Actual deployment remains undecided; the needless date-status question is addressed separately.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:2",
+            "evidence:conditional-rollout-accepted:6",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "explanation": "Sam explicitly commits, Jo reports the prerequisite approval, and Alex confirms the limited assignment. These support the listed roles without a fabricated objector.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "fail",
+          "explanation": "The checklist commitment and separate deployment decision are captured, but the combined date question reopens the already stated wish-date distinction. The eventual deployment choice and support availability can remain unresolved without that extra question.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:7",
+            "evidence:conditional-rollout-accepted:8",
+            "evidence:conditional-rollout-accepted:9",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass",
+          "explanation": "Only one checklist obligation is present. Its decision record and work-item proposal do not create a second executable commitment.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "fail",
+          "explanation": "The checklist deadline 2026-09-18 is correct. The deployment question nevertheless makes the same date's status ambiguous again, despite the explicit wish-date statement and checklist-only later acceptance.",
+          "evidenceIds": [
+            "evidence:conditional-rollout-accepted:7",
+            "evidence:conditional-rollout-accepted:8",
+            "evidence:conditional-rollout-accepted:9",
+            "evidence:conditional-rollout-accepted:16",
+            "evidence:conditional-rollout-accepted:17",
+            "evidence:conditional-rollout-accepted:18"
+          ]
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "answerId": "196adcf4a85dd7df86ba89b1ab06c15a4d995f3ccf3c05b73ee740ce18e419c7",
+      "kind": "rubric-concern",
+      "rubricId": "important-recall",
+      "explanation": "Mira asks which version was used; Jo answers “the previous day's build.” Omitting a version question is reasonable if that identifies the build, but the packet does not establish whether a more specific version is still material. The accepted investigation and resolved synthetic-data question are otherwise covered.",
+      "evidenceIds": [
+        "evidence:handoff-with-scope-limit:3",
+        "evidence:handoff-with-scope-limit:4",
+        "evidence:handoff-with-scope-limit:7",
+        "evidence:handoff-with-scope-limit:8",
+        "evidence:handoff-with-scope-limit:12",
+        "evidence:handoff-with-scope-limit:14"
+      ],
+      "principleIds": ["recall", "clarification", "knowledge"]
+    },
+    {
+      "answerId": "3ba8b6625aaafebf46b2635b4b36d8a9707eb7cf2a0530ed0d0a79176b1c4377",
+      "kind": "answer-error",
+      "rubricId": "duplicate-items",
+      "explanation": "Two action rows, parser-fix and parser-fix-again, repeat the same description, owner, date and source. The single utterance supports only one repair obligation.",
+      "evidenceIds": ["evidence:meeting-041:1"],
+      "principleIds": ["recall"]
+    },
+    {
+      "answerId": "439553507a92d4aaca206f91d0ba03f75cff1b12bc7bd98423d2dc65e56cf632",
+      "kind": "rubric-concern",
+      "rubricId": "important-recall",
+      "explanation": "The output repeats the version question after Jo identifies the previous day's build. This may be a legitimate need for an exact version or unnecessary reopening; the source does not settle that granularity. Mira's final investigation is otherwise captured.",
+      "evidenceIds": [
+        "evidence:handoff-with-scope-limit:3",
+        "evidence:handoff-with-scope-limit:4",
+        "evidence:handoff-with-scope-limit:12",
+        "evidence:handoff-with-scope-limit:14"
+      ],
+      "principleIds": ["recall", "clarification", "knowledge"]
+    },
+    {
+      "answerId": "457ac9518e7b349fe9b17916cd29a89945f2851703bbd5170f94661b54854473",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The question asking whether September 18 is firm or wished-for treats an explicitly settled distinction as unknown: Jo says it is a wish date, not an agreed deadline. The question about deciding Friday versus Monday “now” likewise overlooks Jo's explicit “Nein.”",
+      "evidenceIds": [
+        "evidence:conditional-rollout-unapproved:6",
+        "evidence:conditional-rollout-unapproved:7",
+        "evidence:conditional-rollout-unapproved:9",
+        "evidence:conditional-rollout-unapproved:10",
+        "evidence:conditional-rollout-unapproved:13",
+        "evidence:conditional-rollout-unapproved:14"
+      ],
+      "principleIds": ["evidence", "dates", "clarification", "recall"]
+    },
+    {
+      "answerId": "457ac9518e7b349fe9b17916cd29a89945f2851703bbd5170f94661b54854473",
+      "kind": "answer-error",
+      "rubricId": "important-recall",
+      "explanation": "Pending approval is captured, but the output reopens the already answered deadline-status and immediate-timing questions. The still-unselected deployment date can remain open without repeating those resolved questions.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-unapproved:6",
+        "evidence:conditional-rollout-unapproved:7",
+        "evidence:conditional-rollout-unapproved:9",
+        "evidence:conditional-rollout-unapproved:10",
+        "evidence:conditional-rollout-unapproved:13",
+        "evidence:conditional-rollout-unapproved:14"
+      ],
+      "principleIds": ["evidence", "dates", "clarification", "recall"]
+    },
+    {
+      "answerId": "457ac9518e7b349fe9b17916cd29a89945f2851703bbd5170f94661b54854473",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The null candidate deadline is correct, but the open question falsely leaves September 18's current deadline status undecided despite Jo explicitly calling it only a wish date.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-unapproved:6",
+        "evidence:conditional-rollout-unapproved:7",
+        "evidence:conditional-rollout-unapproved:9",
+        "evidence:conditional-rollout-unapproved:10",
+        "evidence:conditional-rollout-unapproved:13",
+        "evidence:conditional-rollout-unapproved:14"
+      ],
+      "principleIds": ["evidence", "dates", "clarification", "recall"]
+    },
+    {
+      "answerId": "a527fa6f9f6b8e6ba9e346467d5d1d72c853ab8b207e186f93c297cef9bd5c8a",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "“Es besteht kein aktueller Bedarf” asserts that no migration need exists. Jo says there is no decided migration need, which establishes the absence of an adopted need/assignment, not the nonexistence of a need.",
+      "evidenceIds": [
+        "evidence:quoted-owner-is-not-commitment:5",
+        "evidence:quoted-owner-is-not-commitment:6",
+        "evidence:quoted-owner-is-not-commitment:10"
+      ],
+      "principleIds": ["evidence", "modality", "decisions"]
+    },
+    {
+      "answerId": "a527fa6f9f6b8e6ba9e346467d5d1d72c853ab8b207e186f93c297cef9bd5c8a",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The decision drops “beschlossenen” from the source's absence of decided migration need and converts a decision-status limitation into a categorical absence of need. It correctly avoids creating work from the fictional quotation.",
+      "evidenceIds": [
+        "evidence:quoted-owner-is-not-commitment:1",
+        "evidence:quoted-owner-is-not-commitment:3",
+        "evidence:quoted-owner-is-not-commitment:5",
+        "evidence:quoted-owner-is-not-commitment:6",
+        "evidence:quoted-owner-is-not-commitment:8",
+        "evidence:quoted-owner-is-not-commitment:10"
+      ],
+      "principleIds": ["modality", "decisions", "evidence"]
+    },
+    {
+      "answerId": "aaba94b21a0afd6930dedf7c0b63761ed36e1b3062f78cae07b9f82ee0c132fe",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "“Why did the cache.ts bug cause the failure?” presupposes both a cache.ts bug and its causal role. Jo explicitly says cache.ts is merely possible and the cause is unidentified.",
+      "evidenceIds": ["evidence:meeting-087:1"],
+      "principleIds": ["evidence", "modality"]
+    },
+    {
+      "answerId": "aaba94b21a0afd6930dedf7c0b63761ed36e1b3062f78cae07b9f82ee0c132fe",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The question converts “might ... or ... elsewhere” into an established cache.ts cause, eliminating the source's uncertainty even though it appears in a question.",
+      "evidenceIds": ["evidence:meeting-087:1"],
+      "principleIds": ["evidence", "modality"]
+    },
+    {
+      "answerId": "aaba94b21a0afd6930dedf7c0b63761ed36e1b3062f78cae07b9f82ee0c132fe",
+      "kind": "answer-error",
+      "rubricId": "important-recall",
+      "explanation": "The actual unresolved question—whether the cause is in cache.ts or elsewhere—is replaced with a question assuming cache.ts already caused it.",
+      "evidenceIds": ["evidence:meeting-087:1"],
+      "principleIds": ["recall", "clarification", "evidence"]
+    },
+    {
+      "answerId": "b01ee14ff8405f923230bea7858cf5bb4cd518447b22466dfbee0cf25a568ff6",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The follow-up title “Test clock.ts für Zeitumstellung” adds a DST-testing purpose. The speakers use the clock change to disambiguate the deadline and explicitly separate timezone discussion from work; they never state what behavior the clock.ts test should test.",
+      "evidenceIds": [
+        "evidence:berlin-dst-calendar-day:3",
+        "evidence:berlin-dst-calendar-day:4",
+        "evidence:berlin-dst-calendar-day:5",
+        "evidence:berlin-dst-calendar-day:7",
+        "evidence:berlin-dst-calendar-day:9"
+      ],
+      "principleIds": ["evidence", "recall"]
+    },
+    {
+      "answerId": "c0bcde305870205f8e72f157e4708d642b38d8dc8e21231f2c0792b3d519b033",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "“Hat Legal ... freigegeben?” can serve as a standing approval gate, matching Jo's statement that approval remains a question. Read as a question about the current known state, however, it reopens the explicit absence of approval. A future-facing formulation would remove this temporal ambiguity.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-unapproved:3",
+        "evidence:conditional-rollout-unapproved:5",
+        "evidence:conditional-rollout-unapproved:10",
+        "evidence:conditional-rollout-unapproved:13",
+        "evidence:conditional-rollout-unapproved:14"
+      ],
+      "principleIds": ["evidence", "clarification", "modality"]
+    },
+    {
+      "answerId": "d505100d6d7a3a3795b516158f35c566639bf9ae18d263c30ea39868deb64883",
+      "kind": "rubric-concern",
+      "rubricId": "duplicate-items",
+      "explanation": "The general owner question and “Was it Jo?” both address the same unresolved speaker identity. They could be consolidated, although the latter preserves Alex's narrower unanswered hypothesis. This is possible clarification redundancy, not evidence of a second task.",
+      "evidenceIds": [
+        "evidence:unidentified-speaker-commitment:3",
+        "evidence:unidentified-speaker-commitment:4",
+        "evidence:unidentified-speaker-commitment:7",
+        "evidence:unidentified-speaker-commitment:10"
+      ],
+      "principleIds": ["clarification", "recall", "ownership"]
+    },
+    {
+      "answerId": "e485bd6e30c27fd28ca430df11cc4a961381c1979deea07759f1fbd565d600d9",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The action is assigned to person_sam, but the only evidence is person_mira saying “I will fix parser.ts.” There is no Sam assignment or accepted transfer.",
+      "evidenceIds": ["evidence:meeting-041:1"],
+      "principleIds": ["evidence", "ownership"]
+    },
+    {
+      "answerId": "e485bd6e30c27fd28ca430df11cc4a961381c1979deea07759f1fbd565d600d9",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "The speaker's self-commitment establishes Mira, not Sam. person_sam is an unsupported owner.",
+      "evidenceIds": ["evidence:meeting-041:1"],
+      "principleIds": ["ownership", "evidence"]
+    },
+    {
+      "answerId": "fb161de17993e8fa2c5d0d35ee72361aa2654c29592e4efa359bdcae5664abc0",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The deployment-date question asks whether September 18 is a firm deadline or merely a board wish date, although Jo explicitly settles that board-date status. Later Sam accepts that date for checklist writing only; no source makes the deployment-date status unknown or firm.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-accepted:7",
+        "evidence:conditional-rollout-accepted:8",
+        "evidence:conditional-rollout-accepted:9",
+        "evidence:conditional-rollout-accepted:16",
+        "evidence:conditional-rollout-accepted:17",
+        "evidence:conditional-rollout-accepted:18"
+      ],
+      "principleIds": ["dates", "clarification", "evidence", "recall"]
+    },
+    {
+      "answerId": "fb161de17993e8fa2c5d0d35ee72361aa2654c29592e4efa359bdcae5664abc0",
+      "kind": "answer-error",
+      "rubricId": "important-recall",
+      "explanation": "The checklist commitment and separate deployment decision are captured, but the combined date question reopens the already stated wish-date distinction. The eventual deployment choice and support availability can remain unresolved without that extra question.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-accepted:7",
+        "evidence:conditional-rollout-accepted:8",
+        "evidence:conditional-rollout-accepted:9",
+        "evidence:conditional-rollout-accepted:16",
+        "evidence:conditional-rollout-accepted:17",
+        "evidence:conditional-rollout-accepted:18"
+      ],
+      "principleIds": ["dates", "clarification", "evidence", "recall"]
+    },
+    {
+      "answerId": "fb161de17993e8fa2c5d0d35ee72361aa2654c29592e4efa359bdcae5664abc0",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The checklist deadline 2026-09-18 is correct. The deployment question nevertheless makes the same date's status ambiguous again, despite the explicit wish-date statement and checklist-only later acceptance.",
+      "evidenceIds": [
+        "evidence:conditional-rollout-accepted:7",
+        "evidence:conditional-rollout-accepted:8",
+        "evidence:conditional-rollout-accepted:9",
+        "evidence:conditional-rollout-accepted:16",
+        "evidence:conditional-rollout-accepted:17",
+        "evidence:conditional-rollout-accepted:18"
+      ],
+      "principleIds": ["dates", "clarification", "evidence", "recall"]
+    },
+    {
+      "answerId": "33991a22913ede42eecdbb1f8c17ae24387801d33e08775a4db0c3f4f6cf4071",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The schema has one action status and nullable owner, but no separate structured state for a definitely heard commitment whose speaker is unidentified. This answer preserves that distinction in prose and risk while using candidate/null; richer representation is a product gap, not an answer failure or proof that a provider write is safe.",
+      "evidenceIds": [
+        "evidence:unidentified-speaker-commitment:1",
+        "evidence:unidentified-speaker-commitment:2",
+        "evidence:unidentified-speaker-commitment:5",
+        "evidence:unidentified-speaker-commitment:7",
+        "evidence:unidentified-speaker-commitment:8"
+      ],
+      "principleIds": ["modality", "ownership", "authorization", "human"]
+    }
+  ]
+}

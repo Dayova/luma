@@ -1730,6 +1730,13 @@ export function conversationSnapshotContentHash(
   return observedSourceContentHash(canonicalJson(snapshot));
 }
 
+/** Exact original Meeting Note comparison without advancing its durable source head. */
+export function meetingNoteSnapshotContentHash(snapshot: RawMeetingNoteSnapshot): string {
+  if (!isRawMeetingNoteSnapshot(snapshot))
+    throw new Error("Meeting Note snapshot has an invalid shape");
+  return observedSourceContentHash(canonicalJson(snapshot));
+}
+
 function isRawConversation(value: unknown): boolean {
   return (
     isRecord(value) &&

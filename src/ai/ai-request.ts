@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { requireAiRequestGuardCurrent } from "./ai-request-guard.js";
 import { AiServiceError } from "./ai-service-error.js";
 import type { AiTokenUsage, AiUsageBudget } from "./ai-usage-budget.js";
 
@@ -113,6 +114,7 @@ export async function runBudgetedAiRequest(input: {
     const response = await Promise.race([
       (async () => {
         await input.beforeInvoke?.(controller.signal);
+        await requireAiRequestGuardCurrent();
         if (controller.signal.aborted)
           throw new AiServiceError(
             "timeout",

@@ -63,9 +63,9 @@ Every named expectation must have an executable assertion, a validated
 `coveredBy` link to an executable retrieval scenario, or a specific `missing`
 capability entry. Linked checks are counted once. Normal evaluation exits nonzero for measured
 regressions. `pnpm eval:meeting:complete` additionally fails for any missing
-capability and currently **must fail**. The report's `productReadiness` remains
-`not-demonstrated` while gaps exist; a green deterministic CI run is not a
-production-readiness claim.
+capability. The report's `productReadiness` remains `not-demonstrated` while gaps
+exist, and becomes `only-declared-corpus-demonstrated` when all declared checks
+pass. A green deterministic run is not a production-readiness claim.
 
 The version-four corpus adds a real GitHub CodeProvider/catalog/Context Ask
 scenario, using deterministic HTTP responses and original literal code bytes.
@@ -76,11 +76,22 @@ Mutation tests remove matching code, the head change and revocation and require
 the corresponding checks to fail. This runs actual adapters but no live network;
 its source/evidence selection is reported separately from normalized catalogs.
 
-One check remains explicitly missing: real Notion/Linear/GitHub source mapping
-for standing/authority and current-versus-superseded selection. Programmable
-normalized catalogs prove the core's selection policy, but cannot prove those
-external adapters. The original historical/current Meeting fixtures remain
-separate from this new retrieval coverage.
+The version-six corpus closes the previously missing provider-standing check
+through the actual Notion knowledge parser, signed Decision reader, Linear work
+parser and GitHub PR HTTP adapter composed with Context Ask. Synthetic external
+responses contain an older accepted founder Decision, a superseded Notion page,
+a completed Linear task still labeled proposed, and a newer draft PR. It measures
+the accepted Decision's first-place ranking, exclusion of superseded material,
+explicit proposal/source labels, partial discovery coverage, revoked replay and
+delivery, and preserved snapshots. Lower-ranked proposals can remain labeled
+context; the evidence-echo answerer does not pretend to measure live reasoning
+about policy. Mutation cases change provider states, remove Human acceptance and
+omit revocation, requiring the corresponding checks to fail.
+
+`crossProviderSelection` reports this real-adapter coverage separately from the
+normalized-catalog fixtures. All I/O responses and the answerer are deterministic;
+no live provider calls, paid requests, live quality or deployment readiness are
+inferred. The original historical/current Meeting fixtures remain separate.
 
 The version-five corpus adds accepted imported Meeting recall: real immutable
 source admission and Meeting Intelligence analysis, Human confirmation, the owned

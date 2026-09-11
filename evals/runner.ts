@@ -21,6 +21,7 @@ import { score, summarize, type CheckResult } from "./scorer.js";
 import { runRetrievalFixture } from "./retrieval-runner.js";
 import { runImportedMeetingFixture } from "./imported-meeting-runner.js";
 import { runGitHubFixture } from "./github-runner.js";
+import { runCrossProviderFixture } from "./cross-provider-runner.js";
 
 type RequestRecord = {
   sampleId: string;
@@ -404,11 +405,17 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       importedMeetingFixtures.push(
         await runImportedMeetingFixture(database, fixture, corpus)
       );
+    const crossProviderFixtures = [];
+    for (const fixture of corpus.crossProviderFixtures)
+      crossProviderFixtures.push(
+        await runCrossProviderFixture(database, fixture, corpus)
+      );
     const fixtures = [
       ...meetingFixtures,
       ...retrievalFixtures,
       ...githubFixtures,
-      ...importedMeetingFixtures
+      ...importedMeetingFixtures,
+      ...crossProviderFixtures
     ];
     const checks = fixtures.flatMap((fixture) => fixture.checks);
     const metrics = Object.fromEntries(
@@ -469,6 +476,10 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       importedMeetingSelection: knowledgeMeasurements(
         importedMeetingFixtures,
         "Real accepted Notion-shaped captures, MI analysis, original source grants, leaf catalog and Context Ask with deterministic external adapters. No live model, Notion transport or direct Discord historical audience proof is measured."
+      ),
+      crossProviderSelection: knowledgeMeasurements(
+        crossProviderFixtures,
+        "Actual Notion knowledge and signed Decision parsing, Linear work parsing, GitHub PR HTTP adapter, source standing and governed Context Ask over synthetic external responses. Live provider/model quality and latency remain unmeasured."
       ),
       productReadiness: checks.some((check) => check.status !== "passed")
         ? "not-demonstrated"

@@ -304,6 +304,9 @@ export async function startServer(
           database,
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
+          ...(importedSourceAnalysis
+            ? { importedSourceAccess: importedSourceAnalysis.access }
+            : {}),
           accessPolicy,
           budget: aiUsage,
           limits: aiRequestLimits,

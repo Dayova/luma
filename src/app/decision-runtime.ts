@@ -1,5 +1,7 @@
 import { isAbsolute } from "node:path";
 import { createConversationDecisionEvidenceSource } from "../decision-intelligence/conversation-evidence-source.js";
+import { createImportedMeetingDecisionEvidenceSource } from "../decision-intelligence/imported-meeting-evidence-source.js";
+import type { ImportedSourceHistoryAccess } from "../meeting-intelligence/imported-source-analysis.js";
 import { createNotionDecisionAuthority } from "../decision-intelligence/notion-decision-authority.js";
 import { createOpenAIDecisionInterpreter } from "../decision-intelligence/openai-decision-interpreter.js";
 import { createNotionDecisionRecords } from "../knowledge/notion-decision-records.js";
@@ -84,6 +86,7 @@ export async function createDecisionRuntime(
     database: LumaDatabase;
     ledger: ObservedSourceLedger;
     conversationEvidenceSource: ConversationEvidenceSource;
+    importedSourceAccess?: ImportedSourceHistoryAccess;
     accessPolicy: WorkspaceAccessPolicy;
     budget: AiUsageBudget;
     limits: AiRequestLimits;
@@ -128,6 +131,13 @@ export async function createDecisionRuntime(
     accessPolicy: input.accessPolicy,
     recipientPersonIds: dayovaFounderPersonIds
   });
+  const meetingEvidenceSource = input.importedSourceAccess
+    ? createImportedMeetingDecisionEvidenceSource({
+        database: input.database,
+        ledger: input.ledger,
+        sourceAccess: input.importedSourceAccess
+      })
+    : undefined;
   const records = (dependencies.createRecords ?? createNotionDecisionRecords)({
     workspaceId,
     dataSourceId: config.dataSourceId,
@@ -140,13 +150,17 @@ export async function createDecisionRuntime(
         credentialScopeId: config.destinationCredentialScopeId,
         resource: dataSourceId
       }),
-    authorizeRetainedSource: (request) => evidenceSource.authorizeRetained(request),
+    authorizeRetainedSource: (request) =>
+      request.source.subject.type === "meeting"
+        ? (meetingEvidenceSource?.authorizeRetained(request) ?? Promise.resolve(false))
+        : evidenceSource.authorizeRetained(request),
     authorizeRetainedAuthority: (request) => authority.authorizeRetainedAuthority(request)
   });
   return {
     authority,
     records,
     evidenceSource,
+    ...(meetingEvidenceSource ? { meetingEvidenceSource } : {}),
     accessPolicy: input.accessPolicy,
     audience: (requestedWorkspaceId) =>
       Promise.resolve(

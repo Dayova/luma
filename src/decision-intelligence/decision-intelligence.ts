@@ -1,3 +1,4 @@
+import { decisionScopeOwnership } from "./scope-ownership.js";
 import { requireAutomaticPolicyCurrent } from "./automatic-policy.js";
 import { hasDecisionRecordingRefusal } from "./recording-instruction.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
@@ -163,40 +164,15 @@ export function authorityFor(
     return "This is not yet an evidenced final Human decision.";
   if (!stored.authority)
     return "Current responsibility evidence is unavailable; review is required.";
-  const grants = stored.authority.grants.filter(
-    (grant) =>
-      grant.scopeId === candidate.scopeId &&
-      grant.standing === "current" &&
-      grant.kind !== "provisional-role" &&
-      grant.evidence.length > 0
-  );
-  const priority = (kind: string) =>
-    kind === "delegation" ? 3 : kind === "project-ownership" ? 2 : 1;
-  const highest = Math.max(0, ...grants.map((grant) => priority(grant.kind)));
-  const selected = grants.filter((grant) => priority(grant.kind) === highest);
-  const owners = [...new Set(selected.map((grant) => grant.personId))];
+  const ownership = decisionScopeOwnership(stored.authority, candidate.scopeId);
+  if (typeof ownership === "string") return ownership;
   if (
-    owners.length !== 1 ||
     candidate.decisionMakerPersonIds.length !== 1 ||
-    owners[0] !== candidate.decisionMakerPersonIds[0]
+    candidate.decisionMakerPersonIds[0] !== ownership.owner
   )
     return "Current responsibility evidence does not establish one unambiguous accountable decision-maker.";
-  if (
-    selected.some(
-      (grant) =>
-        grant.kind === "delegation" &&
-        (!grant.delegatedBy ||
-          !stored.authority!.grants.some(
-            (parent) =>
-              parent.personId === grant.delegatedBy &&
-              parent.scopeId === grant.scopeId &&
-              parent.standing === "current" &&
-              parent.kind !== "provisional-role" &&
-              parent.kind !== "delegation"
-          ))
-    )
-  )
-    return "The delegation does not have current authority evidence.";
+  const selected = ownership.grants;
+  const owners = [ownership.owner];
   if (
     !candidate.acceptanceEvidenceIds.length ||
     candidate.acceptanceEvidenceIds.some((id) => {

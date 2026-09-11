@@ -1,4 +1,8 @@
 import { createAutomaticDecisionProcessing } from "../../src/app/automatic-decision-processing.js";
+import {
+  standingFixture,
+  audience as permissionAudience
+} from "./standing-permission-fixture.js";
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
 import { createOpenAIAutomaticDecisionDetector } from "../../src/decision-intelligence/openai-decision-interpreter.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1039,5 +1043,64 @@ describe("durable automatic source processing through public MI", () => {
         contentHash: "h"
       })
     ).rejects.toThrow();
+  });
+});
+
+describe("automatic decisions with actual durable native standing permission", () => {
+  async function composed() {
+    const f = fixture(),
+      permissions = standingFixture(database),
+      policy = await permissions.make();
+    f.source.audience = structuredClone(permissionAudience);
+    for (const item of f.source.evidence) {
+      if (item.authorPersonId === "jakob") item.authorPersonId = "person_jakob";
+      if (item.reference.participantId === "jakob")
+        item.reference.participantId = "person_jakob";
+    }
+    f.detection.candidates[0]!.interpretation.candidate.decisionMakerPersonIds = [
+      "person_jakob"
+    ];
+    f.configuration.accessPolicy = permissions.accessPolicy;
+    f.configuration.authority = permissions.authority;
+    f.configuration.audience = () => Promise.resolve(structuredClone(permissionAudience));
+    f.configuration.automatic!.policy = policy;
+    f.request.workspace.workspaceId = permissionAudience.workspaceId;
+    await policy.command(permissions.command());
+    return { f, permissions, policy };
+  }
+  it("uses only explicit stored owner permission, records once, and a recreated core does not replay the write", async () => {
+    const { f, policy } = await composed();
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]).toMatchObject({
+      state: "recorded",
+      automatic: { recording: "standing-policy" }
+    });
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    expect((await f.make().observe(f.request)).duplicate).toBe(true);
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    await policy.stop();
+  });
+  it("revokes actual durable permission after stage admission and prevents provider dispatch", async () => {
+    const { f, permissions, policy } = await composed();
+    const originalQuery = database.query.bind(database);
+    let revoked = false;
+    database.query = async <T>(...args: Parameters<LumaDatabase["query"]>) => {
+      const result = await originalQuery<T>(...args);
+      if (
+        !revoked &&
+        args[0].includes("INSERT INTO decision_write_stages") &&
+        args[1]?.some(
+          (value) => typeof value === "string" && value.includes('"state":"executing"')
+        )
+      ) {
+        revoked = true;
+        await policy.command(permissions.command(2, { action: "disable" }));
+      }
+      return result;
+    };
+    await f.make().observe(f.request);
+    expect(revoked).toBe(true);
+    expect(f.provider.write).not.toHaveBeenCalled();
+    expect(await policy.read({ audience: permissionAudience })).toEqual([]);
   });
 });

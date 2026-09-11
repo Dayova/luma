@@ -1,6 +1,10 @@
 import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
 import {
+  DiscordDecisionPermissionInputError,
+  DiscordDecisionPermissionUnavailableError
+} from "./discord-decision-standing-runtime.js";
+import {
   discordDecisionRecordConfigFromEnv,
   isExplicitDecisionRecordInstruction
 } from "./discord-decision-record-runtime.js";
@@ -278,9 +282,12 @@ export function createDiscordJsTransport(
 
     trackDelivery(
       handleInteraction(interaction, config.guildId, commandHandler, channelScope)
-        .catch(async () => {
+        .catch(async (error: unknown) => {
           const content =
-            "Luma could not process the command right now. Please try again later.";
+            error instanceof DiscordDecisionPermissionInputError ||
+            error instanceof DiscordDecisionPermissionUnavailableError
+              ? error.message
+              : "Luma could not process the command right now. Please try again later.";
 
           if (interaction.deferred || interaction.replied) {
             await interaction.editReply({ content });
@@ -436,7 +443,8 @@ export function createDiscordJsTransport(
       }
     },
     disconnect,
-    resolveChannel: ({ channelId }) => resolveChannel(channelId),
+    resolveChannel: ({ channelId, requiredHumanReaderIds }) =>
+      resolveChannel(channelId, requiredHumanReaderIds),
     async createThread(input): Promise<DiscordThread> {
       await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const channel = await client.channels.fetch(input.parentChannelId, { force: true });
@@ -1163,6 +1171,33 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         ...(candidate ? { candidate } : {}),
         ...(page ? { page } : {})
       };
+    }
+    if (subcommand === "automatic") {
+      const action = interaction.options.getString("action", true);
+      const scopeId = interaction.options.getString("scope", true);
+      const permissionClass = interaction.options.getString("class");
+      const sharing = interaction.options.getString("sharing");
+      if (action === "enable") {
+        if (
+          (permissionClass !== "new-decisions" &&
+            permissionClass !== "decisions-and-corrections") ||
+          sharing !== "four-founders"
+        )
+          throw new DiscordDecisionPermissionInputError();
+        return {
+          ...base,
+          type: "decision-record-automatic",
+          scopeId,
+          choice: { action, permissionClass, sharing }
+        };
+      }
+      if (
+        (action !== "status" && action !== "disable") ||
+        permissionClass !== null ||
+        sharing !== null
+      )
+        throw new DiscordDecisionPermissionInputError();
+      return { ...base, type: "decision-record-automatic", scopeId, choice: { action } };
     }
     if (subcommand === "meeting") {
       const targetRecordId = interaction.options.getString("target_record");
@@ -2224,6 +2259,52 @@ const decisionRecordCommand = new SlashCommandBuilder()
           .setDescription("Candidate detail page")
           .setMinValue(1)
           .setMaxValue(10000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("automatic")
+      .setDescription("Set your own scope-specific automatic recording permission")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Enable, inspect or disable your own permission")
+          .setRequired(true)
+          .addChoices(
+            { name: "Enable my permission", value: "enable" },
+            { name: "Read my permission", value: "status" },
+            { name: "Disable my permission", value: "disable" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("scope")
+          .setDescription("Exact documented responsibility scope, for example luma")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("class")
+          .setDescription(
+            "Required for enable: precisely which recording actions you authorize"
+          )
+          .addChoices(
+            {
+              name: "Create or link my final decisions; no existing record changes",
+              value: "new-decisions"
+            },
+            {
+              name: "Also amend, replace or reverse my explicitly corrected decisions",
+              value: "decisions-and-corrections"
+            }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("sharing")
+          .setDescription("Required for enable: original recipients of this permission")
+          .addChoices({ name: "All four Dayova founders", value: "four-founders" })
       )
   )
   .addSubcommand((command) =>

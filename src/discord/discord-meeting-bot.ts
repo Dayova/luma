@@ -196,7 +196,10 @@ export interface DiscordTransport {
   ): Promise<void>;
   /** Stop admission and wait for admitted handlers and final deliveries before closing. */
   disconnect(): Promise<void>;
-  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null>;
+  resolveChannel(input: {
+    channelId: string;
+    requiredHumanReaderIds?: readonly string[];
+  }): Promise<DiscordChannelSurface | null>;
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
   sendMessage(input: {
     channelId: string;
@@ -686,11 +689,16 @@ async function handleCommand(
                   }
               : isDecisionRecordCommand(command)
                 ? input.decisionRecords &&
-                  surface.kind === "public-thread" &&
-                  surface.parentChannelId &&
-                  input.decisionRecords.config.parentChannelIds.includes(
-                    surface.parentChannelId
-                  ) &&
+                  ((surface.kind === "public-thread" &&
+                    surface.parentChannelId &&
+                    input.decisionRecords.config.parentChannelIds.includes(
+                      surface.parentChannelId
+                    )) ||
+                    (command.type === "decision-record-automatic" &&
+                      surface.kind === "text-channel" &&
+                      input.decisionRecords.config.parentChannelIds.includes(
+                        surface.id
+                      ))) &&
                   input.decisionRecords.config.allowedDiscordUserIds.includes(
                     command.actorDiscordUserId
                   )
@@ -725,6 +733,11 @@ async function handleCommand(
   } catch (error: unknown) {
     if (isStructuredWorkCommand(command))
       return { content: renderStructuredWorkFailure(error, command) };
+    if (command.type === "decision-record-automatic")
+      return {
+        content:
+          "The automatic recording permission changed or could not be verified before delivery. Use /decision-record automatic with action:status and the same scope to check the saved permission."
+      };
     if (isDecisionRecordCommand(command))
       return {
         content: renderDecisionRecordFailure(
@@ -811,7 +824,10 @@ async function executeDecisionRecordCommand(
   command: DiscordDecisionRecordCommand
 ): Promise<DiscordCommandResponse> {
   if (!input.decisionRecords) throw new Error("Decision Records are not configured");
-  if ("sourceMessageId" in command && command.sourceMessageId)
+  if (
+    command.type === "decision-record-automatic" ||
+    ("sourceMessageId" in command && command.sourceMessageId)
+  )
     return handleDiscordDecisionRecordCommand({
       runtime: input.decisionRecords,
       workspace: input.workspace,

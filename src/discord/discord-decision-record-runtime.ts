@@ -1,4 +1,9 @@
 import { hasDecisionRecordingRefusal } from "../decision-intelligence/recording-instruction.js";
+import {
+  handleDiscordDecisionAutomaticCommand,
+  type DiscordDecisionAutomaticCommand
+} from "./discord-decision-standing-runtime.js";
+import type { ManagedDecisionStandingPolicy } from "../decision-intelligence/standing-permission.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import type { AutomaticDecisionProcessing } from "../app/automatic-decision-processing.js";
 import { decisionDigest } from "../decision-intelligence/persistence.js";
@@ -101,31 +106,40 @@ export type DiscordDecisionRecordRuntime = {
   meetingIntelligence: DecisionIntelligence;
   execution: DecisionFollowUpExecution;
   config: DiscordContextAskConfig;
+  standingPolicy?: ManagedDecisionStandingPolicy;
 };
-export type DiscordDecisionRecordCommand = DiscordCommandBase &
-  (
-    | { type: "decision-record-meeting"; instruction: string; targetRecordId?: string }
-    | {
-        type: "decision-record-candidates";
-        sourceMessageId?: string;
-        candidate?: number;
-        page?: number;
-      }
-    | {
-        type: "decision-record-status" | "decision-record-recover";
-        sourceMessageId?: string;
-        requestId: string;
-        page?: number;
-      }
-    | {
-        type: "decision-record-accept";
-        sourceMessageId?: string;
-        requestId: string;
-        reviewToken: string;
-        instruction: string;
-      }
-  );
+export type DiscordDecisionRecordCommand =
+  | DiscordDecisionAutomaticCommand
+  | (DiscordCommandBase &
+      (
+        | {
+            type: "decision-record-meeting";
+            instruction: string;
+            targetRecordId?: string;
+          }
+        | {
+            type: "decision-record-candidates";
+            sourceMessageId?: string;
+            candidate?: number;
+            page?: number;
+          }
+        | {
+            type: "decision-record-status" | "decision-record-recover";
+            sourceMessageId?: string;
+            requestId: string;
+            page?: number;
+          }
+        | {
+            type: "decision-record-accept";
+            sourceMessageId?: string;
+            requestId: string;
+            reviewToken: string;
+            instruction: string;
+          }
+      ));
 export function discordDecisionRequestId(command: DiscordDecisionRecordCommand): string {
+  if (command.type === "decision-record-automatic")
+    return `discord:${command.interactionId}:automatic-recording`;
   if (command.type === "decision-record-candidates")
     return `discord:${command.interactionId}:decision-candidates`;
   return command.type === "decision-record-meeting"
@@ -194,6 +208,11 @@ export async function handleDiscordDecisionRecordCommand(input: {
     throw new Error(
       "The recording instruction includes an explicit refusal; no recording was started."
     );
+  if (command.type === "decision-record-automatic")
+    return handleDiscordDecisionAutomaticCommand({
+      policy: runtime.standingPolicy,
+      command
+    });
   await input.requireCurrent?.();
   const subject: DecisionSubject =
     "sourceMessageId" in command && command.sourceMessageId

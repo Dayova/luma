@@ -1,5 +1,9 @@
+import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
+import { migrateContextRetrieval } from "../context-intelligence/persistence.js";
+import { migrateMeetingContext } from "../meeting-intelligence/context-guard.js";
 import { PGlite } from "@electric-sql/pglite";
 import { openOwnedPgliteDatabase } from "./store-ownership.js";
+import { migrateAiAccountingRecovery } from "./ai-accounting-migration.js";
 
 export type LumaDatabase = PGlite;
 
@@ -799,4 +803,8 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE utterance_versions
       ALTER COLUMN speaker_id DROP NOT NULL;
   `);
+  await migrateOrganizationalContext(database);
+  await migrateAiAccountingRecovery(database);
+  await migrateContextRetrieval(database);
+  await migrateMeetingContext(database);
 }

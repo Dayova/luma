@@ -1,0 +1,350 @@
+{
+  "version": 1,
+  "provenance": "agent-authored-synthetic; not a live provider recording",
+  "model": "synthetic-programmable-v1",
+  "samples": {
+    "german": {
+      "actionItems": [
+        {
+          "stableKey": "german",
+          "description": "Das muss bis übernächsten Dienstag fertig sein.",
+          "ownerId": null,
+          "dueDate": {
+            "originalPhrase": "übernächsten Dienstag",
+            "normalizedDate": "2026-09-22",
+            "confidence": "normalized",
+            "timezone": "Europe/Berlin"
+          },
+          "status": "candidate",
+          "relatedDecisionIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "decisions": [],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "code": {
+      "actionItems": [],
+      "decisions": [
+        {
+          "stableKey": "code",
+          "statement": "The bug is probably in use-auth-session, not the token refresh worker.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "mixed": {
+      "actionItems": [
+        {
+          "stableKey": "mixed",
+          "description": "Jakob übernimmt das GitHub Issue bis Montag.",
+          "ownerId": "person_jakob",
+          "dueDate": {
+            "originalPhrase": "bis Montag",
+            "normalizedDate": "2026-09-14",
+            "confidence": "normalized",
+            "timezone": "Europe/Berlin"
+          },
+          "status": "candidate",
+          "relatedDecisionIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "decisions": [],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": [
+        {
+          "type": "create-work-item",
+          "id": "follow-mixed",
+          "title": "GitHub Issue",
+          "description": "Jakob übernimmt das GitHub Issue bis Montag.",
+          "assigneeId": "person_jakob",
+          "mentionPersonIds": [],
+          "dueDate": "2026-09-14",
+          "relatedMeetingItemIds": ["action:mixed"],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ]
+    },
+    "uncertain": {
+      "actionItems": [],
+      "decisions": [
+        {
+          "stableKey": "uncertain",
+          "statement": "Wir könnten vielleicht Linear verwenden.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "retained": {
+      "actionItems": [],
+      "decisions": [
+        {
+          "stableKey": "owner",
+          "statement": "Luma is owned by Jakob.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "old",
+          "statement": "Luma rollout uses immediate deployment.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$1"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "current",
+          "statement": "Luma rollout uses a staged deployment.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$2"],
+          "confidence": "high"
+        }
+      ],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "owner-initial": {
+      "actionItems": [
+        {
+          "stableKey": "luma",
+          "description": "Build Luma.",
+          "ownerId": "person_jakob",
+          "dueDate": {
+            "originalPhrase": null,
+            "normalizedDate": null,
+            "confidence": "unknown",
+            "timezone": "Europe/Berlin"
+          },
+          "status": "candidate",
+          "relatedDecisionIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "decisions": [],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "owner-later": {
+      "actionItems": [
+        {
+          "stableKey": "luma",
+          "description": "Delegate all Luma work to the CTO.",
+          "ownerId": "person_fabius",
+          "dueDate": {
+            "originalPhrase": null,
+            "normalizedDate": null,
+            "confidence": "unknown",
+            "timezone": "Europe/Berlin"
+          },
+          "status": "candidate",
+          "relatedDecisionIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "decisions": [],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "retained-newer-proposal": {
+      "actionItems": [],
+      "decisions": [
+        {
+          "stableKey": "proposal",
+          "statement": "Luma might be owned by the CTO.",
+          "rationale": [],
+          "status": "candidate",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        }
+      ],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    },
+    "bounded": {
+      "actionItems": [],
+      "decisions": [
+        {
+          "stableKey": "bounded-0",
+          "statement": "Decision 00: Use the reviewed rollout procedure for component 00, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$0"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-1",
+          "statement": "Decision 01: Use the reviewed rollout procedure for component 01, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$1"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-2",
+          "statement": "Decision 02: Use the reviewed rollout procedure for component 02, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$2"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-3",
+          "statement": "Decision 03: Use the reviewed rollout procedure for component 03, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$3"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-4",
+          "statement": "Decision 04: Use the reviewed rollout procedure for component 04, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$4"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-5",
+          "statement": "Decision 05: Use the reviewed rollout procedure for component 05, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$5"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-6",
+          "statement": "Decision 06: Use the reviewed rollout procedure for component 06, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$6"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-7",
+          "statement": "Decision 07: Use the reviewed rollout procedure for component 07, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$7"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-8",
+          "statement": "Decision 08: Use the reviewed rollout procedure for component 08, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$8"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-9",
+          "statement": "Decision 09: Use the reviewed rollout procedure for component 09, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$9"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-10",
+          "statement": "Decision 10: Use the reviewed rollout procedure for component 10, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$10"],
+          "confidence": "high"
+        },
+        {
+          "stableKey": "bounded-11",
+          "statement": "Decision 11: Use the reviewed rollout procedure for component 11, preserving all required checks, ownership conditions, and recovery evidence before each production change.",
+          "rationale": [],
+          "status": "confirmed",
+          "supportingParticipantIds": [],
+          "objectingParticipantIds": [],
+          "relatedTopicIds": [],
+          "evidenceIds": ["$11"],
+          "confidence": "high"
+        }
+      ],
+      "openQuestions": [],
+      "risks": [],
+      "followUpIntentions": []
+    }
+  }
+}

@@ -3,9 +3,11 @@
 This package runs one founders-only Discord service on an always-on Linux host
 with systemd and persistent local storage. It does not provision a host, pay for
 hosting, create a production Discord application, or prove that Luma is live.
-The first release includes the merged Discord Meeting and bounded Context Ask
-capabilities. Granola, polls, native review, and organization-wide retrieval are
-separate product work; the isolated Notion observer stays dormant.
+The runtime includes Discord Meeting analysis and bounded Context Ask, with
+optional governed retrieval from explicitly shared Notion pages, Linear work,
+and GitHub code. This is not the complete agreed Luma product: Granola,
+multi-capture synthesis, cross-Meeting recall, polls, and native review still
+have separate acceptance work. The isolated Notion observer stays dormant.
 
 ## Runtime and ownership
 
@@ -90,16 +92,25 @@ Before first activation, verify these existing product requirements:
 - Use a separate production Discord application and token. The launcher rejects
   the known development application and verifies that the token belongs to the
   configured application before registering commands or connecting the Gateway.
+- Enable **Server Members Intent** under **Bot > Privileged Gateway Intents** on
+  that application and obtain Discord's approval where required. Startup checks
+  this approval even with Context Ask disabled. No environment flag bypasses it.
 - Match the configured guild and all four founder identities. Review actual
   human readers, including Team/Admin role holders, for each allowed parent.
   `allgemein`, `gäste`, and `team-off-topic` are absent from the initial scope.
+  Luma verifies fresh owner, administrator, role, and channel-overwrite permissions
+  against a complete API member list. The current proof supports at most 999
+  members including bots; a full 1,000-member page, incomplete data, or an API
+  failure blocks channel work and publication rather than using cached readers.
+  Private threads are unsupported. See
+  [current reader verification](../integrations/discord.md#current-reader-verification).
 - Give the production bot only the channel permissions needed for the approved
   surface: View Channel, Read Message History, Send Messages, Create Public
   Threads, and Send Messages in Threads. Administrator is unnecessary. The
   development bot's current role grants do not give it private team-channel
   access and are not evidence of the production bot's access.
 - For Context Ask, complete participant notice and source participation approval,
-  enable Message Content intent on the production application, then set
+  additionally enable Message Content intent on the production application, then set
   `LUMA_DISCORD_CONTEXT_ASK_ENABLED=1`. Only explicit founder invocations in public
   threads under configured private parents are eligible. Channel names are
   descriptive; IDs are configurable and must be reviewed when scope changes.
@@ -110,10 +121,15 @@ Before first activation, verify these existing product requirements:
   ledger for that same budget. Usage records are estimates based on actual token
   reporting; reconcile with the provider bill.
 
-The initial template contains no Notion, Linear, GitHub, or personal capture
-credentials. Enabling those capabilities requires their own source/access and
-execution configuration. Do not inject observer/native-review variables into
-this service. The launcher intentionally rejects that mixed topology.
+The template contains empty dedicated read-only organizational credential
+fields; collection remains disabled. To activate it, configure the
+[organizational sharing policy and catalogs](../configuration/organizational-context.md).
+Install the policy as `root:luma`, mode `0640`, so the service can read it without
+being able to modify it. Provider source readability and permission for the full
+four-founder audience are separate requirements. Notion/Linear writer and
+personal capture credentials are not implied by this configuration. Do not
+inject observer/native-review variables into this service. The launcher
+intentionally rejects that mixed topology.
 
 Run the offline preflight against the installed release:
 

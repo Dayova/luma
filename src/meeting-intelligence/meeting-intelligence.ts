@@ -1,3 +1,16 @@
+import {
+  createMeetingContextGuard,
+  MeetingContextUnavailableError,
+  contextItems,
+  contextReceiptIds,
+  type MeetingContextConfiguration
+} from "./context-guard.js";
+import { createHash } from "node:crypto";
+import { prepareMeetingAnalysisContext } from "./retrieval-context.js";
+import type {
+  ContextAudience,
+  OrganizationalContext
+} from "../organizational-context/interface.js";
 import { answerScopedMeetingQuestion } from "./meeting-question.js";
 import type {
   ActionItemReconciliationMatchSignal,
@@ -93,7 +106,7 @@ import {
 import type { LumaDatabase } from "../persistence/db.js";
 
 const ANALYSIS_VERSION = "meeting-analysis-v1";
-const PROMPT_VERSION = "meeting-intelligence-v2";
+const PROMPT_VERSION = "meeting-intelligence-v3";
 const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v1";
 
 export type CreateMeetingIntelligenceInput = {
@@ -103,6 +116,8 @@ export type CreateMeetingIntelligenceInput = {
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
   importedSourceObservationVerifier?: ImportedSourceObservationVerifier;
+  organizationalContext?: OrganizationalContext;
+  contextAudience?: (workspaceId: WorkspaceId) => Promise<ContextAudience | null>;
   now?: () => Date;
 };
 
@@ -201,6 +216,14 @@ export function createMeetingIntelligence(
   const importedSourceObservationVerifier =
     input.importedSourceObservationVerifier ?? rejectUnverifiedImportedSource;
   const reconciliationFlights = new Map<string, ReconciliationFlight>();
+  const contextConfiguration: MeetingContextConfiguration = {
+    database: input.database,
+    ...(input.organizationalContext
+      ? { organizationalContext: input.organizationalContext }
+      : {}),
+    ...(input.contextAudience ? { contextAudience: input.contextAudience } : {})
+  };
+  const contextGuard = createMeetingContextGuard(contextConfiguration);
 
   return {
     observe: (observeInput) =>
@@ -210,12 +233,71 @@ export function createMeetingIntelligence(
         workCatalogs,
         importedSourceObservationVerifier,
         reconciliationFlights,
+        contextConfiguration,
+        contextGuard,
         now,
         observeInput
       ),
-    query: (queryInput) => queryMeeting(input.database, queryInput),
-    conclude: (concludeInput) => concludeMeeting(input.database, now, concludeInput)
+    query: (queryInput) =>
+      freshContextOutput(
+        (guard) => queryMeeting(input.database, guard, queryInput),
+        queryContextReceiptIds,
+        contextConfiguration,
+        contextGuard,
+        queryInput
+      ),
+    conclude: (concludeInput) =>
+      freshContextOutput(
+        (guard) => concludeMeeting(input.database, guard, now, concludeInput),
+        (result) => result.provenance.contextReceiptIds ?? [],
+        contextConfiguration,
+        contextGuard,
+        concludeInput
+      )
   };
+}
+
+async function freshContextOutput<T>(
+  operation: (guard: ReturnType<typeof createMeetingContextGuard>) => Promise<T>,
+  receiptIds: (result: T) => string[],
+  config: MeetingContextConfiguration,
+  guard: ReturnType<typeof createMeetingContextGuard>,
+  scope: { workspaceId: string; meetingId: string }
+): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await operation(guard);
+      await guard.requireReceiptsCurrent({ ...scope, receiptIds: receiptIds(result) });
+      return result;
+    } catch (error) {
+      if (!(error instanceof MeetingContextUnavailableError)) throw error;
+    }
+  }
+  // Continued source churn cannot deadlock unrelated Meeting work. This guard
+  // withholds all external-dependent items and never substitutes cached text.
+  return operation(createMeetingContextGuard({ database: config.database }));
+}
+function queryContextReceiptIds(result: MeetingQueryResult): string[] {
+  switch (result.type) {
+    case "snapshot":
+      return contextReceiptIds(result.state);
+    case "catch-up":
+    case "freeform":
+    case "decision-history":
+      return result.answer.contextReceiptIds ?? [];
+    case "participant-brief":
+      return [
+        ...new Set(
+          [
+            ...result.brief.commitments,
+            ...result.brief.decisionsAffectingWork,
+            ...result.brief.unresolvedQuestions
+          ].flatMap((item) => item.provenance.contextReceiptIds ?? [])
+        )
+      ];
+    default:
+      return [];
+  }
 }
 
 async function observeMeeting(
@@ -224,6 +306,8 @@ async function observeMeeting(
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   importedSourceObservationVerifier: ImportedSourceObservationVerifier,
   reconciliationFlights: Map<string, ReconciliationFlight>,
+  contextConfiguration: MeetingContextConfiguration,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
   now: () => Date,
   input: ObserveMeeting
 ): Promise<MeetingUpdate> {
@@ -459,6 +543,23 @@ async function observeMeeting(
       // A model result is valid only for the exact canonical state it saw. It
       // must never reapply over a later utterance revision or Human Judgment.
       const analysisBaseRevision = state.revision;
+      const analysisContext = await prepareMeetingAnalysisContext(
+        contextConfiguration,
+        contextGuard,
+        state,
+        evidenceForAnalysis
+      );
+      if (analysisContext.unavailable)
+        errors.push({
+          code: "context-unavailable",
+          retryable: true,
+          partialResultAvailable: true
+        });
+      await contextGuard.requireReceiptsCurrent({
+        workspaceId,
+        meetingId,
+        receiptIds: analysisContext.receiptIds
+      });
       const analysis =
         await reasoningModel.generateStructured<MeetingAnalysisProposalBatch>({
           workspaceId,
@@ -466,8 +567,8 @@ async function observeMeeting(
           purpose: "understand-discussion",
           promptVersion: PROMPT_VERSION,
           schemaName: "MeetingAnalysisProposalBatch",
-          evidence: evidenceForAnalysis,
-          context: [],
+          evidence: analysisContext.evidence,
+          context: analysisContext.context,
           input: {
             revision: state.revision,
             timezone: workspace.timezone,
@@ -479,19 +580,26 @@ async function observeMeeting(
       // its exact canonical base revision is still current, so a concurrently
       // accepted receipt, Human Judgment, or source revision cannot be
       // overwritten by stale model output.
+      await contextGuard.requireReceiptsCurrent({
+        workspaceId,
+        meetingId,
+        receiptIds: analysisContext.receiptIds
+      });
       const persistedAnalysis = await persistRebasedAnalysis(
         database,
         workspaceId,
         meetingId,
-        evidenceForAnalysis,
+        analysisContext.evidence,
         analysis,
+        analysisContext.receiptIds,
+        analysisContext.complete,
         analysisBaseRevision,
         now
       );
       state = persistedAnalysis.state;
 
       if (persistedAnalysis.applied) {
-        interventions.push(...deriveInterventions(state));
+        interventions.push(...deriveInterventions(await contextGuard.project(state)));
         analysisStatus = "completed";
       } else {
         // A newer observation has already changed canonical state. Discard the
@@ -501,7 +609,13 @@ async function observeMeeting(
       }
     } catch (error: unknown) {
       analysisStatus = "deferred";
-      if (error instanceof AiServiceError) {
+      if (error instanceof MeetingContextUnavailableError) {
+        errors.push({
+          code: "context-unavailable",
+          retryable: true,
+          partialResultAvailable: true
+        });
+      } else if (error instanceof AiServiceError) {
         errors.push({
           code: `analysis-${error.code}`,
           retryable: ["rate-limited", "timeout", "unavailable"].includes(error.code),
@@ -2027,10 +2141,15 @@ function sameImportedCandidate(
 
 async function queryMeeting(
   database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
   input: QueryMeeting
 ): Promise<MeetingQueryResult> {
-  const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
+  const state = await contextGuard.project(
+    await requireMeetingState(database, input.workspaceId, input.meetingId)
+  );
   const query = input.query;
+  const receiptIds = contextReceiptIds(state);
+  const answerContext = receiptIds.length ? { contextReceiptIds: receiptIds } : {};
 
   switch (query.type) {
     case "snapshot":
@@ -2045,26 +2164,50 @@ async function queryMeeting(
         input.meetingId,
         query.since
       );
-      const changes = deriveCatchUpChanges(previousState, state);
+      const changes = deriveCatchUpChanges(
+        previousState ? await contextGuard.project(previousState) : null,
+        state
+      );
       return {
         type: "catch-up",
         answer: {
-          text: changes.text,
+          ...answerContext,
+          text: withContextAvailability(changes.text, state),
           evidence: changes.evidence,
-          uncertainty: changes.evidence.length > 0 ? "none" : "insufficient-evidence"
+          uncertainty:
+            state.contextAvailability?.status === "partial" ||
+            state.contextAvailability?.status === "unavailable"
+              ? "partial"
+              : changes.evidence.length > 0
+                ? "none"
+                : "insufficient-evidence"
         }
       };
     }
     case "freeform":
-    case "decision-history":
+    case "decision-history": {
+      const answer = answerScopedMeetingQuestion(
+        state,
+        query,
+        uniqueEvidence([
+          ...(await loadEvidenceReferences(database, input.workspaceId, input.meetingId)),
+          ...contextItems(state).flatMap((item) => item.provenance.evidence)
+        ])
+      );
       return {
         type: query.type,
-        answer: answerScopedMeetingQuestion(
-          state,
-          query,
-          await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
-        )
+        answer: {
+          ...answer,
+          ...answerContext,
+          text: withContextAvailability(answer.text, state),
+          uncertainty:
+            state.contextAvailability?.status === "partial" ||
+            state.contextAvailability?.status === "unavailable"
+              ? "partial"
+              : answer.uncertainty
+        }
       };
+    }
     case "participant-brief": {
       return {
         type: "participant-brief",
@@ -2311,17 +2454,28 @@ function uniqueEvidence(evidence: EvidenceReference[]): EvidenceReference[] {
   ];
 }
 
+function withContextAvailability(text: string, state: MeetingState): string {
+  return state.contextAvailability?.withheldItemCount
+    ? `${text}\nSome derived items are unavailable because their organizational sources changed or could not be verified. Original Meeting evidence and Human history are retained.`
+    : state.contextAvailability?.status === "partial"
+      ? `${text}\nOrganizational context retrieval is partial; additional relevant knowledge may be unavailable.`
+      : text;
+}
+
 async function concludeMeeting(
   database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
   now: () => Date,
   input: ConcludeMeeting
 ): Promise<MeetingConclusion> {
-  const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
+  const state = await contextGuard.project(
+    await requireMeetingState(database, input.workspaceId, input.meetingId)
+  );
   const outputLanguage = await resolveConclusionOutputLanguage(database, input);
   // Older conclusions may have cached a legacy `speaker_id` as if it were a
   // verified attribution. Version this projection so a current read rebuilds
   // from the safe attribution overlay rather than replaying that cache.
-  const optionsHash = `${outputLanguage}:${CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION}`;
+  const optionsHash = `${outputLanguage}:${CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION}:context-v1:${createHash("sha256").update(JSON.stringify(state)).digest("hex")}`;
   const existing = await database.query<ConclusionRow>(
     `SELECT conclusion_json FROM conclusions
      WHERE workspace_id = $1 AND meeting_id = $2 AND revision = $3 AND options_hash = $4`,
@@ -2339,8 +2493,11 @@ async function concludeMeeting(
     meetingId: state.meetingId,
     revision: state.revision,
     summary: {
-      brief: renderConclusionBrief(state, outputLanguage),
-      detailed: renderConclusionDetail(state, outputLanguage)
+      brief: withContextAvailability(renderConclusionBrief(state, outputLanguage), state),
+      detailed: withContextAvailability(
+        renderConclusionDetail(state, outputLanguage),
+        state
+      )
     },
     topics: state.topics,
     decisions: state.decisions,
@@ -2353,13 +2510,22 @@ async function concludeMeeting(
     ),
     outputLanguage,
     provenance: combineProvenance(state, state.revision),
-    createdAt: now().toISOString()
+    createdAt: now().toISOString(),
+    ...(state.contextAvailability
+      ? { contextAvailability: state.contextAvailability }
+      : {})
   };
+
+  await contextGuard.requireReceiptsCurrent({
+    workspaceId: state.workspaceId,
+    meetingId: state.meetingId,
+    receiptIds: conclusion.provenance.contextReceiptIds ?? []
+  });
 
   await database.query(
     `INSERT INTO conclusions (
       workspace_id, meeting_id, revision, options_hash, conclusion_json, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
     [
       conclusion.workspaceId,
       conclusion.meetingId,
@@ -5499,6 +5665,8 @@ async function persistRebasedAnalysis(
   meetingId: MeetingId,
   evidence: EvidenceReference[],
   analysis: StructuredReasoningResult<MeetingAnalysisProposalBatch>,
+  receiptIds: string[],
+  coverageComplete: boolean,
   expectedRevision: number,
   now: () => Date
 ): Promise<{ state: MeetingState; applied: boolean }> {
@@ -5510,8 +5678,39 @@ async function persistRebasedAnalysis(
     }
 
     const timestamp = now().toISOString();
+    const reconciled = reconcileAnalysis(latest, evidence, analysis);
+    const changed = <T extends { id: string; provenance: Provenance }>(
+      items: T[],
+      before: T[]
+    ): T[] =>
+      items.map((item) => {
+        if (before.some((previous) => previous === item)) return item;
+        return receiptIds.length
+          ? {
+              ...item,
+              provenance: {
+                ...item.provenance,
+                contextReceiptIds: [...receiptIds],
+                contextCoverage: { complete: coverageComplete }
+              }
+            }
+          : item;
+      });
     const next = {
-      ...advanceRevision(reconcileAnalysis(latest, evidence, analysis), timestamp),
+      ...advanceRevision(
+        {
+          ...reconciled,
+          decisions: changed(reconciled.decisions, latest.decisions),
+          actionItems: changed(reconciled.actionItems, latest.actionItems),
+          openQuestions: changed(reconciled.openQuestions, latest.openQuestions),
+          risks: changed(reconciled.risks, latest.risks),
+          followUpIntentions: changed(
+            reconciled.followUpIntentions,
+            latest.followUpIntentions
+          )
+        },
+        timestamp
+      ),
       lastAnalyzedAt: timestamp
     };
 
@@ -5808,6 +6007,15 @@ function provenanceFromEvidenceIds(
   if (evidence.length === 0) {
     throw new Error("factual proposal requires evidence");
   }
+  if (
+    evidence.every((reference) =>
+      reference.evidenceId.startsWith("organizational-context:")
+    )
+  ) {
+    throw new Error(
+      "Meeting proposals require the Meeting's own Evidence in addition to any external references."
+    );
+  }
 
   return {
     evidence,
@@ -5828,6 +6036,11 @@ function combineProvenance(state: MeetingState, revision: number): Provenance {
 
   return {
     evidence,
+    contextReceiptIds: [
+      ...new Set(
+        contextItems(state).flatMap((item) => item.provenance.contextReceiptIds ?? [])
+      )
+    ],
     confidence: evidence.length > 0 ? "high" : "low",
     producedAtRevision: revision,
     analysisVersion: ANALYSIS_VERSION
@@ -6367,11 +6580,31 @@ function applyHumanJudgment(
           decision.id === meetingItemId
             ? {
                 ...decision,
+                ...(correction.statement !== undefined &&
+                decision.provenance.contextReceiptIds?.length &&
+                evidence
+                  ? {
+                      rationale: [],
+                      supportingParticipantIds: [],
+                      objectingParticipantIds: [],
+                      relatedTopicIds: [],
+                      supersedesDecisionId: null,
+                      supersededByDecisionId: null
+                    }
+                  : {}),
                 statement: correction.statement ?? decision.statement,
                 status: isDecisionStatus(correction.status)
                   ? correction.status
-                  : decision.status,
-                provenance: humanJudgmentProvenance(state, decision.provenance, evidence)
+                  : correction.statement !== undefined &&
+                      decision.provenance.contextReceiptIds?.length
+                    ? "candidate"
+                    : decision.status,
+                provenance: independentCorrectionProvenance(
+                  state,
+                  decision.provenance,
+                  evidence,
+                  correction.statement
+                )
               }
             : decision
         ),
@@ -6390,10 +6623,39 @@ function applyHumanJudgment(
                 ),
                 dueDate:
                   correction.dueDate === undefined ? item.dueDate : correction.dueDate,
+                ...(correction.statement !== undefined &&
+                item.provenance.contextReceiptIds?.length &&
+                evidence
+                  ? {
+                      ownership: ownershipForHumanActionItemCorrection(
+                        {
+                          status: "unresolved",
+                          reason: "no-owner-stated",
+                          likelyOwnerPersonId: null
+                        },
+                        correction.ownerId
+                      ),
+                      ownerId: correction.ownerId ?? null,
+                      dueDate: correction.dueDate ?? null,
+                      dueDateConfidence: correction.dueDate
+                        ? ("exact" as const)
+                        : ("unknown" as const),
+                      relatedDecisionIds: [],
+                      externalReferences: []
+                    }
+                  : {}),
                 status: isActionItemStatus(correction.status)
                   ? correction.status
-                  : item.status,
-                provenance: humanJudgmentProvenance(state, item.provenance, evidence)
+                  : correction.statement !== undefined &&
+                      item.provenance.contextReceiptIds?.length
+                    ? "candidate"
+                    : item.status,
+                provenance: independentCorrectionProvenance(
+                  state,
+                  item.provenance,
+                  evidence,
+                  correction.statement
+                )
               }
             : item
         )
@@ -6407,6 +6669,25 @@ function applyHumanJudgment(
     case "refresh-action-item-reconciliation":
       return state;
   }
+}
+
+function independentCorrectionProvenance(
+  state: MeetingState,
+  existing: Provenance,
+  evidence: EvidenceReference | null,
+  statement: string | undefined
+): Provenance {
+  // A complete Human replacement is independently usable, but it cannot launder
+  // retained external excerpts, inferred owner/date, or rationale into that view.
+  if (statement !== undefined && existing.contextReceiptIds?.length && evidence) {
+    return {
+      evidence: [evidence],
+      confidence: "high",
+      producedAtRevision: state.revision + 1,
+      analysisVersion: "human-judgment"
+    };
+  }
+  return humanJudgmentProvenance(state, existing, evidence);
 }
 
 function humanJudgmentEvidenceForMeetingItem(
@@ -6447,6 +6728,10 @@ function humanJudgmentProvenance(
 
   return {
     evidence: [...byId.values()],
+    ...(existing.contextReceiptIds
+      ? { contextReceiptIds: existing.contextReceiptIds }
+      : {}),
+    ...(existing.contextCoverage ? { contextCoverage: existing.contextCoverage } : {}),
     confidence: "high",
     producedAtRevision: state.revision + 1,
     analysisVersion: "human-judgment"
@@ -7254,6 +7539,9 @@ function buildParticipantBrief(
     unresolvedQuestions: state.openQuestions.filter(
       (question) => question.status === "open"
     ),
+    ...(state.contextAvailability
+      ? { contextAvailability: state.contextAvailability }
+      : {}),
     outputLanguage
   };
 }

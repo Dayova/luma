@@ -48,6 +48,274 @@ import type {
   StructuredReasoningResult
 } from "../../src/ai/reasoning-model.js";
 
+async function prepareContextSettlement(input: {
+  suffix: string;
+  contextAvailable: () => boolean;
+  workProvider: WorkProvider;
+  writer: OperationalOutcomeWriter;
+}) {
+  const catalog = new ProgrammableWorkCatalog();
+  const observation = sourceObservation({
+    sourceObjectId: `notion-context-settlement-${input.suffix}`,
+    description: "Jakob will prepare the Luma launch briefing by Friday.",
+    mentionedWorkItemReferences: []
+  });
+  const description = observation.candidates[0]?.description;
+  if (!description) throw new Error("expected an imported Action Item");
+  catalog.respondToSearch(description, []);
+  const { database, meetingIntelligence } = await createHarness(catalog);
+  try {
+    const reviewed = await observeAndReview(meetingIntelligence, observation);
+    const reviewId = reviewed.reviews[0]?.proposal.id;
+    if (!reviewId) throw new Error("expected a create reconciliation review");
+    const intent = await resolveAndApproveOperationalOutcome({
+      meetingIntelligence,
+      meetingId: observation.meetingId,
+      reviewId,
+      observationSuffix: `context-settlement-${input.suffix}`
+    });
+    const execution = createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      workProvider: input.workProvider,
+      operationalOutcomeWriter: input.writer,
+      organizationalContextGuard: {
+        requireIntentCurrent() {
+          return input.contextAvailable()
+            ? Promise.resolve()
+            : Promise.reject(new Error("Organizational evidence was revoked"));
+        }
+      },
+      now: () => new Date("2026-08-08T10:02:00.000Z")
+    });
+    return {
+      database,
+      meetingIntelligence,
+      execution,
+      executeInput: { workspace, meetingId: observation.meetingId, intentId: intent.id },
+      async stages() {
+        const result = await database.query<{
+          stage: "work" | "outcome";
+          status: string;
+          reference_json: string | null;
+          last_error_code: string | null;
+          execution_lease_id: string | null;
+          prepared_outcome_json: string | null;
+        }>(
+          `SELECT stage, status, reference_json, last_error_code,
+                  execution_lease_id, prepared_outcome_json
+             FROM operational_outcome_settlement_stages
+            WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3`,
+          [workspace.workspaceId, observation.meetingId, intent.id]
+        );
+        return new Map(result.rows.map((row) => [row.stage, row]));
+      },
+      async pageLeases() {
+        return (
+          await database.query(
+            `SELECT intent_id FROM operational_outcome_page_leases
+              WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3`,
+            [workspace.workspaceId, observation.meetingId, intent.id]
+          )
+        ).rows;
+      }
+    };
+  } catch (error) {
+    await database.close();
+    throw error;
+  }
+}
+
+describe("Operational Outcome context settlement", () => {
+  it("records a pre-create context refusal as unresolved work that was never dispatched", async () => {
+    let available = true;
+    class RevokedBeforeCreate extends RecordingCreateWorkProvider {
+      override async findCreatedWorkItemByIdempotencyKey(key: string) {
+        const reference = await super.findCreatedWorkItemByIdempotencyKey(key);
+        available = false;
+        return reference;
+      }
+    }
+    const workProvider = new RevokedBeforeCreate();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "before-create",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toEqual([]);
+      expect(writer.writes).toEqual([]);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "unresolved",
+        last_error_code: "organizational-context-unavailable",
+        execution_lease_id: null
+      });
+      expect(stages.get("work")?.reference_json).toBeNull();
+      expect(await test.pageLeases()).toEqual([]);
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence: test.meetingIntelligence,
+          meetingId: test.executeInput.meetingId,
+          intentId: test.executeInput.intentId
+        })
+      ).not.toBe("requires-manual-recovery");
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("preserves successful work and recovers only the pending outcome after a prewrite context refusal", async () => {
+    let available = true;
+    class RevokedAfterCreate extends RecordingCreateWorkProvider {
+      override async createWorkItem(input: CreateWorkItemInput) {
+        const reference = await super.createWorkItem(input);
+        available = false;
+        return reference;
+      }
+    }
+    const workProvider = new RevokedAfterCreate();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "before-outcome",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toEqual([]);
+      const beforeRecovery = await test.stages();
+      expect(beforeRecovery.get("work")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(beforeRecovery.get("work")?.reference_json).toContain("LUM-99");
+      expect(beforeRecovery.get("outcome")).toMatchObject({
+        status: "pending",
+        last_error_code: "organizational-context-unavailable",
+        execution_lease_id: null,
+        prepared_outcome_json: null
+      });
+      expect(await test.pageLeases()).toEqual([]);
+
+      available = true;
+      const recovered = await test.execution.recover(test.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      const afterRecovery = await test.stages();
+      expect(afterRecovery.get("work")?.reference_json).toBe(
+        beforeRecovery.get("work")?.reference_json
+      );
+      expect(afterRecovery.get("outcome")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(await test.pageLeases()).toEqual([]);
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("keeps a dispatched create with a lost acknowledgement manual when context blocks its recovery probe", async () => {
+    let available = true;
+    class LostCreateAcknowledgement extends RecordingCreateWorkProvider {
+      override async createWorkItem(
+        input: CreateWorkItemInput
+      ): Promise<ExternalReference> {
+        await super.createWorkItem(input);
+        available = false;
+        throw new Error("The provider created work but its acknowledgement was lost");
+      }
+    }
+    const workProvider = new LostCreateAcknowledgement();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "unknown-create",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toEqual([]);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "requires-manual-recovery",
+        last_error_code: "work-outcome-unknown"
+      });
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence: test.meetingIntelligence,
+          meetingId: test.executeInput.meetingId,
+          intentId: test.executeInput.intentId
+        })
+      ).toBe("requires-manual-recovery");
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("preserves both completed receipts when context is revoked after the page write", async () => {
+    let available = true;
+    class RevokedAfterOutcome extends RecordingOperationalOutcomeWriter {
+      override async upsert(input: Parameters<OperationalOutcomeWriter["upsert"]>[0]) {
+        const receipt = await super.upsert(input);
+        available = false;
+        return receipt;
+      }
+    }
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RevokedAfterOutcome();
+    const test = await prepareContextSettlement({
+      suffix: "after-outcome",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(stages.get("outcome")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(stages.get("work")?.reference_json).toContain("LUM-99");
+      expect(stages.get("outcome")?.reference_json).toContain("notion");
+      expect(await test.pageLeases()).toEqual([]);
+      available = true;
+      expect(
+        (await test.execution.execute(test.executeInput)).observation.outcome.status
+      ).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+    } finally {
+      await test.database.close();
+    }
+  });
+});
+
 const workspace: WorkspaceConfig = {
   workspaceId: "workspace_dayova",
   timezone: "Europe/Berlin"

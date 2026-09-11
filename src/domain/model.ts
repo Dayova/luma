@@ -692,6 +692,9 @@ export type EvidenceReference = {
 
 export type Provenance = {
   evidence: EvidenceReference[];
+  /** Durable organizational retrieval dependencies; not a sharing grant. */
+  contextReceiptIds?: string[];
+  contextCoverage?: { complete: boolean };
   confidence: Confidence;
   producedAtRevision: number;
   analysisVersion: string;
@@ -920,6 +923,14 @@ export type MeetingState = {
   actionItemReconciliationCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[];
   lastObservationAt: string;
   lastAnalyzedAt: string | null;
+  /** Current read projection only; canonical observations and revisions are retained. */
+  contextAvailability?: MeetingContextAvailability;
+};
+
+export type MeetingContextAvailability = {
+  status: "complete" | "partial" | "unavailable" | "not-configured";
+  withheldItemCount: number;
+  warnings: string[];
 };
 
 export type ExternalActivity = {
@@ -1011,6 +1022,7 @@ export type ParticipantBrief = {
   decisionsAffectingWork: Decision[];
   unresolvedQuestions: OpenQuestion[];
   outputLanguage: "de" | "en";
+  contextAvailability?: MeetingContextAvailability;
 };
 
 export type MeetingConclusion = {
@@ -1031,6 +1043,7 @@ export type MeetingConclusion = {
   outputLanguage: "de" | "en";
   provenance: Provenance;
   createdAt: string;
+  contextAvailability?: MeetingContextAvailability;
 };
 
 export type MeetingIntelligenceError =

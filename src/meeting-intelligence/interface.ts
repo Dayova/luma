@@ -79,6 +79,7 @@ export type GroundedAnswer = {
   text: string;
   evidence: MeetingState["actionItems"][number]["provenance"]["evidence"];
   uncertainty: "none" | "partial" | "insufficient-evidence";
+  contextReceiptIds?: string[];
 };
 
 export type MeetingQueryResult =

@@ -438,7 +438,7 @@ describe("MeetingIntelligence observe/query", () => {
         ]
       });
 
-      expect(observedPromptVersion).toBe("meeting-intelligence-v2");
+      expect(observedPromptVersion).toBe("meeting-intelligence-v3");
     } finally {
       await database.close();
     }

@@ -61,8 +61,10 @@ If a returned model, pricing tier or usage count contradicts the reservation,
 the workspace stops paid dispatch until an operator reconciles the accounting.
 Restart and monthly rollover do not clear this condition. Preserve the ledger,
 compare the provider receipt and billing facts, and resolve the mismatch before
-clearing the hold. This slice does not offer a self-service override or silently
-release uncertain charges.
+clearing the hold. Use the [audited accounting recovery workflow](../operations/ai-accounting-recovery.md)
+over the cleanly stopped store. It requires verified per-request billing evidence
+and a separate explicit review before unblocking paid AI. Unknown charges are
+never silently released, and reconciliation never retries the original paid work.
 
 Application estimates cannot establish an atomic provider billing ceiling. Use
 a dedicated Luma provider project, verify its existing consumption, and set its

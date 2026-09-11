@@ -163,7 +163,8 @@ function transport() {
     token: "test-only",
     clientId: "application",
     guildId: "guild",
-    allowedParentChannelIds: ["parent"]
+    allowedParentChannelIds: ["parent"],
+    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder")
   });
 }
 

@@ -1,3 +1,9 @@
+import {
+  organizationalContextRuntimeConfig,
+  organizationalContextCatalogsFromEnv
+} from "./organizational-context-runtime.js";
+import { createOrganizationalContext } from "../organizational-context/organizational-context.js";
+import { createMeetingContextGuard } from "../meeting-intelligence/context-guard.js";
 import { discordAllowedParentChannelIdsFromEnv } from "../discord/discord-channel-scope.js";
 import type {
   ReasoningModel,
@@ -60,6 +66,7 @@ type StartServerDependencies = {
   createDiscordTransport?: typeof createDiscordJsTransportFromEnv;
   createOpenAIReasoningModel?: typeof createOpenAIReasoningModel;
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
+  createContextCatalogs?: typeof organizationalContextCatalogsFromEnv;
 };
 
 const legacyMeetingNotesSourceEnvironment = [
@@ -108,6 +115,7 @@ export async function startServer(
   // Validate operating limits before acquiring database or transport resources.
   const aiBudgetSettings = aiUsageBudgetSettingsFromEnv(env);
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
+  const contextConfig = organizationalContextRuntimeConfig(env);
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
@@ -134,6 +142,12 @@ export async function startServer(
     }
   }
 
+  const contextCatalogs = contextConfig
+    ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
+        workspaceId,
+        env
+      })
+    : undefined;
   if (startupSignal?.aborted) throw new LumaStartupCancelledError();
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
   const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
@@ -150,6 +164,15 @@ export async function startServer(
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
           discordContextAskConfig !== undefined)
     });
+    const organizationalContext = contextCatalogs
+      ? createOrganizationalContext({ database, catalogs: contextCatalogs })
+      : undefined;
+    const contextAudience = (requestedWorkspaceId: string) =>
+      Promise.resolve(
+        requestedWorkspaceId === workspaceId
+          ? { workspaceId, personIds: [...dayovaFounderPersonIds] }
+          : null
+      );
     const workProvider = optionalLinearWorkProvider(env);
     const observedSourceLedger = createObservedSourceLedger({ database });
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
@@ -166,6 +189,7 @@ export async function startServer(
     };
     const meetingIntelligence = createMeetingIntelligence({
       database,
+      ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       reasoningModel: reasoningModelFromEnv(
         env,
         openAIReasoningModelName,
@@ -212,6 +236,10 @@ export async function startServer(
     }
     const followUpExecution = createFollowUpExecution({
       database,
+      organizationalContextGuard: createMeetingContextGuard({
+        database,
+        ...(organizationalContext ? { organizationalContext, contextAudience } : {})
+      }),
       meetingIntelligence,
       identityDirectory,
       ...(workProvider ? { workProvider } : {}),
@@ -237,6 +265,7 @@ export async function startServer(
     const contextIntelligence = discordContextAskConfig
       ? createContextIntelligence({
           database,
+          ...(organizationalContext ? { organizationalContext } : {}),
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
           answerer: createContextAnswerer({

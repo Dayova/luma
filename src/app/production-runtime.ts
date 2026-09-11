@@ -1,3 +1,4 @@
+import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { z } from "zod";
@@ -121,11 +122,12 @@ export async function validateProductionEnvironment(
       "The selected production model needs an audited price entry."
     );
     aiRequestLimitsFromEnv(env);
+    organizationalContextRuntimeConfig(env);
   } catch (error) {
     if (error instanceof ProductionPreflightError) throw error;
     // Adapter configuration errors may include supplied values. Never print them.
     throw new ProductionPreflightError(
-      "Production channel, identity, model, or budget configuration is invalid."
+      "Production channel, identity, model, budget, or organizational context configuration is invalid."
     );
   }
 }
@@ -151,6 +153,12 @@ export async function verifyProductionDiscordApplication(
       application.id === env["DISCORD_CLIENT_ID"] &&
         application.id !== developmentDiscordApplicationId,
       "Discord credentials must belong to the configured production application."
+    );
+    // Discord application flags, not the Gateway identify intent bitfield.
+    // https://docs.discord.com/developers/resources/application#application-flags
+    check(
+      (application.flags & ((1 << 14) | (1 << 15))) !== 0,
+      "Enable Server Members intent for the production application so Luma can verify channel readers, even when Context Ask is disabled."
     );
     if (discordContextAskConfigFromEnv(env)) {
       check(

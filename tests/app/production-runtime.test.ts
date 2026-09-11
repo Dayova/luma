@@ -112,41 +112,99 @@ describe("production Discord application proof", () => {
     const fetchApplication = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
-        new Response(JSON.stringify({ id: "999999999999999999", flags: 0 }))
+        new Response(JSON.stringify({ id: "999999999999999999", flags: 1 << 15 }))
       );
     await expect(
       verifyProductionDiscordApplication(configuration(), fetchApplication)
     ).resolves.toBeUndefined();
     fetchApplication.mockResolvedValue(
-      new Response(JSON.stringify({ id: "1526147284822392952", flags: 0 }))
+      new Response(JSON.stringify({ id: "1526147284822392952", flags: 1 << 15 }))
     );
     await expect(
       verifyProductionDiscordApplication(configuration(), fetchApplication)
     ).rejects.toThrow("production application");
   });
 
-  it("requires Message Content intent when bounded Context Ask is enabled", async () => {
-    const env: NodeJS.ProcessEnv = {
-      ...configuration(),
-      LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
-      LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "1507049196006408352",
-      LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301"
-    };
-    const fetchApplication = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 0 }))
+  it.each([0, 1 << 1, 1 << 13, 1 << 19])(
+    "requires Server Members approval even with Context Ask disabled (flags %i)",
+    async (flags) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "0"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).rejects.toThrow("Server Members");
+    }
+  );
+
+  it.each([1 << 14, 1 << 15])(
+    "accepts either Discord Server Members application approval flag %i",
+    async (flags) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "0"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each([1 << 18, 1 << 19])(
+    "additionally requires Message Content approval for Context Ask (flag %i)",
+    async (messageContentFlag) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
+        LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "1507049196006408352",
+        LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 15 }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).rejects.toThrow("Message Content");
+      fetchApplication.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: env["DISCORD_CLIENT_ID"],
+            flags: (1 << 15) | messageContentFlag
+          })
+        )
       );
-    await expect(
-      verifyProductionDiscordApplication(env, fetchApplication)
-    ).rejects.toThrow("Message Content");
-    fetchApplication.mockResolvedValue(
-      new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 19 }))
-    );
-    await expect(
-      verifyProductionDiscordApplication(env, fetchApplication)
-    ).resolves.toBeUndefined();
-  });
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each([undefined, "32768", -1, 32768.5])(
+    "refuses an absent or malformed application intent proof (%s)",
+    async (flags) => {
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: "999999999999999999", flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(configuration(), fetchApplication)
+      ).rejects.toThrow("verification failed");
+    }
+  );
 
   it("does not print provider failures or supplied credentials", async () => {
     const fetchApplication = vi

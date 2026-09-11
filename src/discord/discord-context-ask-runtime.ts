@@ -1,4 +1,5 @@
 import type {
+  OrganizationalContextEvidence,
   ContextEvidence,
   ContextEvidenceClaim,
   ContextInquiryResult
@@ -318,12 +319,17 @@ export function createDiscordContextAskRateLimiter(config: {
  */
 export function renderDiscordContextAskResult(result: ContextInquiryResult): string {
   const capturedEvidence = capturedDiscordEvidenceById(result.evidence);
+  const organizationalEvidence = capturedOrganizationalEvidenceById(result);
+  const answerOrganizationalEvidence = organizationalCitations(
+    result.answer,
+    organizationalEvidence
+  );
   const answerEvidence = uniqueAvailableDiscordEvidence(
     result.answer.evidence,
     capturedEvidence
   );
 
-  if (answerEvidence.length === 0) {
+  if (answerEvidence.length + answerOrganizationalEvidence.length === 0) {
     if (result.uncertainty === "insufficient-evidence") {
       return renderInsufficientEvidenceResult(result);
     }
@@ -331,21 +337,37 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     return DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER;
   }
 
-  const lines = ["Luma Ask", "", escapeDiscordInlineText(result.answer.text)];
+  const lines = [
+    "Luma Ask",
+    result.organizationalContext
+      ? `Scope: this thread and ${result.organizationalContext.coverage.selected} organizational source(s); coverage ${result.organizationalContext.coverage.complete ? "complete within configured catalogs" : "partial"}.`
+      : "Scope: this thread only.",
+    "",
+    escapeDiscordInlineText(result.answer.text)
+  ];
 
-  if (answerEvidence.length > 0) {
+  if (answerEvidence.length + answerOrganizationalEvidence.length > 0) {
     lines.push("", "Evidence:");
-    lines.push(...renderEvidenceLines(answerEvidence, ""));
+    lines.push(
+      ...renderEvidenceLines(answerEvidence, ""),
+      ...renderOrganizationalEvidenceLines(answerOrganizationalEvidence, "")
+    );
   }
 
-  appendEvidenceClaimSection(lines, "Facts", result.facts, capturedEvidence, (fact) =>
-    escapeDiscordInlineText(fact.text)
+  appendEvidenceClaimSection(
+    lines,
+    "Facts",
+    result.facts,
+    capturedEvidence,
+    organizationalEvidence,
+    (fact) => escapeDiscordInlineText(fact.text)
   );
   appendEvidenceClaimSection(
     lines,
     "Inferences",
     result.inferences,
     capturedEvidence,
+    organizationalEvidence,
     (inference) =>
       `${escapeDiscordInlineText(inference.text)} (confidence: ${inference.confidence})`
   );
@@ -416,9 +438,16 @@ function appendEvidenceClaimSection<T extends ContextEvidenceClaim>(
   heading: string,
   claims: readonly T[],
   capturedEvidence: ReadonlyMap<string, ContextEvidence>,
+  organizationalEvidence: ReadonlyMap<string, OrganizationalContextEvidence>,
   formatEscapedClaim: (claim: T) => string
 ): void {
-  const renderableClaims = claimsWithCapturedEvidence(claims, capturedEvidence);
+  const renderableClaims = claims
+    .map((claim) => ({
+      claim,
+      evidence: uniqueAvailableDiscordEvidence(claim.evidence, capturedEvidence),
+      context: organizationalCitations(claim, organizationalEvidence)
+    }))
+    .filter((item) => item.evidence.length + item.context.length > 0);
 
   if (renderableClaims.length === 0) {
     return;
@@ -426,27 +455,14 @@ function appendEvidenceClaimSection<T extends ContextEvidenceClaim>(
 
   lines.push("", `${heading}:`);
 
-  for (const { claim, evidence } of renderableClaims) {
+  for (const { claim, evidence, context } of renderableClaims) {
     lines.push(`- ${formatEscapedClaim(claim)}`);
-    lines.push("  Evidence:", ...renderEvidenceLines(evidence, "  "));
+    lines.push(
+      "  Evidence:",
+      ...renderEvidenceLines(evidence, "  "),
+      ...renderOrganizationalEvidenceLines(context, "  ")
+    );
   }
-}
-
-function claimsWithCapturedEvidence<T extends ContextEvidenceClaim>(
-  claims: readonly T[],
-  capturedEvidence: ReadonlyMap<string, ContextEvidence>
-): Array<{ claim: T; evidence: ContextEvidence[] }> {
-  const renderableClaims: Array<{ claim: T; evidence: ContextEvidence[] }> = [];
-
-  for (const claim of claims) {
-    const evidence = uniqueAvailableDiscordEvidence(claim.evidence, capturedEvidence);
-
-    if (evidence.length > 0) {
-      renderableClaims.push({ claim, evidence });
-    }
-  }
-
-  return renderableClaims;
 }
 
 function renderEvidenceLines(
@@ -509,4 +525,43 @@ function escapeDiscordInlineText(value: string): string {
 
 function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function capturedOrganizationalEvidenceById(
+  result: ContextInquiryResult
+): ReadonlyMap<string, OrganizationalContextEvidence> {
+  return new Map(
+    (result.organizationalContext?.evidence ?? [])
+      .filter((source) => safeOrganizationalUrl(source.externalReference.url))
+      .map((source) => [source.evidenceId, source])
+  );
+}
+function organizationalCitations(
+  claim: ContextEvidenceClaim,
+  captured: ReadonlyMap<string, OrganizationalContextEvidence>
+): OrganizationalContextEvidence[] {
+  const sources = new Map<string, OrganizationalContextEvidence>();
+  for (const citation of claim.organizationalEvidence ?? []) {
+    const source = captured.get(citation.evidenceId);
+    if (source) sources.set(source.evidenceId, source);
+  }
+  return [...sources.values()];
+}
+function renderOrganizationalEvidenceLines(
+  evidence: readonly OrganizationalContextEvidence[],
+  indent: string
+): string[] {
+  return evidence.map(
+    (source) =>
+      `${indent}- ${escapeDiscordInlineText(source.title)} (${source.standing}; ${source.authority}): <${source.externalReference.url}>`
+  );
+}
+function safeOrganizationalUrl(value: string): boolean {
+  if (!/^https:\/\/[^\s<>]+$/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }

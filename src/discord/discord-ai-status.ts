@@ -73,7 +73,11 @@ export function renderAiUsageStatus(status: AiUsageStatus): string {
       );
     }
   }
-  if (!status.configured || status.status === "not-configured") {
+  if (status.accountingBlocked) {
+    lines.push(
+      "Paid AI is paused for accounting review. An authorized operator must use Luma's stopped-store accounting recovery workflow to reconcile provider billing evidence and explicitly review resuming AI. Restarting or changing the cap does not clear this hold."
+    );
+  } else if (!status.configured || status.status === "not-configured") {
     lines.push(
       "Paid AI is not configured. A founder needs to check provider and pricing configuration."
     );

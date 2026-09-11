@@ -1,4 +1,10 @@
 import type { Confidence, WorkspaceId } from "../domain/model.js";
+import type {
+  ContextAudience,
+  OrganizationalContextBundle,
+  OrganizationalContextRequest,
+  RetrievedContextSource
+} from "../organizational-context/interface.js";
 
 /**
  * A bounded, provider-neutral conversation subject. The caller selects a
@@ -20,6 +26,20 @@ export type ContextInquiry = {
   inquiryId: string;
   question: string;
   subject: ConversationContextSubject;
+  /** Actual readers of the response; required when organizational retrieval is configured. */
+  audience?: ContextAudience;
+  contextTime?: OrganizationalContextRequest["time"];
+};
+
+/** A genuine organizational source, never disguised as a Discord message. */
+export type OrganizationalContextEvidence = RetrievedContextSource & {
+  evidenceId: string;
+};
+export type ContextRetrieval = {
+  request: OrganizationalContextRequest;
+  receiptId: string;
+  evidence: OrganizationalContextEvidence[];
+  coverage: OrganizationalContextBundle["retrieval"];
 };
 
 export type ContextEvidence = {
@@ -48,6 +68,7 @@ export type ContextEvidence = {
 export type ContextEvidenceClaim = {
   text: string;
   evidence: ContextEvidence[];
+  organizationalEvidence?: OrganizationalContextEvidence[];
 };
 
 export type ContextInference = ContextEvidenceClaim & {
@@ -70,6 +91,7 @@ export type ContextInquiryWarning = {
     | "conversation-boundary-incomplete"
     | "conversation-evidence-deleted"
     | "conversation-assistant-output-excluded"
+    | "organizational-context-partial"
     | "context-answer-unavailable";
   message: string;
 };
@@ -87,6 +109,7 @@ export type ContextInquiryResult = {
   evidence: ContextEvidence[];
   uncertainty: "none" | "partial" | "insufficient-evidence";
   warnings: ContextInquiryWarning[];
+  organizationalContext?: ContextRetrieval;
   modelMetadata?: {
     provider: string;
     model: string;
@@ -96,4 +119,6 @@ export type ContextInquiryResult = {
 
 export interface ContextIntelligence {
   inquire(input: ContextInquiry): Promise<ContextInquiryResult>;
+  /** Revalidate a persisted answer at delivery without capture or paid reasoning. */
+  requireCurrent?(input: ContextInquiry): Promise<void>;
 }

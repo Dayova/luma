@@ -1,7 +1,10 @@
+import { createDiscordLiveAudience } from "./discord-live-audience.js";
+import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
+import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
+import { dayovaFounderPersonIds } from "../app/founder-access.js";
 import {
   createDiscordChannelScope,
-  discordAllowedParentChannelIdsFromEnv,
-  type DiscordChannelSurface
+  discordAllowedParentChannelIdsFromEnv
 } from "./discord-channel-scope.js";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -57,6 +60,7 @@ export type DiscordJsTransportConfig = {
   clientId: string;
   guildId: string;
   allowedParentChannelIds: readonly string[];
+  authorizeHumanReader: (discordUserId: string) => Promise<boolean>;
   contextAsk?: DiscordContextAskConfig;
 };
 
@@ -101,10 +105,18 @@ export function createDiscordJsTransport(
     intents: discordGatewayIntentsForContextAsk(config.contextAsk),
     rest: restOptions
   });
+  const liveAudience = createDiscordLiveAudience({
+    reader: { get: (route, options) => client.rest.get(route, options) },
+    guildId: config.guildId,
+    allowedParentChannelIds: config.allowedParentChannelIds,
+    botUserId: () => client.user?.id ?? null,
+    authorizeHumanReader: config.authorizeHumanReader
+  });
+  const resolveChannel = liveAudience.resolveChannel;
   const channelScope = createDiscordChannelScope({
     guildId: config.guildId,
     allowedParentChannelIds: config.allowedParentChannelIds,
-    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId)
+    resolveChannel: ({ channelId }) => resolveChannel(channelId)
   });
   let commandHandler:
     ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null = null;
@@ -129,7 +141,7 @@ export function createDiscordJsTransport(
     }
     return disconnecting ?? Promise.resolve();
   }
-  const conversationEvidenceSource = config.contextAsk
+  const rawConversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
         reader: createDiscordJsConversationReader(client),
         guildId: config.guildId,
@@ -137,6 +149,25 @@ export function createDiscordJsTransport(
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const conversationEvidenceSource: ConversationEvidenceSource | null =
+    rawConversationEvidenceSource
+      ? {
+          async capture(input) {
+            await channelScope.requireChannel(
+              input.subject.conversationObjectId,
+              "public-thread"
+            );
+            const captured = await rawConversationEvidenceSource.capture(input);
+            // Check once around the bounded capture, not once per message. No
+            // captured content escapes if the channel gained another reader.
+            await channelScope.requireChannel(
+              input.subject.conversationObjectId,
+              "public-thread"
+            );
+            return captured;
+          }
+        }
+      : null;
 
   client.on(Events.InteractionCreate, (interaction) => {
     if (disconnected) return;
@@ -238,8 +269,9 @@ export function createDiscordJsTransport(
       }
     },
     disconnect,
-    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId),
+    resolveChannel: ({ channelId }) => resolveChannel(channelId),
     async createThread(input): Promise<DiscordThread> {
+      await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const channel = await client.channels.fetch(input.parentChannelId, { force: true });
 
       if (
@@ -268,12 +300,14 @@ export function createDiscordJsTransport(
       }
 
       if (existingThread) {
+        await channelScope.requireChannel(existingThread.id, "public-thread");
         return {
           id: existingThread.id,
           url: existingThread.url
         };
       }
 
+      await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const thread = await channel.threads.create({
         name: input.name,
         autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
@@ -286,6 +320,7 @@ export function createDiscordJsTransport(
       };
     },
     async sendMessage(input) {
+      await channelScope.requireChannel(input.channelId, "public-thread");
       const channel = await client.channels.fetch(input.channelId, { force: true });
       if (
         !channel ||
@@ -353,46 +388,6 @@ export function createDiscordJsTransport(
   };
 }
 
-async function resolveDiscordChannel(
-  client: Client,
-  channelId: string
-): Promise<DiscordChannelSurface | null> {
-  const channel = await client.channels.fetch(channelId, { force: true });
-  if (
-    !channel ||
-    !("guildId" in channel) ||
-    !client.user ||
-    !channel.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
-  )
-    return null;
-  if (channel.type === ChannelType.GuildText) {
-    return {
-      id: channel.id,
-      guildId: channel.guildId,
-      kind: "text-channel",
-      parentChannelId: null
-    };
-  }
-  if (channel.type === ChannelType.PublicThread) {
-    if (!channel.parentId) return null;
-    const parent = await client.channels.fetch(channel.parentId, { force: true });
-    if (
-      !parent ||
-      parent.type !== ChannelType.GuildText ||
-      parent.guildId !== channel.guildId ||
-      !parent.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
-    )
-      return null;
-    return {
-      id: channel.id,
-      guildId: channel.guildId,
-      kind: "public-thread",
-      parentChannelId: channel.parentId
-    };
-  }
-  return null;
-}
-
 export function createDiscordJsTransportFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env)
@@ -408,7 +403,21 @@ export function createDiscordJsTransportFromEnv(
     );
   }
 
+  const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
+  const accessPolicy = createWorkspaceAccessPolicy({
+    workspaceId,
+    identityDirectory: createIdentityDirectoryFromEnv(env),
+    authorizedPersonIds: dayovaFounderPersonIds
+  });
   return createDiscordJsTransport({
+    authorizeHumanReader: async (providerUserId) =>
+      Boolean(
+        await accessPolicy.authorize({
+          workspaceId,
+          providerId: "discord",
+          providerUserId
+        })
+      ),
     token,
     clientId,
     guildId,
@@ -423,10 +432,11 @@ export function discordGatewayIntentsForContextAsk(
   return contextAsk
     ? [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
       ]
-    : [GatewayIntentBits.Guilds];
+    : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers];
 }
 
 async function registerMeetingCommand(
@@ -545,6 +555,18 @@ async function handleContextAskMention(input: {
       response = {
         content:
           "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+        idempotencyKey: response.idempotencyKey
+      };
+    }
+    if (!(await mayReply())) return;
+  }
+  if (response.requireCurrent) {
+    try {
+      await response.requireCurrent();
+    } catch {
+      response = {
+        content:
+          "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
         idempotencyKey: response.idempotencyKey
       };
     }

@@ -73,6 +73,14 @@ export type CreateFollowUpExecutionInput = {
   operationalOutcomeSourceExecutionFence?: OperationalOutcomeSourceExecutionFence;
   workProvider?: WorkProvider;
   codeProvider?: CodeProvider;
+  /** Organizational evidence guard, separate from the source-page settlement fence. */
+  organizationalContextGuard?: {
+    requireIntentCurrent(input: {
+      workspaceId: string;
+      meetingId: string;
+      intentId: string;
+    }): Promise<void>;
+  };
   now?: () => Date;
 };
 
@@ -87,7 +95,8 @@ class NonRetryableExecutionError extends Error {
       | "operational-outcome-source-ledger-superseded"
       | "action-item-ownership-not-executable"
       | "legacy-generic-knowledge-update-disabled"
-      | "code-comment-write-not-supported",
+      | "code-comment-write-not-supported"
+      | "organizational-context-unavailable",
     message: string
   ) {
     super(message);
@@ -152,16 +161,113 @@ export function createFollowUpExecution(
     execute: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
       return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
-        executeClaimedIntent(input, executeInput, idempotencyKeys, now)
+        withCurrentExecutionContext(input, executeInput, (guarded) =>
+          executeClaimedIntent(guarded, executeInput, idempotencyKeys, now)
+        )
       );
     },
     recover: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
       return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
-        recoverClaimedIntent(input, executeInput, idempotencyKeys, now)
+        withCurrentExecutionContext(input, executeInput, (guarded) =>
+          recoverClaimedIntent(guarded, executeInput, idempotencyKeys, now)
+        )
       );
     }
   };
+}
+
+/** Rechecks before claim, every external provider call, and public receipt replay.
+ * Local outcome persistence always completes before the final delivery check.
+ */
+async function withCurrentExecutionContext(
+  dependencies: CreateFollowUpExecutionInput,
+  input: ExecuteFollowUpInput,
+  operation: (guarded: CreateFollowUpExecutionInput) => Promise<ExecuteFollowUpResult>
+): Promise<ExecuteFollowUpResult> {
+  const requireCurrent = async () => {
+    const rows = await dependencies.database.query<{ state_json: string }>(
+      "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",
+      [input.workspace.workspaceId, input.meetingId]
+    );
+    const raw = rows.rows[0];
+    if (!raw) return; // The canonical claim owns the normal missing-Meeting error.
+    const state = JSON.parse(raw.state_json) as MeetingState;
+    const intent = state.followUpIntentions.find((item) => item.id === input.intentId);
+    if (!intent) return;
+    const related = new Set(intent.relatedMeetingItemIds);
+    const items = [
+      intent,
+      ...state.decisions,
+      ...state.actionItems,
+      ...state.openQuestions,
+      ...state.risks,
+      ...state.topics,
+      ...state.proposals,
+      ...state.followUpIntentions
+    ];
+    const contextDependent = items.some((item) => {
+      if (item !== intent && intent.type !== "record-meeting" && !related.has(item.id))
+        return false;
+      const receipts: unknown = Reflect.get(item.provenance, "contextReceiptIds");
+      return receipts !== undefined && (!Array.isArray(receipts) || receipts.length > 0);
+    });
+    if (!contextDependent && !dependencies.organizationalContextGuard) return;
+    try {
+      if (!dependencies.organizationalContextGuard) throw new Error("Missing guard");
+      await dependencies.organizationalContextGuard.requireIntentCurrent({
+        workspaceId: input.workspace.workspaceId,
+        meetingId: input.meetingId,
+        intentId: input.intentId
+      });
+    } catch {
+      throw new NonRetryableExecutionError(
+        "organizational-context-unavailable",
+        "Organizational sources changed or their access could not be verified. Review the current evidence before executing or displaying this follow-up."
+      );
+    }
+  };
+  await requireCurrent();
+  const guarded: CreateFollowUpExecutionInput = {
+    ...dependencies,
+    ...(dependencies.knowledgeProvider
+      ? {
+          knowledgeProvider: guardProvider(dependencies.knowledgeProvider, requireCurrent)
+        }
+      : {}),
+    ...(dependencies.workProvider
+      ? { workProvider: guardProvider(dependencies.workProvider, requireCurrent) }
+      : {}),
+    ...(dependencies.operationalOutcomeWriter
+      ? {
+          operationalOutcomeWriter: guardProvider(
+            dependencies.operationalOutcomeWriter,
+            requireCurrent
+          )
+        }
+      : {})
+  };
+  const result = await operation(guarded);
+  await requireCurrent();
+  return result;
+}
+function guardProvider<T extends object>(provider: T, guard: () => Promise<void>): T {
+  return new Proxy(provider, {
+    get(target, property, receiver): unknown {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return async (...args: unknown[]): Promise<unknown> => {
+        await guard();
+        return Reflect.apply(value, target, args) as unknown;
+      };
+    }
+  });
+}
+function isContextRefusal(error: unknown): error is NonRetryableExecutionError {
+  return (
+    error instanceof NonRetryableExecutionError &&
+    error.code === "organizational-context-unavailable"
+  );
 }
 
 async function executeClaimedIntent(
@@ -2202,6 +2308,9 @@ async function settleOperationalOutcomeWorkStage(
 
     return { externalReferences: result.externalReferences, unresolved: [] };
   } catch (error) {
+    // This owned refusal occurs only before a guarded call starts. A failed
+    // real mutation remains indeterminate even if its recovery probe is blocked.
+    const contextRefusal = isContextRefusal(error);
     const message =
       error instanceof Error
         ? error.message
@@ -2215,9 +2324,11 @@ async function settleOperationalOutcomeWorkStage(
         intentId: plan.intentId,
         stage: "work",
         executionLeaseId: input.executionLeaseId,
-        status: "requires-manual-recovery",
+        status: contextRefusal ? "unresolved" : "requires-manual-recovery",
         error: {
-          code: "work-outcome-unknown",
+          code: contextRefusal
+            ? "organizational-context-unavailable"
+            : "work-outcome-unknown",
           message
         },
         now: new Date()
@@ -2225,7 +2336,9 @@ async function settleOperationalOutcomeWorkStage(
     } catch (terminalizationError) {
       throw new PartialOperationalOutcomeSettlementError(
         knownWorkReferences,
-        "work-outcome-terminalization-unknown",
+        contextRefusal
+          ? "work-no-write-terminalization-unknown"
+          : "work-outcome-terminalization-unknown",
         `${message} Luma could not durably mark the work-stage boundary: ${
           terminalizationError instanceof Error
             ? terminalizationError.message
@@ -2234,6 +2347,8 @@ async function settleOperationalOutcomeWorkStage(
         "manual"
       );
     }
+
+    if (contextRefusal) throw error;
 
     throw new PartialOperationalOutcomeSettlementError(
       knownWorkReferences,
@@ -2372,6 +2487,7 @@ async function executeOperationalOutcomeWorkStage(
         assertUpdateWorkProvider(updateIntent, provider);
         await assertCurrentWorkItemVersion(updateIntent, provider);
       } catch (error) {
+        if (isContextRefusal(error)) throw error;
         return {
           externalReferences: [canonicalReference],
           unresolved: {
@@ -2635,6 +2751,19 @@ async function settleOperationalOutcomeWriteStage(
       throw error;
     }
 
+    if (isContextRefusal(error)) {
+      // providerWriteStarted is set before invoking the provider facade, whose
+      // guard can still refuse dispatch. The owned error proves upsert itself
+      // never ran; retain settled work and release only this pending page stage.
+      return resetOperationalOutcomePrewriteFailure(
+        dependencies,
+        input,
+        plan,
+        externalReferences,
+        error
+      );
+    }
+
     if (!providerWriteStarted && writerInput === null) {
       return resetOperationalOutcomePrewriteFailure(
         dependencies,
@@ -2849,6 +2978,9 @@ async function resetOperationalOutcomePrewriteFailure(
       ? error.message
       : "Luma could not prepare the Operational Outcome provider write";
   const providerConfirmedCode = "operational-outcome-prewrite-provider-not-started";
+  const failureCode = isContextRefusal(error)
+    ? "organizational-context-unavailable"
+    : "operational-outcome-prewrite-failed";
 
   try {
     await recordOperationalOutcomeKnownNotAppliedWithReadback({
@@ -2880,7 +3012,7 @@ async function resetOperationalOutcomePrewriteFailure(
       executionLeaseId: input.executionLeaseId,
       target: plan.target,
       error: {
-        code: "operational-outcome-prewrite-failed",
+        code: failureCode,
         message
       },
       now: new Date()
@@ -2913,8 +3045,8 @@ async function resetOperationalOutcomePrewriteFailure(
 
   throw new PartialOperationalOutcomeSettlementError(
     externalReferences,
-    "operational-outcome-prewrite-failed",
-    `${message} No provider write was attempted; explicit recovery can safely resume the settlement.`
+    failureCode,
+    `${message} No page write was attempted; explicit recovery can safely resume the pending outcome.`
   );
 }
 
@@ -3378,7 +3510,8 @@ async function providerCreateWithPositiveRecovery(
 
   try {
     existing = await recover();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     // A failed marker probe cannot prove an earlier create did not succeed.
     // Do not begin another mutation from an unknowable idempotency boundary.
     throw new IndeterminateProviderMutationError(indeterminateMessage);
@@ -3390,7 +3523,8 @@ async function providerCreateWithPositiveRecovery(
 
   try {
     return await mutate();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     // A response failure does not prove that the provider did not apply the
     // mutation. A positive marker match is success; every other result is
     // deliberately indeterminate and cannot be automatically retried.
@@ -3410,7 +3544,8 @@ async function providerMutationOutcome(
 ): Promise<ExternalReference | null> {
   try {
     return await mutate();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     throw new IndeterminateProviderMutationError(indeterminateMessage);
   }
 }
@@ -3980,6 +4115,7 @@ type KnownNotAppliedOperationalOutcome = {
     | "operational-outcome-not-written"
     | "operational-outcome-not-writable"
     | "operational-outcome-prewrite-failed"
+    | "organizational-context-unavailable"
     | "operational-outcome-prewrite-abandoned";
   message: string;
   disposition: "resumable" | "failed";
@@ -4050,6 +4186,7 @@ function knownNotAppliedPendingOperationalOutcome(
         disposition: "failed"
       };
     case "operational-outcome-prewrite-failed":
+    case "organizational-context-unavailable":
       return {
         outcomeErrorCode: stage.error.code,
         message: stage.error.message,

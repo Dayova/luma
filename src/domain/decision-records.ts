@@ -185,6 +185,16 @@ export type DecisionCorrectionObservation = {
   candidate: DecisionCandidate;
   reason: string;
 };
+export type DecisionAcceptanceObservation = {
+  type: "decision-candidate-accepted";
+  observationId: string;
+  requestId: string;
+  actor: DecisionActor;
+  /** Exact review token returned with the current candidate. */
+  reviewToken: string;
+  /** Literal authenticated Human acceptance and recording instruction. */
+  instruction: string;
+};
 export type DecisionExecutionRecord = {
   type: "follow-up-execution-recorded";
   recordId: string;
@@ -225,7 +235,11 @@ export type DecisionRequestState = {
 export type ObserveDecision = {
   workspace: WorkspaceConfig;
   subject: DecisionSubject;
-  observations: [DecisionRequestObservation | DecisionCorrectionObservation];
+  observations: [
+    | DecisionRequestObservation
+    | DecisionCorrectionObservation
+    | DecisionAcceptanceObservation
+  ];
 };
 export type DecisionUpdate = DecisionRequestState & { duplicate: boolean };
 export type QueryDecision = {

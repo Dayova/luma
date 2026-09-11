@@ -94,3 +94,25 @@ link/no-op, audience/source/authority revocation, duplicate/restart behavior, un
 positive-only recovery and partial pending/retire/activate settlement. They do not
 claim a live Notion mutation, Discord command, configured responsibility source, or
 production deployment has been verified.
+
+### Literal Human review of an imported decision
+
+The owned Decision facade retains an authenticated Meeting recording instruction as
+separate Human Evidence. It never attributes imported transcript sections to that
+requester. The interpreter may use a literal first-person decision from the owner
+immediately; a generic request to record a discussion cannot supply missing owner
+acceptance, including when a model incorrectly cites that instruction.
+
+A later `decision-candidate-accepted` Observation binds the exact `reviewToken`
+returned by `query` and retains the literal confirmation. It does not call the
+model again. The canonical proof preserves the original audience, actor identity,
+source hashes, observation and exact accepted candidate content separately under
+`authority.humanReviews`. A later correction cannot reuse acceptance of different
+content. Source, audience, identity and ownership checks still gate every read and
+execution stage; the original imported source remains byte-for-byte unchanged.
+
+`createDecisionHumanReviewAccess` supplies an independent retained review grant for
+canonical record readers. An ownership-page grant does not grant access to a Human
+review. Provider composition must require that additional proof for every retained
+review; archives without Human reviews remain compatible. The native bound-Meeting
+recording and candidate acceptance commands are a separate ingress follow-up.

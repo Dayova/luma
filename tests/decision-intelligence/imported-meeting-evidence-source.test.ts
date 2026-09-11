@@ -14,6 +14,11 @@ import { decisionRecord } from "../knowledge/decision-record-fixture.js";
 import type { DecisionInterpreter } from "../../src/decision-intelligence/ports.js";
 import type { DecisionRecords } from "../../src/knowledge/decision-records.js";
 import type { ObserveDecision } from "../../src/domain/decision-records.js";
+import type {
+  CanonicalDecisionRecord,
+  DecisionCandidate
+} from "../../src/domain/decision-records.js";
+import { createDecisionHumanReviewAccess } from "../../src/decision-intelligence/human-review.js";
 
 let database: LumaDatabase;
 beforeEach(async () => {
@@ -60,6 +65,8 @@ async function fixture() {
     completeness: { state: "complete" }
   };
   let granted = true;
+  let identityAllowed = true;
+  let authorityAllowed = true;
   let revokeDuringRead = false;
   const ledger = createObservedSourceLedger({ database });
   const access = createGrantedImportedSourceAnalysisAccess({
@@ -105,6 +112,29 @@ async function fixture() {
   const write = vi.fn<DecisionRecords["write"]>(() => {
     throw new Error("No Human acceptance permits a write");
   });
+  const written = new Map<string, CanonicalDecisionRecord>();
+  const accessPolicy = {
+    authorize: (request: { providerUserId: string }) =>
+      Promise.resolve(
+        !identityAllowed
+          ? null
+          : {
+              personId:
+                request.providerUserId === "founder" ? "jakob" : request.providerUserId,
+              displayName: "Founder",
+              discordUserId: request.providerUserId,
+              discordUsername: null,
+              githubLogin: null,
+              githubUserId: null,
+              atlassianAccountId: null,
+              notionUserId: null,
+              linearUserId: null,
+              languagePreference: "auto" as const
+            }
+      )
+  };
+  const audience = () =>
+    Promise.resolve({ workspaceId: workspace.workspaceId, personIds: [...people] });
   const mi = createMeetingIntelligence({
     database,
     reasoningModel: {
@@ -129,7 +159,10 @@ async function fixture() {
       },
       authority: {
         read: () => Promise.resolve(record.authority.snapshot),
-        requireCurrent: () => Promise.resolve()
+        requireCurrent: () =>
+          authorityAllowed
+            ? Promise.resolve()
+            : Promise.reject(new Error("Authority revoked"))
       },
       interpreter: { interpret },
       records: {
@@ -142,27 +175,12 @@ async function fixture() {
             records: []
           }),
         requireCurrent: () => Promise.resolve(),
-        read: () => Promise.resolve(null),
+        read: ({ recordId }) => Promise.resolve(written.get(recordId) ?? null),
         findWritten: () => Promise.resolve(null),
         write
       },
-      accessPolicy: {
-        authorize: () =>
-          Promise.resolve({
-            personId: "jakob",
-            displayName: "Jakob",
-            discordUserId: "founder",
-            discordUsername: null,
-            githubLogin: null,
-            githubUserId: null,
-            atlassianAccountId: null,
-            notionUserId: null,
-            linearUserId: null,
-            languagePreference: "auto"
-          })
-      },
-      audience: () =>
-        Promise.resolve({ workspaceId: workspace.workspaceId, personIds: [...people] })
+      accessPolicy,
+      audience
     },
     now: () => new Date(time)
   });
@@ -211,6 +229,30 @@ async function fixture() {
     people,
     interpret,
     write,
+    written,
+    reviewAccess: createDecisionHumanReviewAccess({ database, accessPolicy, audience }),
+    allowWrites: () =>
+      write.mockImplementation(({ stage, operationId }) => {
+        if (stage.type !== "create-record") throw new Error("Unexpected test stage");
+        const result = {
+          content: structuredClone(stage.record),
+          reference: {
+            providerId: "notion",
+            objectType: "document" as const,
+            externalId: "decision-page",
+            url: "https://notion.so/decision-page"
+          },
+          version: "v1"
+        };
+        written.set(result.reference.externalId, result);
+        return Promise.resolve({ operationId, observedAt: time, record: result });
+      }),
+    revokeIdentity: () => {
+      identityAllowed = false;
+    },
+    revokeAuthority: () => {
+      authorityAllowed = false;
+    },
     revoke: () => {
       granted = false;
     },
@@ -403,6 +445,261 @@ describe("Imported Meeting Decision evidence through MI", () => {
       await expect(
         f.source.authorizeRetained({ source: original, audience })
       ).resolves.toBe(false);
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+  });
+});
+
+function acceptRequest(
+  f: Awaited<ReturnType<typeof fixture>>,
+  reviewToken: string,
+  actor = "founder"
+): ObserveDecision {
+  return {
+    workspace,
+    subject: f.request.subject,
+    observations: [
+      {
+        type: "decision-candidate-accepted",
+        observationId: "literal-owner-acceptance",
+        requestId: "record-request",
+        actor: { providerId: "discord", providerUserId: actor },
+        reviewToken,
+        instruction:
+          "Ich entscheide: Luma bleibt intern bei uns vier Gründern. Bitte genau so festhalten."
+      }
+    ]
+  };
+}
+
+describe("Original Human review of imported Decision candidates", () => {
+  it("refuses a generic recording instruction even when the interpreter incorrectly calls it acceptance", async () => {
+    const f = await fixture();
+    f.interpret.mockImplementation((request) => {
+      const evidence = request.humanReviewEvidence![0]!;
+      return Promise.resolve({
+        candidate: {
+          ...decisionRecord().candidate,
+          statement: { text: "Luma bleibt intern.", evidenceIds: [evidence.id] },
+          acceptanceEvidenceIds: [evidence.id]
+        },
+        reconciliation: { action: "create" }
+      });
+    });
+    const result = await f.mi.observe(f.request);
+    expect(result).toMatchObject({
+      state: "needs-clarification",
+      approvedIntentId: null
+    });
+    expect(result.message).toMatch(/not the owner's acceptance/);
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("accepts the exact candidate separately from unattributed transcript, writes once and replays without another model call", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const first = await f.mi.observe(f.request);
+    const acceptance = acceptRequest(f, first.reviewToken!);
+    const accepted = await f.mi.observe(acceptance);
+    expect(accepted.state).toBe("confirmed");
+    expect(accepted.source).toEqual(first.source);
+    expect(accepted.source.evidence.every((item) => item.authorPersonId === null)).toBe(
+      true
+    );
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+    const executor = createFollowUpExecution({ database, meetingIntelligence: f.mi });
+    const request = {
+      workspace,
+      subject: f.request.subject,
+      decisionRequestId: accepted.requestId,
+      intentId: accepted.approvedIntentId!
+    };
+    expect((await executor.execute(request)).record.outcome.status).toBe("succeeded");
+    await executor.execute(request);
+    expect((await f.mi.observe(acceptance)).duplicate).toBe(true);
+    expect((await f.mi.query(f.query)).state).toBe("recorded");
+    expect(
+      (
+        await f.mi.conclude({
+          workspaceId: workspace.workspaceId,
+          subject: f.request.subject,
+          requestId: first.requestId
+        })
+      ).request.state
+    ).toBe("recorded");
+    expect(f.write).toHaveBeenCalledTimes(1);
+    const content = f.written.get("decision-page")!.content;
+    expect(content.source).toEqual(first.source);
+    expect(content.authority.humanReviews).toHaveLength(2);
+    expect(content.authority.humanReviews![1]!.evidence).toMatchObject({
+      origin: "human",
+      authorPersonId: "jakob",
+      text:
+        acceptance.observations[0].type === "decision-candidate-accepted"
+          ? acceptance.observations[0].instruction
+          : ""
+    });
+    expect((await database.query("SELECT * FROM meetings")).rows).toHaveLength(1);
+  });
+  it("can record an owner's literal original decision instruction immediately, without inventing transcript authors", async () => {
+    const f = await fixture();
+    f.interpret.mockImplementation((request) => {
+      const evidence = request.humanReviewEvidence![0]!;
+      return Promise.resolve({
+        candidate: {
+          ...decisionRecord().candidate,
+          statement: {
+            text: "Luma bleibt intern bei den vier Gründern.",
+            evidenceIds: [evidence.id]
+          },
+          acceptanceEvidenceIds: [evidence.id]
+        },
+        reconciliation: { action: "create" }
+      });
+    });
+    const request = structuredClone(f.request);
+    if (request.observations[0].type !== "decision-record-requested")
+      throw new Error("fixture");
+    request.observations[0].instruction =
+      "Ich entscheide: Luma bleibt intern bei den vier Gründern. Bitte als Entscheidung festhalten.";
+    const result = await f.mi.observe(request);
+    expect(result.state).toBe("confirmed");
+    expect(f.interpret.mock.calls[0]![0].humanReviewEvidence?.[0]).toMatchObject({
+      authorPersonId: "jakob",
+      text: request.observations[0].instruction
+    });
+    expect(result.source.evidence.every((item) => item.authorPersonId === null)).toBe(
+      true
+    );
+    await f.mi.observe(request);
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+  });
+  it("refuses a stale review token and never treats a different founder as the accountable owner", async () => {
+    const f = await fixture();
+    const first = await f.mi.observe(f.request);
+    await expect(f.mi.observe(acceptRequest(f, "stale"))).rejects.toThrow(
+      /review changed/
+    );
+    const other = await f.mi.observe(acceptRequest(f, first.reviewToken!, "fabius"));
+    expect(other).toMatchObject({ state: "needs-clarification", approvedIntentId: null });
+    expect(f.write).not.toHaveBeenCalled();
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+  });
+  it("cannot transfer exact owner acceptance to different candidate content via a later correction", async () => {
+    const f = await fixture();
+    const first = await f.mi.observe(f.request);
+    const accepted = await f.mi.observe(acceptRequest(f, first.reviewToken!));
+    const candidate: DecisionCandidate = structuredClone(accepted.candidate!);
+    candidate.statement.text = "Luma is now public.";
+    const corrected = await f.mi.observe({
+      workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-candidate-corrected",
+          observationId: "changed-candidate",
+          requestId: first.requestId,
+          actor: { providerId: "discord", providerUserId: "founder" },
+          candidate,
+          reason: "Changed wording"
+        }
+      ]
+    });
+    expect(corrected).toMatchObject({
+      state: "needs-clarification",
+      approvedIntentId: null
+    });
+    expect(corrected.message).toMatch(/different exact candidate/);
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+  });
+  it.each(["source", "authority", "identity", "audience"])(
+    "rechecks %s after acceptance before execution and replay",
+    async (change) => {
+      const f = await fixture();
+      f.allowWrites();
+      const first = await f.mi.observe(f.request);
+      const acceptance = acceptRequest(f, first.reviewToken!);
+      const accepted = await f.mi.observe(acceptance);
+      if (change === "source") f.revoke();
+      if (change === "authority") f.revokeAuthority();
+      if (change === "identity") f.revokeIdentity();
+      if (change === "audience") f.people.push("guest");
+      await expect(
+        createFollowUpExecution({ database, meetingIntelligence: f.mi }).execute({
+          workspace,
+          subject: f.request.subject,
+          decisionRequestId: first.requestId,
+          intentId: accepted.approvedIntentId!
+        })
+      ).rejects.toThrow();
+      await expect(f.mi.query(f.query)).rejects.toThrow();
+      await expect(f.mi.observe(acceptance)).rejects.toThrow();
+      expect(f.write).not.toHaveBeenCalled();
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+    }
+  );
+  it("requires the separate original Human receipt and original recipients for retained review", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const first = await f.mi.observe(f.request);
+    const accepted = await f.mi.observe(acceptRequest(f, first.reviewToken!));
+    await createFollowUpExecution({ database, meetingIntelligence: f.mi }).execute({
+      workspace,
+      subject: f.request.subject,
+      decisionRequestId: first.requestId,
+      intentId: accepted.approvedIntentId!
+    });
+    const review = f.written.get("decision-page")!.content.authority.humanReviews![1]!;
+    expect(
+      await f.reviewAccess.authorizeRetainedHumanReview({
+        audience: review.audience,
+        review
+      })
+    ).toBe(true);
+    expect(
+      await f.reviewAccess.authorizeRetainedHumanReview({
+        audience: { ...review.audience, personIds: ["jakob"] },
+        review
+      })
+    ).toBe(true);
+    expect(
+      await f.reviewAccess.authorizeRetainedHumanReview({
+        audience: { ...review.audience, personIds: ["guest"] },
+        review
+      })
+    ).toBe(false);
+    const forged = structuredClone(review);
+    forged.evidence.text = "Invented acceptance";
+    expect(
+      await f.reviewAccess.authorizeRetainedHumanReview({
+        audience: review.audience,
+        review: forged
+      })
+    ).toBe(false);
+    await database.query("DELETE FROM decision_human_reviews WHERE review_id=$1", [
+      review.id
+    ]);
+    expect(
+      await f.reviewAccess.authorizeRetainedHumanReview({
+        audience: review.audience,
+        review
+      })
+    ).toBe(false);
+    await expect(f.mi.query(f.query)).rejects.toThrow();
+  });
+  it("rolls back the acceptance observation and candidate together if immutable review persistence fails", async () => {
+    const f = await fixture();
+    const first = await f.mi.observe(f.request);
+    await database.exec(
+      "ALTER TABLE decision_human_reviews ADD CONSTRAINT refuse_acceptance CHECK (payload_json::json->>'reviewToken' IS NULL)"
+    );
+    await expect(f.mi.observe(acceptRequest(f, first.reviewToken!))).rejects.toThrow();
+    expect((await f.mi.query(f.query)).reviewToken).toBe(first.reviewToken);
+    expect(
+      (
+        await database.query(
+          "SELECT * FROM decision_observations WHERE observation_id='literal-owner-acceptance'"
+        )
+      ).rows
+    ).toEqual([]);
     expect(f.interpret).toHaveBeenCalledTimes(1);
   });
 });

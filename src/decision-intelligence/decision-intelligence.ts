@@ -36,6 +36,12 @@ import {
   saveDecisionRequest,
   type StoredDecisionRequest
 } from "./persistence.js";
+import {
+  createDecisionHumanReviewAccess,
+  originalDecisionHumanReview,
+  saveDecisionHumanReview,
+  acceptedDecisionCandidateHash
+} from "./human-review.js";
 
 export type DecisionIntelligenceConfiguration = {
   evidenceSource: DecisionEvidenceSource;
@@ -76,6 +82,10 @@ export async function requireDecisionRequestCurrent(
   )
     throw new Error("Decision requester is no longer authorized");
   await input.evidenceSource.requireCurrent(stored.state.source);
+  await createDecisionHumanReviewAccess(input).requireCurrent(
+    stored.state.source,
+    stored.humanReviews ?? []
+  );
   await input.authority.requireCurrent({ audience, snapshot: stored.authority });
   if (options.catalog)
     await input.records.requireCurrent({ audience, snapshot: stored.catalog });
@@ -96,7 +106,12 @@ function authorityFor(
   candidate: DecisionCandidate,
   stored: StoredDecisionRequest
 ): DecisionAuthorityProof | string {
-  const evidence = new Map(stored.state.source.evidence.map((item) => [item.id, item]));
+  const evidence = new Map(
+    [
+      ...stored.state.source.evidence,
+      ...(stored.humanReviews ?? []).map((review) => review.evidence)
+    ].map((item) => [item.id, item])
+  );
   const claims = [
     candidate.statement,
     ...(candidate.context ? [candidate.context] : []),
@@ -168,6 +183,24 @@ function authorityFor(
   )
     return "A poll, summary, or another speaker cannot establish the owner's acceptance.";
   if (
+    (stored.humanReviews ?? []).some(
+      (review) =>
+        candidate.acceptanceEvidenceIds.includes(review.evidence.id) &&
+        review.acceptedCandidateHash &&
+        review.acceptedCandidateHash !== acceptedDecisionCandidateHash(candidate)
+    )
+  )
+    return "This Human acceptance belongs to a different exact candidate; request a fresh review.";
+  if (
+    (stored.humanReviews ?? []).some(
+      (review) =>
+        candidate.acceptanceEvidenceIds.includes(review.evidence.id) &&
+        review.reviewToken === null &&
+        !isLiteralDecisionInstruction(review.evidence.text)
+    )
+  )
+    return "A request to record a discussion is not the owner's acceptance; explicitly review this candidate.";
+  if (
     !candidate.statement.evidenceIds.some((id) =>
       candidate.acceptanceEvidenceIds.includes(id)
     ) &&
@@ -191,7 +224,10 @@ function authorityFor(
     snapshot: stored.authority,
     grantIds: selected.map((grant) => grant.id),
     decisionMakerPersonIds: owners,
-    acceptanceEvidenceIds: [...candidate.acceptanceEvidenceIds]
+    acceptanceEvidenceIds: [...candidate.acceptanceEvidenceIds],
+    ...((stored.humanReviews?.length ?? 0) > 0
+      ? { humanReviews: structuredClone(stored.humanReviews) }
+      : {})
   };
 }
 
@@ -444,7 +480,12 @@ export function createDecisionIntelligence(
           "Decision state changed during its final currentness check; read the current request again"
         );
     });
-    return structuredClone(stored.state);
+    return {
+      ...structuredClone(stored.state),
+      ...(stored.state.candidate && !stored.state.execution
+        ? { reviewToken: decisionReviewToken(stored) }
+        : {})
+    };
   };
   return {
     observe: (request) =>
@@ -492,13 +533,36 @@ export function createDecisionIntelligence(
             !audience.personIds.length
           )
             throw new Error("Decision requester or audience is not authorized");
-          if (observation.type === "decision-candidate-corrected") {
+          if (
+            observation.type === "decision-candidate-corrected" ||
+            observation.type === "decision-candidate-accepted"
+          ) {
             if (
               !prior ||
               decisionDigest(prior.state.subject) !== decisionDigest(bound.subject)
             )
               throw new Error("Select an existing decision candidate in this subject");
             await requireDecisionRequestCurrent(input, prior, { catalog: true });
+            const previousObservation = (
+              await input.database.query<{ payload_hash: string }>(
+                `SELECT payload_hash FROM decision_observations WHERE workspace_id=$1 AND observation_id=$2`,
+                [bound.workspace.workspaceId, observation.observationId]
+              )
+            ).rows[0];
+            if (previousObservation) {
+              if (previousObservation.payload_hash !== decisionDigest(bound))
+                throw new Error(
+                  "Decision observation ID has a different immutable Human review"
+                );
+              return {
+                ...(await read({
+                  workspaceId: bound.workspace.workspaceId,
+                  subject: bound.subject,
+                  query: { type: "decision-request", requestId }
+                })),
+                duplicate: true
+              };
+            }
             const stages = prior.intent
               ? await readDecisionStages(
                   input.database,
@@ -514,13 +578,79 @@ export function createDecisionIntelligence(
               throw new Error(
                 "A clarified recording instruction is required before correcting this candidate"
               );
+            const acceptance = observation.type === "decision-candidate-accepted";
+            if (
+              acceptance &&
+              (!prior.state.candidate ||
+                observation.reviewToken !== decisionReviewToken(prior))
+            )
+              throw new Error(
+                "This candidate review changed; read and review the current candidate"
+              );
+            if (
+              acceptance &&
+              ["reject", "clarify"].includes(prior.interpretation.reconciliation.action)
+            )
+              throw new Error(
+                "Clarify the recording plan before accepting this candidate"
+              );
+            const review = acceptance
+              ? originalDecisionHumanReview({
+                  request: bound,
+                  requestId,
+                  source: prior.state.source,
+                  personId: person.personId,
+                  observedAt: now().toISOString(),
+                  ...(prior.state.candidate
+                    ? {
+                        acceptedCandidateHash: acceptedDecisionCandidateHash({
+                          ...prior.state.candidate,
+                          modality:
+                            prior.state.candidate.modality === "reversal"
+                              ? "reversal"
+                              : "accepted-proposal",
+                          decisionMakerPersonIds: [person.personId]
+                        })
+                      }
+                    : {})
+                })
+              : null;
+            const humanReviews = [
+              ...(prior.humanReviews ?? []),
+              ...(review ? [review] : [])
+            ];
+            if (humanReviews.length > 20)
+              throw new Error(
+                "Use a fresh bounded recording request after this review history"
+              );
+            const candidate =
+              acceptance && prior.state.candidate && review
+                ? {
+                    ...structuredClone(prior.state.candidate),
+                    modality:
+                      prior.state.candidate.modality === "reversal"
+                        ? ("reversal" as const)
+                        : ("accepted-proposal" as const),
+                    decisionMakerPersonIds: [person.personId],
+                    acceptanceEvidenceIds: [review.evidence.id]
+                  }
+                : observation.type === "decision-candidate-corrected"
+                  ? decisionCandidateSchema.parse(observation.candidate)
+                  : null;
             const updated = reconcileDecision(
-              { ...prior, actor: observation.actor, requesterPersonId: person.personId },
+              {
+                ...prior,
+                actor: observation.actor,
+                requesterPersonId: person.personId,
+                ...(humanReviews.length ? { humanReviews } : {})
+              },
               {
                 ...prior.interpretation,
-                candidate: decisionCandidateSchema.parse(observation.candidate)
+                candidate
               },
-              observation.reason,
+              observation.type === "decision-candidate-corrected"
+                ? observation.reason
+                : observation.instruction,
               observation.observationId,
               now()
             );
@@ -532,12 +662,14 @@ export function createDecisionIntelligence(
                 observation.observationId,
                 bound
               );
-              if (accepted)
+              if (accepted) {
+                if (review) await saveDecisionHumanReview(transaction, review);
                 await saveDecisionRequest(
                   transaction,
                   bound.workspace.workspaceId,
                   updated
                 );
+              }
               return accepted;
             });
             if (!fresh)
@@ -610,14 +742,28 @@ export function createDecisionIntelligence(
             }
           };
           await requireDecisionRequestCurrent(input, stored, { catalog: true });
-          await saveDecisionObservation(
-            input.database,
-            bound.workspace.workspaceId,
-            requestId,
-            observation.observationId,
-            bound
-          );
-          await saveDecisionRequest(input.database, bound.workspace.workspaceId, stored);
+          const humanReview =
+            bound.subject.type === "meeting"
+              ? originalDecisionHumanReview({
+                  request: bound,
+                  requestId,
+                  source,
+                  personId: person.personId,
+                  observedAt: now().toISOString()
+                })
+              : null;
+          if (humanReview) stored.humanReviews = [humanReview];
+          await input.database.transaction(async (transaction) => {
+            await saveDecisionObservation(
+              transaction,
+              bound.workspace.workspaceId,
+              requestId,
+              observation.observationId,
+              bound
+            );
+            if (humanReview) await saveDecisionHumanReview(transaction, humanReview);
+            await saveDecisionRequest(transaction, bound.workspace.workspaceId, stored);
+          });
           if (!catalog.complete) {
             stored.state.state = "needs-clarification";
             stored.state.message = "The canonical Decision Record search was incomplete.";
@@ -644,6 +790,7 @@ export function createDecisionIntelligence(
                   instruction: observation.instruction,
                   requesterPersonId: person.personId,
                   source,
+                  ...(humanReview ? { humanReviewEvidence: [humanReview.evidence] } : {}),
                   authority,
                   catalog,
                   ...(observation.targetRecordId
@@ -753,6 +900,38 @@ function validateRequest(request: ObserveDecision): void {
       observation.reason.length > 2000)
   )
     throw new Error("A bounded Human correction reason is required");
+  if (
+    observation.type === "decision-candidate-accepted" &&
+    (!id(observation.requestId) ||
+      !id(observation.reviewToken) ||
+      !observation.instruction.trim() ||
+      observation.instruction.length > 4000)
+  )
+    throw new Error(
+      "An exact candidate review and bounded literal Human acceptance are required"
+    );
+}
+
+function decisionReviewToken(stored: StoredDecisionRequest): string {
+  return decisionDigest({
+    requestId: stored.state.requestId,
+    subject: stored.state.subject,
+    source: stored.state.source,
+    interpretation: stored.interpretation,
+    candidate: stored.state.candidate,
+    authority: stored.authority,
+    catalog: stored.catalog,
+    humanReviews: stored.humanReviews ?? []
+  });
+}
+
+/** Admission of the command is not semantic acceptance of its imported source. */
+function isLiteralDecisionInstruction(text: string): boolean {
+  const statement =
+    /^(?:(?:please\s+)?(?:record|document)(?:\s+that)?\s+)?(?:i\s+(?:decide|have\s+decided)|ich\s+(?:entscheide|habe\s+entschieden))\s*[:,—-]?\s+(.+)$/isu.exec(
+      text.trim()
+    )?.[1];
+  return !!statement && !/^(?:if|whether|maybe|falls|ob|vielleicht)\b/iu.test(statement);
 }
 
 function decisionFailureMessage(error: unknown): string {

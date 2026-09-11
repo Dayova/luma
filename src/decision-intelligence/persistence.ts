@@ -9,7 +9,8 @@ import type {
   DecisionRequestState,
   DecisionSubject,
   DecisionWriteReceipt,
-  DecisionWriteStage
+  DecisionWriteStage,
+  DecisionHumanReview
 } from "../domain/decision-records.js";
 
 export function decisionDigest(value: unknown): string {
@@ -39,6 +40,7 @@ export type StoredDecisionRequest = {
   catalog: DecisionCatalogSnapshot;
   intent: DecisionFollowUpIntent | null;
   interpretation: DecisionInterpretation | null;
+  humanReviews?: DecisionHumanReview[];
 };
 export type StoredDecisionStage = {
   index: number;
@@ -71,6 +73,11 @@ export async function migrateDecisionIntelligence(database: LumaDatabase): Promi
     );
     CREATE TABLE IF NOT EXISTS decision_catalog_fences (
       provider_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, intent_id TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS decision_human_reviews (
+      workspace_id TEXT NOT NULL, review_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
+      PRIMARY KEY(workspace_id,review_id)
     );
   `);
 }

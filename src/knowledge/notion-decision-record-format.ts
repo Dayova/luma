@@ -40,7 +40,8 @@ export function renderNotionDecisionRecord(
     "<summary>Evidence and revision history</summary>",
     "",
     "\t```json",
-    `\t${JSON.stringify({ archive: validated, signature })}`,
+    // Literal backticks in evidence must not masquerade as our region markers.
+    `\t${JSON.stringify({ archive: validated, signature }).replace(/`/gu, "\\u0060")}`,
     "\t```",
     "</details>",
     END

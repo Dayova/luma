@@ -125,6 +125,19 @@ afterEach(() => {
 });
 
 describe("canonical Notion Decision Records", () => {
+  it("retains literal region-marker text as evidence without making its own write unrecoverable", async () => {
+    const f = fixture();
+    const request = createInput();
+    const text =
+      "Quoted `luma-decision-record:start:v1` and `luma-decision-record:end:v1` are just evidence.";
+    request.stage.record.source.evidence[0]!.text = text;
+    request.stage.record.candidate.statement.text = text;
+    const receipt = await f.records.write(request);
+    expect(receipt.record.content.source.evidence[0]!.text).toBe(text);
+    expect(receipt.record.content.candidate.statement.text).toBe(text);
+    expect(await f.make().findWritten(request)).toEqual(receipt);
+    expect(f.mutationLog).toEqual(["create"]);
+  });
   it("retains a recoverable native toggle through documented empty-line normalization and escaped prose", async () => {
     const f = fixture();
     const create = f.transport.create.bind(f.transport);

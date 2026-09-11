@@ -443,6 +443,7 @@ export function createNotionDecisionRecords(
           });
           await originalGrants(deadline, bound.audience, archive);
           const markdown = renderNotionDecisionRecord(archive, signingKey);
+          parseNotionDecisionRecord({ ...scope, markdown });
           await grant(deadline, bound.audience, prior?.record.reference.externalId);
           deadline.check();
           dispatched = true;

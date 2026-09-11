@@ -51,6 +51,50 @@ async function fixture() {
   };
 }
 describe("authenticated runtime recovery material", () => {
+  it("accepts blank optional recovery settings without weakening retained configured material", async () => {
+    const f = await fixture();
+    const original = [
+      "LUMA_WORKSPACE_ID=workspace_dayova",
+      "LUMA_DISCORD_DECISION_RECORDS_ENABLED=0",
+      "LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED=0",
+      "LUMA_GRANOLA_OAUTH_ENABLED=0",
+      "LUMA_ORGANIZATIONAL_CONTEXT_ENABLED=0",
+      "LUMA_DISCORD_STRUCTURED_WORK_ENABLED=0",
+      "LUMA_DECISION_RECORDS_SIGNING_KEY=",
+      "LUMA_SYNTHESIS_SIGNING_KEY=",
+      "LUMA_STRUCTURED_WORK_SIGNING_KEY=",
+      "LUMA_CONTEXT_SHARING_POLICY_PATH=",
+      "LUMA_DECISION_AUTHORITY_POLICY_PATH=",
+      "LUMA_GRANOLA_CREDENTIAL_KEY_PATH=",
+      "LUMA_STRUCTURED_WORK_TARGETS_PATH=",
+      ""
+    ].join("\n");
+    await writeFile(f.productionEnvPath, original, { mode: 0o600 });
+    await validateRuntimeRecoveryInputs(f.productionEnvPath);
+    const manifest = await captureRuntimeRecoveryMaterial(f);
+    expect(manifest.files.map((file) => file.role)).toEqual(["production-environment"]);
+    expect(await readFile(join(f.directory, "recovery", "production.env"), "utf8")).toBe(
+      original
+    );
+    await writeFile(
+      f.productionEnvPath,
+      original.replace(
+        "LUMA_DECISION_RECORDS_SIGNING_KEY=",
+        "LUMA_DECISION_RECORDS_SIGNING_KEY=too-short"
+      ),
+      { mode: 0o600 }
+    );
+    await expect(validateRuntimeRecoveryInputs(f.productionEnvPath)).rejects.toThrow();
+    await writeFile(
+      f.productionEnvPath,
+      original.replace(
+        "LUMA_DISCORD_DECISION_RECORDS_ENABLED=0",
+        "LUMA_DISCORD_DECISION_RECORDS_ENABLED=1"
+      ),
+      { mode: 0o600 }
+    );
+    await expect(validateRuntimeRecoveryInputs(f.productionEnvPath)).rejects.toThrow();
+  });
   it("retains exact runtime secrets, selected policies and a separate key in private files bound to the backup", async () => {
     const f = await fixture();
     const network = vi

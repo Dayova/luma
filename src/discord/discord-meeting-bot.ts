@@ -1,3 +1,11 @@
+import { handleDiscordStructuredWorkMention } from "./discord-structured-work-mention.js";
+import {
+  handleDiscordStructuredWorkCommand,
+  isStructuredWorkCommand,
+  renderStructuredWorkFailure,
+  type DiscordStructuredWorkCommand,
+  type DiscordStructuredWorkRuntime
+} from "./discord-structured-work-runtime.js";
 import {
   isGranolaCommand,
   DiscordGranolaUnavailableError,
@@ -91,6 +99,7 @@ export type DiscordCommand =
   | DiscordCaptureReviewCommand
   | DiscordGranolaCommand
   | DiscordDecisionRecordCommand
+  | DiscordStructuredWorkCommand
   | (DiscordCommandBase & {
       type: "start";
       title: string;
@@ -188,7 +197,10 @@ export interface DiscordTransport {
   ): Promise<void>;
   /** Stop admission and wait for admitted handlers and final deliveries before closing. */
   disconnect(): Promise<void>;
-  resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null>;
+  resolveChannel(input: {
+    channelId: string;
+    requiredHumanReaderIds?: readonly string[];
+  }): Promise<DiscordChannelSurface | null>;
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
   sendMessage(input: {
     channelId: string;
@@ -218,6 +230,7 @@ export type CreateDiscordMeetingBotInput = {
   captureReview?: DiscordCaptureReviewRuntime;
   granola?: DiscordGranolaRuntime;
   decisionRecords?: DiscordDecisionRecordRuntime;
+  structuredWork?: DiscordStructuredWorkRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
   authorizedPersonIds: readonly PersonId[];
@@ -305,6 +318,12 @@ export function createDiscordMeetingBot(
         now: () => now().getTime()
       })
     : undefined;
+  const structuredRateLimiter = input.structuredWork
+    ? createDiscordContextAskRateLimiter({
+        minIntervalMs: input.structuredWork.config.minIntervalMs,
+        now: () => now().getTime()
+      })
+    : undefined;
   // A second Gateway delivery must not become a second cooldown/status reply.
   const seenContextMessages = new Map<string, number>();
 
@@ -324,7 +343,7 @@ export function createDiscordMeetingBot(
                 )
           );
         },
-        input.contextAsk || input.decisionRecords
+        input.contextAsk || input.decisionRecords || input.structuredWork
           ? (ask) =>
               stopping
                 ? Promise.resolve(null)
@@ -334,9 +353,11 @@ export function createDiscordMeetingBot(
                       ask,
                       accessPolicy,
                       channelScope,
-                      ask.purpose === "decision-record"
-                        ? decisionRateLimiter
-                        : contextRateLimiter,
+                      ask.purpose === "structured-work"
+                        ? structuredRateLimiter
+                        : ask.purpose === "decision-record"
+                          ? decisionRateLimiter
+                          : contextRateLimiter,
                       seenContextMessages,
                       now
                     )
@@ -377,7 +398,12 @@ async function answerConversationThread(
   const contextAsk = input.contextAsk;
   const decisionRecords =
     ask.purpose === "decision-record" ? input.decisionRecords : undefined;
-  const scope = ask.purpose === "decision-record" ? decisionRecords : contextAsk;
+  const scope =
+    ask.purpose === "structured-work"
+      ? input.structuredWork
+      : ask.purpose === "decision-record"
+        ? decisionRecords
+        : contextAsk;
 
   if (
     !scope ||
@@ -429,6 +455,36 @@ async function answerConversationThread(
   }
 
   try {
+    if (ask.purpose === "structured-work") {
+      if (!input.structuredWork) return null;
+      const requireCurrent = async () => {
+        if (
+          !(await accessPolicy.authorize({
+            workspaceId: input.workspace.workspaceId,
+            providerId: "discord",
+            providerUserId: ask.actorDiscordUserId
+          })) ||
+          !(await allowedSurface())
+        )
+          throw new DiscordChannelAccessError();
+      };
+      const result = await handleDiscordStructuredWorkMention({
+        runtime: input.structuredWork,
+        workspace: input.workspace,
+        mention: ask,
+        requireCurrent
+      });
+      const response = await reply(await appendAiUsageWarning(input, result.content));
+      return response
+        ? {
+            ...response,
+            requireCurrent: async () => {
+              await requireCurrent();
+              await result.requireCurrent?.();
+            }
+          }
+        : null;
+    }
     if (ask.purpose === "decision-record") {
       if (!decisionRecords || !isExplicitDecisionRecordInstruction(ask.question))
         return null;
@@ -647,39 +703,56 @@ async function handleCommand(
   try {
     const sourceFence = await commandSourceFence(input, command);
     await sourceFence?.();
-    const response = isGranolaCommand(command)
-      ? await handleGranola(input, command, accessPolicy)
-      : isCaptureReviewCommand(command)
-        ? await handleCaptureReview(input, command, accessPolicy)
-        : command.type === "usage"
-          ? { content: await readAiUsage(input) }
-          : isConsultationCommand(command)
-            ? input.consultations
-              ? await handleDiscordConsultationCommand({
-                  runtime: input.consultations,
-                  workspace: input.workspace,
-                  command,
-                  accessPolicy
-                })
-              : {
-                  content: "Advisory consultations are not configured in this workspace."
-                }
-            : isDecisionRecordCommand(command)
-              ? input.decisionRecords &&
-                surface.kind === "public-thread" &&
-                surface.parentChannelId &&
-                input.decisionRecords.config.parentChannelIds.includes(
-                  surface.parentChannelId
-                ) &&
-                input.decisionRecords.config.allowedDiscordUserIds.includes(
-                  command.actorDiscordUserId
-                )
-                ? await executeDecisionRecordCommand(input, command)
+    const response = isStructuredWorkCommand(command)
+      ? input.structuredWork &&
+        surface.kind === "public-thread" &&
+        surface.parentChannelId &&
+        input.structuredWork.config.parentChannelIds.includes(surface.parentChannelId) &&
+        input.structuredWork.config.allowedDiscordUserIds.includes(
+          command.actorDiscordUserId
+        )
+        ? await executeStructuredWorkCommand(input, command)
+        : { content: "Structured work is not enabled for you in this discussion." }
+      : isGranolaCommand(command)
+        ? await handleGranola(input, command, accessPolicy)
+        : isCaptureReviewCommand(command)
+          ? await handleCaptureReview(input, command, accessPolicy)
+          : command.type === "usage"
+            ? { content: await readAiUsage(input) }
+            : isConsultationCommand(command)
+              ? input.consultations
+                ? await handleDiscordConsultationCommand({
+                    runtime: input.consultations,
+                    workspace: input.workspace,
+                    command,
+                    accessPolicy
+                  })
                 : {
                     content:
-                      "Decision Records are not enabled for you in this discussion."
+                      "Advisory consultations are not configured in this workspace."
                   }
-              : await executeAdmittedCommand(input, command, now);
+              : isDecisionRecordCommand(command)
+                ? input.decisionRecords &&
+                  ((surface.kind === "public-thread" &&
+                    surface.parentChannelId &&
+                    input.decisionRecords.config.parentChannelIds.includes(
+                      surface.parentChannelId
+                    )) ||
+                    ((command.type === "decision-record-automatic" ||
+                      ("meetingId" in command && !!command.meetingId)) &&
+                      surface.kind === "text-channel" &&
+                      input.decisionRecords.config.parentChannelIds.includes(
+                        surface.id
+                      ))) &&
+                  input.decisionRecords.config.allowedDiscordUserIds.includes(
+                    command.actorDiscordUserId
+                  )
+                  ? await executeDecisionRecordCommand(input, command)
+                  : {
+                      content:
+                        "Decision Records are not enabled for you in this discussion."
+                    }
+                : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
         ? response.content
@@ -703,6 +776,13 @@ async function handleCommand(
       ...(sourceFence || response.requireCurrent ? { requireCurrent } : {})
     };
   } catch (error: unknown) {
+    if (isStructuredWorkCommand(command))
+      return { content: renderStructuredWorkFailure(error, command) };
+    if (command.type === "decision-record-automatic")
+      return {
+        content:
+          "The automatic recording permission changed or could not be verified before delivery. Use /decision-record automatic with action:status and the same scope to check the saved permission."
+      };
     if (isDecisionRecordCommand(command))
       return {
         content: renderDecisionRecordFailure(
@@ -726,12 +806,100 @@ async function handleCommand(
   }
 }
 
+async function executeStructuredWorkCommand(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordStructuredWorkCommand
+): Promise<DiscordCommandResponse> {
+  if (!input.structuredWork) throw new Error("Structured work is not configured");
+  if (!command.meeting)
+    return handleDiscordStructuredWorkCommand({
+      runtime: input.structuredWork,
+      workspace: input.workspace,
+      command
+    });
+  const binding = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  if (!binding || binding.thread_id !== command.channelId)
+    return {
+      content:
+        "Bind this thread to its imported Meeting with /meeting bind first, or omit meeting:true to use only the discussion."
+    };
+  const state = await queryMeetingSnapshot(input, binding);
+  if (!state.importedSources.length)
+    return { content: "This request requires an actual imported Meeting binding." };
+  const requireBinding = async () => {
+    const current = await findMeetingThreadForChannel(
+      input,
+      command.guildId,
+      command.channelId,
+      "include-ended-thread"
+    );
+    if (
+      !current ||
+      current.meeting_id !== binding.meeting_id ||
+      current.thread_id !== binding.thread_id ||
+      current.parent_channel_id !== binding.parent_channel_id
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    await requireImportedMeetingCurrent(input, state);
+  };
+  await requireBinding();
+  const response = await handleDiscordStructuredWorkCommand({
+    runtime: input.structuredWork,
+    workspace: input.workspace,
+    command,
+    meetingId: binding.meeting_id,
+    requireCurrent: requireBinding
+  });
+  return {
+    content: response.content,
+    requireCurrent: async () => {
+      await requireBinding();
+      await response.requireCurrent?.();
+    }
+  };
+}
+
 async function executeDecisionRecordCommand(
   input: ScopedDiscordMeetingBotInput,
   command: DiscordDecisionRecordCommand
 ): Promise<DiscordCommandResponse> {
   if (!input.decisionRecords) throw new Error("Decision Records are not configured");
-  if ("sourceMessageId" in command && command.sourceMessageId)
+  if (
+    command.type !== "decision-record-automatic" &&
+    command.meetingId &&
+    "sourceMessageId" in command &&
+    command.sourceMessageId
+  )
+    return { content: "Choose either meeting_id or source_message, never both." };
+  if (command.type !== "decision-record-automatic" && command.meetingId) {
+    const logical = await resolveLogicalDecisionAddress(input, command.meetingId, true);
+    if (!logical) throw new ImportedMeetingReviewUnavailableError();
+    const response = await handleDiscordDecisionRecordCommand({
+      runtime: input.decisionRecords,
+      workspace: input.workspace,
+      command,
+      meetingId: logical.id,
+      logicalMeetingId: logical.id,
+      requireCurrent: () => logical.requireCurrent()
+    });
+    await logical.requireCurrent();
+    return {
+      content: response.content,
+      requireCurrent: async () => {
+        await logical.requireCurrent();
+        await response.requireCurrent?.();
+      }
+    };
+  }
+  if (
+    command.type === "decision-record-automatic" ||
+    ("sourceMessageId" in command && command.sourceMessageId)
+  )
     return handleDiscordDecisionRecordCommand({
       runtime: input.decisionRecords,
       workspace: input.workspace,
@@ -746,7 +914,7 @@ async function executeDecisionRecordCommand(
   if (!binding || binding.thread_id !== command.channelId)
     return {
       content:
-        "Attach this thread to its imported Meeting with /meeting bind first, or supply source_message for a Conversation request."
+        "Supply meeting_id from /meeting captures for a LogicalMeeting, attach this thread with /meeting bind, or supply source_message for a Conversation request."
     };
   const state = await queryMeetingSnapshot(input, binding);
   if (!state.importedSources.length)
@@ -771,19 +939,75 @@ async function executeDecisionRecordCommand(
     await requireImportedMeetingCurrent(input, state);
   };
   await requireBinding();
+  // Only candidate discovery may route to the capture queue. Existing imported
+  // request IDs keep their original subject unless an exact meeting_id is supplied.
+  const logical =
+    command.type === "decision-record-candidates"
+      ? await resolveLogicalDecisionAddress(input, binding.meeting_id, false)
+      : null;
+  const requireCurrent = async () => {
+    await requireBinding();
+    await logical?.requireCurrent();
+  };
   const response = await handleDiscordDecisionRecordCommand({
     runtime: input.decisionRecords,
     workspace: input.workspace,
     command,
-    meetingId: binding.meeting_id,
-    requireCurrent: requireBinding
+    meetingId: logical?.id ?? binding.meeting_id,
+    ...(logical ? { logicalMeetingId: logical.id } : {}),
+    requireCurrent
   });
-  await requireBinding();
+  await requireCurrent();
   return {
     content: response.content,
     requireCurrent: async () => {
-      await requireBinding();
+      await requireCurrent();
       await response.requireCurrent?.();
+    }
+  };
+}
+
+async function resolveLogicalDecisionAddress(
+  input: ScopedDiscordMeetingBotInput,
+  requestedId: string,
+  exact: boolean
+): Promise<{ id: string; requireCurrent(): Promise<void> } | null> {
+  const resolver = input.decisionRecords?.logicalMeetings;
+  if (!resolver) return null;
+  if (!requestedId || requestedId.length > 512 || /[\s<>`]/u.test(requestedId))
+    throw new ImportedMeetingReviewUnavailableError();
+  const readAudience = async () => {
+    const audience = await resolver.currentAudience(input.workspace.workspaceId);
+    if (
+      !audience ||
+      audience.workspaceId !== input.workspace.workspaceId ||
+      audience.personIds.length !== 4 ||
+      new Set(audience.personIds).size !== 4 ||
+      JSON.stringify([...audience.personIds].sort()) !==
+        JSON.stringify([...input.authorizedPersonIds].sort())
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    return { ...audience, personIds: [...audience.personIds].sort() };
+  };
+  const audience = await readAudience();
+  const resolve = () =>
+    resolver.resolveMeeting({
+      workspaceId: input.workspace.workspaceId,
+      meetingId: requestedId,
+      audience: structuredClone(audience)
+    });
+  const id = await resolve();
+  if (!id) return null;
+  if ((exact && id !== requestedId) || id.length > 512 || /[\s<>`]/u.test(id))
+    throw new ImportedMeetingReviewUnavailableError();
+  return {
+    id,
+    requireCurrent: async () => {
+      if (
+        JSON.stringify(await readAudience()) !== JSON.stringify(audience) ||
+        (await resolve()) !== id
+      )
+        throw new ImportedMeetingReviewUnavailableError();
     }
   };
 }
@@ -876,6 +1100,7 @@ async function executeAdmittedCommand(
     | { type: "usage" }
     | DiscordConsultationCommand
     | DiscordDecisionRecordCommand
+    | DiscordStructuredWorkCommand
     | DiscordCaptureReviewCommand
     | DiscordGranolaCommand
   >,
@@ -944,6 +1169,7 @@ async function commandSourceFence(
     isCaptureReviewCommand(command) ||
     isConsultationCommand(command) ||
     isDecisionRecordCommand(command) ||
+    isStructuredWorkCommand(command) ||
     command.type === "usage" ||
     command.type === "bind" ||
     command.type === "start"

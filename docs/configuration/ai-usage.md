@@ -7,7 +7,7 @@ not a target to spend or a permanent financial commitment. Hosting, capture
 subscriptions, ChatGPT/Codex subscriptions, taxes and currency conversion are
 separate. The cap never increases automatically.
 
-The decision and ongoing pilot context live in the
+The decision and ongoing exploration context live in the
 [operating brief](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23).
 [LUM-44](https://linear.app/dayova/issue/LUM-44) tracks implementation.
 
@@ -32,14 +32,18 @@ messages contain no raw provider diagnostics or credentials.
 
 When a note is saved but its analysis is deferred, the response says both things.
 Original Evidence remains available. Do not resubmit the same note to force
-analysis: duplicate Observations do not re-run it. Monthly rollover does not
-automatically replay blocked requests or proposed external writes. Deterministic
+analysis: duplicate Observations do not re-run it. Automatic Decision processing
+can retry a retained attempt only when the provider was definitely not called,
+with at most three attempts for the exact source batch and a fresh permission
+check. Budget refusals wait for the actual reset; unknown charges remain held.
+Monthly rollover does not authorize proposed external writes. Deterministic
 queries and already saved information remain usable independently of AI spend.
 
 ## Accounting and admission
 
 The executable application supplies one durable usage controller to Meeting
-analysis and Context Ask. Reservations are transactional and shared across
+analysis, capture synthesis, Context Ask, Decision processing, structured work
+and native Notion review. Reservations are transactional and shared across
 concurrent callers. The ledger records request/workflow identities, capability,
 model, price version and token counts; it does not store prompt bodies or source
 text for telemetry.
@@ -76,15 +80,15 @@ not configure a live project, buy credits or enable collection. See the
 
 ## Configuration
 
-| Variable                     | Default         | Purpose                                                                 |
-| ---------------------------- | --------------- | ----------------------------------------------------------------------- |
-| `LUMA_AI_MONTHLY_LIMIT_USD`  | `30`            | Shared monthly admission ceiling; `0` pauses paid dispatch.             |
-| `LUMA_AI_DAILY_LIMIT_USD`    | Unset           | Optional additional daily ceiling.                                      |
-| `LUMA_AI_BUDGET_TIMEZONE`    | `Europe/Berlin` | Calendar boundaries for this ledger.                                    |
-| `LUMA_AI_WORKFLOW_LIMIT_USD` | `0.25`          | Maximum estimated spend for one logical workflow.                       |
-| `LUMA_AI_MAX_INPUT_TOKENS`   | `100000`        | Conservative input-token upper bound, not a character-to-token average. |
-| `LUMA_AI_MAX_OUTPUT_TOKENS`  | `8192`          | Maximum total output tokens, including reasoning.                       |
-| `LUMA_AI_TIMEOUT_MS`         | `60000`         | Per-request timeout; no automatic SDK retry.                            |
+| Variable                     | Default         | Purpose                                                                       |
+| ---------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `LUMA_AI_MONTHLY_LIMIT_USD`  | `30`            | Shared monthly admission ceiling; `0` pauses paid dispatch.                   |
+| `LUMA_AI_DAILY_LIMIT_USD`    | Unset           | Optional additional daily ceiling.                                            |
+| `LUMA_AI_BUDGET_TIMEZONE`    | `Europe/Berlin` | Calendar boundaries for this ledger.                                          |
+| `LUMA_AI_WORKFLOW_LIMIT_USD` | `0.25`          | Maximum estimated spend for one logical workflow.                             |
+| `LUMA_AI_MAX_INPUT_TOKENS`   | `100000`        | Maximum admitted input tokens; conservative byte bound or exact native count. |
+| `LUMA_AI_MAX_OUTPUT_TOKENS`  | `8192`          | Maximum total output tokens, including reasoning.                             |
+| `LUMA_AI_TIMEOUT_MS`         | `60000`         | Per-request timeout; no automatic SDK retry.                                  |
 
 Limit changes are explicit operator configuration under the owner's budget
 decision. Keep the ledger with the durable application database and include it
@@ -95,7 +99,7 @@ not a valid way to reset usage.
 
 Plan **USD 5–15/month initially** for all four founders using the current model
 and text workflows. This is a planning range, not measured consumption. Prices
-were checked on 8 September 2026 against the
+were checked on 11 September 2026 against the
 [official pricing table](https://developers.openai.com/api/docs/pricing) and
 [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna):
 per million tokens, Standard short-context input is $0.20, cached input $0.02,
@@ -120,7 +124,12 @@ Longer context, more revisions, greater reasoning usage or a model upgrade can
 consume the $30 allowance. New audio, paid tools or source services require a new
 estimate.
 
+Notion's own Custom Agent credits are separate from these Luma API calls. Native
+Notion review remains disabled until its access and separate billing arrangement
+are established; enabling the MCP endpoint does not bring provider agent charges
+under Luma's local ledger.
+
 After roughly two weeks of actual use, compare the usage breakdown with provider
 billing and useful workflow outcomes. Inspect uncertain/failed work and quality
-before changing the cap or routing. This is a pilot review checkpoint, not a
+before changing the cap or routing. This is an exploration review checkpoint, not a
 scheduled automation or a claim that live cost reconciliation has run.

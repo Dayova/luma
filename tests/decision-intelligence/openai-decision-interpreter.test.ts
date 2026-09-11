@@ -3,6 +3,7 @@ import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/d
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
 import {
   createOpenAIDecisionInterpreter,
+  createOpenAIAutomaticDecisionDetector,
   type DecisionModelRequest
 } from "../../src/decision-intelligence/openai-decision-interpreter.js";
 import { decisionRecord } from "../knowledge/decision-record-fixture.js";
@@ -292,4 +293,39 @@ describe("budgeted production DecisionInterpreter", () => {
     ).rejects.toMatchObject({ code: "unavailable" });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("Decision model disclosure after durable reservation", () => {
+  it.each(["explicit", "automatic"] as const)(
+    "refuses %s provider dispatch when the current source proof is revoked",
+    async (kind) => {
+      const f = fixture();
+      const config = {
+        budget: f.budget,
+        client: f.client,
+        beforeInvoke: async () => {
+          expect((await f.budget.getStatus("dayova")).reservedUsd).toBeGreaterThan(0);
+          throw new Error("Original source grant was revoked");
+        }
+      };
+      const run =
+        kind === "explicit"
+          ? createOpenAIDecisionInterpreter(config).interpret(f.request)
+          : createOpenAIAutomaticDecisionDetector(config).detect({
+              workspace: f.request.workspace,
+              batchId: "batch-current-proof",
+              source: f.request.source,
+              authority: f.request.authority,
+              catalog: f.request.catalog
+            });
+      await expect(run).rejects.toMatchObject({ requestDispatched: false });
+      expect(f.client.create).not.toHaveBeenCalled();
+      expect(await f.budget.getStatus("dayova")).toMatchObject({
+        requestCount: 1,
+        spentUsd: 0,
+        reservedUsd: 0,
+        unknownUsd: 0
+      });
+    }
+  );
 });

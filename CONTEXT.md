@@ -45,6 +45,10 @@ _Avoid_: Binding vote, inferred authority, final decision
 A canonical knowledge artifact documenting an evidenced Human decision and its source-backed authority. Recording permission is separate from decision authority. Exact Follow-up Intents govern creation or amendments; supersession/reversal preserves the predecessor and links a pending successor before activation.
 _Avoid_: Poll result, Meeting summary, executable work item
 
+**Standing Recording Policy**:
+An original authenticated Human instruction that grants Luma bounded permission to record clear decisions automatically, with explicit scope, decision classes, audience and current-source proof. It never supplies missing decision authority or Human acceptance.
+_Avoid_: Model confidence, job title, poll result, implicit approval
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row
@@ -144,6 +148,14 @@ _Avoid_: Generic document update, whole-page replacement, automatic merge
 **Operational Outcome**:
 A compact Luma-owned record of authorized reconciliation and execution against canonical organizational surfaces, distinct from raw Meeting Captures and a Luma Synthesis.
 _Avoid_: Meeting Notes, source evidence, synthesis
+
+**Structured Record**:
+A canonical knowledge entry in a configured structured collection, with named fields and traceable source Evidence. A hypothesis remains a hypothesis until Human Evidence establishes a decision.
+_Avoid_: Ad-hoc page, Decision Record, task
+
+**Compound Operation**:
+One explicit, source-bound request for coordinated changes to structured knowledge and canonical work. Each output retains its own reconciliation and execution outcome while sharing the original Evidence and authorization.
+_Avoid_: Distributed transaction, independent automation, implicit approval
 
 **External Activity**:
 A provider-normalized event connected to a Meeting Item, external object, or Follow-up.

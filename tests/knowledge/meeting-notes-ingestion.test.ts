@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   ReasoningModel,
   StructuredReasoningRequest,
@@ -3175,6 +3175,50 @@ describe("Meeting Notes ingestion", () => {
             "candidate:notion%3Ainternal:meeting%3Anotes%2Froot:block:action%3Ablock%2Fone"
         })
       ]);
+    } finally {
+      await database.close();
+    }
+  });
+});
+
+describe("accepted Meeting source notifications", () => {
+  it("announces only canonical accepted source revisions and preserves acceptance when downstream queueing is unavailable", async () => {
+    const database = await createPgliteDatabase(),
+      reasoningModel = new NoAnalysisReasoningModel();
+    const meetingIntelligence = createMeetingIntelligence({ database, reasoningModel });
+    const onProcessedSource = vi.fn<
+      NonNullable<Parameters<typeof createMeetingNotesIngestion>[0]["onProcessedSource"]>
+    >(() => Promise.reject(new Error("queue unavailable")));
+    const ingestion = createMeetingNotesIngestion({
+        meetingIntelligence,
+        onProcessedSource
+      }),
+      request = {
+        workspace: { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" },
+        source: observedMeetingNote()
+      };
+    try {
+      const result = await ingestion.ingest(request);
+      expect(result.acceptedObservationIds).toEqual([
+        "meeting-note-import:notion:meeting-notes-root:r1"
+      ]);
+      expect(result.errors).toContainEqual({
+        code: "context-unavailable",
+        retryable: true,
+        partialResultAvailable: true
+      });
+      expect(onProcessedSource).toHaveBeenCalledWith({
+        workspaceId: "workspace_dayova",
+        meetingId: "meeting:source:notion:meeting-notes-root",
+        observationId: "meeting-note-import:notion:meeting-notes-root:r1",
+        sourceRevision: 1,
+        contentHash: "sha256:meeting-note-v1"
+      });
+      onProcessedSource.mockResolvedValue(undefined);
+      const repeated = await ingestion.ingest(request);
+      expect(repeated.duplicateObservationIds).toEqual(result.acceptedObservationIds);
+      expect(onProcessedSource).toHaveBeenCalledTimes(2);
+      expect(reasoningModel.requests).toHaveLength(0);
     } finally {
       await database.close();
     }

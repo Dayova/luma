@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { LumaDatabase } from "../persistence/db.js";
-import type { DecisionRecordCatalog } from "../knowledge/decision-record-catalog.js";
+import type {
+  DecisionRecordCatalog,
+  DecisionRecordHistoricalRevision
+} from "../knowledge/decision-record-catalog.js";
 import type {
   DecisionAudience,
   CanonicalDecisionRecord
@@ -14,6 +17,16 @@ import {
 import type { ContextCatalog } from "./interface.js";
 import { createDecisionContextCatalog } from "./decision-context-catalog.js";
 
+const revisionHintSchema = z
+  .object({
+    reference: decisionExternalReferenceSchema,
+    revisionId: z.string().regex(/^[a-f0-9]{64}$/u),
+    ordinal: z.number().int().min(1).max(100),
+    recordedAt: z.string().datetime({ offset: true }).nullable(),
+    terms: z.array(z.string().min(1).max(80)).max(64),
+    active: z.boolean()
+  })
+  .strict();
 const manifestSchema = z
   .object({
     version: z.literal(1),
@@ -23,6 +36,8 @@ const manifestSchema = z
     observedAt: z.string().datetime(),
     providerSnapshotId: z.string().min(1),
     providerRevision: z.string().min(1),
+    historicalRevisions: z.array(revisionHintSchema).max(1000).optional(),
+    historyComplete: z.boolean().optional(),
     entries: z
       .array(
         z
@@ -203,14 +218,22 @@ export async function createDecisionRecallRuntime(input: {
         check();
         const audience = await cancellable(owned.signal, currentAudience);
         if (!audience) throw new Error("Decision audience is unavailable");
-        const snapshot = await cancellable(owned.signal, () =>
-          input.records.discover({
+        const discovery = await cancellable(owned.signal, async () => {
+          const request = {
             audience,
             limit: 100,
             signal: owned.signal,
-            priority: "background"
-          })
-        );
+            priority: "background" as const
+          };
+          return input.records.history
+            ? input.records.history.discover({ ...request, historyLimit: 1000 })
+            : {
+                current: await input.records.discover(request),
+                revisions: [],
+                complete: false
+              };
+        });
+        const snapshot = discovery.current;
         check();
         if (!snapshot.complete) {
           await storeState("partial", at);
@@ -241,7 +264,9 @@ export async function createDecisionRecallRuntime(input: {
           observedAt: now().toISOString(),
           providerSnapshotId: snapshot.id,
           providerRevision: snapshot.revision,
-          entries: records.map(candidate)
+          entries: records.map(candidate),
+          historicalRevisions: discovery.revisions.map(revisionHint),
+          historyComplete: discovery.complete
         });
       } catch {
         await storeState("unavailable", at);
@@ -292,7 +317,38 @@ export async function createDecisionRecallRuntime(input: {
             warnings: ["Decision candidate discovery is not ready for these recipients."]
           };
         const wanted = new Set(terms(request.concepts.join(" ")));
-        const matches = manifest.entries
+        const isHistory =
+          request.time?.mode === "history" && Boolean(input.records.history);
+        let entries: Array<
+          Manifest["entries"][number] | z.infer<typeof revisionHintSchema>
+        > = isHistory ? (manifest.historicalRevisions ?? []) : manifest.entries;
+        if (isHistory && request.time?.mode === "history" && request.time.asOf) {
+          const byPage = new Map<string, z.infer<typeof revisionHintSchema>>();
+          for (const entry of manifest.historicalRevisions ?? []) {
+            if (
+              entry.recordedAt === null ||
+              Date.parse(entry.recordedAt) > Date.parse(request.time.asOf)
+            )
+              continue;
+            const key = JSON.stringify([
+              entry.reference.providerId,
+              entry.reference.externalId
+            ]);
+            const prior = byPage.get(key);
+            if (!prior || entry.ordinal > prior.ordinal) byPage.set(key, entry);
+          }
+          entries = [...byPage.values()].filter(
+            (entry) =>
+              !(manifest.historicalRevisions ?? []).some(
+                (later) =>
+                  later.reference.providerId === entry.reference.providerId &&
+                  later.reference.externalId === entry.reference.externalId &&
+                  later.ordinal > entry.ordinal &&
+                  later.recordedAt === null
+              )
+          );
+        }
+        const matches = entries
           .map((entry) => ({
             entry,
             score: entry.terms.reduce(
@@ -304,7 +360,11 @@ export async function createDecisionRecallRuntime(input: {
           .sort(
             (left, right) =>
               right.score - left.score ||
-              Number(right.entry.active) - Number(left.entry.active) ||
+              ("recordedAt" in right.entry && "recordedAt" in left.entry
+                ? Date.parse(right.entry.recordedAt ?? "1970-01-01T00:00:00Z") -
+                    Date.parse(left.entry.recordedAt ?? "1970-01-01T00:00:00Z") ||
+                  right.entry.ordinal - left.entry.ordinal
+                : Number(right.entry.active) - Number(left.entry.active)) ||
               left.entry.reference.externalId.localeCompare(
                 right.entry.reference.externalId
               )
@@ -312,6 +372,17 @@ export async function createDecisionRecallRuntime(input: {
         const warnings = [
           "Decision candidates come from bounded background discovery; current completeness is not guaranteed."
         ];
+        if (
+          isHistory &&
+          manifest.historicalRevisions?.some((entry) => entry.recordedAt === null)
+        )
+          warnings.push(
+            "Some legacy Decision revisions have no recorded revision time; as-of ordering may be unavailable."
+          );
+        if (isHistory && !manifest.historyComplete)
+          warnings.push(
+            "Canonical Decision archive discovery is incomplete or has not run; only explicitly discovered revisions are available."
+          );
         if (row?.state !== "ready" && !(row?.state === "refreshing" && running))
           warnings.push(
             "The last Decision refresh was incomplete, interrupted or unavailable."
@@ -325,7 +396,10 @@ export async function createDecisionRecallRuntime(input: {
         return {
           references: matches
             .slice(0, Math.min(candidateLimit, request.limit))
-            .map(({ entry }) => structuredClone(entry.reference)),
+            .map(({ entry }) => ({
+              reference: structuredClone(entry.reference),
+              ...("revisionId" in entry ? { revisionId: entry.revisionId } : {})
+            })),
           complete: false,
           warnings
         };
@@ -413,5 +487,19 @@ function cancellable<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T>
       })
       .then(resolve, reject)
       .finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+function revisionHint(
+  revision: DecisionRecordHistoricalRevision
+): z.infer<typeof revisionHintSchema> {
+  const record = canonicalDecisionRecordSchema.parse(revision.record);
+  const current = candidate(record);
+  return revisionHintSchema.parse({
+    ...current,
+    terms: current.terms.slice(0, 64),
+    revisionId: revision.revisionId,
+    ordinal: revision.ordinal,
+    recordedAt: revision.recordedAt
   });
 }

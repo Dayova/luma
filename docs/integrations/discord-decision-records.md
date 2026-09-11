@@ -122,7 +122,9 @@ without another paid call. Live source access, native Notion round-trip, product
 secrets and host recovery still need deployment verification.
 
 This path handles explicit Conversation and imported-Meeting recording instructions.
-Automatic candidate recognition remains separate required work.
+The same main runtime also implements [automatic source review](#automatic-source-review)
+when explicitly configured, including admitted LogicalMeeting captures. Candidate
+recognition alone grants no permission to record a decision.
 
 The same runtime includes [background Decision recall](../decision-record-recall.md).
 Discovery uses the dedicated read-only credential and never invokes the writer.
@@ -167,3 +169,49 @@ to the admitted leading-mention surface. The read check never updates the ledger
 or authorizes another write; `requireCurrent` continues to demand the exact current
 execution source. Retained statements and poll counts keep their original meaning
 and standing.
+
+# Automatic source review
+
+`LUMA_AUTOMATIC_DECISIONS_ENABLED=1` connects accepted Conversation Ask material and imported Meeting revisions to a durable Decision candidate queue in the main app. It requires the existing four-founder Decision Records configuration and uses the same monthly AI budget. Source ingestion remains independent from background interpretation. A source notification is retained before ingestion or Ask returns; repeated notifications for the same current evidence are coalesced by Meeting Intelligence.
+
+Use `/decision-record candidates source_message:<original-message-id>` in the original Conversation, or `/decision-record candidates` in the bound imported Meeting thread. Optional `candidate` and `page` selections expose the full retained review and exact acceptance token. Every delivery rechecks the source, original audience and current channel binding. Queue, interruption and budget failures produce deterministic status text without requiring an AI response.
+
+Enabling source review does not grant standing permission to create or amend records. Candidates require the ordinary exact Human acceptance unless a separate current Human standing policy authorizes the operation. An interrupted model attempt is retained and is not silently charged again at restart. The main app stops background admission immediately during shutdown and drains admitted work before closing persistence.
+
+## LogicalMeeting addresses
+
+`/decision-record meeting`, `candidates`, `status`, `accept`, and `recover`
+accept an optional `meeting_id` from `/meeting captures`. This directly addresses
+an already admitted LogicalMeeting, including Granola-only captures, from a
+configured founder-only parent channel or its eligible thread. No synthetic
+Meeting or thread binding is created. `meeting_id` and `source_message` are
+mutually exclusive.
+
+The main runtime resolves that exact ID through the owned current capture/source
+proof for all four founders. The bot rechecks the same resolved identity, original
+source access, founder audience and actual channel at response delivery. Replies
+include `Meeting ID (meeting_id)` alongside the original request ID; carry both
+into later status, acceptance or recovery commands.
+
+On an existing imported Meeting thread, `candidates` uses its current proven
+LogicalMeeting queue when available. Status, acceptance and recovery without an
+explicit `meeting_id` continue to address the original imported request subject.
+They never silently retarget old request IDs to a different LogicalMeeting.
+The imported binding and capture resolution are both checked again at delivery.
+
+### Automatic analysis recovery
+
+A refusal proved to occur before an AI request was sent is retained with its next
+retry time. The queue resumes it after restart, rechecking the exact original
+source, audience, ownership and standing permission. Monthly or daily budget
+refusals wait until their calendar reset; other unsent refusals use bounded
+backoff. Each original source batch permits at most three total attempts.
+
+`/decision-record candidates` stays read-only and displays the failure and retry
+time. After repairing configuration or raising the existing budget, an admitted
+founder may use the same command with `retry:true` for an earlier attempt. This
+does not authorize recording or bypass the shared budget. Replaying the same
+interaction does not consume another attempt. Unknown or dispatched attempts,
+including legacy batches without a durable unsent proof, are never repeated by
+this option or the scheduler. Check `/meeting usage` and the retained result
+before starting a new explicit request.

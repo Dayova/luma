@@ -2,7 +2,10 @@ import type { WorkspaceConfig } from "../domain/model.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { ObservedSourceLedger } from "../knowledge/observed-source-ledger.js";
 import type { ImportedSourceAnalysisAccess } from "../meeting-intelligence/imported-source-analysis.js";
-import type { CaptureSynthesisConfiguration } from "../meeting-intelligence/meeting-capture-access.js";
+import type {
+  CaptureSynthesisConfiguration,
+  ProcessedLogicalMeetingSourceEvent
+} from "../meeting-intelligence/meeting-capture-access.js";
 import type { MeetingNotesIngestion } from "../knowledge/meeting-notes-ingestion.js";
 import type {
   MeetingIntelligence,
@@ -154,6 +157,14 @@ export async function createMeetingCaptureRuntime(input: {
   return {
     configuration,
     logicalMeetings,
+    /** Bind before intake starts; acceptance owns the fresh proof and awaits durable enqueue. */
+    connectProcessedSource(
+      handler: (event: ProcessedLogicalMeetingSourceEvent) => Promise<void>
+    ) {
+      if (started || stopped || configuration.onProcessedSource)
+        throw new Error("Processed capture delivery must be bound once before start.");
+      configuration.onProcessedSource = handler;
+    },
     /** Late construction binding; completed before any Gateway/source intake starts. */
     connect(
       meetingIntelligence: MeetingIntelligence,

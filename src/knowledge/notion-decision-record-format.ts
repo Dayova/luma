@@ -10,6 +10,7 @@ const revisionSchema = z
   .object({
     operationId: z.string().min(1).max(512),
     stageDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+    recordedAt: z.string().datetime({ offset: true }).optional(),
     content: decisionRecordContentSchema
   })
   .strict();

@@ -30,6 +30,8 @@ export type MeetingContextExecutionGuard = {
 export type MeetingContextConfiguration = {
   database: LumaDatabase;
   importedSourceAnalysis?: ImportedSourceAnalysisConfiguration;
+  /** Owned current capture-set proof; stored synthesis metadata alone is insufficient. */
+  requireSynthesisCurrent?: (state: MeetingState) => Promise<void>;
   organizationalContext?: OrganizationalContext;
   /** Configured actual shared audience; never inferred from Meeting attendance. */
   contextAudience?: (workspaceId: WorkspaceId) => Promise<ContextAudience | null>;
@@ -188,7 +190,8 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
             importedSourceAnalysisReceiptIds: state.importedSourceAnalysisReceiptIds ?? []
           }
         : state,
-      eligible
+      eligible,
+      config.requireSynthesisCurrent
     );
     const items = contextItems(state);
     const allowedEvidence = new Set(
@@ -230,7 +233,15 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
               sameImportedSourceRevision(source, projected)
             )
         ).length;
-    const count = blocked.size + withheldSources;
+    const currentSynthesisCandidates = state.importedActionItemCandidates.filter(
+      (item) =>
+        item.source.source.sourceKind === "capture-synthesis" &&
+        state.currentImportedActionItemCandidateIds.includes(item.id)
+    );
+    const withheldSynthesis = currentSynthesisCandidates.filter(
+      (item) => !projectedSources.currentImportedActionItemCandidateIds.includes(item.id)
+    ).length;
+    const count = blocked.size + withheldSources + withheldSynthesis;
     const partial = items.some(
       (item) =>
         !blocked.has(item.id) && item.provenance.contextCoverage?.complete === false
@@ -243,7 +254,7 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
       actionItems: visible(state.actionItems),
       openQuestions: visible(state.openQuestions),
       risks: visible(state.risks),
-      followUpIntentions: visible(state.followUpIntentions),
+      followUpIntentions: visible(projectedSources.followUpIntentions),
       humanJudgmentItemIds: state.humanJudgmentItemIds.filter((id) => !blocked.has(id)),
       currentTopicId:
         state.currentTopicId && blocked.has(state.currentTopicId)
@@ -251,7 +262,8 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
           : state.currentTopicId,
       contextAvailability: {
         status: count
-          ? count === items.length + latestSources.length
+          ? count ===
+            items.length + latestSources.length + currentSynthesisCandidates.length
             ? "unavailable"
             : "partial"
           : config.organizationalContext

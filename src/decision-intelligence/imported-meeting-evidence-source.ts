@@ -11,10 +11,11 @@ import {
   type ImportedSourceHistoryAccess
 } from "../meeting-intelligence/imported-source-analysis.js";
 import type { LumaDatabase } from "../persistence/db.js";
-import type { DecisionEvidenceSource } from "./ports.js";
+import type { DecisionEvidenceSource, ProcessedDecisionEvidenceSource } from "./ports.js";
 import { decisionDigest } from "./persistence.js";
 
-export interface ImportedMeetingDecisionEvidenceSource extends DecisionEvidenceSource {
+export interface ImportedMeetingDecisionEvidenceSource
+  extends DecisionEvidenceSource, ProcessedDecisionEvidenceSource {
   /** Read-only historical projection; exact current proof remains mandatory for writes. */
   authorizeRetained(input: {
     audience: DecisionAudience;
@@ -187,18 +188,22 @@ export function createImportedMeetingDecisionEvidenceSource(input: {
     if (decisionDigest(proof.source) !== decisionDigest(source)) throw unavailable();
     return proof;
   };
+  const captureProcessed: ProcessedDecisionEvidenceSource["captureProcessed"] = async (
+    request
+  ) => {
+    request = structuredClone(request);
+    if (request.subject.type !== "meeting") throw unavailable();
+    const proof = await assemble(
+      request.workspace.workspaceId,
+      request.subject.meetingId,
+      request.audience
+    );
+    await prove(proof.source, proof.receipts, request.audience, false);
+    return proof.source;
+  };
   return {
-    async capture(request) {
-      request = structuredClone(request);
-      if (request.subject.type !== "meeting") throw unavailable();
-      const proof = await assemble(
-        request.workspace.workspaceId,
-        request.subject.meetingId,
-        request.audience
-      );
-      await prove(proof.source, proof.receipts, request.audience, false);
-      return proof.source;
-    },
+    captureProcessed,
+    capture: captureProcessed,
     async requireCurrent(source) {
       source = structuredClone(source);
       const proof = await original(source);

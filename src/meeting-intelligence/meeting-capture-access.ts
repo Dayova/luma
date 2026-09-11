@@ -26,7 +26,19 @@ export interface MeetingCaptureAccess {
   }>;
 }
 
+export type ProcessedLogicalMeetingSourceEvent = {
+  workspaceId: string;
+  meetingId: string;
+  observationId: string;
+  sourceRevision: number;
+  contentHash: string;
+};
 export type CaptureSynthesisConfiguration = {
+  /** Notification after durable acceptance plus fresh source proof, including Human review. */
+  onProcessedSource?(
+    this: void,
+    event: ProcessedLogicalMeetingSourceEvent
+  ): Promise<void>;
   logicalMeetings: Pick<LogicalMeetings, "get">;
   access: MeetingCaptureAccess;
   audience(workspaceId: string): Promise<ContextAudience | null>;

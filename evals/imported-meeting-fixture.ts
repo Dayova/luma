@@ -244,7 +244,7 @@ export function importedMeetingFixture(
       });
       citeExternal = true;
     },
-    context: (value: OrganizationalContext) => {
+    context: (value: OrganizationalContext | undefined) => {
       context = value;
     },
     afterRead: (callback: () => Promise<void>) => {

@@ -16,7 +16,11 @@ is no age-based deletion. Current retrieval excludes historical/superseded
 versions, preserves old still-valid decisions, ranks Human-confirmed statements
 ahead of unaccepted proposals, discloses conflicts, and treats mirrors as duplicate
 citations rather than independent corroboration. Explicit historical queries can
-retrieve prior observed versions after fresh source eligibility checks.
+retrieve prior observed versions and bounded signed provider archive revisions after
+fresh source eligibility checks. Archived Decision versions are a separate read-only
+capability, labeled historical and excluded from current-default discovery and reads.
+As-of selection uses recorded time; explicitly evidenced effective time remains a
+separate applicability fact and never upgrades proposed authority.
 
 Returned excerpts and source scans are bounded and omissions are disclosed. Each
 bundle has a durable receipt binding the workspace, recipient set, question scope,
@@ -40,6 +44,12 @@ identity includes the original grant identities so retained raw revisions cannot
 inherit a later capture's permission. Independent Human text needs its own audience grant. External Organizational
 Context dependencies use a restricted receipt verifier that checks original
 recipient admission, exact source versions and current external discovery. It
-cannot invoke a prior-Meeting catalog; multi-hop Meeting dependencies remain
-withheld. See [bounded imported Meeting recall](../imported-meeting-recall.md)
+cannot invoke a prior-Meeting catalog. An owned, bounded receipt graph can instead
+bind read-only Meeting proof leaves, with fresh original grants and exact receipt
+snapshots on every edge. Current subjects and ancestors are excluded during both
+discovery and reproof, so later descendants cannot supply circular evidence.
+Independent new discoveries still invalidate old receipts. The graph performs no
+MI queries, paid interpretation, source capture or mutations; graph exhaustion
+withholds output. Missing original audiences are never reconstructed from current
+roles or Meeting participants. See [bounded imported Meeting recall](../imported-meeting-recall.md)
 for the coverage and evaluation limits.

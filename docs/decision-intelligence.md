@@ -117,3 +117,69 @@ review. Provider composition must require that additional proof for every retain
 review; archives without Human reviews remain compatible. The native bound-Meeting recording, paginated candidate review and exact-token
 acceptance commands are documented in
 [integrations/discord-decision-records.md](integrations/discord-decision-records.md).
+
+## Automatic candidates from processed evidence
+
+LUM-38 adds a factual `decision-source-processed` Observation for an actual Meeting or
+bounded Conversation. MI captures the accepted original material through
+`ProcessedDecisionEvidenceSource`; there is no fabricated Human requester or Meeting.
+Imported and directly captured Meeting adapters expose `captureProcessed` with the
+same original/current audience and evidence proofs as explicit recording. The Conversation adapter reads `createProcessedConversationSources` admissions and
+recaptures through the governed Ask source; it does not require a recording command.
+Context Intelligence persists the exact original audience and complete ledger revision
+before AI work. Only these immutable admissions are eligible, never a legacy raw
+snapshot with guessed recipients. Current author mappings must agree with originally
+attributed authors; unknown original authors remain unknown. Reads and retained-history
+checks never write the ledger, rerun Ask or include generated/retrieved answer text.
+
+One durable batch binds the exact original source revision, content, admission and
+recipients. The module retains up to 20 candidates, their modality, classification
+confidence, source-backed authority assessment and proposed reconciliation. Read them
+with `query({query:{type:'automatic-decision-candidates',batchId}, ...})` or conclude
+with `batchId`. Individual request IDs use existing query, correction, acceptance and
+Follow-up Execution. A later automatic inference cannot replace a retained Human
+correction or acceptance in that scope. Separate Human acceptance keeps imported
+speaker attribution and original speech unchanged.
+
+Automatic processing defaults to review only. Missing responsibility or canonical
+catalog context does not erase supported candidates; the result identifies incomplete
+coverage and cannot approve recording. The production OpenAI detector shares the
+explicit interpreter's native client, grounding checks and durable AI budget. It has
+no tools, SDK retries or response storage. Confidence never supplies ownership,
+Human acceptance or recording permission. Original tentative wording, provisional
+titles, polls and unresolved objections cannot pass the automatic approval gates.
+Failed/interrupted analysis remains visible, including shared budget refusal. Replaying
+the same processed source does not repeat model work or uncertain provider writes;
+changed Evidence cannot reuse the same Observation ID.
+
+An optional `DecisionStandingPolicy` independently proves original authenticated
+Human standing authorization. Each grant binds a source version, literal instruction,
+original audience, accountable owner and scope, permitted actions/modalities/
+dispositions, and validity window. The current actor mapping, actual ownership,
+original source grant, current catalog and exact policy proof gate recording. They
+are rechecked at execution stages and read/recovery boundaries. A missing, revoked,
+ambiguous, expanded or expired grant leaves the candidate for explicit review.
+Explicit Human instructions continue to use their existing authorization path.
+
+Several candidates in the same scope stay fully visible for joint review; their
+relationships are not silently settled automatically. Distinct scopes may settle in
+sequence only when every intervening catalog change exactly matches this batch's
+positive durable receipts. Any other change or uncertain stage stops further automatic
+writes. Available successful/unknown receipts remain visible; candidates whose current
+context cannot be proven retain visible request IDs and a clear review reason while
+their stale text and references are withheld. No later scope triggers a new paid
+interpretation implicitly.
+
+The core and owned source/model adapters do not by themselves enable production
+processing, authorize a standing policy or configure a source connection. Runtime
+composition binds `createMeetingNotesIngestion({onProcessedSource})` and
+`createContextIntelligence({onProcessedSource})` to durable background processing.
+The callbacks emit accepted original source IDs/revisions and no approval. Imported
+notification failure preserves accepted Evidence and reports a retryable partial
+result; duplicate imports can deliver the same notification again. Context admissions
+coalesce identical source revisions and audiences independently of inquiry IDs.
+Feed a stable event ID into MI's `decision-source-processed` Observation; actual source
+capture, policy validation, detection and execution remain owned by MI. Composition
+must also supply current policy proofs; these callbacks never create a policy. Tests
+exercise public MI and actual SDK serialization with deterministic provider responses;
+they do not claim live provider access or a paid model evaluation.

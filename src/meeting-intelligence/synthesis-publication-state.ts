@@ -30,6 +30,7 @@ export type SynthesisPublicationState = {
   pendingObservation: FollowUpExecutionRecorded | null;
 };
 const migrations = new WeakMap<LumaDatabase, Promise<void>>();
+class InvalidPublicationObservation extends Error {}
 export function isSynthesisPublicationIntent(id: string): boolean {
   return /^publish-synthesis:[a-f0-9]{64}$/u.test(id);
 }
@@ -54,7 +55,11 @@ export function migrateSynthesisPublications(database: LumaDatabase): Promise<vo
     CREATE TABLE IF NOT EXISTS meeting_synthesis_publication_locks (workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, intent_id TEXT NOT NULL, PRIMARY KEY(workspace_id,meeting_id));
   `
       )
-      .then(() => undefined);
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        migrations.delete(database);
+        throw error;
+      });
     migrations.set(database, result);
   }
   return result;
@@ -148,6 +153,7 @@ export async function observeSynthesisPublication(input: {
     events: [],
     errors: []
   };
+  let stage: "validation" | "source-proof" | "migration" | "transaction" = "validation";
   try {
     for (const value of [
       observation.observationId,
@@ -155,23 +161,27 @@ export async function observeSynthesisPublication(input: {
       observation.workspaceId
     ])
       if (typeof value !== "string" || !value.trim() || value.length > 1024)
-        throw new Error("Invalid publication scope");
+        throw new InvalidPublicationObservation("Invalid publication scope");
     for (const value of [observation.occurredAt, observation.observedAt])
       if (!Number.isFinite(Date.parse(value)))
-        throw new Error("Invalid publication timestamp");
+        throw new InvalidPublicationObservation("Invalid publication timestamp");
     if (observation.type !== "follow-up-execution-recorded") {
+      stage = "source-proof";
       const current = await input.current();
       result.revision = current.synthesis.revision;
       if (current.intent.id !== observation.intentId)
-        throw new Error("Synthesis approval is stale");
+        throw new InvalidPublicationObservation("Synthesis approval is stale");
     }
+    stage = "migration";
     await migrateSynthesisPublications(input.database);
+    stage = "transaction";
     await input.database.transaction(async (tx) => {
       const row = await tx.query<{ state_json: string }>(
         "SELECT state_json FROM meeting_synthesis_publications WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3 FOR UPDATE",
         [observation.workspaceId, observation.meetingId, observation.intentId]
       );
-      if (!row.rows[0]) throw new Error("Publication intent not found");
+      if (!row.rows[0])
+        throw new InvalidPublicationObservation("Publication intent not found");
       const state = JSON.parse(row.rows[0].state_json) as SynthesisPublicationState;
       result.revision = state.intent.synthesisRevision;
       const duplicate = await tx.query<{ payload_json: string }>(
@@ -183,7 +193,7 @@ export async function observeSynthesisPublication(input: {
           synthesisDigest(JSON.parse(duplicate.rows[0].payload_json)) !==
           synthesisDigest(observation)
         )
-          throw new Error("Conflicting publication Observation");
+          throw new InvalidPublicationObservation("Conflicting publication Observation");
         result.duplicateObservationIds = [observation.observationId];
         return;
       }
@@ -193,7 +203,7 @@ export async function observeSynthesisPublication(input: {
           !state.pendingObservation ||
           synthesisDigest(state.pendingObservation) !== synthesisDigest(observation)
         )
-          throw new Error("Unclaimed publication outcome");
+          throw new InvalidPublicationObservation("Unclaimed publication outcome");
         state.intent.status =
           observation.outcome.status === "succeeded"
             ? "succeeded"
@@ -226,13 +236,17 @@ export async function observeSynthesisPublication(input: {
           !["suggested", "approved", "rejected"].includes(state.intent.status) ||
           state.phase !== "unclaimed"
         )
-          throw new Error("Publication has already entered execution");
+          throw new InvalidPublicationObservation(
+            "Publication has already entered execution"
+          );
         const actor =
           observation.type === "follow-up-intent-approved"
             ? observation.approvedBy
             : observation.rejectedBy;
         if (!state.audience.personIds.includes(actor))
-          throw new Error("Publication actor is outside its recipients");
+          throw new InvalidPublicationObservation(
+            "Publication actor is outside its recipients"
+          );
         state.intent.status =
           observation.type === "follow-up-intent-approved" ? "approved" : "rejected";
       }
@@ -252,23 +266,47 @@ export async function observeSynthesisPublication(input: {
       result.acceptedObservationIds = [observation.observationId];
     });
     if (observation.type !== "follow-up-execution-recorded") {
+      stage = "source-proof";
       const current = await input.current();
       if (current.intent.id !== observation.intentId)
-        throw new Error("Synthesis source changed during approval");
+        throw new InvalidPublicationObservation(
+          "Synthesis source changed during approval"
+        );
     }
     return result;
-  } catch {
+  } catch (error) {
+    const invalid = error instanceof InvalidPublicationObservation;
+    if (!invalid) {
+      // Raw database errors can contain source text and credentials in query
+      // parameters. Retain the operational category, never their message/stack.
+      console.error("Luma synthesis publication unavailable", {
+        event: "synthesis-publication-unavailable",
+        stage,
+        errorKind:
+          error instanceof SyntaxError ? "invalid-persisted-json" : "operation-failed"
+      });
+    }
     return {
       ...result,
+      acceptedObservationIds: [],
+      duplicateObservationIds: [],
       events: [],
       errors: [
-        {
-          code: "invalid-observation",
-          observationId: observation.observationId,
-          message:
-            "Synthesis publication is unavailable, stale, or not authorized for this actor.",
-          retryable: false
-        }
+        invalid
+          ? {
+              code: "invalid-observation",
+              observationId: observation.observationId,
+              message:
+                "Synthesis publication is unavailable, stale, or not authorized for this actor.",
+              retryable: false
+            }
+          : {
+              code: "publication-unavailable",
+              observationId: observation.observationId,
+              message:
+                "Synthesis publication is unavailable, stale, or not authorized for this actor.",
+              retryable: true
+            }
       ]
     };
   }

@@ -19,6 +19,61 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("admits the shared native review listener only with separate complete credentials and distinct ports", async () => {
+    const native = {
+      ...configuration(),
+      LUMA_NATIVE_REVIEW_ENABLED: "1",
+      LUMA_NATIVE_NOTION_WORKSPACE_ID: "10000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_AGENT_ID: "20000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_PAGE_ID: "30000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_AGENT_READ_TOKEN: "test-agent-reader",
+      LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: "test-admin-reader",
+      LUMA_NATIVE_NOTION_READONLY_API_TOKEN: "test-page-reader",
+      LUMA_NATIVE_NOTION_CREDENTIAL_SCOPE_ID: "native-page",
+      LINEAR_READONLY_API_KEY: "test-linear-reader",
+      LINEAR_TEAM_ID: "team",
+      LUMA_NATIVE_LINEAR_CREDENTIAL_SCOPE_ID: "native-linear",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/sharing.json",
+      LUMA_NATIVE_REVIEW_MCP_BEARER_TOKEN: "test-only-native-bearer-longer-than-32-bytes"
+    };
+    await expect(
+      validateProductionEnvironment(native, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: "" },
+      { LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: native.LUMA_NATIVE_NOTION_AGENT_READ_TOKEN },
+      { LINEAR_API_KEY: native.LINEAR_READONLY_API_KEY },
+      { LUMA_NATIVE_REVIEW_HTTP_PORT: "70000" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...native, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+    const withGranola = {
+      ...native,
+      LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "1",
+      LUMA_GRANOLA_OAUTH_ENABLED: "1",
+      LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/etc/luma/granola.key",
+      LUMA_GRANOLA_OAUTH_REDIRECT_URI: "https://luma.example/granola/callback",
+      LUMA_SYNTHESIS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_SYNTHESIS_IMPORTED_MEETINGS_DATA_SOURCE_ID:
+        "11111111-1111-4111-8111-111111111111",
+      LUMA_SYNTHESIS_CREDENTIAL_SCOPE_ID: "synthesis-writer",
+      LUMA_SYNTHESIS_SIGNING_KEY: "synthetic-stable-signing-key-over-32-bytes"
+    };
+    await expect(
+      validateProductionEnvironment(withGranola, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    await expect(
+      validateProductionEnvironment(
+        { ...withGranola, LUMA_NATIVE_REVIEW_HTTP_PORT: "3002" },
+        "/opt/luma/releases/revision"
+      )
+    ).rejects.toThrow("separate ports");
+  });
+
   it("requires governed capture, HTTPS and a separately protected key for Granola onboarding", async () => {
     const env = {
       ...configuration(),

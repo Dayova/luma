@@ -323,17 +323,19 @@ export async function createGranolaMeetingCaptureSource(input: {
       };
     },
     async knownCaptures() {
-      const rows = await input.database.query<{ capture_id: string }>(
-        `SELECT DISTINCT capture_id FROM granola_capture_revisions WHERE workspace_id=$1 AND connection_id=$2 ORDER BY capture_id LIMIT 500`,
-        [input.workspaceId, input.connectionId]
-      );
+      const known: string[] = [];
+      let after = "";
+      for (;;) {
+        const page = await input.database.query<{ capture_id: string }>(
+          `SELECT DISTINCT capture_id FROM granola_capture_revisions WHERE workspace_id=$1 AND connection_id=$2 AND capture_id>$3 ORDER BY capture_id LIMIT 500`,
+          [input.workspaceId, input.connectionId, after]
+        );
+        known.push(...page.rows.map((row) => row.capture_id));
+        if (page.rows.length < 500) break;
+        after = page.rows.at(-1)!.capture_id;
+      }
       const bound = await policy();
-      return [
-        ...new Set([
-          ...rows.rows.map((row) => row.capture_id),
-          ...bound.includedMeetingIds
-        ])
-      ].map(address);
+      return [...new Set([...known, ...bound.includedMeetingIds])].map(address);
     }
   };
   return source;

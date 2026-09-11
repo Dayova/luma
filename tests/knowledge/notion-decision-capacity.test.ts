@@ -123,6 +123,7 @@ describe("native Decision Record capacity and read-only access", () => {
     f.seed(pageId(2), pageId(1));
     expect(Object.keys(f.reader).sort()).toEqual([
       "discover",
+      "history",
       "providerId",
       "read",
       "readReference",

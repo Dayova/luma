@@ -1,6 +1,4 @@
 import type {
-  MeetingCaptureSetObserved,
-  CaptureSynthesisJudgmentRecorded,
   PublishMeetingSynthesisIntent,
   LumaSynthesis
 } from "./meeting-capture-synthesis.js";
@@ -18,6 +16,28 @@ export type OpenQuestionId = string;
 export type RiskId = string;
 export type FollowUpIntentId = string;
 export type TopicId = string;
+
+/** Only exact bound identities cross the intake Interface; source text comes from owned readers. */
+export type MeetingCaptureSetObserved = ObservationBase & {
+  type: "meeting-capture-set-observed";
+  captures: Array<{ captureId: string; sourceRevision: number; contentHash: string }>;
+};
+
+export type CaptureSynthesisJudgmentRecorded = ObservationBase & {
+  type: "capture-synthesis-judgment-recorded";
+  participantId: PersonId;
+  expectedSynthesisRevision: number;
+  claimId: string;
+  judgment:
+    | { kind: "confirm" | "reject" }
+    | { kind: "correct"; text: string }
+    | {
+        kind: "resolve-action";
+        modality: "commitment" | "request";
+        dueDate: string | null;
+        ownerPersonId: PersonId | null;
+      };
+};
 
 export type MeetingLanguageMode = "auto" | "de" | "en" | "multilingual";
 export type UtteranceLanguage = "de" | "en" | "mixed" | "unknown";
@@ -1154,6 +1174,12 @@ export type MeetingIntelligenceError =
     }
   | {
       code: "source-verification-unavailable";
+      observationId: ObservationId;
+      message: string;
+      retryable: true;
+    }
+  | {
+      code: "publication-unavailable";
       observationId: ObservationId;
       message: string;
       retryable: true;

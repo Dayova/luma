@@ -53,8 +53,8 @@ export type DiscordContextAskMention = {
   actorDiscordUserId: string;
   question: string;
   occurredAt: string;
-  /** A separately enabled explicit instruction, routed to the owned decision facade. */
-  purpose?: "decision-record";
+  /** A separately enabled explicit instruction, routed to its owned MI facade. */
+  purpose?: "decision-record" | "structured-work";
 };
 
 export type DiscordContextAskMessageCandidate = {

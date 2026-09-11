@@ -33,14 +33,15 @@ export function decisionSubjectKey(subject: DecisionSubject): string {
 }
 export type StoredDecisionRequest = {
   requestHash: string;
-  actor: DecisionActor;
-  requesterPersonId: string;
+  actor: DecisionActor | null;
+  requesterPersonId: string | null;
   state: DecisionRequestState;
-  authority: DecisionAuthoritySnapshot;
-  catalog: DecisionCatalogSnapshot;
+  authority: DecisionAuthoritySnapshot | null;
+  catalog: DecisionCatalogSnapshot | null;
   intent: DecisionFollowUpIntent | null;
   interpretation: DecisionInterpretation | null;
   humanReviews?: DecisionHumanReview[];
+  humanReviewed?: boolean;
 };
 export type StoredDecisionStage = {
   index: number;
@@ -52,6 +53,13 @@ export type StoredDecisionStage = {
 };
 export async function migrateDecisionIntelligence(database: LumaDatabase): Promise<void> {
   await database.exec(`
+    CREATE TABLE IF NOT EXISTS automatic_decision_batches (
+      workspace_id TEXT NOT NULL, batch_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
+      PRIMARY KEY (workspace_id,batch_id)
+    );
+    ALTER TABLE automatic_decision_batches ADD COLUMN IF NOT EXISTS
+      created_sequence BIGINT GENERATED ALWAYS AS IDENTITY;
     CREATE TABLE IF NOT EXISTS decision_requests (
       workspace_id TEXT NOT NULL, request_id TEXT NOT NULL, subject_key TEXT NOT NULL,
       payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,

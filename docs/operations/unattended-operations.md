@@ -287,3 +287,9 @@ committed records into quarantine, and prove the original lease, Human Judgment,
 unknown external disposition, and held AI charge remain intact. This synthetic
 test does not substitute for a crash/restore rehearsal on the actual host and
 storage filesystem. No real host or source-owner migration has been performed.
+
+# Processing capability alerts
+
+The protected runtime health receipt also carries fixed, content-free codes for AI budget warnings or exhaustion, unavailable accounting, failed source ingestion, degraded Decision recall, and automatic Decision sources requiring attention. The independent Discord alert sender uses these codes even while the Gateway remains connected. Unchanged alerts are deduplicated; recovery is announced. `/meeting usage`, private source status and `/decision-record candidates` expose the relevant retained state without an AI call.
+
+Historical failed automatic jobs remain in storage. Only the latest notification for each source contributes to present attention counts. A later successful notification clears that source's operational warning without deleting its history. Health reads share the application's shutdown drain: they cannot outlive the database, and failures never masquerade as a successful health check.

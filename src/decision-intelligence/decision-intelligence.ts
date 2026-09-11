@@ -1,3 +1,5 @@
+import { decisionScopeOwnership } from "./scope-ownership.js";
+import { requireAutomaticPolicyCurrent } from "./automatic-policy.js";
 import { hasDecisionRecordingRefusal } from "./recording-instruction.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import { randomUUID } from "node:crypto";
@@ -11,6 +13,7 @@ import {
 import type { WorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import type {
   DecisionAudience,
+  DecisionFollowUpIntent,
   DecisionAuthorityProof,
   DecisionCandidate,
   DecisionInterpretation,
@@ -26,7 +29,10 @@ import type { DecisionIntelligence } from "./interface.js";
 import type {
   DecisionAuthority,
   DecisionEvidenceSource,
-  DecisionInterpreter
+  DecisionInterpreter,
+  ProcessedDecisionEvidenceSource,
+  AutomaticDecisionDetector,
+  DecisionStandingPolicy
 } from "./ports.js";
 import {
   decisionDigest,
@@ -45,6 +51,11 @@ import {
 } from "./human-review.js";
 
 export type DecisionIntelligenceConfiguration = {
+  automatic?: {
+    evidenceSource: ProcessedDecisionEvidenceSource;
+    detector: AutomaticDecisionDetector;
+    policy?: DecisionStandingPolicy;
+  };
   evidenceSource: DecisionEvidenceSource;
   authority: DecisionAuthority;
   interpreter: DecisionInterpreter;
@@ -73,22 +84,32 @@ export async function requireDecisionRequestCurrent(
       })
   )
     throw new Error("Decision audience changed; request a fresh review");
-  const actor = await input.accessPolicy.authorize({
-    workspaceId: audience.workspaceId,
-    ...stored.actor
-  });
-  if (
-    actor?.personId !== stored.requesterPersonId ||
-    !audience.personIds.includes(actor.personId)
-  )
-    throw new Error("Decision requester is no longer authorized");
-  await input.evidenceSource.requireCurrent(stored.state.source);
+  if (stored.actor) {
+    const actor = await input.accessPolicy.authorize({
+      workspaceId: audience.workspaceId,
+      ...stored.actor
+    });
+    if (
+      actor?.personId !== stored.requesterPersonId ||
+      !audience.personIds.includes(actor.personId)
+    )
+      throw new Error("Decision requester is no longer authorized");
+  } else if (!stored.state.automatic || stored.requesterPersonId !== null) {
+    throw new Error("Decision requester is not proven");
+  }
+  if (stored.state.automatic) {
+    if (!input.automatic) throw new Error("Automatic Decision source is not configured");
+    await input.automatic.evidenceSource.requireCurrent(stored.state.source);
+  } else await input.evidenceSource.requireCurrent(stored.state.source);
+  if (stored.intent?.authorization.basis === "standing-policy")
+    await requireAutomaticPolicyCurrent(input, stored.intent);
   await createDecisionHumanReviewAccess(input).requireCurrent(
     stored.state.source,
     stored.humanReviews ?? []
   );
-  await input.authority.requireCurrent({ audience, snapshot: stored.authority });
-  if (options.catalog)
+  if (stored.authority)
+    await input.authority.requireCurrent({ audience, snapshot: stored.authority });
+  if (options.catalog && stored.catalog)
     await input.records.requireCurrent({ audience, snapshot: stored.catalog });
   const refs = stored.state.execution?.outcome.references ?? [];
   for (const ref of refs) {
@@ -103,10 +124,12 @@ export async function requireDecisionRequestCurrent(
   }
 }
 
-function authorityFor(
+export function authorityFor(
   candidate: DecisionCandidate,
   stored: StoredDecisionRequest
 ): DecisionAuthorityProof | string {
+  const reviewConflict = captureReviewConflict(candidate, stored);
+  if (reviewConflict) return reviewConflict;
   const evidence = new Map(
     [
       ...stored.state.source.evidence,
@@ -141,45 +164,27 @@ function authorityFor(
     return "The source contains objections that need an explicit Human resolution.";
   if (!["final-decision", "accepted-proposal", "reversal"].includes(candidate.modality))
     return "This is not yet an evidenced final Human decision.";
-  const grants = stored.authority.grants.filter(
-    (grant) =>
-      grant.scopeId === candidate.scopeId &&
-      grant.standing === "current" &&
-      grant.kind !== "provisional-role" &&
-      grant.evidence.length > 0
-  );
-  const priority = (kind: string) =>
-    kind === "delegation" ? 3 : kind === "project-ownership" ? 2 : 1;
-  const highest = Math.max(0, ...grants.map((grant) => priority(grant.kind)));
-  const selected = grants.filter((grant) => priority(grant.kind) === highest);
-  const owners = [...new Set(selected.map((grant) => grant.personId))];
+  if (!stored.authority)
+    return "Current responsibility evidence is unavailable; review is required.";
+  const ownership = decisionScopeOwnership(stored.authority, candidate.scopeId);
+  if (typeof ownership === "string") return ownership;
   if (
-    owners.length !== 1 ||
     candidate.decisionMakerPersonIds.length !== 1 ||
-    owners[0] !== candidate.decisionMakerPersonIds[0]
+    candidate.decisionMakerPersonIds[0] !== ownership.owner
   )
     return "Current responsibility evidence does not establish one unambiguous accountable decision-maker.";
-  if (
-    selected.some(
-      (grant) =>
-        grant.kind === "delegation" &&
-        (!grant.delegatedBy ||
-          !stored.authority.grants.some(
-            (parent) =>
-              parent.personId === grant.delegatedBy &&
-              parent.scopeId === grant.scopeId &&
-              parent.standing === "current" &&
-              parent.kind !== "provisional-role" &&
-              parent.kind !== "delegation"
-          ))
-    )
-  )
-    return "The delegation does not have current authority evidence.";
+  const selected = ownership.grants;
+  const owners = [ownership.owner];
   if (
     !candidate.acceptanceEvidenceIds.length ||
     candidate.acceptanceEvidenceIds.some((id) => {
       const item = evidence.get(id);
-      return !item || item.origin !== "human" || item.authorPersonId !== owners[0];
+      return (
+        !item ||
+        item.origin !== "human" ||
+        item.purpose === "capture-synthesis-review" ||
+        item.authorPersonId !== owners[0]
+      );
     })
   )
     return "A poll, summary, or another speaker cannot establish the owner's acceptance.";
@@ -215,6 +220,7 @@ function authorityFor(
         ![...evidence.values()].some(
           (item) =>
             item.origin === "human" &&
+            item.purpose !== "capture-synthesis-review" &&
             item.authorPersonId === personId &&
             claims.some((claim) => claim.evidenceIds.includes(item.id))
         )
@@ -232,16 +238,73 @@ function authorityFor(
   };
 }
 
+/** A model cannot silently undo accuracy corrections by paraphrasing the same source. */
+export function captureReviewConflict(
+  candidate: DecisionCandidate,
+  stored: StoredDecisionRequest
+): string | null {
+  // A later business acceptance is a separate exact original Human judgment.
+  // Generic recording instructions and synthesis accuracy reviews cannot override.
+  if (
+    (stored.humanReviews ?? []).some(
+      (review) =>
+        review.reviewToken !== null &&
+        review.acceptedCandidateHash === acceptedDecisionCandidateHash(candidate) &&
+        candidate.acceptanceEvidenceIds.includes(review.evidence.id) &&
+        review.evidence.purpose !== "capture-synthesis-review"
+    )
+  )
+    return null;
+  const latest = new Map<string, (typeof stored.state.source.evidence)[number]>();
+  for (const evidence of stored.state.source.evidence) {
+    const review = evidence.captureReview;
+    if (
+      review &&
+      review.revision > (latest.get(review.claimId)?.captureReview?.revision ?? 0)
+    )
+      latest.set(review.claimId, evidence);
+  }
+  const claims = [
+    candidate.statement,
+    ...(candidate.context ? [candidate.context] : []),
+    ...candidate.rationale,
+    ...candidate.alternatives,
+    ...candidate.consequences,
+    ...candidate.objections
+  ];
+  for (const evidence of latest.values()) {
+    const review = evidence.captureReview!;
+    if (review.action !== "reject" && review.action !== "correct") continue;
+    for (const claim of claims) {
+      if (
+        !claim.evidenceIds.some((id) => review.evidenceIds.includes(id)) &&
+        claim.text !== review.reviewedText
+      )
+        continue;
+      if (
+        review.action === "correct" &&
+        claim.evidenceIds.includes(evidence.id) &&
+        claim.text === review.correctedText
+      )
+        continue;
+      return "A Human rejected or corrected a synthesis claim grounded in this material. Review the candidate against that exact current feedback; the original source and inference remain retained, but recording is not approved.";
+    }
+  }
+  return null;
+}
+
 /** Inference selects a candidate; deterministic reconciliation alone grants a write plan. */
 export function reconcileDecision(
   stored: StoredDecisionRequest,
   interpretation: DecisionInterpretation,
   instruction: string,
   evidenceId: string,
-  now: Date
+  now: Date,
+  authorization?: DecisionFollowUpIntent["authorization"]
 ): StoredDecisionRequest {
   const result = structuredClone(stored);
   result.intent = null;
+  if (result.state.automatic) result.state.automatic.authority = "unresolved";
   result.interpretation = interpretation;
   const candidate = interpretation.candidate;
   const clarify = (message: string) => {
@@ -273,7 +336,7 @@ export function reconcileDecision(
         ? [decisionDigest(item.reference.externalReference)]
         : []
     ),
-    ...stored.catalog.records.flatMap((record) => [
+    ...(stored.catalog?.records ?? []).flatMap((record) => [
       decisionDigest(record.reference),
       ...record.content.candidate.relatedWork.map(decisionDigest),
       ...record.content.candidate.implementationEvidence.map(decisionDigest)
@@ -287,9 +350,12 @@ export function reconcileDecision(
     return clarify(
       "Related work or implementation evidence must name a verified existing source reference."
     );
+  const captureConflict = captureReviewConflict(candidate, stored);
+  if (captureConflict) return clarify(captureConflict);
   const authority = authorityFor(candidate, stored);
   if (typeof authority === "string") return clarify(authority);
-  if (!stored.catalog.complete)
+  if (result.state.automatic) result.state.automatic.authority = "verified";
+  if (!stored.catalog?.complete)
     return clarify("The canonical Decision Record search was incomplete.");
   const action = interpretation.reconciliation;
   const targets =
@@ -346,6 +412,27 @@ export function reconcileDecision(
     return clarify(
       "The selected record does not state this exact decision; choose an explicit amendment or replacement."
     );
+  const recordingAuthorization =
+    authorization ??
+    (stored.actor && stored.requesterPersonId
+      ? {
+          basis: "explicit-instruction" as const,
+          authorizedBy: stored.requesterPersonId,
+          instruction,
+          evidenceId
+        }
+      : null);
+  if (!recordingAuthorization) {
+    result.state = {
+      ...result.state,
+      state: "candidate",
+      candidate,
+      approvedIntentId: null,
+      message:
+        "The evidenced decision is retained for review. No standing policy authorizes automatic recording."
+    };
+    return result;
+  }
   const operationId = randomUUID(),
     intentId = `decision-intent:${randomUUID()}`;
   const record: DecisionRecordContent = {
@@ -379,12 +466,7 @@ export function reconcileDecision(
     catalog: stored.catalog,
     record,
     target: target ?? null,
-    authorization: {
-      basis: "explicit-instruction",
-      authorizedBy: stored.requesterPersonId,
-      instruction,
-      evidenceId
-    }
+    authorization: recordingAuthorization
   };
   result.state = {
     ...result.state,
@@ -461,7 +543,7 @@ export function createDecisionIntelligence(
       };
     }
     await requireDecisionRequestCurrent(input, stored, {
-      catalog: !stages.length && !stored.state.execution && stored.catalog.complete
+      catalog: !stages.length && !stored.state.execution && !!stored.catalog?.complete
     });
     await input.database.transaction(async (transaction) => {
       const current = await readDecisionRequest(
@@ -646,6 +728,19 @@ export function createDecisionIntelligence(
                 ...prior,
                 actor: observation.actor,
                 requesterPersonId: person.personId,
+                humanReviewed: true,
+                state: {
+                  ...prior.state,
+                  ...(prior.state.automatic
+                    ? {
+                        automatic: {
+                          ...prior.state.automatic,
+                          humanReviewed: true,
+                          recording: "human-instruction" as const
+                        }
+                      }
+                    : {})
+                },
                 ...(humanReviews.length ? { humanReviews } : {})
               },
               {

@@ -265,6 +265,13 @@ describe("canonical Decision recall", () => {
       expect(result.sources).toHaveLength(variant === "valid" ? 1 : 0);
     }
   );
+  it("withholds a record whose claimed Human acceptance was only synthesis accuracy confirmation", async () => {
+    const f = await fixture();
+    const record = canonical("accuracy-only", "Luma will launch.");
+    record.content.source.evidence[0]!.purpose = "capture-synthesis-review";
+    f.setRecords([record]);
+    expect((await f.context().retrieve(request)).sources).toEqual([]);
+  });
   it("withholds incomplete catalog discovery and audience expansion", async () => {
     const f = await fixture();
     f.incomplete();

@@ -1,5 +1,12 @@
+import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
+import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
 import {
+  DiscordDecisionPermissionInputError,
+  DiscordDecisionPermissionUnavailableError
+} from "./discord-decision-standing-runtime.js";
+import {
+  DiscordDecisionAddressInputError,
   discordDecisionRecordConfigFromEnv,
   isExplicitDecisionRecordInstruction
 } from "./discord-decision-record-runtime.js";
@@ -81,6 +88,7 @@ export type DiscordJsTransportConfig = {
   contextAsk?: DiscordContextAskConfig;
   consultations?: DiscordConsultationConfig;
   decisionRecords?: DiscordContextAskConfig;
+  structuredWork?: DiscordContextAskConfig;
   granola?: boolean;
 };
 
@@ -107,11 +115,13 @@ export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
   if (
-    [config.contextAsk, config.consultations?.capture, config.decisionRecords].some(
-      (capture) =>
-        capture?.parentChannelIds.some(
-          (id) => !config.allowedParentChannelIds.includes(id)
-        )
+    [
+      config.contextAsk,
+      config.consultations?.capture,
+      config.decisionRecords,
+      config.structuredWork
+    ].some((capture) =>
+      capture?.parentChannelIds.some((id) => !config.allowedParentChannelIds.includes(id))
     )
   ) {
     throw new Error(
@@ -121,7 +131,9 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
-    ...(config.consultations || config.decisionRecords ? { retries: 0 } : {}),
+    ...(config.consultations || config.decisionRecords || config.structuredWork
+      ? { retries: 0 }
+      : {}),
     makeRequest: (
       url: string,
       init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
@@ -133,7 +145,10 @@ export function createDiscordJsTransport(
   };
   const client = new Client({
     intents: discordGatewayIntentsForContextAsk(
-      config.contextAsk ?? config.consultations?.capture ?? config.decisionRecords
+      config.contextAsk ??
+        config.consultations?.capture ??
+        config.decisionRecords ??
+        config.structuredWork
     ),
     rest: restOptions
   });
@@ -209,10 +224,19 @@ export function createDiscordJsTransport(
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const rawStructuredWorkEvidenceSource = config.structuredWork
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.structuredWork,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
   const conversationEvidenceSource: ConversationEvidenceSource | null =
     rawConversationEvidenceSource ||
     rawConsultationEvidenceSource ||
-    rawDecisionEvidenceSource
+    rawDecisionEvidenceSource ||
+    rawStructuredWorkEvidenceSource
       ? {
           async capture(input) {
             await channelScope.requireChannel(
@@ -224,7 +248,9 @@ export function createDiscordJsTransport(
                 ? rawConsultationEvidenceSource
                 : input.purpose === "decision-record"
                   ? rawDecisionEvidenceSource
-                  : rawConversationEvidenceSource;
+                  : input.purpose === "structured-work"
+                    ? rawStructuredWorkEvidenceSource
+                    : rawConversationEvidenceSource;
             if (!source)
               throw new Error(
                 "The requested Conversation capture purpose is not enabled"
@@ -245,18 +271,26 @@ export function createDiscordJsTransport(
     if (disconnected) return;
     if (
       !interaction.isChatInputCommand() ||
-      !["meeting", "consultation", "decision-record", "granola"].includes(
-        interaction.commandName
-      )
+      ![
+        "meeting",
+        "consultation",
+        "decision-record",
+        "granola",
+        "structured-work"
+      ].includes(interaction.commandName)
     ) {
       return;
     }
 
     trackDelivery(
       handleInteraction(interaction, config.guildId, commandHandler, channelScope)
-        .catch(async () => {
+        .catch(async (error: unknown) => {
           const content =
-            "Luma could not process the command right now. Please try again later.";
+            error instanceof DiscordDecisionAddressInputError ||
+            error instanceof DiscordDecisionPermissionInputError ||
+            error instanceof DiscordDecisionPermissionUnavailableError
+              ? error.message
+              : "Luma could not process the command right now. Please try again later.";
 
           if (interaction.deferred || interaction.replied) {
             await interaction.editReply({ content });
@@ -289,11 +323,21 @@ export function createDiscordJsTransport(
     const originalInstruction =
       questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
     const usageRequest = /^(?:usage|status)$/iu.test(originalInstruction.trim());
-    let decisionRequest = Boolean(
-      config.decisionRecords &&
-      (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+    let structuredRequest = Boolean(
+      config.structuredWork &&
+      (isExplicitStructuredWorkInstruction(originalInstruction) || usageRequest)
     );
-    const captureConfig = decisionRequest ? config.decisionRecords : config.contextAsk;
+    let decisionRequest =
+      !structuredRequest &&
+      Boolean(
+        config.decisionRecords &&
+        (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+      );
+    const captureConfig = structuredRequest
+      ? config.structuredWork
+      : decisionRequest
+        ? config.decisionRecords
+        : config.contextAsk;
     if (!captureConfig) return;
 
     const candidate = discordContextAskMessageCandidate(message);
@@ -304,22 +348,33 @@ export function createDiscordJsTransport(
       config: captureConfig
     });
 
-    // Usage is a deterministic shared service. Its admission may come from the
-    // Ask scope when this channel is outside the separately enabled write scope.
-    if (!ask && decisionRequest && usageRequest && config.contextAsk) {
-      ask = discordContextAskMentionFromCandidate({
-        candidate,
-        botUserId,
-        guildId: config.guildId,
-        config: config.contextAsk
-      });
-      decisionRequest = false;
+    // Usage is a deterministic shared service and may use any separately
+    // enabled scope without granting that scope another capability's writes.
+    if (!ask && usageRequest) {
+      for (const fallback of [
+        { config: config.decisionRecords, decision: true },
+        { config: config.contextAsk, decision: false }
+      ]) {
+        if (!fallback.config) continue;
+        ask = discordContextAskMentionFromCandidate({
+          candidate,
+          botUserId,
+          guildId: config.guildId,
+          config: fallback.config
+        });
+        if (ask) {
+          decisionRequest = fallback.decision;
+          structuredRequest = false;
+          break;
+        }
+      }
     }
 
     if (!ask) {
       return;
     }
-    if (decisionRequest) ask.purpose = "decision-record";
+    if (structuredRequest) ask.purpose = "structured-work";
+    else if (decisionRequest) ask.purpose = "decision-record";
 
     trackDelivery(
       handleContextAskMention({
@@ -412,7 +467,8 @@ export function createDiscordJsTransport(
       }
     },
     disconnect,
-    resolveChannel: ({ channelId }) => resolveChannel(channelId),
+    resolveChannel: ({ channelId, requiredHumanReaderIds }) =>
+      resolveChannel(channelId, requiredHumanReaderIds),
     async createThread(input): Promise<DiscordThread> {
       await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const channel = await client.channels.fetch(input.parentChannelId, { force: true });
@@ -570,6 +626,9 @@ export function createDiscordJsTransportFromEnv(
     ...(discordConsultationConfigFromEnv(env)
       ? { consultations: discordConsultationConfigFromEnv(env)! }
       : {}),
+    ...(discordStructuredWorkConfigFromEnv(env)
+      ? { structuredWork: discordStructuredWorkConfigFromEnv(env)! }
+      : {}),
     ...(discordDecisionRecordConfigFromEnv(env)
       ? { decisionRecords: discordDecisionRecordConfigFromEnv(env)! }
       : {})
@@ -601,7 +660,8 @@ async function registerMeetingCommand(
       meetingCommand.toJSON(),
       ...(config.granola ? [granolaCommand.toJSON()] : []),
       ...(config.consultations ? [consultationCommand.toJSON()] : []),
-      ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : [])
+      ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : []),
+      ...(config.structuredWork ? [structuredWorkCommand.toJSON()] : [])
     ],
     signal
   });
@@ -1099,12 +1159,84 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         }
       : { ...choice, type: "granola-configure" };
   }
+  if (interaction.commandName === "structured-work") {
+    const address = {
+      ...base,
+      sourceMessageId: interaction.options.getString("source_message", true),
+      meeting: interaction.options.getBoolean("meeting") ?? false
+    };
+    if (subcommand === "request") {
+      const workItemId = interaction.options.getString("work_item");
+      return {
+        ...address,
+        type: "structured-work-request",
+        targetKey: interaction.options.getString("target", true),
+        ...(workItemId ? { workItemId } : {})
+      };
+    }
+    if (subcommand !== "status" && subcommand !== "recover")
+      throw new Error("Unknown structured work command");
+    return {
+      ...address,
+      type: `structured-work-${subcommand}`,
+      requestId: interaction.options.getString("request_id", true),
+      page: interaction.options.getInteger("page") ?? 1
+    };
+  }
   if (interaction.commandName === "decision-record") {
+    const meetingId =
+      subcommand === "automatic" ? null : interaction.options.getString("meeting_id");
+    const selectedSource =
+      subcommand === "automatic" ? null : interaction.options.getString("source_message");
+    if (meetingId && selectedSource) throw new DiscordDecisionAddressInputError();
+    const meetingAddress = meetingId ? { meetingId } : {};
+    if (subcommand === "candidates") {
+      const sourceMessageId = interaction.options.getString("source_message"),
+        candidate = interaction.options.getInteger("candidate"),
+        page = interaction.options.getInteger("page");
+      return {
+        ...base,
+        type: "decision-record-candidates",
+        ...(interaction.options.getBoolean("retry") ? { retry: true } : {}),
+        ...meetingAddress,
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        ...(candidate ? { candidate } : {}),
+        ...(page ? { page } : {})
+      };
+    }
+    if (subcommand === "automatic") {
+      const action = interaction.options.getString("action", true);
+      const scopeId = interaction.options.getString("scope", true);
+      const permissionClass = interaction.options.getString("class");
+      const sharing = interaction.options.getString("sharing");
+      if (action === "enable") {
+        if (
+          (permissionClass !== "new-decisions" &&
+            permissionClass !== "decisions-and-corrections") ||
+          sharing !== "four-founders"
+        )
+          throw new DiscordDecisionPermissionInputError();
+        return {
+          ...base,
+          type: "decision-record-automatic",
+          scopeId,
+          choice: { action, permissionClass, sharing }
+        };
+      }
+      if (
+        (action !== "status" && action !== "disable") ||
+        permissionClass !== null ||
+        sharing !== null
+      )
+        throw new DiscordDecisionPermissionInputError();
+      return { ...base, type: "decision-record-automatic", scopeId, choice: { action } };
+    }
     if (subcommand === "meeting") {
       const targetRecordId = interaction.options.getString("target_record");
       return {
         ...base,
         type: "decision-record-meeting",
+        ...meetingAddress,
         instruction: interaction.options.getString("instruction", true),
         ...(targetRecordId ? { targetRecordId } : {})
       };
@@ -1112,6 +1244,7 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     const sourceMessageId = interaction.options.getString("source_message");
     const address = {
       ...base,
+      ...meetingAddress,
       ...(sourceMessageId ? { sourceMessageId } : {}),
       requestId: interaction.options.getString("request_id", true)
     };
@@ -2137,8 +2270,94 @@ const decisionRecordCommand = new SlashCommandBuilder()
   .setDescription("Record or review a decision from its original source")
   .addSubcommand((command) =>
     command
+      .setName("candidates")
+      .setDescription(
+        "Review automatic decisions from this Meeting or a captured conversation"
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("retry")
+          .setDescription("Retry only a proved unsent AI attempt after fixing its cause")
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("candidate")
+          .setDescription("Retained candidate number")
+          .setMinValue(1)
+          .setMaxValue(20)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Candidate detail page")
+          .setMinValue(1)
+          .setMaxValue(10000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("automatic")
+      .setDescription("Set your own scope-specific automatic recording permission")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Enable, inspect or disable your own permission")
+          .setRequired(true)
+          .addChoices(
+            { name: "Enable my permission", value: "enable" },
+            { name: "Read my permission", value: "status" },
+            { name: "Disable my permission", value: "disable" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("scope")
+          .setDescription("Exact documented responsibility scope, for example luma")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("class")
+          .setDescription(
+            "Required for enable: precisely which recording actions you authorize"
+          )
+          .addChoices(
+            {
+              name: "Create or link my final decisions; no existing record changes",
+              value: "new-decisions"
+            },
+            {
+              name: "Also amend, replace or reverse my explicitly corrected decisions",
+              value: "decisions-and-corrections"
+            }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("sharing")
+          .setDescription("Required for enable: original recipients of this permission")
+          .addChoices({ name: "All four Dayova founders", value: "four-founders" })
+      )
+  )
+  .addSubcommand((command) =>
+    command
       .setName("meeting")
-      .setDescription("Record a decision from the imported Meeting bound to this thread")
+      .setDescription("Record a decision from a LogicalMeeting or this imported Meeting")
       .addStringOption((option) =>
         option
           .setName("instruction")
@@ -2150,6 +2369,14 @@ const decisionRecordCommand = new SlashCommandBuilder()
         option
           .setName("target_record")
           .setDescription("Exact existing record ID when requesting an update")
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
           .setMaxLength(512)
       )
   )
@@ -2202,6 +2429,14 @@ const decisionRecordCommand = new SlashCommandBuilder()
           .setDescription("Original @Luma message ID; omit for this bound Meeting")
           .setMaxLength(22)
       )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
   );
 function decisionRecordAddress(
   command: SlashCommandSubcommandBuilder,
@@ -2216,12 +2451,21 @@ function decisionRecordAddress(
   );
   return omitSource
     ? addressed
-    : addressed.addStringOption((option) =>
-        option
-          .setName("source_message")
-          .setDescription("Original @Luma message ID; omit for this bound Meeting")
-          .setMaxLength(22)
-      );
+    : addressed
+        .addStringOption((option) =>
+          option
+            .setName("source_message")
+            .setDescription("Original @Luma message ID; omit for this bound Meeting")
+            .setMaxLength(22)
+        )
+        .addStringOption((option) =>
+          option
+            .setName("meeting_id")
+            .setDescription(
+              "Exact LogicalMeeting ID returned by Luma; excludes source_message"
+            )
+            .setMaxLength(512)
+        );
 }
 
 function granolaSharingOptions(command: SlashCommandSubcommandBuilder) {
@@ -2331,3 +2575,86 @@ const granolaCommand = new SlashCommandBuilder()
         "Disable your Granola connection in Luma; retain original shared captures"
       )
   );
+
+const structuredWorkCommand = new SlashCommandBuilder()
+  .setName("structured-work")
+  .setDescription("Add an evidenced table record and validation task")
+  .addSubcommand((command) =>
+    command
+      .setName("request")
+      .setDescription("Execute your original explicit @Luma table-and-task instruction")
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("ID of your original @Luma message in this thread")
+          .setRequired(true)
+          .setMinLength(17)
+          .setMaxLength(20)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target")
+          .setDescription("Configured table alias, such as hypotheses")
+          .setRequired(true)
+          .setMaxLength(50)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("meeting")
+          .setDescription(
+            "Use this thread's bound imported Meeting as additional evidence"
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("work_item")
+          .setDescription(
+            "Explicit existing Linear issue ID, including an archived issue"
+          )
+          .setMaxLength(100)
+      )
+  )
+  .addSubcommand((command) =>
+    structuredWorkAddress(
+      command
+        .setName("status")
+        .setDescription("Read the full retained plan and each target receipt")
+    )
+  )
+  .addSubcommand((command) =>
+    structuredWorkAddress(
+      command
+        .setName("recover")
+        .setDescription("Check an uncertain write without sending it again")
+    )
+  );
+function structuredWorkAddress(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("source_message")
+        .setDescription("Original source message ID")
+        .setRequired(true)
+        .setMinLength(17)
+        .setMaxLength(20)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("request_id")
+        .setDescription("Exact request ID returned by Luma")
+        .setRequired(true)
+        .setMaxLength(160)
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("meeting")
+        .setDescription("True for a request using this thread's imported Meeting")
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("page")
+        .setDescription("Page of the complete preview and receipts")
+        .setMinValue(1)
+        .setMaxValue(1000)
+    );
+}

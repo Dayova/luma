@@ -1,10 +1,23 @@
 import { isAbsolute } from "node:path";
 import { createConversationDecisionEvidenceSource } from "../decision-intelligence/conversation-evidence-source.js";
 import { createImportedMeetingDecisionEvidenceSource } from "../decision-intelligence/imported-meeting-evidence-source.js";
+import {
+  LOGICAL_CAPTURE_DECISION_REVISION_PREFIX,
+  type LogicalMeetingDecisionEvidenceSource
+} from "../decision-intelligence/logical-meeting-evidence-source.js";
+import {
+  createDecisionStandingPolicy,
+  type DecisionPermissionSourceAccess,
+  type ManagedDecisionStandingPolicy
+} from "../decision-intelligence/standing-permission.js";
 import type { ImportedSourceHistoryAccess } from "../meeting-intelligence/imported-source-analysis.js";
 import { createNotionDecisionAuthority } from "../decision-intelligence/notion-decision-authority.js";
 import { createDecisionHumanReviewAccess } from "../decision-intelligence/human-review.js";
-import { createOpenAIDecisionInterpreter } from "../decision-intelligence/openai-decision-interpreter.js";
+import {
+  createOpenAIDecisionInterpreter,
+  createOpenAIAutomaticDecisionDetector
+} from "../decision-intelligence/openai-decision-interpreter.js";
+import { createProcessedConversationSources } from "../context-intelligence/processed-conversation-source.js";
 import {
   createNotionDecisionRecords,
   createNotionDecisionRecordCatalog,
@@ -24,6 +37,7 @@ import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
 import type { AiRequestLimits } from "../ai/ai-request.js";
 
 export type DecisionRuntimeConfig = {
+  automatic?: boolean;
   dataSourceId: string;
   destinationCredentialScopeId: string;
   authorityPolicyPath: string;
@@ -36,6 +50,13 @@ export function decisionRuntimeConfig(
   env: NodeJS.ProcessEnv,
   enabled: boolean
 ): DecisionRuntimeConfig | undefined {
+  const automatic = env["LUMA_AUTOMATIC_DECISIONS_ENABLED"]?.trim();
+  if (automatic && automatic !== "0" && automatic !== "1")
+    throw new Error("LUMA_AUTOMATIC_DECISIONS_ENABLED must be 0 or 1");
+  if (automatic === "1" && !enabled)
+    throw new Error(
+      "Automatic Decisions require the founder Decision Records configuration and review commands"
+    );
   if (!enabled) return undefined;
   const dataSourceId = canonicalNotionObjectId(
     env["LUMA_DECISION_RECORDS_DATA_SOURCE_ID"] ?? ""
@@ -69,6 +90,7 @@ export function decisionRuntimeConfig(
       "Decision Records require an exact Notion data source, protected source-backed authority/sharing policies, dedicated read-only knowledge scope, write credential scope, signing key and shared AI configuration."
     );
   return {
+    ...(automatic === "1" ? { automatic: true } : {}),
     dataSourceId,
     destinationCredentialScopeId,
     authorityPolicyPath,
@@ -84,6 +106,7 @@ export type DecisionRuntimeDependencies = {
   createRecords?: typeof createNotionDecisionRecords;
   createRecordCatalog?: typeof createNotionDecisionRecordCatalog;
   createInterpreter?: typeof createOpenAIDecisionInterpreter;
+  createDetector?: typeof createOpenAIAutomaticDecisionDetector;
 };
 export async function createDecisionRuntime(
   input: {
@@ -94,6 +117,8 @@ export async function createDecisionRuntime(
     ledger: ObservedSourceLedger;
     conversationEvidenceSource: ConversationEvidenceSource;
     importedSourceAccess?: ImportedSourceHistoryAccess;
+    logicalMeetingEvidenceSource?: LogicalMeetingDecisionEvidenceSource;
+    standingPermissionSourceAccess?: DecisionPermissionSourceAccess;
     accessPolicy: WorkspaceAccessPolicy;
     budget: AiUsageBudget;
     limits: AiRequestLimits;
@@ -103,6 +128,7 @@ export async function createDecisionRuntime(
 ): Promise<
   DecisionIntelligenceConfiguration & {
     recall: Awaited<ReturnType<typeof createDecisionRecallRuntime>>;
+    standingPolicy?: ManagedDecisionStandingPolicy;
   }
 > {
   const { workspaceId } = input;
@@ -148,15 +174,79 @@ export async function createDecisionRuntime(
     conversationEvidenceSource: input.conversationEvidenceSource,
     ledger: input.ledger,
     accessPolicy: input.accessPolicy,
+    processedSources: createProcessedConversationSources({
+      database: input.database,
+      ledger: input.ledger
+    }),
     recipientPersonIds: dayovaFounderPersonIds
   });
-  const meetingEvidenceSource = input.importedSourceAccess
+  const importedMeetingEvidenceSource = input.importedSourceAccess
     ? createImportedMeetingDecisionEvidenceSource({
         database: input.database,
         ledger: input.ledger,
         sourceAccess: input.importedSourceAccess
       })
     : undefined;
+  const logical = input.logicalMeetingEvidenceSource;
+  const meetingEvidenceSource =
+    importedMeetingEvidenceSource || logical
+      ? {
+          async capture(request: Parameters<typeof evidenceSource.capture>[0]) {
+            // An imported request keeps its original identity. Only an actual
+            // LogicalMeeting ID can select the capture-backed source capability.
+            if (
+              logical &&
+              request.subject.type === "meeting" &&
+              (await logical.resolveMeeting({
+                workspaceId,
+                meetingId: request.subject.meetingId,
+                audience: request.audience
+              })) === request.subject.meetingId
+            )
+              return logical.capture(request);
+            if (!importedMeetingEvidenceSource)
+              throw new Error("The Decision Meeting source is unavailable");
+            return importedMeetingEvidenceSource.capture(request);
+          },
+          async captureProcessed(
+            request: Parameters<typeof evidenceSource.captureProcessed>[0]
+          ) {
+            if (
+              logical &&
+              request.subject.type === "meeting" &&
+              (await logical.resolveMeeting({
+                workspaceId,
+                meetingId: request.subject.meetingId,
+                audience: request.audience
+              })) === request.subject.meetingId
+            )
+              return logical.captureProcessed(request);
+            if (!importedMeetingEvidenceSource)
+              throw new Error("The processed Decision Meeting source is unavailable");
+            return importedMeetingEvidenceSource.captureProcessed(request);
+          },
+          requireCurrent(source: Parameters<typeof evidenceSource.requireCurrent>[0]) {
+            const provider = source.revision.startsWith(
+              LOGICAL_CAPTURE_DECISION_REVISION_PREFIX
+            )
+              ? logical
+              : importedMeetingEvidenceSource;
+            if (!provider)
+              return Promise.reject(new Error("The Decision source is unavailable"));
+            return provider.requireCurrent(source);
+          },
+          authorizeRetained(
+            request: Parameters<typeof evidenceSource.authorizeRetained>[0]
+          ) {
+            const provider = request.source.revision.startsWith(
+              LOGICAL_CAPTURE_DECISION_REVISION_PREFIX
+            )
+              ? logical
+              : importedMeetingEvidenceSource;
+            return provider?.authorizeRetained(request) ?? Promise.resolve(false);
+          }
+        }
+      : undefined;
   const humanReviewAccess = createDecisionHumanReviewAccess({
     database: input.database,
     accessPolicy: input.accessPolicy,
@@ -222,7 +312,93 @@ export async function createDecisionRuntime(
     records: catalog,
     audience: () => audience(workspaceId)
   });
+  const standingPolicy =
+    config.automatic && input.standingPermissionSourceAccess
+      ? await createDecisionStandingPolicy({
+          database: input.database,
+          workspaceId,
+          audience: { workspaceId, personIds: [...dayovaFounderPersonIds] },
+          accessPolicy: input.accessPolicy,
+          authority,
+          sourceAccess: input.standingPermissionSourceAccess
+        })
+      : undefined;
+  const beforeInvoke: NonNullable<
+    Parameters<typeof createOpenAIDecisionInterpreter>[0]["beforeInvoke"]
+  > = async (request, signal) => {
+    const allowed = await retained(signal, async () => {
+      const source = request.source;
+      if (source.subject.type === "meeting") {
+        if (!meetingEvidenceSource)
+          throw new Error("Imported Decision source is not configured");
+        await meetingEvidenceSource.requireCurrent(source);
+      } else await evidenceSource.requireCurrent(source);
+      if (signal.aborted) return false;
+      if (request.authority)
+        await authority.requireCurrent({
+          audience: source.audience,
+          snapshot: request.authority
+        });
+      if (signal.aborted) return false;
+      // Every retained record sent to the model carries its own source and Human
+      // review proof. The current request's permission cannot stand in for them.
+      if (request.catalog)
+        await records.requireCurrent({
+          audience: source.audience,
+          snapshot: request.catalog
+        });
+      return (
+        !signal.aborted &&
+        (await policy.authorize({
+          audience: source.audience,
+          provider: "notion",
+          credentialScopeId: config.destinationCredentialScopeId,
+          resource: config.dataSourceId
+        }))
+      );
+    });
+    if (!allowed)
+      throw new Error(
+        "Current Decision source disclosure could not be verified before AI dispatch"
+      );
+  };
   return {
+    ...(config.automatic
+      ? {
+          automatic: {
+            ...(standingPolicy ? { policy: standingPolicy } : {}),
+            evidenceSource: {
+              captureProcessed: (
+                request: Parameters<typeof evidenceSource.captureProcessed>[0]
+              ) =>
+                request.subject.type === "meeting"
+                  ? (meetingEvidenceSource?.captureProcessed(request) ??
+                    Promise.reject(
+                      new Error("Imported Decision source is not configured")
+                    ))
+                  : evidenceSource.captureProcessed(request),
+              requireCurrent: (
+                source: Parameters<typeof evidenceSource.requireCurrent>[0]
+              ) =>
+                source.subject.type === "meeting"
+                  ? (meetingEvidenceSource?.requireCurrent(source) ??
+                    Promise.reject(
+                      new Error("Imported Decision source is not configured")
+                    ))
+                  : evidenceSource.requireCurrent(source)
+            },
+            detector: (
+              dependencies.createDetector ?? createOpenAIAutomaticDecisionDetector
+            )({
+              apiKey: env["OPENAI_API_KEY"]!,
+              model: input.model,
+              budget: input.budget,
+              limits: input.limits,
+              beforeInvoke
+            })
+          }
+        }
+      : {}),
     recall: {
       ...recall,
       async stop() {
@@ -231,6 +407,7 @@ export async function createDecisionRuntime(
       }
     },
     authority,
+    ...(standingPolicy ? { standingPolicy } : {}),
     records,
     evidenceSource,
     ...(meetingEvidenceSource ? { meetingEvidenceSource } : {}),
@@ -240,7 +417,8 @@ export async function createDecisionRuntime(
       apiKey: env["OPENAI_API_KEY"]!,
       model: input.model,
       budget: input.budget,
-      limits: input.limits
+      limits: input.limits,
+      beforeInvoke
     })
   };
 }

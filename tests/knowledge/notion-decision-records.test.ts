@@ -19,7 +19,11 @@ function fixture() {
   let authorityGranted = true;
   let uncertainCreate = false;
   const mutationLog: string[] = [];
-  const hooks: { beforeList?: () => Promise<void>; afterCreate?: () => void } = {};
+  const hooks: {
+    beforeList?: () => Promise<void>;
+    afterCreate?: () => void;
+    now?: () => Date;
+  } = {};
   const transport: NotionDecisionTransport = {
     async list() {
       await hooks.beforeList?.();
@@ -87,7 +91,7 @@ function fixture() {
       ),
     authorizeRetainedSource: () => Promise.resolve(sourceGranted),
     authorizeRetainedAuthority: () => Promise.resolve(authorityGranted),
-    now: () => new Date("2026-09-11T10:03:00Z")
+    now: () => hooks.now?.() ?? new Date("2026-09-11T10:03:00Z")
   };
   const make = () => createNotionDecisionRecords({ ...config, transport });
   return {
@@ -327,12 +331,15 @@ describe("canonical Notion Decision Records", () => {
   });
   it("publishes a pending successor, retires its predecessor and activates only after the backlink is proven", async () => {
     const f = fixture();
+    let at = "2026-09-11T10:03:00Z";
+    f.hooks.now = () => new Date(at);
     const original = await f.records.write(createInput());
     const successor = decisionRecord("decision-successor");
     successor.status = "pending";
     successor.supersedes = [original.record.reference];
     successor.candidate.statement.text = "Pause the wider rollout.";
     successor.candidate.disposition = "pause";
+    at = "2026-09-11T10:04:00Z";
     const pending = await f.records.write({
       audience,
       requireCurrent,
@@ -351,6 +358,7 @@ describe("canonical Notion Decision Records", () => {
     await expect(f.records.write(activation)).rejects.toBeInstanceOf(
       DecisionWriteNotAppliedError
     );
+    at = "2026-09-11T10:05:00Z";
     const retired = await f.records.write({
       audience,
       requireCurrent,
@@ -366,6 +374,7 @@ describe("canonical Notion Decision Records", () => {
       status: "reversed",
       supersededBy: pending.record.reference
     });
+    at = "2026-09-11T10:06:00Z";
     const active = await f.records.write(activation);
     expect(active.record.content).toMatchObject({
       status: "active",
@@ -375,6 +384,63 @@ describe("canonical Notion Decision Records", () => {
       (await f.records.read({ audience, recordId: original.record.content.id }))?.content
         .status
     ).toBe("reversed");
+    const history = (
+      await f.make().history!.discover({ audience, limit: 100, historyLimit: 100 })
+    ).revisions;
+    const before = history.find(
+      (item) =>
+        item.record.content.id === original.record.content.id &&
+        item.record.content.status === "active"
+    )!;
+    const after = history.find(
+      (item) =>
+        item.record.content.id === original.record.content.id &&
+        item.record.content.status === "reversed"
+    )!;
+    expect(before.record.content.recordedAt).toBe(after.record.content.recordedAt);
+    expect(before.recordedAt).toBe("2026-09-11T10:03:00.000Z");
+    expect(after.recordedAt).toBe("2026-09-11T10:05:00.000Z");
+    expect(
+      await f.make().history!.readReference({
+        audience,
+        reference: before.record.reference,
+        revisionId: before.revisionId,
+        asOf: "2026-09-11T10:04:30Z"
+      })
+    ).toEqual(before);
+    expect(
+      await f.make().history!.readReference({
+        audience,
+        reference: after.record.reference,
+        revisionId: after.revisionId,
+        asOf: "2026-09-11T10:04:30Z"
+      })
+    ).toBeNull();
+    const pendingRevision = history.find(
+      (item) =>
+        item.record.content.id === successor.id &&
+        item.record.content.status === "pending"
+    )!;
+    const activeRevision = history.find(
+      (item) =>
+        item.record.content.id === successor.id && item.record.content.status === "active"
+    )!;
+    expect(
+      await f.make().history!.readReference({
+        audience,
+        reference: pendingRevision.record.reference,
+        revisionId: pendingRevision.revisionId,
+        asOf: "2026-09-11T10:05:30Z"
+      })
+    ).toEqual(pendingRevision);
+    expect(
+      await f.make().history!.readReference({
+        audience,
+        reference: activeRevision.record.reference,
+        revisionId: activeRevision.revisionId,
+        asOf: "2026-09-11T10:05:30Z"
+      })
+    ).toBeNull();
     expect(f.mutationLog).toEqual(["create", "create", "replace", "replace"]);
   });
   it.each([

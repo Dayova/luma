@@ -8,33 +8,40 @@ Notion and Granola meeting captures plus Discord conversations, with the
 Notion Custom Agent and Discord `@Luma` as interaction surfaces over the
 shared Luma core.
 
-The repository currently contains a durable Meeting Intelligence Module,
-provider-neutral capability Interfaces, Linear and Notion Adapters,
-Follow-up Execution foundations, a persistent Discord Meeting bot, and a
-bounded read-only Discord Context Ask slice. A provider-neutral Logical
-Meeting foundation can retain separate capture revisions and their durable
-bindings. Granola ingestion, multi-capture synthesis, Decision Record
-execution, compound execution, and the complete Discord Ask → Verify →
-Reconcile → Execute product path remain incomplete.
+The shared runtime implements durable Meeting Intelligence, permission-aware
+organizational retrieval, Notion and Granola capture, multi-capture synthesis,
+founder Decision Records, advisory Discord polls, and approved Linear/Notion
+follow-up execution. Discord commands share the same database and monthly AI
+budget. Raw evidence and Human decisions are retained; current and historical
+knowledge are selected explicitly.
 
-## Current Delivery Boundary
+## Delivery And Activation
 
-LUM-2 (Notion Meeting Notes ingestion and observed revisions), LUM-3
-(read-only Linear reconciliation), LUM-7/LUM-8 (source-bound settlement and
-Operational Outcome writeback), LUM-9 (German speaker and ownership safety),
-and LUM-10 (source-bound GitHub implementation references) are complete
-foundations. LUM-6 remains open: LUM-11's target-selection and conflict policy
-is selected, while its safe, target-bound canonical Notion patch capability
-and live proof remain outstanding before the first production-safe meeting
-wedge can be complete. The
+The production launcher, deployment checks, encrypted recovery tooling, and
+capability health reporting are implemented. Configurable provider capabilities
+include exact canonical Notion patches, compound Hypothesis/Linear work,
+automatic Decision processing under owner standing permission, and source-bound
+Meeting recall across prior Meetings. See the
+[production runbook](docs/operations/production-discord.md),
+[structured-work guide](docs/structured-work.md), and
+[Decision guide](docs/integrations/discord-decision-records.md).
+
+Compound commands create or reuse configured Notion records and Linear tasks.
+Native table-property and task updates currently produce exact manual-change
+proposals: those APIs lack the conditional-write capability needed to preserve
+concurrent Human edits. This is a functional limitation, not a credential or
+hosting requirement. The structured-work guide records the supported fields,
+catalog bounds and recovery behavior.
+
+Implementation and offline validation do not prove live deployment. Production
+activation still requires the dedicated application and provider credentials,
+reviewed founder/source grants and notices, the selected host, and real
+restart/restore/provider verification. Granola access requires each owner's
+OAuth connection. Optional native Notion review has additional provider access
+requirements documented in its integration guide. The
 [operating brief](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23)
-records the policy, delivery priorities, and remaining owner decisions.
-
-The LUM-33 Logical Meeting foundation is also implemented. It preserves
-capture provenance, capability gaps, and Human binding decisions; it does
-not activate Granola access, source collection, synthesis, or provider
-writes. See [ADR 0008](docs/adr/0008-provider-neutral-logical-meetings.md) for
-the exact boundary.
+records the product contract; current deployment evidence belongs in the
+operating plan and tracker.
 
 ## Public Interfaces
 
@@ -109,9 +116,8 @@ Run deterministic local verification with:
 pnpm verify
 ```
 
-The networked Discord bot is deliberately not a current Dayova setup step. Do
-not configure or start `pnpm dev` with a Dayova or shared Discord Application
-until the [LUM-4 activation gate](docs/integrations/discord.md#lum-4-activation-gate)
-is satisfied: its owner has recorded all four policy decisions and the required
-follow-up implementation is delivered. Technical configuration, gateway
-intents, and allowlists are necessary controls, not authorization.
+Live Discord startup registers commands and connects to the configured server.
+Use the [production runbook](docs/operations/production-discord.md) and record the
+source grants, participant notice and deployment checks before enabling the
+corresponding capabilities. Development credentials are not production
+credentials. Disabled capabilities retain their stored history.

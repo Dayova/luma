@@ -1,8 +1,16 @@
 import { hasDecisionRecordingRefusal } from "../decision-intelligence/recording-instruction.js";
+import {
+  handleDiscordDecisionAutomaticCommand,
+  type DiscordDecisionAutomaticCommand
+} from "./discord-decision-standing-runtime.js";
+import type { ManagedDecisionStandingPolicy } from "../decision-intelligence/standing-permission.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
+import type { AutomaticDecisionProcessing } from "../app/automatic-decision-processing.js";
+import { decisionDigest } from "../decision-intelligence/persistence.js";
 import { renderAiServiceFailure } from "./discord-ai-status.js";
 import type { DecisionIntelligence } from "../decision-intelligence/interface.js";
 import type {
+  DecisionAudience,
   DecisionRequestState,
   DecisionSubject
 } from "../domain/decision-records.js";
@@ -94,29 +102,63 @@ export function isExplicitDecisionRecordInstruction(text: string): boolean {
   );
 }
 
+export class DiscordDecisionAddressInputError extends Error {
+  constructor() {
+    super(
+      "Choose either meeting_id for a LogicalMeeting or source_message for a conversation, never both."
+    );
+  }
+}
 export type DiscordDecisionRecordRuntime = {
+  logicalMeetings?: {
+    resolveMeeting(input: {
+      workspaceId: string;
+      meetingId: string;
+      audience: DecisionAudience;
+    }): Promise<string | null>;
+    currentAudience(workspaceId: string): Promise<DecisionAudience | null>;
+  };
+  automatic?: Pick<AutomaticDecisionProcessing, "review"> &
+    Partial<Pick<AutomaticDecisionProcessing, "retry">>;
   meetingIntelligence: DecisionIntelligence;
   execution: DecisionFollowUpExecution;
   config: DiscordContextAskConfig;
+  standingPolicy?: ManagedDecisionStandingPolicy;
 };
-export type DiscordDecisionRecordCommand = DiscordCommandBase &
-  (
-    | { type: "decision-record-meeting"; instruction: string; targetRecordId?: string }
-    | {
-        type: "decision-record-status" | "decision-record-recover";
-        sourceMessageId?: string;
-        requestId: string;
-        page?: number;
-      }
-    | {
-        type: "decision-record-accept";
-        sourceMessageId?: string;
-        requestId: string;
-        reviewToken: string;
-        instruction: string;
-      }
-  );
+export type DiscordDecisionRecordCommand =
+  | DiscordDecisionAutomaticCommand
+  | (DiscordCommandBase & { meetingId?: string } & (
+        | {
+            type: "decision-record-meeting";
+            instruction: string;
+            targetRecordId?: string;
+          }
+        | {
+            type: "decision-record-candidates";
+            retry?: boolean;
+            sourceMessageId?: string;
+            candidate?: number;
+            page?: number;
+          }
+        | {
+            type: "decision-record-status" | "decision-record-recover";
+            sourceMessageId?: string;
+            requestId: string;
+            page?: number;
+          }
+        | {
+            type: "decision-record-accept";
+            sourceMessageId?: string;
+            requestId: string;
+            reviewToken: string;
+            instruction: string;
+          }
+      ));
 export function discordDecisionRequestId(command: DiscordDecisionRecordCommand): string {
+  if (command.type === "decision-record-automatic")
+    return `discord:${command.interactionId}:automatic-recording`;
+  if (command.type === "decision-record-candidates")
+    return `discord:${command.interactionId}:decision-candidates`;
   return command.type === "decision-record-meeting"
     ? `discord:${command.interactionId}:decision-record`
     : command.requestId;
@@ -171,8 +213,10 @@ export async function handleDiscordDecisionRecordCommand(input: {
   runtime: DiscordDecisionRecordRuntime;
   workspace: WorkspaceConfig;
   command: DiscordDecisionRecordCommand;
-  /** Resolved from the bot's existing guarded imported Meeting binding, never user input. */
+  /** Resolved and re-proven by the bot, never an unchecked caller-selected ID. */
   meetingId?: string;
+  /** Supplied only for a proven LogicalMeeting; keeps follow-up addressing explicit. */
+  logicalMeetingId?: string;
   requireCurrent?: () => Promise<void>;
 }): Promise<DiscordCommandResponse> {
   const { runtime, workspace, command } = input;
@@ -183,6 +227,11 @@ export async function handleDiscordDecisionRecordCommand(input: {
     throw new Error(
       "The recording instruction includes an explicit refusal; no recording was started."
     );
+  if (command.type === "decision-record-automatic")
+    return handleDiscordDecisionAutomaticCommand({
+      policy: runtime.standingPolicy,
+      command
+    });
   await input.requireCurrent?.();
   const subject: DecisionSubject =
     "sourceMessageId" in command && command.sourceMessageId
@@ -192,6 +241,68 @@ export async function handleDiscordDecisionRecordCommand(input: {
         : (() => {
             throw new Error("Bind this thread to its imported Meeting first");
           })();
+  if (command.type === "decision-record-candidates") {
+    if (!runtime.automatic)
+      return {
+        content:
+          "Automatic decision processing is not enabled. Explicit recording and /meeting usage remain available."
+      };
+    if (command.retry) {
+      if (!runtime.automatic.retry) throw new Error("Automatic retry is not configured");
+      await input.requireCurrent?.();
+      await runtime.automatic.retry(
+        subject,
+        `discord:${command.interactionId}:automatic-retry`
+      );
+    }
+    const result = await runtime.automatic.review(subject);
+    const selected = command.candidate ?? 1;
+    if (!Number.isSafeInteger(selected) || selected < 1)
+      throw new Error("Select a positive candidate number");
+    const batch = result.batch;
+    const candidate = batch?.candidates[selected - 1];
+    const content = candidate
+      ? `Automatic decisions: candidate ${selected}/${batch.candidates.length}.${batch.complete ? "" : " Analysis is incomplete."}\n${renderDecisionRecordResponse(candidate, command.page, input.logicalMeetingId)}`
+      : batch
+        ? `${batch.message.slice(0, 1200)}\n${batch.candidates.length} retained candidates. Select candidate:1 through candidate:${Math.max(1, batch.candidates.length)}. /meeting usage remains available.`
+        : (
+            {
+              unseen:
+                "This source has not been queued for automatic decisions. A new admitted conversation or accepted Meeting import starts processing.",
+              queued: "This source is queued for automatic decision analysis.",
+              processing: "This source is being analyzed for decisions.",
+              completed:
+                "No retained automatic decision review is available for this source.",
+              unavailable:
+                "Automatic decision analysis is unavailable. Original evidence remains retained. Check /meeting usage; a new explicit recording request remains available.",
+              interrupted:
+                "Automatic decision analysis was interrupted. Luma has not repeated the paid request. Check /meeting usage before starting a fresh explicit request."
+            } as const
+          )[result.status];
+    const retry = batch?.analysisRetry;
+    const retryGuidance =
+      !retry || retry.disposition === "completed"
+        ? ""
+        : retry.canRetry
+          ? `\nNo AI request was dispatched. Retry ${retry.attempts + 1}/${retry.maxAttempts} is scheduled for ${retry.nextAttemptAt}. After fixing the budget or configuration, use this candidates command with retry:true for an earlier attempt. Current source and permissions are checked again.`
+          : retry.disposition === "not-dispatched"
+            ? `\nAll ${retry.maxAttempts} bounded attempts were refused before dispatch. No automatic retry remains; resolve the cause and use a new explicit recording request.`
+            : "\nA previous request may have been dispatched. Luma will not repeat it automatically or through retry:true; check /meeting usage and the retained result before a new explicit request.";
+    return {
+      content:
+        input.logicalMeetingId && !candidate
+          ? `Meeting ID (meeting_id): ${input.logicalMeetingId}.\n${content}${retryGuidance}`
+          : `${content}${retryGuidance}`,
+      requireCurrent: async () => {
+        await input.requireCurrent?.();
+        if (
+          decisionDigest(await runtime.automatic!.review(subject)) !==
+          decisionDigest(result)
+        )
+          throw new Error("Automatic decision review changed before delivery");
+      }
+    };
+  }
   const requestId = discordDecisionRequestId(command);
   if (
     command.type === "decision-record-meeting" ||
@@ -255,7 +366,8 @@ export async function handleDiscordDecisionRecordCommand(input: {
     subject,
     requestId,
     executionUnavailable,
-    command.type === "decision-record-status" ? (command.page ?? 1) : 1
+    command.type === "decision-record-status" ? (command.page ?? 1) : 1,
+    input.logicalMeetingId
   );
 }
 
@@ -265,7 +377,8 @@ async function readResponse(
   subject: DecisionSubject,
   requestId: string,
   executionUnavailable = false,
-  page = 1
+  page = 1,
+  logicalMeetingId?: string
 ): Promise<DiscordCommandResponse> {
   const address = {
     workspaceId,
@@ -275,7 +388,7 @@ async function readResponse(
   const state = await runtime.meetingIntelligence.query(address);
   const retained = JSON.stringify(state);
   return {
-    content: `${executionUnavailable && !state.execution ? "Luma could not verify the execution result. Use /decision-record recover before another recording request.\n" : ""}${renderDecisionRecordResponse(state, page)}`,
+    content: `${executionUnavailable && !state.execution ? "Luma could not verify the execution result. Use /decision-record recover before another recording request.\n" : ""}${renderDecisionRecordResponse(state, page, logicalMeetingId)}`,
 
     requireCurrent: async () => {
       // The owned query checks original source, authority and canonical target.
@@ -298,7 +411,8 @@ function conversationSubject(
 }
 export function renderDecisionRecordResponse(
   state: DecisionRequestState,
-  page = 1
+  page = 1,
+  logicalMeetingId?: string
 ): string {
   const outcome = state.execution?.outcome;
   const references = [
@@ -326,6 +440,7 @@ export function renderDecisionRecordResponse(
       ? [`Source: <${source[0]}>`]
       : []),
     `Request ID: ${state.requestId}.`,
+    ...(logicalMeetingId ? [`Meeting ID (meeting_id): ${logicalMeetingId}.`] : []),
     ...(state.subject.type === "conversation-thread"
       ? [`Source message: ${state.subject.anchorMessageId}.`]
       : [])
@@ -367,7 +482,7 @@ export function renderDecisionRecordResponse(
   }
   const rendered = lines.join("\n");
   if (rendered.length <= 1_850) return rendered;
-  return `Decision Record: ${state.state}. The full result and any known references are retained. Use /decision-record status with request ID ${state.requestId}.`;
+  return `Decision Record: ${state.state}. The full result and any known references are retained. Use /decision-record status with request ID ${state.requestId}.${logicalMeetingId ? ` Meeting ID (meeting_id): ${logicalMeetingId}.` : ""}`;
 }
 function safeReference(value: string): boolean {
   try {

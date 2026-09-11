@@ -488,6 +488,200 @@ describe("Capture synthesis approved canonical publication", () => {
       await f.database.close();
     }
   });
+  it.each(["malformed", "stale"])(
+    "keeps %s publication approval a nonretryable invalid observation",
+    async (kind) => {
+      const f = await setup();
+      try {
+        const conclusion = await f.conclude();
+        const synthesis = conclusion.captureSynthesis!;
+        const approval: FollowUpIntentApproved = {
+          type: "follow-up-intent-approved",
+          observationId: "invalid-publication-approval",
+          workspaceId: workspace.workspaceId,
+          meetingId: f.meetingId,
+          occurredAt: at,
+          observedAt: kind === "malformed" ? "invalid-date" : at,
+          intentId: conclusion.followUpIntentions[0]!.id,
+          approvedBy: "person_jakob"
+        };
+        if (kind === "stale") {
+          expect(
+            (
+              await f.mi.observe({
+                workspace,
+                observations: [
+                  {
+                    type: "capture-synthesis-judgment-recorded",
+                    observationId: "revise-before-approval",
+                    workspaceId: workspace.workspaceId,
+                    meetingId: f.meetingId,
+                    occurredAt: at,
+                    observedAt: at,
+                    participantId: "person_jakob",
+                    expectedSynthesisRevision: synthesis.revision,
+                    claimId: synthesis.claims[0]!.id,
+                    judgment: { kind: "correct", text: "A revised Human judgment." }
+                  }
+                ]
+              })
+            ).errors
+          ).toEqual([]);
+        }
+        const result = await f.mi.observe({ workspace, observations: [approval] });
+        expect(result).toMatchObject({
+          acceptedObservationIds: [],
+          duplicateObservationIds: [],
+          events: [],
+          errors: [{ code: "invalid-observation", retryable: false }]
+        });
+        expect(f.mutations()).toBe(0);
+      } finally {
+        await f.database.close();
+      }
+    }
+  );
+  it.each(["transaction", "persisted-json"])(
+    "reports %s publication failure as retryable and accepts the same observation once after restoration",
+    async (kind) => {
+      const f = await setup();
+      const diagnostics = vi.spyOn(console, "error").mockImplementation(() => {});
+      const transaction = vi.spyOn(f.database, "transaction");
+      try {
+        const conclusion = await f.conclude();
+        const approval: FollowUpIntentApproved = {
+          type: "follow-up-intent-approved",
+          observationId: "recover-publication-approval",
+          workspaceId: workspace.workspaceId,
+          meetingId: f.meetingId,
+          occurredAt: at,
+          observedAt: at,
+          intentId: conclusion.followUpIntentions[0]!.id,
+          approvedBy: "person_jakob"
+        };
+        const scope = [workspace.workspaceId, f.meetingId, approval.intentId];
+        const originalState = (
+          await f.database.query<{ state_json: string }>(
+            "SELECT state_json FROM meeting_synthesis_publications WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3",
+            scope
+          )
+        ).rows[0]!.state_json;
+        if (kind === "transaction")
+          transaction.mockRejectedValueOnce(
+            new Error("PRIVATE SOURCE CONTENT in database error")
+          );
+        else
+          await f.database.query(
+            "UPDATE meeting_synthesis_publications SET state_json=$4 WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3",
+            [...scope, "{corrupted"]
+          );
+        const failed = await f.mi.observe({ workspace, observations: [approval] });
+        expect(failed).toMatchObject({
+          acceptedObservationIds: [],
+          duplicateObservationIds: [],
+          events: [],
+          errors: [{ code: "publication-unavailable", retryable: true }]
+        });
+        expect(JSON.stringify(failed)).not.toContain("PRIVATE SOURCE CONTENT");
+        expect(diagnostics).toHaveBeenCalled();
+        expect(JSON.stringify(diagnostics.mock.calls)).not.toContain(
+          "PRIVATE SOURCE CONTENT"
+        );
+        expect(
+          (
+            await f.database.query(
+              "SELECT observation_id FROM meeting_synthesis_publication_observations WHERE workspace_id=$1 AND observation_id=$2",
+              [workspace.workspaceId, approval.observationId]
+            )
+          ).rows
+        ).toEqual([]);
+        if (kind === "persisted-json")
+          await f.database.query(
+            "UPDATE meeting_synthesis_publications SET state_json=$4 WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3",
+            [...scope, originalState]
+          );
+        expect(await f.mi.observe({ workspace, observations: [approval] })).toMatchObject(
+          {
+            acceptedObservationIds: [approval.observationId],
+            duplicateObservationIds: [],
+            errors: []
+          }
+        );
+        expect(await f.mi.observe({ workspace, observations: [approval] })).toMatchObject(
+          {
+            acceptedObservationIds: [],
+            duplicateObservationIds: [approval.observationId],
+            errors: []
+          }
+        );
+        expect(
+          (
+            await f.database.query(
+              "SELECT observation_id FROM meeting_synthesis_publication_observations WHERE workspace_id=$1 AND observation_id=$2",
+              [workspace.workspaceId, approval.observationId]
+            )
+          ).rows
+        ).toHaveLength(1);
+        expect(f.mutations()).toBe(0);
+      } finally {
+        transaction.mockRestore();
+        diagnostics.mockRestore();
+        await f.database.close();
+      }
+    }
+  );
+  it("releases a prepared publication when current source proof fails before provider dispatch", async () => {
+    const f = await setup(true);
+    const transaction = f.database.transaction.bind(f.database);
+    let revoke = true;
+    const spy = vi
+      .spyOn(f.database, "transaction")
+      .mockImplementation(async (operation) => {
+        const result = await transaction(operation);
+        if (
+          revoke &&
+          (await f.database.query("SELECT 1 FROM meeting_synthesis_publication_locks"))
+            .rows.length
+        ) {
+          revoke = false;
+          f.setSourceAllowed(false);
+        }
+        return result;
+      });
+    try {
+      const { intentId } = await f.approve();
+      const request = { workspace, meetingId: f.meetingId, intentId };
+      await expect(f.executor.execute(request)).rejects.toBeInstanceOf(
+        MeetingSynthesisWriteNotAppliedError
+      );
+      expect(f.mutations()).toBe(0);
+      expect(
+        await readSynthesisPublication(
+          f.database,
+          workspace.workspaceId,
+          f.meetingId,
+          intentId
+        )
+      ).toMatchObject({
+        phase: "unclaimed",
+        intent: { status: "approved" },
+        plan: null,
+        executionLeaseId: null,
+        applied: null
+      });
+      expect(
+        (await f.database.query("SELECT * FROM meeting_synthesis_publication_locks")).rows
+      ).toEqual([]);
+      f.setSourceAllowed(true);
+      expect((await f.executor.execute(request)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(f.mutations()).toBe(1);
+    } finally {
+      spy.mockRestore();
+      await f.database.close();
+    }
+  });
   it("respects the physical-page lease shared with operational outcome writes", async () => {
     const f = await setup(true);
     try {
@@ -1294,7 +1488,7 @@ describe("Derived capture actions through MI and canonical execution", () => {
           dueDate: "2026-09-15"
         })
       );
-      expect(f.pages).toHaveLength(1);
+      expect(f.pages.size).toBe(1);
       expect(f.pages.get(imported)?.markdown).toContain("LUM-101");
       expect(f.pages.get(imported)?.markdown).toContain("Luma — Operational Outcome");
       expect(f.modelCalls()).toBe(1);

@@ -546,7 +546,7 @@ function localDate(date: Date, timezone: string): string {
 }
 
 /** Find the actual timezone boundary, including DST, without machine-local dates. */
-function nextBoundary(now: Date, timezone: string, unit: "month" | "day"): string {
+export function nextBoundary(now: Date, timezone: string, unit: "month" | "day"): string {
   const key = (timestamp: number): string =>
     localDate(new Date(timestamp), timezone).slice(0, unit === "month" ? 7 : 10);
   const initial = key(now.getTime());

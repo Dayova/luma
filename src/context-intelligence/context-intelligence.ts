@@ -1,3 +1,7 @@
+import {
+  retainProcessedConversationAdmission,
+  type ProcessedConversationSourceEvent
+} from "./processed-conversation-source.js";
 import type { OrganizationalContext } from "../organizational-context/interface.js";
 import { conversationPollSchema } from "../domain/conversation-poll.js";
 import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
@@ -44,6 +48,8 @@ export type CreateContextIntelligenceInput = {
   ledger: ObservedSourceLedger;
   conversationEvidenceSource: ConversationEvidenceSource;
   answerer: ContextAnswerer;
+  /** Accepted original source notification; runtime may durably queue MI processing. It grants no recording permission. */
+  onProcessedSource?(event: ProcessedConversationSourceEvent): Promise<void>;
   organizationalContext?: OrganizationalContext;
   organizationalContextLimits?: { limit: number; maxCharacters: number };
   now?: () => Date;
@@ -220,6 +226,12 @@ async function inquire(
     failureCode: "conversation-capture-invalid",
     failureMessage: "Captured conversation does not match its immutable ledger revision"
   });
+  const processedSource = await retainProcessedConversationAdmission({
+    database: input.database,
+    inquiry: immutableInquiry,
+    recorded: immutableRecorded
+  });
+  if (processedSource) await input.onProcessedSource?.(processedSource);
   let retrieval: ContextRetrieval | undefined;
   if (
     input.organizationalContext &&

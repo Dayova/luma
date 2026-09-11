@@ -34,9 +34,19 @@ anchors receive only the owned Luma Synthesis section. Granola-only meetings get
 one owned Imported Record, whose positive receipt becomes the canonical anchor.
 `recover:true` checks an uncertain write for an exact existing result; it never
 resends an uncertain mutation. A saved positive receipt survives a later local
-anchor or source-access failure. This publication does not itself create Linear
-tasks or settle Operational Outcome; that derived-work composition remains
-separate tracked implementation work.
+anchor or source-access failure.
+
+Derived Action Item reconciliation is also implemented in the shared runtime.
+Use `/meeting judge choice:resolve-action` to supply explicit commitment/request,
+owner and deadline details for an exact claim, then `/meeting actions` to review
+canonical work matches and the resulting settlement. Publication alone does not
+approve a task. With the WorkProvider and Operational Outcome writer configured,
+an approved settlement can create or link work and record its outcome at the
+LogicalMeeting's current canonical anchor. Original capture grants, the exact
+synthesis revision and current signed destination are rechecked; unsupported
+ownership, modality, conflicts or coverage remain unresolved. See the
+[derived-action design](../adr/0011-synthesis-actions-use-owned-reconciliation.md)
+for source fencing and recovery boundaries.
 
 ## Per-founder Granola connection
 

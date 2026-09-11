@@ -42,10 +42,12 @@ analysis, then closes its database. The existing 90-second drain and 120-second
 service hard stop apply. A failed drain never creates a clean-close receipt.
 Startup failure closes acquired listeners and source schedules.
 
-Keep the old `LUMA_NOTION_OBSERVATION_*` and dormant `LUMA_NATIVE_*` settings out
-of this production profile. The standalone observation entrypoint remains an
-isolated proof tool; it is not a second production source owner. Native Notion
-review ingress remains a separate capability.
+Keep the old `LUMA_NOTION_OBSERVATION_*` settings out of this production profile.
+The standalone observation entrypoint remains an isolated proof tool; it is not
+a second production source owner. Native Notion review is a separate capability
+in this shared runtime: use only its documented `LUMA_NATIVE_*` settings from
+the production template after satisfying the authenticated-ingress and access
+checks in the [native review guide](../integrations/notion.md#source-bound-native-review).
 
 The connected regression uses a real loopback HTTP listener and signed bytes,
 then refreshes an immutable source through the shared runtime and recalls it

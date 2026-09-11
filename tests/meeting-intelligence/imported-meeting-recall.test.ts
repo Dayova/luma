@@ -120,21 +120,40 @@ describe("source-bound prior Meeting recall", () => {
       await database.close();
     }
   });
-  it("rejects prior-Meeting dependencies without recursively entering the leaf", async () => {
+  it("recalls A through B into C and excludes circular descendants during each original Meeting's replay", async () => {
     const database = await createPgliteDatabase();
     const f = importedMeetingFixture(database);
     const external = externalFixture();
     try {
       f.compose([external.catalog]);
-      await f.ingest("first", "Luma first source decision.");
-      const next = await f.ingest("second", "Luma second source decision.");
-      expect(next.result.analysisStatus).toBe("completed");
+      const first = await f.ingest("first", "Luma first source decision.");
+      const second = await f.ingest("second", "Luma second source decision.");
+      const third = await f.ingest("third", "Luma third source decision.");
+      for (const admitted of [first, second, third]) {
+        expect(admitted.result.analysisStatus).toBe("completed");
+        expect(admitted.result.errors).toEqual([]);
+        expect((await f.snapshot(admitted.observation)).decisions).toHaveLength(1);
+        const conclusion = await f.mi().conclude({
+          workspaceId: f.workspace.workspaceId,
+          meetingId: admitted.observation.meetingId
+        });
+        expect(JSON.stringify(conclusion)).toContain("source decision");
+      }
       expect(
-        f.requests[1]?.evidence.some((evidence) => evidence.source === "previous-meeting")
-      ).toBe(true);
+        f.requests[2]?.evidence.filter(
+          (evidence) => evidence.source === "previous-meeting"
+        )
+      ).toHaveLength(2);
       const recalled = await f.organizationalContext().retrieve(f.request());
-      expect(recalled.sources).toHaveLength(1);
-      expect(recalled.sources[0]?.content).toContain("first source decision");
+      expect(recalled.sources).toHaveLength(3);
+      expect(
+        recalled.sources.every(
+          (source) =>
+            source.authority === "ai-inference" && source.standing === "proposed"
+        )
+      ).toBe(true);
+      await f.organizationalContext().requireCurrent(f.request(), recalled.receiptId);
+      expect(f.requests).toHaveLength(3);
       expect(() =>
         createExternalContextReceiptVerifier({
           database,
@@ -142,6 +161,102 @@ describe("source-bound prior Meeting recall", () => {
           ignoredEmptyCatalogIds: []
         })
       ).toThrow("only external provider catalogs");
+    } finally {
+      await database.close();
+    }
+  });
+  for (const invalidation of [
+    "source-grant",
+    "source-version",
+    "human-rejection",
+    "external-grant",
+    "independent-discovery"
+  ] as const)
+    it(`invalidates every borrowed edge after ${invalidation} without reinterpreting or deleting Evidence`, async () => {
+      const database = await createPgliteDatabase();
+      const f = importedMeetingFixture(database);
+      const external = externalFixture();
+      try {
+        f.compose([external.catalog]);
+        const first = await f.ingest("first", "Luma first source decision.");
+        await f.ingest("second", "Luma second source decision.");
+        const third = await f.ingest("third", "Luma third source decision.");
+        expect(third.result.errors).toEqual([]);
+        const recalled = await f.organizationalContext().retrieve(f.request());
+        expect(recalled.sources).toHaveLength(3);
+        if (invalidation === "source-grant") f.records.get("first")!.readers = [];
+        if (invalidation === "source-version") {
+          const section = f.records.get("first")!.snapshot.sections.transcript;
+          if (section.state !== "available") throw new Error("Expected transcript");
+          section.text = "Changed original source";
+        }
+        if (invalidation === "human-rejection")
+          await f.judge(first.observation, {
+            kind: "reject",
+            meetingItemId: "decision:choice"
+          });
+        if (invalidation === "external-grant") external.revoke();
+        if (invalidation === "independent-discovery") {
+          f.context(undefined);
+          await f.ingest("independent", "Luma independently eligible later source.");
+        }
+        const calls = f.requests.length;
+        await expect(
+          f.organizationalContext().requireCurrent(f.request(), recalled.receiptId)
+        ).rejects.toThrow();
+        const current = await f.organizationalContext().retrieve(f.request());
+        expect(
+          current.sources.some((source) =>
+            source.content.includes('"statement":"Luma second source decision.')
+          )
+        ).toBe(false);
+        expect(
+          current.sources.some((source) =>
+            source.content.includes('"statement":"Luma third source decision.')
+          )
+        ).toBe(false);
+        expect(f.requests).toHaveLength(calls);
+        expect(
+          (
+            await database.query<{ count: number }>(
+              "SELECT count(*)::int AS count FROM meeting_imported_source_receipts"
+            )
+          ).rows[0]?.count
+        ).toBeGreaterThanOrEqual(3);
+      } finally {
+        await database.close();
+      }
+    });
+  it("rechecks the recalled item's original grant after its ancestors finish proving", async () => {
+    const database = await createPgliteDatabase();
+    const f = importedMeetingFixture(database);
+    const external = externalFixture();
+    let armed = false;
+    const catalog: ContextCatalog = {
+      ...external.catalog,
+      read: async (request) => {
+        const value = await external.catalog.read(request);
+        if (armed) {
+          armed = false;
+          f.records.get("second")!.readers = [];
+        }
+        return value;
+      }
+    };
+    try {
+      f.compose([catalog]);
+      await f.ingest("first", "Luma first source decision.");
+      await f.ingest("second", "Luma second source decision.");
+      const result = await f.organizationalContext().retrieve(f.request());
+      const selected = result.sources.find((entry) =>
+        entry.content.includes('"statement":"Luma second source decision.')
+      );
+      expect(selected).toBeDefined();
+      armed = true;
+      await expect(
+        f.catalog().read({ audience: f.audience, sourceId: selected!.id })
+      ).rejects.toThrow();
+      expect(f.requests).toHaveLength(2);
     } finally {
       await database.close();
     }
@@ -335,6 +450,79 @@ describe("source-bound prior Meeting recall", () => {
       expect((await f.organizationalContext().retrieve(f.request())).sources).toEqual([]);
     } finally {
       await db.close();
+    }
+  });
+  it("retains legacy Discord speech but never infers an original recall audience from today's participants", async () => {
+    const database = await createPgliteDatabase();
+    const f = importedMeetingFixture(database);
+    try {
+      const base = {
+        workspaceId: f.workspace.workspaceId,
+        meetingId: "legacy-discord",
+        observedAt: "2026-09-11T09:00:00.000Z",
+        occurredAt: "2026-09-11T09:00:00.000Z"
+      };
+      const mi = f.mi();
+      const result = await mi.observe({
+        workspace: f.workspace,
+        observations: [
+          {
+            ...base,
+            type: "meeting-started",
+            observationId: "started",
+            title: "Luma legacy Discord",
+            startedAt: base.occurredAt,
+            languageMode: "en",
+            participantIds: f.audience.personIds
+          },
+          {
+            ...base,
+            type: "utterance-committed",
+            observationId: "speech",
+            utteranceId: "speech",
+            version: 1,
+            speaker: {
+              status: "unresolved",
+              candidatePersonId: null,
+              confidence: "unknown",
+              basis: "provider-speaker-label"
+            },
+            startedAt: base.occurredAt,
+            endedAt: base.occurredAt,
+            originalText: "Luma private legacy speech",
+            language: "en"
+          }
+        ]
+      });
+      expect(result.acceptedObservationIds).toContain("speech");
+      expect(result.analysisStatus).toBe("completed");
+      const before = await database.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM utterance_versions"
+      );
+      for (const time of [{ mode: "current" }, { mode: "history" }] as const) {
+        const recalled = await f
+          .organizationalContext()
+          .retrieve({ ...f.request(), time });
+        expect(recalled.sources).toEqual([]);
+        expect(recalled.retrieval.complete).toBe(false);
+        expect(recalled.retrieval.warnings.join(" ")).toContain("ungranted history");
+      }
+      expect(
+        (
+          await database.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM utterance_versions"
+          )
+        ).rows
+      ).toEqual(before.rows);
+      expect(
+        (
+          await database.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM meeting_imported_source_receipts"
+          )
+        ).rows[0]?.count
+      ).toBe(0);
+    } finally {
+      await database.close();
     }
   });
   it("withholds externally informed analysis when no restricted verifier is composed", async () => {

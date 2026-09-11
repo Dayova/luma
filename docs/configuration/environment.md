@@ -390,8 +390,8 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 - Keep SDKs, MCP tools, CLIs, and provider IDs out of Meeting Intelligence domain state.
 - The current Meeting settlement implementation requires an approved,
   source-bound Follow-up Intent and a durable idempotency key. Product policy
-  may later allow an authorized explicit write instruction for safe,
-  unambiguous operations; that broader authorization path is not implemented
-  by the bounded Context Ask slice.
+  allows an authorized explicit instruction to approve safe, unambiguous
+  [structured work](../structured-work.md) and [Decision recording](../integrations/discord-decision-records.md)
+  through their owned execution paths. Context Ask remains read-only.
 
 See `docs/configuration/identity.md` for the built-in Person mappings.

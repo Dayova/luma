@@ -186,14 +186,14 @@ and failures, and stops admission before draining the active run and reporting.
 No second AI budget or standalone source store is created.
 
 The OAuth manager supplies `policy` and `connections()` directly to this runtime.
-Main composition must refresh its connection registry after attestation,
-configuration or disconnect and must drain the capture scheduler before the OAuth
-manager and shared database. Server/Discord owner entry and browser callback
-handling belong to the unified main runtime; this module does not open a separate
-unauthenticated listener. Live consent, account attestation and compatibility
-validation of actual provider output remain activation steps. No personal source,
-OAuth registration, provider mutation or production service was activated during
-implementation. LUM-34/LUM-35 still require their connected-runtime delivery.
+The [shared main runtime](shared-meeting-capture-runtime.md) refreshes its connection
+registry after attestation, configuration or disconnect and drains the capture
+scheduler before the OAuth manager and shared database. It composes the browser
+callback, founder Discord onboarding, capture synthesis, review and approved
+publication. Live consent, account attestation and compatibility validation of
+actual provider output remain activation steps. No personal source, OAuth
+registration, provider mutation or production service was activated during
+implementation.
 
 Deterministic tests exercise actual HTTP metadata/registration/token/MCP handling,
 PKCE and owner/state binding, explicit account attestation, encryption/recreation,

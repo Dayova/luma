@@ -1,3 +1,4 @@
+import { createMeetingReceiptGraph } from "./meeting-receipt-graph.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
@@ -74,6 +75,7 @@ export function createOrganizationalContext(input: {
       catalog.read({
         audience: structuredClone(request.audience),
         subject: structuredClone(request.subject),
+        time: structuredClone(request.time),
         sourceId
       }),
       Math.min(input.timeoutMs ?? 5_000, deadlineAt - Date.now())
@@ -109,6 +111,7 @@ export function createOrganizationalContext(input: {
             catalog.search({
               audience: structuredClone(request.audience),
               subject: structuredClone(request.subject),
+              time: structuredClone(request.time),
               concepts: [...request.concepts],
               limit: remaining
             }),
@@ -119,6 +122,10 @@ export function createOrganizationalContext(input: {
           // Provider diagnostics can contain private source text or secrets.
           if (search.warnings.length)
             warnings.push(`Catalog ${catalog.id} reported a coverage limitation.`);
+          if (!search.complete && catalog.dependencyKind === "meeting")
+            warnings.push(
+              "Prior Meeting recall excludes ungranted history and dependencies that cannot be proved within its bounds."
+            );
           searches.push({
             catalogId: catalog.id,
             limit: remaining,
@@ -414,6 +421,29 @@ export function createExternalContextReceiptVerifier(input: {
     );
   const ignoredEmptyCatalogIds = [...input.ignoredEmptyCatalogIds];
   return {
+    withMeetingLeaves(leaves) {
+      if (!ignoredEmptyCatalogIds.includes(leaves.id) || catalogs.has(leaves.id))
+        throw new Error(
+          "Meeting proof leaves need their own configured catalog identity."
+        );
+      return createMeetingReceiptGraph({
+        leaves,
+        verify: (request, receiptId, audience, catalog, deadlineAt) =>
+          verifyReceipt(
+            { ...input, catalogs: new Map([...catalogs, [catalog.id, catalog]]) },
+            request,
+            receiptId,
+            {
+              audience,
+              ignoredEmptyCatalogIds: ignoredEmptyCatalogIds.filter(
+                (id) => id !== leaves.id
+              ),
+              meetingCatalogId: leaves.id,
+              deadlineAt
+            }
+          )
+      });
+    },
     async requireCurrent({ originalRequest, receiptId, audience }) {
       const bundle = await verifyReceipt(
         { ...input, catalogs },
@@ -434,7 +464,12 @@ async function verifyReceipt(
   },
   request: OrganizationalContextRequest,
   receiptId: string,
-  external?: { audience: ContextAudience; ignoredEmptyCatalogIds: string[] }
+  external?: {
+    audience: ContextAudience;
+    ignoredEmptyCatalogIds: string[];
+    meetingCatalogId?: string;
+    deadlineAt?: number;
+  }
 ): Promise<OrganizationalContextBundle> {
   const catalogs = input.catalogs;
   const now = input.now ?? (() => new Date());
@@ -449,6 +484,7 @@ async function verifyReceipt(
       catalog.read({
         audience: structuredClone(bound.audience),
         subject: structuredClone(bound.subject),
+        time: structuredClone(bound.time),
         sourceId
       }),
       Math.min(input.timeoutMs ?? 5000, deadlineAt - Date.now())
@@ -458,7 +494,7 @@ async function verifyReceipt(
   };
   request = structuredClone(request);
   validateRequest(request);
-  const readDeadline = Date.now() + 15_000;
+  const readDeadline = Math.min(Date.now() + 15_000, external?.deadlineAt ?? Infinity);
   const result = await input.database.query<{
     request_hash: string;
     proof_json: string;
@@ -475,7 +511,13 @@ async function verifyReceipt(
   const ignored = new Set(external?.ignoredEmptyCatalogIds ?? []);
   if (
     digest(receipt.catalogIds.filter((id) => !ignored.has(id))) !==
-    digest([...catalogs.keys()].sort())
+    digest(
+      [...catalogs.keys()]
+        .filter(
+          (id) => id !== external?.meetingCatalogId || receipt.catalogIds.includes(id)
+        )
+        .sort()
+    )
   )
     throw new OrganizationalContextUnavailableError();
   if (external) {
@@ -488,7 +530,8 @@ async function verifyReceipt(
     )
       throw new OrganizationalContextUnavailableError();
     if (
-      bundle.sources.some((source) => source.kind === "previous-meeting-item") ||
+      (!external.meetingCatalogId &&
+        bundle.sources.some((source) => source.kind === "previous-meeting-item")) ||
       receipt.sources.some((source) => ignored.has(source.catalogId)) ||
       receipt.unavailableReads.some((source) => ignored.has(source.catalogId))
     )
@@ -498,6 +541,16 @@ async function verifyReceipt(
   if (receipt.validUntil && now().getTime() >= Date.parse(receipt.validUntil))
     throw new OrganizationalContextUnavailableError();
   for (const search of receipt.searches) {
+    // Empty original Meeting discovery supplied no borrowed text. Later Meetings
+    // cannot retroactively create a dependency; this matches the external-only leaf rule.
+    if (
+      search.catalogId === external?.meetingCatalogId &&
+      !search.failed &&
+      !search.sourceIds.length &&
+      !receipt.sources.some((source) => source.catalogId === search.catalogId) &&
+      !receipt.unavailableReads.some((source) => source.catalogId === search.catalogId)
+    )
+      continue;
     if (ignored.has(search.catalogId)) {
       // No prior-Meeting material was discovered or read. Never enter that
       // catalog to verify a leaf's own dependency graph.
@@ -514,6 +567,7 @@ async function verifyReceipt(
         catalog.search({
           audience: structuredClone(request.audience),
           subject: structuredClone(request.subject),
+          time: structuredClone(request.time),
           concepts: [...request.concepts],
           limit: search.limit
         }),
@@ -551,7 +605,9 @@ async function verifyReceipt(
       const current = await read(catalog, request, proof.sourceId, readDeadline);
       if (
         !current ||
-        (external && current.kind === "previous-meeting-item") ||
+        (external &&
+          !external.meetingCatalogId &&
+          current.kind === "previous-meeting-item") ||
         digest(current) !== proof.snapshotId
       )
         throw new OrganizationalContextUnavailableError();

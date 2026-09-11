@@ -3,7 +3,15 @@ import {
   requireUnfencedSynthesis
 } from "./synthesis-action-state.js";
 import { synthesisActionCandidates } from "./synthesis-action-candidates.js";
-import { createHash } from "node:crypto";
+import { readProcessedCaptureEvidence } from "./processed-capture-evidence.js";
+import {
+  prepareCaptureSynthesisSources,
+  matchesMaterialDigest,
+  digest,
+  sorted,
+  type Material,
+  type Prepared
+} from "./capture-synthesis-sources.js";
 import { z } from "zod";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import {
@@ -26,7 +34,6 @@ import type {
   SynthesisActionItemCandidate,
   MeetingState
 } from "../domain/model.js";
-import type { LogicalMeeting } from "../logical-meetings/interface.js";
 import type { ContextAudience } from "../organizational-context/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
@@ -35,10 +42,7 @@ import type {
   ObserveMeeting,
   QueryMeeting
 } from "./interface.js";
-import type {
-  CaptureSynthesisConfiguration,
-  CurrentMeetingCaptureMaterial
-} from "./meeting-capture-access.js";
+import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
 import {
   isSynthesisPublicationObservation,
   observeSynthesisPublication,
@@ -53,20 +57,6 @@ type Stored = {
   materialDigest: string;
   bindingDigest: string;
   judgments: CaptureSynthesisJudgmentRecorded[];
-};
-type Material = CurrentMeetingCaptureMaterial & {
-  captureId: string;
-  sourceRevision: number;
-  evidenceId: string;
-};
-type Prepared = {
-  authorizationScopes: Record<string, string>;
-  meeting: LogicalMeeting;
-  audience: ContextAudience;
-  materials: Material[];
-  bindingDigest: string;
-  materialDigest: string;
-  anchor: LumaSynthesis["canonicalAnchorRef"];
 };
 const scopeSchema = z.object({
   observationId: z.string().min(1).max(1024),
@@ -170,9 +160,16 @@ export function withCaptureSynthesis(input: {
       workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, attempt_key TEXT NOT NULL,
       PRIMARY KEY(workspace_id, meeting_id, attempt_key)
     );
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS source_set_digest TEXT;
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS judgments_digest TEXT;
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS ordering_version TEXT;
   `
       )
-      .then(() => ensureSynthesisActionFences(input.database)));
+      .then(() => ensureSynthesisActionFences(input.database))
+      .catch((error: unknown) => {
+        migration = undefined;
+        throw error;
+      }));
   const load = async (workspaceId: string, meetingId: string): Promise<Stored | null> => {
     const result = await input.database.query<{ state_json: string }>(
       "SELECT state_json FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
@@ -210,105 +207,8 @@ export function withCaptureSynthesis(input: {
       new Intl.DateTimeFormat("en", { timeZone: config.timezone });
       return config;
     });
-  const prepare = async (
-    workspaceId: string,
-    meetingId: string,
-    original?: ContextAudience
-  ): Promise<Prepared> => {
-    const config = input.configuration;
-    if (!config) throw new Unavailable();
-    const audience = await config.audience(workspaceId);
-    if (
-      !audience ||
-      audience.workspaceId !== workspaceId ||
-      !audience.personIds.length ||
-      new Set(audience.personIds).size !== audience.personIds.length ||
-      (original &&
-        (original.workspaceId !== workspaceId ||
-          audience.personIds.some((id) => !original.personIds.includes(id))))
-    )
-      throw new Unavailable();
-    const boundAudience = { workspaceId, personIds: [...audience.personIds].sort() };
-    const meeting = await config.logicalMeetings.get({
-      workspaceId,
-      logicalMeetingId: meetingId
-    });
-    if (!meeting || !meeting.captureRefs.length || meeting.captureRefs.length > 8)
-      throw new Unavailable();
-    // Publication metadata is not new source material or a new capture binding.
-    const bindingDigest = captureBindingDigest(meeting);
-    const materials: Material[] = [];
-    const authorizationScopes: Record<string, string> = {};
-    const anchors: NonNullable<LumaSynthesis["canonicalAnchorRef"]>[] = [];
-    for (const capture of meeting.captureRefs) {
-      const revision = capture.latestRevision;
-      if (
-        !["complete", "partial"].includes(revision.availability) ||
-        !revision.materials.length
-      )
-        throw new Unavailable();
-      const material = await config.access.readCurrent({
-        workspaceId,
-        capture: structuredClone(capture),
-        audience: structuredClone(boundAudience)
-      });
-      if (!material.authorizationScopeId.trim()) throw new Unavailable();
-      authorizationScopes[capture.id] = material.authorizationScopeId;
-      if (material.canonicalAnchorRef) anchors.push(material.canonicalAnchorRef);
-      if (
-        digest(sorted(material.materials.map((item) => item.descriptor))) !==
-        digest(sorted(revision.materials))
-      )
-        throw new Unavailable();
-      for (const item of material.materials) {
-        if (!item.text.trim() || item.text.length > 100_000) throw new Unavailable();
-        materials.push({
-          ...item,
-          captureId: capture.id,
-          sourceRevision: revision.sourceRevision,
-          evidenceId: `capture-evidence:${digest([capture.id, revision.sourceRevision, item.descriptor])}`
-        });
-      }
-    }
-    if (
-      materials.length > 64 ||
-      materials.reduce((count, item) => count + item.text.length, 0) > 250_000 ||
-      new Set(materials.map((item) => item.evidenceId)).size !== materials.length
-    )
-      throw new Unavailable();
-    const finalMeeting = await config.logicalMeetings.get({
-      workspaceId,
-      logicalMeetingId: meetingId
-    });
-    if (
-      captureBindingDigest(finalMeeting) !== bindingDigest ||
-      digest(finalMeeting?.canonicalAnchorRef) !== digest(meeting.canonicalAnchorRef) ||
-      digest(
-        await config
-          .audience(workspaceId)
-          .then((value) =>
-            value ? { ...value, personIds: [...value.personIds].sort() } : null
-          )
-      ) !== digest(boundAudience)
-    )
-      throw new Unavailable();
-    const uniqueAnchors = new Map(
-      anchors.map((anchor) => [digest([anchor.providerId, anchor.externalId]), anchor])
-    );
-    const anchor =
-      meeting.canonicalAnchorRef ??
-      (uniqueAnchors.size === 1 ? [...uniqueAnchors.values()][0]! : null);
-    if (!anchor && uniqueAnchors.size > 1) throw new Unavailable();
-    return {
-      meeting,
-      audience: boundAudience,
-      materials,
-      bindingDigest,
-      materialDigest: digest(sorted(materials)),
-      authorizationScopes,
-      anchor
-    };
-  };
+  const prepare = (workspaceId: string, meetingId: string, original?: ContextAudience) =>
+    prepareCaptureSynthesisSources(input.configuration, workspaceId, meetingId, original);
   const requireSame = async (
     workspaceId: string,
     meetingId: string,
@@ -460,7 +360,7 @@ export function withCaptureSynthesis(input: {
         if (
           prior &&
           (current.bindingDigest !== prior.bindingDigest ||
-            current.materialDigest !== prior.materialDigest ||
+            !matchesMaterialDigest(current, prior.materialDigest) ||
             digest(current.authorizationScopes) !== digest(prior.authorizationScopes))
         )
           throw new Unavailable();
@@ -481,6 +381,14 @@ export function withCaptureSynthesis(input: {
         );
       }
       const prepared = await prepare(workspaceId, meetingId, prior?.audience);
+      // An unchanged immutable source set with an unrecognized old material
+      // order cannot be treated as new evidence to justify another paid call.
+      if (
+        prior &&
+        prepared.bindingDigest === prior.bindingDigest &&
+        !matchesMaterialDigest(prepared, prior.materialDigest)
+      )
+        throw new Unavailable();
       const currentCaptureIds = new Set(
         prepared.meeting.captureRefs.map((capture) => capture.id)
       );
@@ -505,7 +413,7 @@ export function withCaptureSynthesis(input: {
           observation.expectedSynthesisRevision !== prior.synthesis.revision ||
           !prepared.audience.personIds.includes(observation.participantId) ||
           prepared.bindingDigest !== prior.bindingDigest ||
-          prepared.materialDigest !== prior.materialDigest ||
+          !matchesMaterialDigest(prepared, prior.materialDigest) ||
           digest(prepared.authorizationScopes) !== digest(prior.authorizationScopes)
         )
           throw new Unavailable();
@@ -534,13 +442,17 @@ export function withCaptureSynthesis(input: {
         if (digest(sorted(actual)) !== digest(sorted(observation.captures)))
           throw new Unavailable();
         const workspace = await claimWorkspace(request.workspace);
-        const sourceSetDigest = digest([
-          prepared.bindingDigest,
-          prepared.materialDigest,
-          prepared.authorizationScopes,
-          workspace
-        ]);
-        if (prior?.synthesis.sourceSetDigest === sourceSetDigest) {
+        const sourceSetDigests = prepared.compatibleMaterialDigests.map(
+          (materialDigest) =>
+            digest([
+              prepared.bindingDigest,
+              materialDigest,
+              prepared.authorizationScopes,
+              workspace
+            ])
+        );
+        const sourceSetDigest = sourceSetDigests[0]!;
+        if (prior && sourceSetDigests.includes(prior.synthesis.sourceSetDigest)) {
           await requireSame(workspaceId, meetingId, prepared, audience);
           await input.database.query(
             "INSERT INTO meeting_capture_synthesis_observations(workspace_id,observation_id,meeting_id,payload_json) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
@@ -556,14 +468,58 @@ export function withCaptureSynthesis(input: {
           return update(observation, "not-needed", prior.synthesis.revision, true);
         }
         await requireUnfencedSynthesis(input.database, workspaceId, meetingId);
-        attemptKey = digest([
-          sourceSetDigest,
-          digest(prior?.judgments ?? []),
-          "capture-synthesis-v1"
-        ]);
+        const judgmentsDigest = digest(prior?.judgments ?? []);
+        const compatibleAttemptKeys = sourceSetDigests.map((sourceDigest) =>
+          digest([sourceDigest, judgmentsDigest, "capture-synthesis-v1"])
+        );
+        const previousAttempts = await input.database.query<{
+          attempt_key: string;
+          ordering_version: string | null;
+        }>(
+          "SELECT attempt_key,ordering_version FROM meeting_capture_synthesis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND (ordering_version IS NULL OR attempt_key=ANY($3::text[])) LIMIT 1001",
+          [workspaceId, meetingId, compatibleAttemptKeys]
+        );
+        const unknownLegacy = previousAttempts.rows.filter(
+          (attempt) =>
+            attempt.ordering_version === null &&
+            !compatibleAttemptKeys.includes(attempt.attempt_key)
+        );
+        let unresolvedLegacy = false;
+        if (unknownLegacy.length) {
+          const revisions = await input.database.query<{ state_json: string }>(
+            "SELECT state_json FROM meeting_capture_synthesis_revisions WHERE workspace_id=$1 AND meeting_id=$2 ORDER BY revision DESC LIMIT 1001",
+            [workspaceId, meetingId]
+          );
+          const completed = new Set(
+            revisions.rows.map(({ state_json }) => {
+              const state = JSON.parse(state_json) as Stored;
+              return digest([
+                state.synthesis.sourceSetDigest,
+                digest(state.judgments),
+                "capture-synthesis-v1"
+              ]);
+            })
+          );
+          unresolvedLegacy =
+            revisions.rows.length > 1000 ||
+            unknownLegacy.some((attempt) => !completed.has(attempt.attempt_key));
+        }
+        if (
+          previousAttempts.rows.length > 1000 ||
+          unresolvedLegacy ||
+          previousAttempts.rows.some((attempt) =>
+            compatibleAttemptKeys.includes(attempt.attempt_key)
+          )
+        )
+          throw new AiServiceError(
+            "request-indeterminate",
+            "A retained synthesis attempt cannot be safely redispatched; its original charge and identity require recovery.",
+            { requestDispatched: true }
+          );
+        attemptKey = digest([sourceSetDigest, judgmentsDigest, "capture-synthesis-v1"]);
         const claimAttempt = await input.database.query(
-          "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING attempt_key",
-          [workspaceId, meetingId, attemptKey]
+          "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key,source_set_digest,judgments_digest,ordering_version) VALUES($1,$2,$3,$4,$5,'code-unit-v1') ON CONFLICT DO NOTHING RETURNING attempt_key",
+          [workspaceId, meetingId, attemptKey, sourceSetDigest, judgmentsDigest]
         );
         if (!claimAttempt.rows.length) {
           attemptKey = undefined;
@@ -759,7 +715,7 @@ export function withCaptureSynthesis(input: {
       if (
         current.bindingDigest !== state.bindingDigest ||
         digest(current.authorizationScopes) !== digest(state.authorizationScopes) ||
-        current.materialDigest !== state.materialDigest
+        !matchesMaterialDigest(current, state.materialDigest)
       )
         throw new Unavailable();
       await requireSame(scope.workspaceId, scope.meetingId, current, state.audience);
@@ -944,9 +900,60 @@ export function withCaptureSynthesis(input: {
       const bound = structuredClone(request);
       const key = digest([bound.workspace.workspaceId, bound.observations[0]?.meetingId]);
       const previous = flights.get(key);
-      const next = previous
-        ? previous.catch(() => undefined).then(() => observe(bound))
-        : observe(bound);
+      const process = async (): Promise<MeetingUpdate> => {
+        const result = await observe(bound);
+        const callback = input.configuration?.onProcessedSource;
+        const observation = bound.observations[0];
+        if (
+          callback &&
+          input.configuration &&
+          observation &&
+          (result.acceptedObservationIds.includes(observation.observationId) ||
+            result.duplicateObservationIds.includes(observation.observationId))
+        ) {
+          try {
+            const audience = await input.configuration.audience(
+              bound.workspace.workspaceId
+            );
+            if (!audience) throw new Unavailable();
+            const current = await readProcessedCaptureEvidence({
+              database: input.database,
+              configuration: input.configuration,
+              workspaceId: bound.workspace.workspaceId,
+              meetingId: observation.meetingId,
+              audience
+            });
+            await callback({
+              workspaceId: bound.workspace.workspaceId,
+              meetingId: observation.meetingId,
+              observationId: observation.observationId,
+              sourceRevision: current.revision,
+              contentHash: digest([
+                current.bindingDigest,
+                current.materialDigest,
+                current.authorizationScopes,
+                current.audience,
+                current.reviews
+              ])
+            });
+          } catch {
+            return {
+              ...result,
+              analysisStatus: "deferred" as const,
+              errors: [
+                ...result.errors,
+                {
+                  code: "context-unavailable" as const,
+                  retryable: true,
+                  partialResultAvailable: true
+                }
+              ]
+            };
+          }
+        }
+        return result;
+      };
+      const next = previous ? previous.catch(() => undefined).then(process) : process();
       flights.set(key, next);
       void next
         .finally(() => {
@@ -1049,25 +1056,4 @@ function applyJudgments(
     }
   }
   return result;
-}
-function sorted<T>(values: readonly T[]): T[] {
-  return [...values].sort((left, right) =>
-    canonical(left).localeCompare(canonical(right))
-  );
-}
-function captureBindingDigest(meeting: LogicalMeeting | null): string {
-  return digest(meeting ? { ...meeting, canonicalAnchorRef: null } : null);
-}
-function digest(value: unknown): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
-}
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object)
-    .sort()
-    .filter((key) => object[key] !== undefined)
-    .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
-    .join(",")}}`;
 }

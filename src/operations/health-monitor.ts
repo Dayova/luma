@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { runtimeHealthSchema } from "../app/runtime-health.js";
+import {
+  runtimeHealthSchema,
+  runtimeCapabilityProblemSchema
+} from "../app/runtime-health.js";
 import { backupReceiptSchema } from "./maintenance.js";
 
 /** Matches the complete stop/copy/verify/resume bound in luma-backup.service. */
@@ -10,7 +13,8 @@ export const healthProblemSchema = z.enum([
   "gateway-disconnected",
   "backup-overdue",
   "backup-failed",
-  "storage-low"
+  "storage-low",
+  ...runtimeCapabilityProblemSchema.options
 ]);
 export type HealthProblem = z.infer<typeof healthProblemSchema>;
 export const alertStateSchema = z
@@ -62,6 +66,8 @@ export function assessOperationalHealth(input: {
   } else if (!plannedColdCopy && runtime.success && !runtime.data.gatewayConnected) {
     problems.push("gateway-disconnected");
   }
+  if (!plannedColdCopy && runtime.success && !problems.includes("runtime-unavailable"))
+    problems.push(...new Set(runtime.data.capabilityProblems ?? []));
   const backup = backupReceiptSchema.safeParse(input.backupReceipt);
   const backupAge = backup.success
     ? currentTime - Date.parse(backup.data.capturedAt)
@@ -104,11 +110,25 @@ export async function deliverHealthStatus(input: {
       "backup-failed":
         "Luma's latest scheduled backup failed. The last verified backup has been preserved.",
       "storage-low":
-        "Luma has less than 2 GiB of free space for its store or backup verification."
+        "Luma has less than 2 GiB of free space for its store or backup verification.",
+      "ai-budget-near-limit":
+        "Luma is approaching its configured AI spending limit. Check /meeting usage; the cap will not increase automatically.",
+      "ai-budget-exhausted":
+        "Luma has reached its configured AI spending limit. Paid processing is paused; /meeting usage shows costs and reset time. Original captured evidence is retained.",
+      "ai-unavailable":
+        "Luma's AI configuration or usage accounting is unavailable. Check /meeting usage before retrying.",
+      "source-ingestion-degraded":
+        "Luma's enabled source ingestion reports a failure. Check source access and the private source status; existing evidence is retained.",
+      "decision-recall-degraded":
+        "Luma cannot currently refresh complete Decision recall candidates. Answers may have missing context; check the source grants and provider availability.",
+      "automatic-decisions-need-attention":
+        "Automatic Decision processing needs attention for a current source. Use /decision-record candidates in the source conversation or meeting to inspect its retained status.",
+      "capability-status-unavailable":
+        "Luma could not check its processing capabilities. Inspect the running service before assuming source processing is healthy."
     };
     await input.send(
       input.problems.length === 0
-        ? "Luma operations recovered: runtime, Discord Gateway, and off-host backup checks are healthy."
+        ? "Luma operations recovered: runtime, Discord Gateway, enabled processing capabilities and off-host backup checks are healthy."
         : input.problems.map((problem) => descriptions[problem]).join("\n")
     );
     // Failed delivery remains retryable. State never claims a notification sent.

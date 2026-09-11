@@ -1,6 +1,7 @@
 import { projectCurrentSynthesisActions } from "./synthesis-action-state.js";
 import { withCaptureSynthesis } from "./capture-synthesis.js";
 import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
+import { createAutomaticDecisionIntelligence } from "../decision-intelligence/automatic-decisions.js";
 import {
   createDecisionIntelligence,
   type DecisionIntelligenceConfiguration
@@ -10,6 +11,11 @@ import {
   type MeetingDecisionSourceAudience
 } from "../decision-intelligence/meeting-evidence-source.js";
 import { bindDecisionModule } from "../decision-intelligence/module-binding.js";
+import {
+  createStructuredWorkIntelligence,
+  type StructuredWorkConfiguration
+} from "../structured-work/structured-work.js";
+import { bindStructuredWorkModule } from "../structured-work/module-binding.js";
 import {
   scopeMeetingIntelligence,
   type ScopedMeetingIntelligence
@@ -138,6 +144,7 @@ const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v
 export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
   reasoningModel: ReasoningModel;
+  structuredWork?: StructuredWorkConfiguration;
   decisionIntelligence?: DecisionIntelligenceConfiguration & {
     meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
     meetingSourceAudience?: MeetingDecisionSourceAudience;
@@ -246,6 +253,9 @@ export function createMeetingIntelligence(
   }
 ): ScopedMeetingIntelligence;
 export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput & { structuredWork: StructuredWorkConfiguration }
+): ScopedMeetingIntelligence;
+export function createMeetingIntelligence(
   input: CreateMeetingIntelligenceInput
 ): MeetingIntelligence;
 export function createMeetingIntelligence(
@@ -263,6 +273,7 @@ export function createMeetingIntelligence(
       : Promise.resolve();
   const contextConfiguration: MeetingContextConfiguration = {
     database: input.database,
+    requireSynthesisCurrent: (state) => requireSynthesisCurrent(state),
     ...(input.importedSourceAnalysis
       ? { importedSourceAnalysis: input.importedSourceAnalysis }
       : {}),
@@ -382,9 +393,16 @@ export function createMeetingIntelligence(
                 state.importedActionItemCandidates,
                 candidates
               ),
-              currentImportedActionItemCandidateIds: candidates.map(
-                (candidate) => candidate.id
-              ),
+              currentImportedActionItemCandidateIds: [
+                ...state.currentImportedActionItemCandidateIds.filter((id) =>
+                  state.importedActionItemCandidates.some(
+                    (candidate) =>
+                      candidate.id === id &&
+                      candidate.source.source.sourceKind !== "capture-synthesis"
+                  )
+                ),
+                ...candidates.map((candidate) => candidate.id)
+              ],
               captureSynthesisActionSource: {
                 revision: synthesis.revision,
                 sourceSetDigest: synthesis.sourceSetDigest,
@@ -425,7 +443,17 @@ export function createMeetingIntelligence(
     },
     now
   });
-  if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
+  const structuredDependencies = input.structuredWork
+    ? { ...input.structuredWork, database: input.database }
+    : undefined;
+  const structured = structuredDependencies
+    ? createStructuredWorkIntelligence(structuredDependencies)
+    : undefined;
+  if (!input.decisionIntelligence) {
+    const facade = scopeMeetingIntelligence(meeting, undefined, structured);
+    if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
+    return facade;
+  }
   const configuration = input.decisionIntelligence;
   const meetingSource =
     configuration.meetingEvidenceSource ??
@@ -469,11 +497,17 @@ export function createMeetingIntelligence(
       }
     }
   };
+  const decision = createDecisionIntelligence(dependencies);
   const facade = scopeMeetingIntelligence(
     meeting,
-    createDecisionIntelligence(dependencies)
+    decision,
+    structured,
+    configuration.automatic
+      ? createAutomaticDecisionIntelligence(dependencies, decision)
+      : undefined
   );
   bindDecisionModule(facade, dependencies);
+  if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
   return facade;
 }
 
@@ -2654,7 +2688,12 @@ function filterSynthesisActionEvidence(
       ...state.followUpIntentions.flatMap((item) => item.provenance.evidence)
     ].map((item) => item.evidenceId)
   );
-  return evidence.filter((item) => allowed.has(item.evidenceId));
+  return evidence.filter(
+    (item) =>
+      (!item.evidenceId.startsWith("evidence:synthesis-action:") &&
+        !item.evidenceId.startsWith("evidence:human-action:")) ||
+      allowed.has(item.evidenceId)
+  );
 }
 
 async function queryProjectedMeeting(

@@ -31,6 +31,19 @@ export async function createPgliteDatabase(dataDir?: string): Promise<LumaDataba
 
 export async function runMigrations(database: LumaDatabase): Promise<void> {
   await database.exec(`
+    CREATE TABLE IF NOT EXISTS native_review_instructions (
+      workspace_id TEXT NOT NULL,
+      instruction_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      analysis_json TEXT,
+      source_provider_id TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_content_hash TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, instruction_id)
+    );
+    CREATE INDEX IF NOT EXISTS native_review_instruction_source_idx ON native_review_instructions (workspace_id,source_provider_id,source_object_id,source_content_hash);
+
     CREATE TABLE IF NOT EXISTS ai_usage_locks (
       workspace_id TEXT PRIMARY KEY,
       accounting_blocked BOOLEAN NOT NULL DEFAULT FALSE

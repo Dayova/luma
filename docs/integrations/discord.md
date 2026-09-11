@@ -2,11 +2,10 @@
 
 ## Current Capability
 
-Discord is a first-class Luma conversation source and interaction surface in
-the product direction. The current implementation is deliberately narrower:
-it provides a persistent Meeting bot and a bounded read-only Context Ask
-slice. It does not yet implement the complete Discord Ask → Verify →
-Reconcile → Execute interaction model.
+Discord is a Luma conversation source and interaction surface. The shared
+runtime provides persistent Meetings, bounded Context Ask, source-bound review,
+reconciliation and governed execution. Each capability has its own explicit
+scope and activation checks; a successful read does not authorize a write.
 
 The Discord Module translates current Meeting interactions into
 provider-independent calls to Meeting Intelligence and renders Meeting
@@ -30,17 +29,20 @@ Implemented now:
 - deterministic provider-identity speaker attribution for typed Discord notes;
   speaker attribution remains distinct from Action Item ownership
 - explicit approval before the currently implemented Meeting settlement path
-- explicit Discord user mentions for Jakob, Fabius, Julius, Philipp, and configured additional People
+- explicit Discord user mentions for the four admitted founders: Jakob, Fabius, Julius and Philipp
 - bot-authored messages with restricted allowed mentions
 - graceful Gateway shutdown
 - optional, disabled-by-default bounded `@Luma` Context Ask in reviewed public
   threads
 
-Not implemented in this slice:
+Source-bound imported Meeting review, reconciliation, approved execution and
+recovery are also connected to this runtime. See the [shared capture guide](shared-meeting-capture-runtime.md),
+[Decision commands](discord-decision-records.md) and [structured work guide](../structured-work.md).
+
+Not implemented:
 
 - Discord voice connection and per-user audio capture
 - voice transcription, utterance revision, and correction UI
-- bounded Discord Verify, Reconcile, and risk-authorized Execute interactions
 - Discord voice identity/audio evidence spike; voiceprints and biometric
   recognition are not a default path
 
@@ -118,7 +120,7 @@ Grant only these bot permissions:
 - Send Messages in Threads
 - Read Message History
 
-The resulting permission integer is `309237713920`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. The standard Meeting bot does not ingest member message content. The optional Context Ask capability below is separately opt-in and bounded. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
+The base permission integer is `309237713920`. When advisory consultations are enabled, also grant **Send Polls** (`1 << 49`); the combined integer is `563259191135232`. Read Message History lets Luma find a reserved thread after Discord has auto-archived it and verify bot-owned lifecycle markers during durable retry recovery. The standard Meeting bot does not ingest member message content. The optional Context Ask capability below is separately opt-in and bounded. The Developer Portal installation builder can generate the install URL; using the builder avoids hand-editing OAuth2 URLs. Discord's current permission flags are documented in the [Permissions reference](https://docs.discord.com/developers/topics/permissions).
 
 Do not grant Administrator, Manage Server, Manage Roles, Manage Webhooks, or
 Manage Messages. Server Members is a privileged intent needed for audience
@@ -376,13 +378,13 @@ second and later questions work in the same thread. Their IDs remain in capture
 metadata, their exclusion is disclosed, and they still consume the scan budget.
 Founder and verified Luma polls are retained as [bounded advisory Evidence](discord-polls.md),
 including unknown results and provisional counts. Unknown bots, webhooks, system messages, unsupported content, and truncated
-history still produce an insufficient-evidence answer. This scope answers the
-selected thread only and needs no Granola or cross-provider retrieval. It never
-creates a Meeting, proposal, Intent,
-Linear issue, Notion page, or any other Follow-up mutation. This is an
-implemented bounded limitation, not a permanent statement that Discord
-conversations cannot later feed the shared Evidence, reconciliation,
-authorization, and execution core.
+history still produce an insufficient-evidence answer. The answer uses the
+selected thread and, when configured, governed organizational retrieval with
+current source and audience proofs. Answer generation is read-only and does not
+create a synthetic Meeting. When automatic Decision processing is separately
+enabled, the admitted conversation also feeds the shared candidate pipeline;
+canonical writes require its current standing recording permission and normal
+source, authority and execution checks. See [Decision Records in Discord](discord-decision-records.md).
 
 Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
 
@@ -442,7 +444,7 @@ After the development Application is installed and `.env` is populated:
 
 Do not use this development smoke test to exercise approval, Linear, or Notion
 mutations. Those require their own source-bound authorization and rollout
-evidence outside this dormant Discord documentation path.
+evidence described in the linked capability guides.
 
 9. Run `/meeting stop` and confirm the Conclusion appears in the thread.
 10. Restart the bot and confirm `.luma/pglite` preserves thread and execution records.

@@ -3,19 +3,29 @@
 This package runs one founders-only Discord service on an always-on Linux host
 with systemd and persistent local storage. It does not provision a host, pay for
 hosting, create a production Discord application, or prove that Luma is live.
-The runtime includes Discord Meeting analysis and bounded Context Ask, with
-optional governed retrieval from explicitly shared Notion pages, Linear work,
-and GitHub code. This is not the complete agreed Luma product: Granola,
-multi-capture synthesis, cross-Meeting recall, polls, and native review still
-have separate acceptance work. The isolated Notion observer stays dormant.
+The shared runtime includes Discord Meeting analysis and bounded Context Ask,
+governed Notion/Linear/GitHub retrieval, canonical Decision Records and their
+signed history, founder consultations, Notion/Granola capture and synthesis,
+reviewed action execution, and explicit compound structured Notion/Linear work.
+Compound creation and reuse execute directly when authorized. Existing native
+table-property and task changes remain exact manual proposals because the
+providers cannot enforce an expected-version condition; deployment does not
+remove that functional limitation.
+Automatic Decision candidates use the shared AI allowance; canonical recording
+additionally requires current owner-specific standing permission. These are
+implemented capabilities, not evidence that source activation or production
+validation has been completed. The isolated Notion observer stays dormant;
+native Notion review has a separate authenticated-ingress acceptance gate.
 
 ## Runtime and ownership
 
 Use Node.js 24 at `/usr/bin/node`, pnpm 11.12.0 for building, and `flock` from
 util-linux at `/usr/bin/flock`. Pin the exact application commit for each release.
-The application opens outbound Discord/OpenAI connections; this service needs
-no inbound listener, public domain, or TLS endpoint. It has no HTTP readiness
-endpoint. Do not configure a hosting HTTP health check against an invented port.
+The Discord transport opens outbound connections. Enabled Notion webhooks and
+Granola browser OAuth add separate loopback HTTP listeners (defaults 3001 and 3002) and need HTTPS forwarding to their exact configured paths. Optional native Notion review uses its own loopback port 3003 and authenticated `/notion/review/mcp` path. Granola's
+production redirect must be HTTPS. Those callback paths are not health endpoints;
+the application has no HTTP readiness endpoint. Do not configure a hosting HTTP
+health check against an invented port.
 The optional operations profile uses a private local Gateway-health receipt and
 an independent systemd timer instead; see
 [unattended operations](unattended-operations.md) for daily encrypted off-host
@@ -110,7 +120,8 @@ Before first activation, verify these existing product requirements:
   [current reader verification](../integrations/discord.md#current-reader-verification).
 - Give the production bot only the channel permissions needed for the approved
   surface: View Channel, Read Message History, Send Messages, Create Public
-  Threads, and Send Messages in Threads. Administrator is unnecessary. The
+  Threads, and Send Messages in Threads. Enabled advisory consultations also
+  require Send Polls in their destination threads. Administrator is unnecessary. The
   development bot's current role grants do not give it private team-channel
   access and are not evidence of the production bot's access.
 - For Context Ask, complete participant notice and source participation approval,
@@ -125,15 +136,39 @@ Before first activation, verify these existing product requirements:
   ledger for that same budget. Usage records are estimates based on actual token
   reporting; reconcile with the provider bill.
 
-The template contains empty dedicated read-only organizational credential
-fields; collection remains disabled. To activate it, configure the
+The template contains all implemented optional capability groups with empty
+credentials and disabled flags. To activate organizational retrieval, configure the
 [organizational sharing policy and catalogs](../configuration/organizational-context.md).
 Install the policy as `root:luma`, mode `0640`, so the service can read it without
 being able to modify it. Provider source readability and permission for the full
 four-founder audience are separate requirements. Notion/Linear writer and
 personal capture credentials are not implied by this configuration. Do not
-inject observer/native-review variables into this service. The launcher
-intentionally rejects that mixed topology.
+inject the separate observer configuration into this service. The launcher
+rejects that topology; the optional native review listener is composed in this
+shared process and does not create another store.
+
+Configure the other enabled workflows from their owned guides:
+
+- [Founder Decision Records](../integrations/discord-decision-records.md),
+  [standing recording permissions](../integrations/decision-standing-permission.md),
+  and [current and historical recall](../decision-record-recall.md).
+- [Shared meeting capture](../integrations/shared-meeting-capture-runtime.md),
+  including per-founder Granola account attestation and source exclusions.
+- [Founder consultations](../integrations/discord-consultations.md).
+- [Native Notion review](../integrations/native-notion-review.md), requiring
+  verified original founder events, existing Enterprise Admin API access, separate
+  read credentials and HTTPS forwarding. Notion's own Custom Agent credits are
+  separate from Luma's API accounting; leave this capability disabled until its
+  provider access and cost arrangement are established.
+- [Compound structured work](../structured-work.md), with
+  protected target mappings and independently checked Notion/Linear grants.
+
+All workflows use the same store and AI budget. When shared capture is enabled,
+automatic Decision processing follows the accepted LogicalMeeting event once;
+the underlying Notion import does not enqueue a second paid analysis. Changing
+or revoking a source grant withholds its retained outputs without deleting the
+original history. Include the exact enabled policies, signing keys and Granola
+credential key in the authenticated [recovery bundle](backup-restore.md).
 
 Run the offline preflight against the installed release:
 
@@ -181,7 +216,7 @@ Jakob when the host is provisioned; validate one alert deliberately. The service
 restarts failed processes with a delay and stops retrying after five failures
 within five minutes. Investigate failures before `systemctl reset-failed luma`.
 
-## Prove the limited release
+## Run operational smoke checks
 
 Use an explicitly approved test thread and founder actor. Establish all of:
 
@@ -200,6 +235,12 @@ Record exact release, channel scope, runtime start/stop, restore result, and liv
 smoke-test outcome. Never include tokens or captured conversation bodies in the
 deployment record. The service can report AI failures while alive; if the host
 or Gateway is unavailable, a separate host alert is required.
+
+These operational checks do not complete the canonical
+[five-approved-real-meetings product acceptance](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23).
+That acceptance also covers mixed language, ambiguous ownership, later revisions
+and replay, with recorded accuracy, corrections, review effort and AI cost.
+Keep its results separate from the deployment smoke-test record.
 
 ## Update and rollback
 

@@ -1,3 +1,5 @@
+import type { DiscordDecisionRecordRuntime } from "../../src/discord/discord-decision-record-runtime.js";
+import type { AutomaticDecisionDetector } from "../../src/decision-intelligence/ports.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
 import {
@@ -37,7 +39,7 @@ afterEach(async () => {
 const workspace = { workspaceId: "dayova", timezone: "Europe/Berlin" };
 const time = "2026-09-11T10:00:00.000Z";
 
-async function fixture() {
+async function fixture(automaticEnabled = false) {
   const people = ["jakob", "fabius", "philipp", "julius"];
   const identity = {
     providerId: "notion",
@@ -116,6 +118,30 @@ async function fixture() {
       reconciliation: { action: "create" }
     });
   });
+  const detect = vi.fn<AutomaticDecisionDetector["detect"]>((request) => {
+    const transcript = request.source.evidence.find(
+      (entry) => entry.reference.source === "transcript"
+    )!;
+    return Promise.resolve({
+      complete: true,
+      candidates: [
+        {
+          confidence: "high",
+          interpretation: {
+            candidate: {
+              ...record.candidate,
+              statement: {
+                text: "Luma bleibt intern bei den vier Gründern.",
+                evidenceIds: [transcript.id]
+              },
+              acceptanceEvidenceIds: [transcript.id]
+            },
+            reconciliation: { action: "create" }
+          }
+        }
+      ]
+    });
+  });
   const write = vi.fn<DecisionRecords["write"]>(() => {
     throw new Error("No Human acceptance permits a write");
   });
@@ -159,6 +185,9 @@ async function fixture() {
         Promise.resolve({ workspaceId: workspace.workspaceId, personIds: [...people] })
     },
     decisionIntelligence: {
+      ...(automaticEnabled
+        ? { automatic: { evidenceSource: source, detector: { detect } } }
+        : {}),
       meetingEvidenceSource: source,
       evidenceSource: {
         capture: () => Promise.reject(new Error("No synthetic Conversation")),
@@ -237,6 +266,7 @@ async function fixture() {
     identity,
     people,
     interpret,
+    detect,
     write,
     written,
     reviewAccess: createDecisionHumanReviewAccess({ database, accessPolicy, audience }),
@@ -714,7 +744,10 @@ describe("Original Human review of imported Decision candidates", () => {
   });
 });
 
-async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
+async function importedDecisionBot(
+  f: Awaited<ReturnType<typeof fixture>>,
+  options: Pick<DiscordDecisionRecordRuntime, "logicalMeetings" | "automatic"> = {}
+) {
   let command: ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | undefined;
   const transport: DiscordTransport = {
     connect: (handler) => {
@@ -763,6 +796,7 @@ async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
       }
     },
     decisionRecords: {
+      ...options,
       meetingIntelligence: f.mi,
       execution: executor,
       config: {
@@ -797,6 +831,59 @@ async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Native imported Decision commands through the actual MI facade", () => {
+  it("maps only candidate discovery to the current LogicalMeeting and keeps prior imported request IDs on their original subject", async () => {
+    const f = await fixture();
+    let mapped = "logical-meeting:approved-capture";
+    const resolveMeeting = vi.fn(({ meetingId }: { meetingId: string }) =>
+      Promise.resolve(meetingId === f.imported.meetingId ? mapped : null)
+    );
+    const review = vi.fn<
+      NonNullable<DiscordDecisionRecordRuntime["automatic"]>["review"]
+    >(() =>
+      Promise.resolve({
+        batch: null,
+        status: "queued" as const
+      })
+    );
+    const live = await importedDecisionBot(f, {
+      logicalMeetings: {
+        resolveMeeting,
+        currentAudience: () =>
+          Promise.resolve({
+            workspaceId: workspace.workspaceId,
+            personIds: [...f.people]
+          })
+      },
+      automatic: { review }
+    });
+    await live.bind();
+    const response = await live.invoke({
+      ...live.base,
+      type: "decision-record-candidates",
+      interactionId: "candidates-logical"
+    });
+    expect(response.content).toContain(`Meeting ID (meeting_id): ${mapped}`);
+    expect(review).toHaveBeenCalledWith({ type: "meeting", meetingId: mapped });
+    await response.requireCurrent?.();
+    mapped = "logical-meeting:changed-binding";
+    await expect(response.requireCurrent?.()).rejects.toThrow();
+    resolveMeeting.mockClear();
+    const request = await live.invoke({
+      ...live.base,
+      type: "decision-record-meeting",
+      instruction: "Record this decision."
+    });
+    expect(request.content).toContain("Request ID:");
+    const status = await live.invoke({
+      ...live.base,
+      type: "decision-record-status",
+      requestId: `discord:${live.base.interactionId}:decision-record`
+    });
+    expect(status.content).toContain("Request ID:");
+    expect(resolveMeeting).not.toHaveBeenCalled();
+    expect(status.content).not.toContain("Meeting ID (meeting_id):");
+  });
+
   it("rechecks the imported thread binding after interpretation before executing an otherwise approved record", async () => {
     const f = await fixture();
     f.allowWrites();
@@ -1025,5 +1112,84 @@ describe("Native imported Decision commands through the actual MI facade", () =>
     } finally {
       await live.bot.stop();
     }
+  });
+});
+
+describe("automatic imported-Meeting candidates from accepted original evidence", () => {
+  it("reads the actual admitted import without a requester, retains unknown speaker and permits separate explicit owner acceptance", async () => {
+    const f = await fixture(true);
+    const processed = {
+      workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-source-processed" as const,
+          observationId: "automatic-imported-source"
+        }
+      ] as [{ type: "decision-source-processed"; observationId: string }]
+    };
+    const batch = await f.mi.observe(processed),
+      candidate = batch.candidates[0]!;
+    expect(candidate).toMatchObject({
+      state: "needs-clarification",
+      approvedIntentId: null,
+      automatic: { authority: "unresolved", recording: "review-only" }
+    });
+    expect(
+      candidate.source.evidence.find((entry) => entry.reference.source === "transcript")
+    ).toMatchObject({ authorPersonId: null, origin: "human" });
+    expect(f.interpret).not.toHaveBeenCalled();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    expect(f.write).not.toHaveBeenCalled();
+    const reviewed = await f.mi.observe({
+      workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-candidate-accepted",
+          observationId: "owner-accepts-auto",
+          requestId: candidate.requestId,
+          actor: { providerId: "discord", providerUserId: "founder" },
+          reviewToken: candidate.reviewToken!,
+          instruction: "I accept this exact decision and want it recorded."
+        }
+      ]
+    });
+    expect(reviewed.approvedIntentId).not.toBeNull();
+    expect(reviewed.source).toEqual(candidate.source);
+    f.allowWrites();
+    const execution = createFollowUpExecution({ database, meetingIntelligence: f.mi });
+    await execution.execute({
+      workspace,
+      subject: f.request.subject,
+      decisionRequestId: candidate.requestId,
+      intentId: reviewed.approvedIntentId!
+    });
+    expect(f.write).toHaveBeenCalledTimes(1);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    expect(f.interpret).not.toHaveBeenCalled();
+    const stored = [...f.written.values()][0]!.content;
+    expect(stored.source).toEqual(candidate.source);
+    expect(stored.authority.humanReviews).toHaveLength(1);
+    expect((await f.mi.observe(processed)).duplicate).toBe(true);
+    expect(f.write).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks original imported audience and live grants on processed-source replay", async () => {
+    const f = await fixture(true);
+    const processed = {
+      workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-source-processed" as const,
+          observationId: "automatic-imported"
+        }
+      ] as [{ type: "decision-source-processed"; observationId: string }]
+    };
+    await f.mi.observe(processed);
+    f.revoke();
+    await expect(f.mi.observe(processed)).rejects.toThrow();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    expect(f.write).not.toHaveBeenCalled();
   });
 });

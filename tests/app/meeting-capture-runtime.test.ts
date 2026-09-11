@@ -1,3 +1,5 @@
+import { createLogicalMeetingDecisionEvidenceSource } from "../../src/decision-intelligence/logical-meeting-evidence-source.js";
+import { observedMeetingNoteToObservation } from "../../src/knowledge/meeting-notes-ingestion.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -181,6 +183,46 @@ describe("meeting capture application composition", () => {
         })
       });
       if (resolved.status !== "accepted") throw new Error("Expected accepted capture");
+      const logicalDecisionSource = createLogicalMeetingDecisionEvidenceSource({
+        database,
+        configuration: runtime.configuration
+      });
+      const importedMeetingId = observedMeetingNoteToObservation(
+        { workspace, source },
+        "linear"
+      ).meetingId;
+      const logicalResolution = {
+        workspaceId: workspace.workspaceId,
+        meetingId: importedMeetingId,
+        audience: {
+          workspaceId: workspace.workspaceId,
+          personIds: [...dayovaFounderPersonIds]
+        }
+      };
+      expect(await logicalDecisionSource.resolveMeeting(logicalResolution)).toBe(
+        resolved.decision.logicalMeeting.id
+      );
+      expect(
+        await logicalDecisionSource.resolveMeeting({
+          ...logicalResolution,
+          audience: { ...logicalResolution.audience, personIds: ["guest"] }
+        })
+      ).toBeNull();
+      const logicalEvidence = await logicalDecisionSource.captureProcessed({
+        workspace,
+        subject: { type: "meeting", meetingId: resolved.decision.logicalMeeting.id },
+        audience: logicalResolution.audience
+      });
+      expect(
+        logicalEvidence.evidence.find((item) => item.reference.source === "transcript")
+      ).toMatchObject({
+        origin: "human",
+        authorPersonId: null,
+        text:
+          snapshot.sections.transcript.state === "available"
+            ? snapshot.sections.transcript.text
+            : undefined
+      });
       const query = () =>
         mi.query({
           workspaceId: workspace.workspaceId,
@@ -201,6 +243,7 @@ describe("meeting capture application composition", () => {
         ingestion.ingest({ workspace: { ...workspace, workspaceId: "outside" }, source })
       ).rejects.toThrow("workspace");
       allowed = false;
+      expect(await logicalDecisionSource.resolveMeeting(logicalResolution)).toBeNull();
       expect(await query()).toMatchObject({
         availability: "unavailable",
         synthesis: null

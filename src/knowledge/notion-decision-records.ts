@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { DecisionRecordCatalog } from "./decision-record-catalog.js";
+import type {
+  DecisionRecordCatalog,
+  DecisionRecordHistoricalRevision
+} from "./decision-record-catalog.js";
 import type { ExternalReference } from "../domain/model.js";
 import { createScheduledNotionClient } from "./notion-scheduled-client.js";
 import { NOTION_OPERATION_TIMEOUT_MS } from "./notion-request-scheduler.js";
@@ -151,7 +154,8 @@ export function createNotionDecisionRecordCatalog(
     discover: records.discover,
     requireCurrent: records.requireCurrent,
     read: records.read,
-    readReference: records.readReference
+    readReference: records.readReference,
+    ...(records.history ? { history: records.history } : {})
   });
 }
 /** One configured canonical location; each approved stage performs at most one provider mutation. */
@@ -494,8 +498,116 @@ function createCapability(
       throw safeFailure();
     return target.reference.externalId;
   }
+  function historicalRevision(
+    page: ReadRecord,
+    ordinal: number
+  ): DecisionRecordHistoricalRevision {
+    const revision = page.archive.revisions[ordinal - 1]!;
+    const revisionId = decisionDigest(revision);
+    const version = decisionDigest({ head: page.record.version, revisionId, ordinal });
+    return {
+      revisionId,
+      ordinal,
+      recordedAt: revision.recordedAt ?? null,
+      record: {
+        content: structuredClone(revision.content),
+        reference: { ...page.record.reference, version },
+        version
+      }
+    };
+  }
   return {
     providerId: "notion",
+    history: {
+      discover(input) {
+        const { signal, priority, ...request } = input;
+        const bound = structuredClone(request);
+        return withinDeadline(
+          async (deadline) => {
+            try {
+              if (
+                !Number.isSafeInteger(bound.historyLimit) ||
+                bound.historyLimit < 1 ||
+                bound.historyLimit > 1000
+              )
+                throw safeFailure();
+              const found = await discover(deadline, bound.audience, bound.limit);
+              const revisions: DecisionRecordHistoricalRevision[] = [];
+              let revisionCount = 0;
+              if (found.snapshot.complete) {
+                for (const page of found.pages) {
+                  revisionCount += page.archive.revisions.length;
+                  for (let index = 0; index < page.archive.revisions.length; index++) {
+                    if (revisions.length >= bound.historyLimit) break;
+                    revisions.push(historicalRevision(page, index + 1));
+                  }
+                }
+              }
+              return {
+                current: found.snapshot,
+                revisions,
+                complete: found.snapshot.complete && revisionCount <= bound.historyLimit
+              };
+            } catch {
+              return {
+                current: {
+                  id: `notion-decisions:${workspaceId}:${dataSourceId}`,
+                  revision: "unavailable",
+                  complete: false,
+                  records: []
+                },
+                revisions: [],
+                complete: false
+              };
+            }
+          },
+          signal,
+          priority
+        );
+      },
+      readReference(input) {
+        const { signal, ...request } = input;
+        const bound = structuredClone(request);
+        return withinDeadline(async (deadline) => {
+          try {
+            if (!/^[a-f0-9]{64}$/u.test(bound.revisionId)) return null;
+            const page = await readPage(
+              deadline,
+              bound.audience,
+              referencePage(bound.reference)
+            );
+            const revisions = page.archive.revisions.map((_revision, index) =>
+              historicalRevision(page, index + 1)
+            );
+            if (bound.asOf) {
+              if (!Number.isFinite(Date.parse(bound.asOf))) return null;
+              const latest = revisions
+                .filter(
+                  (revision) =>
+                    revision.recordedAt !== null &&
+                    Date.parse(revision.recordedAt) <= Date.parse(bound.asOf!)
+                )
+                .at(-1);
+              if (
+                !latest ||
+                revisions.some(
+                  (revision) =>
+                    revision.ordinal > latest.ordinal && revision.recordedAt === null
+                )
+              )
+                return null;
+              return latest.revisionId === bound.revisionId ? latest : null;
+            }
+            return (
+              revisions.find((revision) => revision.revisionId === bound.revisionId) ??
+              null
+            );
+          } catch {
+            return null;
+          }
+        }, signal);
+      }
+    },
     discover(input) {
       const { signal, priority, ...request } = input;
       const bound = structuredClone(request);
@@ -690,6 +802,7 @@ function createCapability(
           archive.revisions.push({
             operationId: bound.operationId,
             stageDigest: decisionDigest(stage),
+            recordedAt: now().toISOString(),
             content: nextContent(stage)
           });
           const markdown = renderNotionDecisionRecord(archive, signingKey);

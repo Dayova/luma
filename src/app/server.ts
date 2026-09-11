@@ -1,4 +1,13 @@
+import {
+  nativeNotionReviewConfig,
+  createNativeNotionReviewResources
+} from "./native-notion-review-config.js";
+import { createImportedSourceAnalysisRouter } from "./imported-source-analysis-router.js";
 import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
+import {
+  createAutomaticDecisionProcessing,
+  type AutomaticDecisionProcessingStatus
+} from "./automatic-decision-processing.js";
 import { createMeetingCaptureRuntime } from "./meeting-capture-runtime.js";
 import {
   meetingCaptureRuntimeConfig,
@@ -13,6 +22,8 @@ import { createDiscordCaptureReviewRuntime } from "../discord/discord-capture-re
 import { createDiscordGranolaRuntime } from "../discord/discord-granola-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
+import { createLogicalMeetingDecisionEvidenceSource } from "../decision-intelligence/logical-meeting-evidence-source.js";
+import { createDiscordDecisionPermissionSourceAccess } from "../discord/discord-decision-standing-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
@@ -73,12 +84,20 @@ import { createObservedSourceLedger } from "../knowledge/observed-source-ledger.
 import { createMeetingIntelligence } from "../meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase } from "../persistence/db.js";
 import { createLinearWorkProviderFromEnv } from "../work/linear-work-provider.js";
+import {
+  createStructuredWorkRuntime,
+  structuredWorkRuntimeConfig,
+  validateStructuredWorkFounderScope
+} from "./structured-work-runtime.js";
 import { toWorkCatalog } from "../work/interface.js";
 import { loadAppConfigFromEnv } from "./env.js";
 import { dayovaFounderPersonIds } from "./founder-access.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
+import type { RuntimeCapabilityProblem } from "./runtime-health.js";
 
 export type RunningLumaApp = {
+  capabilityProblems?(): Promise<RuntimeCapabilityProblem[]>;
+  automaticDecisionStatus?(): Promise<AutomaticDecisionProcessingStatus | null>;
   stop(): Promise<void>;
   gatewayConnected(): boolean;
   decisionRecallStatus?(): Promise<DecisionRecallStatus | null>;
@@ -98,6 +117,9 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  createNativeNotionReviewResources?: typeof createNativeNotionReviewResources;
+  createStructuredWorkRuntime?: typeof createStructuredWorkRuntime;
+  createWorkProvider?: typeof createLinearWorkProviderFromEnv;
   createGranolaConnections?: typeof granolaOAuthConnectionsFromEnv;
   createGranolaCallbackHost?: typeof createGranolaOAuthCallbackHost;
   createMeetingSynthesisWriter?: typeof createMeetingSynthesisRuntime;
@@ -180,6 +202,8 @@ export async function startServer(
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
   const contextConfig = organizationalContextRuntimeConfig(env);
   const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
+  const structuredWorkConfig = structuredWorkRuntimeConfig(env);
+  const nativeReviewConfig = nativeNotionReviewConfig(env);
   const captureConfig = meetingCaptureRuntimeConfig(env);
   const granolaConfig = granolaOAuthRuntimeConfig(env);
   if (granolaConfig && !captureConfig?.granolaEnabled)
@@ -199,6 +223,13 @@ export async function startServer(
     identityDirectory,
     authorizedPersonIds: dayovaFounderPersonIds
   });
+  if (structuredWorkConfig)
+    await validateStructuredWorkFounderScope({
+      config: structuredWorkConfig,
+      workspaceId,
+      identityDirectory,
+      accessPolicy
+    });
   for (const providerUserId of discordContextAskConfig?.allowedDiscordUserIds ?? []) {
     if (
       !(await accessPolicy.authorize({
@@ -274,7 +305,8 @@ export async function startServer(
         hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
           discordContextAskConfig !== undefined ||
-          decisionRecordConfig !== undefined)
+          decisionRecordConfig !== undefined ||
+          structuredWorkConfig !== undefined)
     });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
@@ -282,18 +314,23 @@ export async function startServer(
           ? { workspaceId, personIds: [...dayovaFounderPersonIds] }
           : null
       );
-    const workProvider = optionalLinearWorkProvider(env);
+    const workProvider = dependencies.createWorkProvider
+      ? dependencies.createWorkProvider(env)
+      : env["LINEAR_READONLY_API_KEY"]?.trim() && !env["LINEAR_API_KEY"]?.trim()
+        ? undefined
+        : optionalLinearWorkProvider(env);
     const observedSourceLedger = createObservedSourceLedger({ database });
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
       database
     });
-    const importedSourceAnalysis = importedSourceAnalysisFromEnv({
+    const genericImportedSourceAnalysis = importedSourceAnalysisFromEnv({
       workspaceId,
       env,
       ledger: observedSourceLedger,
       operationalOutcomeMarkerVerifier
     });
-    const workItemProviderId = workProvider?.providerId ?? "linear";
+    const workItemProviderId =
+      workProvider?.providerId ?? nativeReviewConfig?.workItemProviderId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     let transportOwnedByBot = false;
     startupCleanup.push(() =>
@@ -305,6 +342,33 @@ export async function startServer(
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
     };
+    const nativeReviewResources = nativeReviewConfig
+      ? (
+          dependencies.createNativeNotionReviewResources ??
+          createNativeNotionReviewResources
+        )({
+          config: nativeReviewConfig,
+          database,
+          workspace,
+          ledger: observedSourceLedger,
+          identityDirectory,
+          accessPolicy,
+          operationalOutcomeMarkerVerifier
+        })
+      : undefined;
+    if (nativeReviewResources) startupCleanup.push(() => nativeReviewResources.stop());
+    await nativeReviewResources?.validate();
+    const importedSourceRouter = createImportedSourceAnalysisRouter({
+      database,
+      workspaceId,
+      audience: contextAudience,
+      ...(genericImportedSourceAnalysis
+        ? { generic: genericImportedSourceAnalysis }
+        : {}),
+      ...(nativeReviewResources ? { native: nativeReviewResources } : {})
+    });
+    startupCleanup.push(() => importedSourceRouter.stop());
+    const importedSourceAnalysis = importedSourceRouter.configuration;
     const granolaConnections = granolaConfig
       ? await (dependencies.createGranolaConnections ?? granolaOAuthConnectionsFromEnv)({
           database,
@@ -377,6 +441,12 @@ export async function startServer(
           dependencies.createMeetingSynthesisWriter ?? createMeetingSynthesisRuntime
         )({ workspaceId, config: captureConfig, env })
       : undefined;
+    const logicalDecisionEvidence = captureRuntime
+      ? createLogicalMeetingDecisionEvidenceSource({
+          database,
+          configuration: captureRuntime.configuration
+        })
+      : undefined;
     const decisionIntelligence = decisionConfig
       ? await (dependencies.createDecisionRuntime ?? createDecisionRuntime)({
           config: decisionConfig,
@@ -385,6 +455,23 @@ export async function startServer(
           database,
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
+          ...(logicalDecisionEvidence
+            ? { logicalMeetingEvidenceSource: logicalDecisionEvidence }
+            : {}),
+          ...(decisionConfig.automatic && decisionRecordConfig
+            ? {
+                standingPermissionSourceAccess:
+                  createDiscordDecisionPermissionSourceAccess({
+                    workspaceId,
+                    guildId: env["DISCORD_GUILD_ID"]!,
+                    parentChannelIds: decisionRecordConfig.parentChannelIds,
+                    founderPersonIds: dayovaFounderPersonIds,
+                    identityDirectory,
+                    accessPolicy,
+                    resolveChannel: (request) => discordTransport.resolveChannel(request)
+                  })
+              }
+            : {}),
           ...(importedSourceAnalysis
             ? { importedSourceAccess: importedSourceAnalysis.access }
             : {}),
@@ -395,9 +482,36 @@ export async function startServer(
         })
       : undefined;
     if (decisionIntelligence) {
+      if (decisionIntelligence.standingPolicy)
+        startupCleanup.push(() => decisionIntelligence.standingPolicy!.stop());
       startupAdmissionStops.push(() => decisionIntelligence.recall.stop());
       startupCleanup.push(() => decisionIntelligence.recall.stop());
     }
+    const structuredWorkRuntime =
+      structuredWorkConfig && workProvider
+        ? await (dependencies.createStructuredWorkRuntime ?? createStructuredWorkRuntime)(
+            {
+              config: structuredWorkConfig,
+              env,
+              workspaceId,
+              database,
+              ledger: observedSourceLedger,
+              conversationEvidenceSource: discordTransport,
+              ...(importedSourceAnalysis
+                ? { importedSourceAccess: importedSourceAnalysis.access }
+                : {}),
+              identityDirectory,
+              accessPolicy,
+              work: workProvider,
+              budget: aiUsage,
+              limits: aiRequestLimits,
+              model: openAIReasoningModelName
+            }
+          )
+        : undefined;
+    if (structuredWorkConfig && !structuredWorkRuntime)
+      throw new Error("Structured work requires the shared Linear WorkProvider");
+    if (structuredWorkRuntime) startupCleanup.push(() => structuredWorkRuntime.stop());
     const providerContextCatalogs = [
       ...(externalContextCatalogs ?? []),
       ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
@@ -422,6 +536,9 @@ export async function startServer(
         : undefined;
     const meetingDependencies = {
       database,
+      ...(structuredWorkRuntime
+        ? { structuredWork: structuredWorkRuntime.configuration }
+        : {}),
       ...(captureRuntime ? { captureSynthesis: captureRuntime.configuration } : {}),
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
@@ -432,8 +549,13 @@ export async function startServer(
         aiUsage,
         aiRequestLimits
       ),
-      ...(workProvider ? { workCatalogs: [toWorkCatalog(workProvider)] } : {}),
-      ...(hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
+      ...(nativeReviewResources
+        ? { workCatalogs: [nativeReviewResources.workCatalog] }
+        : workProvider
+          ? { workCatalogs: [toWorkCatalog(workProvider)] }
+          : {}),
+      ...(nativeReviewConfig ||
+      hasAnyEnv(env, ["NOTION_API_TOKEN", "NOTION_MEETINGS_DATA_SOURCE_ID"])
         ? {
             importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
               ledger: observedSourceLedger,
@@ -442,11 +564,37 @@ export async function startServer(
           }
         : {})
     };
-    const decisionMeetingIntelligence = decisionIntelligence
+    const scopedMeetingIntelligence = decisionIntelligence
       ? createMeetingIntelligence({ ...meetingDependencies, decisionIntelligence })
-      : undefined;
+      : structuredWorkRuntime
+        ? createMeetingIntelligence({
+            ...meetingDependencies,
+            structuredWork: structuredWorkRuntime.configuration
+          })
+        : undefined;
     const meetingIntelligence =
-      decisionMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+      scopedMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
+    const nativeReview = nativeReviewResources?.createRuntime({ meetingIntelligence });
+    if (nativeReview) {
+      startupAdmissionStops.push(() => nativeReview.stop());
+      startupCleanup.push(() => nativeReview.stop());
+    }
+    const decisionMeetingIntelligence = decisionIntelligence
+      ? scopedMeetingIntelligence
+      : undefined;
+    const automaticDecisions =
+      decisionIntelligence?.automatic && decisionMeetingIntelligence
+        ? await createAutomaticDecisionProcessing({
+            database,
+            workspace,
+            meetingIntelligence: decisionMeetingIntelligence
+          })
+        : undefined;
+    if (automaticDecisions) {
+      startupAdmissionStops.push(() => automaticDecisions.pause());
+      startupCleanup.push(() => automaticDecisions.stop());
+      captureRuntime?.connectProcessedSource(automaticDecisions.meeting);
+    }
     const knowledgeProvider = optionalNotionKnowledgeProvider(env);
     const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
@@ -460,6 +608,9 @@ export async function startServer(
     const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
     const baseMeetingNotesIngestion = createMeetingNotesIngestion({
       meetingIntelligence,
+      ...(automaticDecisions && !captureRuntime
+        ? { onProcessedSource: automaticDecisions.meeting }
+        : {}),
       workItemProviderId
     });
     const meetingNotesIngestion = captureRuntime
@@ -567,6 +718,9 @@ export async function startServer(
     const contextIntelligence = discordContextAskConfig
       ? createContextIntelligence({
           database,
+          ...(automaticDecisions
+            ? { onProcessedSource: automaticDecisions.conversation }
+            : {}),
           ...(organizationalContext ? { organizationalContext } : {}),
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
@@ -580,6 +734,14 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(structuredWorkRuntime && scopedMeetingIntelligence
+        ? {
+            structuredWork: structuredWorkRuntime.discord({
+              meetingIntelligence: scopedMeetingIntelligence,
+              execution: followUpExecution
+            })
+          }
+        : {}),
       ...(granolaConnections && granolaCallback
         ? {
             granola: await createDiscordGranolaRuntime({
@@ -609,6 +771,23 @@ export async function startServer(
       ...(decisionRecordConfig && decisionMeetingIntelligence
         ? {
             decisionRecords: {
+              ...(logicalDecisionEvidence && decisionIntelligence
+                ? {
+                    logicalMeetings: {
+                      resolveMeeting: (
+                        request: Parameters<
+                          typeof logicalDecisionEvidence.resolveMeeting
+                        >[0]
+                      ) => logicalDecisionEvidence.resolveMeeting(request),
+                      currentAudience: (requestedWorkspaceId: string) =>
+                        decisionIntelligence.audience(requestedWorkspaceId)
+                    }
+                  }
+                : {}),
+              ...(decisionIntelligence?.standingPolicy
+                ? { standingPolicy: decisionIntelligence.standingPolicy }
+                : {}),
+              ...(automaticDecisions ? { automatic: automaticDecisions } : {}),
               meetingIntelligence: decisionMeetingIntelligence,
               execution: followUpExecution,
               config: decisionRecordConfig
@@ -657,6 +836,7 @@ export async function startServer(
     transportOwnedByBot = true;
     startupAdmissionStops.push(() => bot.stop());
     startupCleanup.push(() => bot.stop());
+    if (nativeReview) await nativeReview.start();
     if (granolaCallback) await granolaCallback.start();
     await bot.start(startupSignal);
     startupSignal?.throwIfAborted();
@@ -664,16 +844,68 @@ export async function startServer(
     else meetingNotesSync?.start();
     decisionIntelligence?.recall.start();
     captureRuntime?.start();
+    automaticDecisions?.start();
     startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
     let stopping: Promise<void> | undefined;
+    let healthClosed = false;
+    const healthReads = new Set<Promise<RuntimeCapabilityProblem[]>>();
     return {
+      capabilityProblems() {
+        if (healthClosed) return Promise.resolve(["capability-status-unavailable"]);
+        const pending = (async (): Promise<RuntimeCapabilityProblem[]> => {
+          const results = await Promise.allSettled([
+            aiUsage.getStatus(workspaceId),
+            decisionIntelligence?.recall.status(),
+            automaticDecisions?.status()
+          ]);
+          const [usageResult, recallResult, automaticResult] = results;
+          if (
+            usageResult.status !== "fulfilled" ||
+            recallResult.status !== "fulfilled" ||
+            automaticResult.status !== "fulfilled"
+          )
+            throw new Error("Processing capability status is unavailable");
+          const usage = usageResult.value,
+            recall = recallResult.value,
+            automatic = automaticResult.value;
+          const problems: RuntimeCapabilityProblem[] = [];
+          if (usage.accountingBlocked || usage.status === "not-configured")
+            problems.push("ai-unavailable");
+          else if (usage.status === "exhausted") problems.push("ai-budget-exhausted");
+          else if (usage.status === "warning" || usage.status === "critical")
+            problems.push("ai-budget-near-limit");
+          if (
+            recall &&
+            ["stale", "partial", "unavailable", "stopped"].includes(recall.state)
+          )
+            problems.push("decision-recall-degraded");
+          if (automatic && (!automatic.active || automatic.needsAttention > 0))
+            problems.push("automatic-decisions-need-attention");
+          const granola = captureRuntime?.status();
+          const notion = notionWebhook?.status();
+          const sync = notion?.canonicalRecovery ?? meetingNotesSync?.status();
+          if (
+            granola?.lastFailure ||
+            granola?.lastResult?.failures.length ||
+            notion?.runtime.lastFailure ||
+            sync?.lastOutcome === "failed"
+          )
+            problems.push("source-ingestion-degraded");
+          return problems;
+        })().finally(() => healthReads.delete(pending));
+        healthReads.add(pending);
+        return pending;
+      },
+      automaticDecisionStatus: () =>
+        automaticDecisions?.status() ?? Promise.resolve(null),
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
       notionObservationStatus: () => notionWebhook?.status() ?? null,
       decisionRecallStatus: () =>
         decisionIntelligence?.recall.status() ?? Promise.resolve(null),
       stop() {
+        healthClosed = true;
         stopping ??= (async () => {
           // Stop admission and scheduled ingestion immediately, then drain both.
           // A failed/timed-out drain never closes the store later in a detached
@@ -682,8 +914,10 @@ export async function startServer(
             (async () => {
               const drains = await Promise.allSettled([
                 bot.stop(),
+                nativeReview?.stop(),
                 granolaCallback?.stop(),
                 captureRuntime?.pauseIntake(),
+                automaticDecisions?.pause(),
                 notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
                 decisionIntelligence?.recall.stop()
               ]);
@@ -692,8 +926,14 @@ export async function startServer(
               // Foreground Decision work may have entered a retained proof after
               // background cancellation; all command admission has now settled.
               await decisionIntelligence?.recall.stop();
+              await structuredWorkRuntime?.stop();
+              await Promise.allSettled([...healthReads]);
               await captureRuntime?.stop();
+              await automaticDecisions?.stop();
+              await decisionIntelligence?.standingPolicy?.stop();
               await granolaConnections?.stop();
+              await importedSourceRouter.stop();
+              await nativeReviewResources?.stop();
             })()
           );
           await database.close();

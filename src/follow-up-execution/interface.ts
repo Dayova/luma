@@ -1,4 +1,5 @@
 import type { ConversationContextSubject } from "../context-intelligence/interface.js";
+import type { StructuredWorkExecution } from "../structured-work/interface.js";
 import type { ConversationConsultationExecutionRecord } from "../context-intelligence/conversation-consultations.js";
 import type { ConsultationReceipt } from "../consultation/interface.js";
 import type {
@@ -75,6 +76,7 @@ export interface DecisionFollowUpExecution {
   recover(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
 }
 /** Overloaded execution preserves existing Meeting callers and admits typed Conversations. */
-export type ScopedFollowUpExecution = FollowUpExecution &
+export type ScopedFollowUpExecution = StructuredWorkExecution &
+  DecisionFollowUpExecution &
   ConversationFollowUpExecution &
-  DecisionFollowUpExecution;
+  FollowUpExecution;

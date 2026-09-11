@@ -219,7 +219,12 @@ export function withSynthesisPublicationExecution(input: {
         } else {
           try {
             writing = true;
-            await current();
+            try {
+              await current();
+            } catch {
+              // The writer has not been called, so this failed proof is a definite refusal.
+              throw new MeetingSynthesisWriteNotAppliedError();
+            }
             await input.writer.publish({
               publication: state.plan,
               requireCurrent: async () => {

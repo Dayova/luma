@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { requireAiRequestGuardCurrent } from "./ai-request-guard.js";
 import { AiServiceError } from "./ai-service-error.js";
 import type { AiTokenUsage, AiUsageBudget } from "./ai-usage-budget.js";
 
@@ -66,22 +67,33 @@ export async function runBudgetedAiRequest(input: {
   input: string;
   schema: Record<string, unknown>;
   limits: AiRequestLimits;
+  /** Fresh disclosure proof after durable reservation, before any provider dispatch. */
+  beforeInvoke?: (signal: AbortSignal) => Promise<void>;
+  /** Non-generating native count of the exact immutable request, including its schema. */
+  countInputTokens?: (signal: AbortSignal) => Promise<number>;
   invoke: (signal: AbortSignal) => Promise<AiResponse>;
 }): Promise<AiResponse> {
   // The text tokenizer cannot have more tokens than UTF-8 bytes. Include the
   // instructions, schema and a conservative framing allowance, not chars / 4.
-  const inputTokenUpperBound =
+  const byteUpperBound =
     Buffer.byteLength(input.instructions, "utf8") +
     Buffer.byteLength(input.input, "utf8") +
     Buffer.byteLength(JSON.stringify(input.schema), "utf8") +
     1024;
-  if (inputTokenUpperBound > input.limits.maxInputTokens) {
+  const needsNativeCount = byteUpperBound > input.limits.maxInputTokens;
+  if (needsNativeCount && (!input.countInputTokens || byteUpperBound > 1_048_576)) {
     throw new AiServiceError(
       "request-too-large",
       "This AI request is too large; narrow the source or question before retrying.",
       { requestDispatched: false }
     );
   }
+  // Large text may still fit the token limit. Reserve the full permitted input
+  // before disclosing it to the non-generating count endpoint. Only a positive
+  // exact count within that reservation can proceed; never truncate the source.
+  const inputTokenUpperBound = needsNativeCount
+    ? input.limits.maxInputTokens
+    : byteUpperBound;
   const reservation = await input.budget
     ?.reserve({
       workspaceId: input.workspaceId,
@@ -103,19 +115,60 @@ export async function runBudgetedAiRequest(input: {
     });
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let dispatched = false;
   try {
-    // Race only the provider read. Accounting stays inside this request's owned
-    // lifetime; a response arriving after timeout cannot write into a closed
-    // store from a detached continuation. Its held charge requires reconciliation.
+    // Race admission and the provider read. A late admission cannot dispatch,
+    // and accounting stays inside this request's owned lifetime: a late provider
+    // response cannot write into a closed store. Its held charge needs reconciliation.
     const response = await Promise.race([
-      input.invoke(controller.signal),
+      (async () => {
+        await input.beforeInvoke?.(controller.signal);
+        await requireAiRequestGuardCurrent();
+        if (controller.signal.aborted)
+          throw new AiServiceError(
+            "timeout",
+            "The AI request timed out before dispatch.",
+            { requestDispatched: false }
+          );
+        if (needsNativeCount) {
+          const count = await input.countInputTokens!(controller.signal);
+          if (
+            !Number.isSafeInteger(count) ||
+            count <= 0 ||
+            count > input.limits.maxInputTokens
+          )
+            throw new AiServiceError(
+              "request-too-large",
+              "The complete AI input could not be proved to fit its token limit. No generation was started.",
+              { requestDispatched: false }
+            );
+          if (controller.signal.aborted)
+            throw new AiServiceError("timeout", "Input counting timed out.", {
+              requestDispatched: false
+            });
+          // Counting is itself a disclosure. Reprove the source again after its
+          // network wait before starting the separately charged generation.
+          await input.beforeInvoke?.(controller.signal);
+          await requireAiRequestGuardCurrent();
+          if (controller.signal.aborted)
+            throw new AiServiceError("timeout", "AI admission timed out.", {
+              requestDispatched: false
+            });
+        }
+        dispatched = true;
+        return input.invoke(controller.signal);
+      })(),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
           controller.abort();
           reject(
             new AiServiceError(
               "timeout",
-              "The AI request timed out. Its possible charge remains reserved."
+              dispatched
+                ? "The AI request timed out. Its possible charge remains reserved."
+                : needsNativeCount
+                  ? "Source verification or input counting did not finish before the AI admission deadline. No generation was started."
+                  : "The current source could not be verified before the AI admission deadline. No request was dispatched."
             )
           );
         }, input.limits.timeoutMs);
@@ -185,11 +238,19 @@ export async function runBudgetedAiRequest(input: {
         failureCode: safe.code,
         ...(typeof requestId === "string" ? { providerRequestId: requestId } : {})
       });
-      await input.budget.markUnknown(reservation.reservationId);
+      if (dispatched) await input.budget.markUnknown(reservation.reservationId);
+      else
+        await input.budget.settle(reservation.reservationId, {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0
+        });
     }
     throw new AiServiceError(safe.code, safe.message, {
       ...safe,
-      requestDispatched: true
+      requestDispatched: dispatched
     });
   } finally {
     if (timeout) clearTimeout(timeout);

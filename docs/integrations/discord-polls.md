@@ -39,8 +39,9 @@ relevant poll and discussion. Provider content remains input evidence, separate
 from higher-priority instructions, following the
 [OpenAI prompt guidance](https://developers.openai.com/api/docs/guides/prompt-engineering#message-roles-and-instruction-following).
 
-This implementation is read-only. Autonomous poll publication, verified Dayova
-Team role mentions, Decision Records, broader channel observation and durable
-unknown-send recovery are separate work. Deterministic tests prove capture,
+Context Ask remains read-only. Explicitly authorized publication, verified role
+mentions and durable unknown-send recovery use the separate
+[Conversation consultation commands](discord-consultations.md). Decision Records
+and broader channel observation remain separate capabilities. Deterministic tests prove capture,
 normalization, budget bounds and replay behavior; live model quality and actual
 Discord activation have not been measured by those tests.

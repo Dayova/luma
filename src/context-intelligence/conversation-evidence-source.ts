@@ -11,6 +11,7 @@ export type CaptureConversationEvidenceInput = {
   subject: ConversationContextSubject;
   /** When supplied, the current anchor must still ask this exact question. */
   question?: string;
+  purpose?: "consultation";
 };
 
 export type ConversationEvidenceProof = {
@@ -18,6 +19,7 @@ export type ConversationEvidenceProof = {
   subject: ConversationContextSubject;
   question: string;
   contentHash: string;
+  capturePurpose?: "consultation";
 };
 
 export type CapturedConversationEvidence = {
@@ -44,7 +46,8 @@ export async function requireCurrentConversationEvidence(
   const current = await source.capture({
     workspaceId: proof.workspaceId,
     subject: { ...proof.subject },
-    question: proof.question
+    question: proof.question,
+    ...(proof.capturePurpose ? { purpose: proof.capturePurpose } : {})
   });
   if (
     current.source.sourceKind !== "conversation" ||

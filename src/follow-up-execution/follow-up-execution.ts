@@ -3,6 +3,15 @@ import {
   CanonicalPatchStageError,
   settleCanonicalKnowledgePatch
 } from "./canonical-knowledge-patch-stage.js";
+import { withExecutionRunLock } from "./execution-run-lock.js";
+import { createConversationFollowUpExecution } from "./conversation-consultation-execution.js";
+import type { ConversationConsultations } from "../context-intelligence/conversation-consultations.js";
+import type { ConsultationProvider } from "../consultation/interface.js";
+import type {
+  ExecuteConversationFollowUpInput,
+  ExecuteConversationFollowUpResult,
+  ScopedFollowUpExecution
+} from "./interface.js";
 import { randomUUID } from "node:crypto";
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { OperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
@@ -69,6 +78,8 @@ import {
 export type CreateFollowUpExecutionInput = {
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
+  conversationConsultations?: ConversationConsultations;
+  consultationProvider?: ConsultationProvider;
   identityDirectory?: IdentityDirectory;
   knowledgeProvider?: KnowledgeProvider;
   canonicalKnowledgePatchWriter?: CanonicalKnowledgePatchWriter;
@@ -143,30 +154,15 @@ type ExecutionIdempotencyKeys = {
  * mutation. A process stop drops this memory-only guard; the durable
  * execution/stage recovery protocol then takes over after restart.
  */
-const activeExecutionKeysByDatabase = new WeakMap<LumaDatabase, Set<string>>();
-
-function activeExecutionKeysFor(database: LumaDatabase): Set<string> {
-  const existing = activeExecutionKeysByDatabase.get(database);
-
-  if (existing) {
-    return existing;
-  }
-
-  const created = new Set<string>();
-  activeExecutionKeysByDatabase.set(database, created);
-  return created;
-}
-
 export function createFollowUpExecution(
   input: CreateFollowUpExecutionInput
-): FollowUpExecution {
-  const executionLocks = activeExecutionKeysFor(input.database);
+): ScopedFollowUpExecution {
   const now = input.now ?? (() => new Date());
 
-  return {
+  const meetingExecution: FollowUpExecution = {
     execute: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
-      return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
+      return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
         withCurrentExecutionContext(input, executeInput, (guarded) =>
           executeClaimedIntent(guarded, executeInput, idempotencyKeys, now)
         )
@@ -174,11 +170,63 @@ export function createFollowUpExecution(
     },
     recover: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
-      return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
+      return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
         withCurrentExecutionContext(input, executeInput, (guarded) =>
           recoverClaimedIntent(guarded, executeInput, idempotencyKeys, now)
         )
       );
+    }
+  };
+  const conversationExecution =
+    input.conversationConsultations && input.consultationProvider
+      ? createConversationFollowUpExecution({
+          database: input.database,
+          consultations: input.conversationConsultations,
+          provider: input.consultationProvider,
+          now
+        })
+      : undefined;
+  function execute(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
+  function execute(
+    request: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  function execute(
+    request: ExecuteFollowUpInput | ExecuteConversationFollowUpInput
+  ): Promise<ExecuteFollowUpResult | ExecuteConversationFollowUpResult> {
+    if ("subject" in request) {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.execute(request);
+    }
+    return meetingExecution.execute(request);
+  }
+  function recover(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
+  function recover(
+    request: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  function recover(
+    request: ExecuteFollowUpInput | ExecuteConversationFollowUpInput
+  ): Promise<ExecuteFollowUpResult | ExecuteConversationFollowUpResult> {
+    if ("subject" in request) {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.recover(request);
+    }
+    return meetingExecution.recover(request);
+  }
+  return {
+    execute,
+    recover,
+    readConsultation: (request) => {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.readConsultation(request);
     }
   };
 }
@@ -4708,24 +4756,4 @@ async function completeExecution(
       intentId: result.observation.intentId
     });
   });
-}
-
-async function withExecutionLock<T>(
-  locks: Set<string>,
-  key: string,
-  operation: () => Promise<T>
-): Promise<T> {
-  if (locks.has(key)) {
-    throw new Error(
-      "Follow-up Intent already has an execution in progress; wait for it to finish before retrying."
-    );
-  }
-
-  locks.add(key);
-
-  try {
-    return await operation();
-  } finally {
-    locks.delete(key);
-  }
 }

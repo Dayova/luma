@@ -21,6 +21,9 @@ const sdk = vi.hoisted(() => ({
     return false;
   },
   get: vi.fn(),
+  post: vi.fn(),
+  clientOptions: vi.fn<(options: Discord.ClientOptions) => void>(),
+  register: vi.fn<(route: string, options: unknown) => void>(),
   fetch: vi.fn<(id: string, options?: unknown) => Promise<unknown>>()
 }));
 
@@ -32,9 +35,10 @@ vi.mock("discord.js", async (importOriginal) => {
     Client: class extends EventEmitter {
       user = { id: "bot" };
       channels = { fetch: sdk.fetch };
-      rest = { get: sdk.get };
-      constructor() {
+      rest = { get: sdk.get, post: sdk.post };
+      constructor(options: Discord.ClientOptions) {
         super();
+        sdk.clientOptions(options);
         sdk.emit = this.emit.bind(this);
       }
       login(): Promise<void> {
@@ -49,7 +53,8 @@ vi.mock("discord.js", async (importOriginal) => {
       setToken() {
         return this;
       }
-      put(): Promise<void> {
+      put(route: string, options: unknown): Promise<void> {
+        sdk.register(route, options);
         return Promise.resolve();
       }
     }
@@ -182,6 +187,85 @@ describe("Discord production channel resolution and delivery", () => {
     }
   );
 
+  it("registers and maps explicit consultation commands on the single Gateway with mutation retries disabled", async () => {
+    const live = createDiscordJsTransport({
+      token: "test",
+      clientId: "application",
+      guildId: "guild",
+      allowedParentChannelIds: ["parent"],
+      authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+      consultations: {
+        teamRoleId: "role",
+        capture: {
+          parentChannelIds: ["parent"],
+          allowedDiscordUserIds: ["founder"],
+          maxMessages: 50,
+          maxEvidenceChars: 32000,
+          minIntervalMs: 60000
+        }
+      }
+    });
+    const handler = vi.fn(() => Promise.resolve({ content: "Canonical receipt" }));
+    await live.connect(handler);
+    expect(sdk.clientOptions).toHaveBeenCalledOnce();
+    expect(sdk.clientOptions.mock.calls[0]?.[0].rest?.retries).toBe(0);
+    expect(sdk.clientOptions.mock.calls[0]?.[0].intents).toContain(32768); // MessageContent for ordinary founder source messages.
+    expect(sdk.register.mock.calls[0]?.[1]).toMatchObject({
+      body: [
+        expect.objectContaining({ name: "meeting" }),
+        expect.objectContaining({ name: "consultation" })
+      ]
+    });
+    const strings: Record<string, string> = {
+      source_message: "message",
+      purpose: "Gather founder views",
+      question: "Release now?",
+      options: "Pilot | Release",
+      replaces: "previous"
+    };
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "consultation",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "thread",
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-11T10:00:00Z"),
+      options: {
+        getSubcommand: () => "start",
+        getString: (key: string) => strings[key] ?? null,
+        getInteger: () => null,
+        getUser: () => ({ id: "founder" })
+      },
+      deferReply: vi.fn(async () => {}),
+      editReply: vi.fn(async () => {})
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "consultation-start",
+        sourceMessageId: "message",
+        purpose: "Gather founder views",
+        question: "Release now?",
+        options: ["Pilot", "Release"],
+        durationHours: 24,
+        ownerDiscordUserId: "founder",
+        replacesConsultationId: "previous"
+      })
+    );
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Canonical receipt",
+      allowedMentions: { parse: [] }
+    });
+    const provider = live.createConsultationProvider?.({
+      resolveRecipients: () => Promise.resolve(["founder"])
+    });
+    expect(provider?.providerId).toBe("discord");
+    expect(sdk.clientOptions).toHaveBeenCalledOnce();
+    await live.disconnect();
+  });
   it.each([
     "human",
     "luma",

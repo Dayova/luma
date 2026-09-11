@@ -1,4 +1,11 @@
 import {
+  handleDiscordStructuredWorkCommand,
+  isStructuredWorkCommand,
+  renderStructuredWorkFailure,
+  type DiscordStructuredWorkCommand,
+  type DiscordStructuredWorkRuntime
+} from "./discord-structured-work-runtime.js";
+import {
   isGranolaCommand,
   DiscordGranolaUnavailableError,
   type DiscordGranolaCommand,
@@ -91,6 +98,7 @@ export type DiscordCommand =
   | DiscordCaptureReviewCommand
   | DiscordGranolaCommand
   | DiscordDecisionRecordCommand
+  | DiscordStructuredWorkCommand
   | (DiscordCommandBase & {
       type: "start";
       title: string;
@@ -218,6 +226,7 @@ export type CreateDiscordMeetingBotInput = {
   captureReview?: DiscordCaptureReviewRuntime;
   granola?: DiscordGranolaRuntime;
   decisionRecords?: DiscordDecisionRecordRuntime;
+  structuredWork?: DiscordStructuredWorkRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
   authorizedPersonIds: readonly PersonId[];
@@ -647,39 +656,50 @@ async function handleCommand(
   try {
     const sourceFence = await commandSourceFence(input, command);
     await sourceFence?.();
-    const response = isGranolaCommand(command)
-      ? await handleGranola(input, command, accessPolicy)
-      : isCaptureReviewCommand(command)
-        ? await handleCaptureReview(input, command, accessPolicy)
-        : command.type === "usage"
-          ? { content: await readAiUsage(input) }
-          : isConsultationCommand(command)
-            ? input.consultations
-              ? await handleDiscordConsultationCommand({
-                  runtime: input.consultations,
-                  workspace: input.workspace,
-                  command,
-                  accessPolicy
-                })
-              : {
-                  content: "Advisory consultations are not configured in this workspace."
-                }
-            : isDecisionRecordCommand(command)
-              ? input.decisionRecords &&
-                surface.kind === "public-thread" &&
-                surface.parentChannelId &&
-                input.decisionRecords.config.parentChannelIds.includes(
-                  surface.parentChannelId
-                ) &&
-                input.decisionRecords.config.allowedDiscordUserIds.includes(
-                  command.actorDiscordUserId
-                )
-                ? await executeDecisionRecordCommand(input, command)
+    const response = isStructuredWorkCommand(command)
+      ? input.structuredWork &&
+        surface.kind === "public-thread" &&
+        surface.parentChannelId &&
+        input.structuredWork.config.parentChannelIds.includes(surface.parentChannelId) &&
+        input.structuredWork.config.allowedDiscordUserIds.includes(
+          command.actorDiscordUserId
+        )
+        ? await executeStructuredWorkCommand(input, command)
+        : { content: "Structured work is not enabled for you in this discussion." }
+      : isGranolaCommand(command)
+        ? await handleGranola(input, command, accessPolicy)
+        : isCaptureReviewCommand(command)
+          ? await handleCaptureReview(input, command, accessPolicy)
+          : command.type === "usage"
+            ? { content: await readAiUsage(input) }
+            : isConsultationCommand(command)
+              ? input.consultations
+                ? await handleDiscordConsultationCommand({
+                    runtime: input.consultations,
+                    workspace: input.workspace,
+                    command,
+                    accessPolicy
+                  })
                 : {
                     content:
-                      "Decision Records are not enabled for you in this discussion."
+                      "Advisory consultations are not configured in this workspace."
                   }
-              : await executeAdmittedCommand(input, command, now);
+              : isDecisionRecordCommand(command)
+                ? input.decisionRecords &&
+                  surface.kind === "public-thread" &&
+                  surface.parentChannelId &&
+                  input.decisionRecords.config.parentChannelIds.includes(
+                    surface.parentChannelId
+                  ) &&
+                  input.decisionRecords.config.allowedDiscordUserIds.includes(
+                    command.actorDiscordUserId
+                  )
+                  ? await executeDecisionRecordCommand(input, command)
+                  : {
+                      content:
+                        "Decision Records are not enabled for you in this discussion."
+                    }
+                : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
         ? response.content
@@ -703,6 +723,8 @@ async function handleCommand(
       ...(sourceFence || response.requireCurrent ? { requireCurrent } : {})
     };
   } catch (error: unknown) {
+    if (isStructuredWorkCommand(command))
+      return { content: renderStructuredWorkFailure(error, command) };
     if (isDecisionRecordCommand(command))
       return {
         content: renderDecisionRecordFailure(
@@ -724,6 +746,64 @@ async function handleCommand(
             : renderAiServiceFailure(error)
     };
   }
+}
+
+async function executeStructuredWorkCommand(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordStructuredWorkCommand
+): Promise<DiscordCommandResponse> {
+  if (!input.structuredWork) throw new Error("Structured work is not configured");
+  if (!command.meeting)
+    return handleDiscordStructuredWorkCommand({
+      runtime: input.structuredWork,
+      workspace: input.workspace,
+      command
+    });
+  const binding = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  if (!binding || binding.thread_id !== command.channelId)
+    return {
+      content:
+        "Bind this thread to its imported Meeting with /meeting bind first, or omit meeting:true to use only the discussion."
+    };
+  const state = await queryMeetingSnapshot(input, binding);
+  if (!state.importedSources.length)
+    return { content: "This request requires an actual imported Meeting binding." };
+  const requireBinding = async () => {
+    const current = await findMeetingThreadForChannel(
+      input,
+      command.guildId,
+      command.channelId,
+      "include-ended-thread"
+    );
+    if (
+      !current ||
+      current.meeting_id !== binding.meeting_id ||
+      current.thread_id !== binding.thread_id ||
+      current.parent_channel_id !== binding.parent_channel_id
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    await requireImportedMeetingCurrent(input, state);
+  };
+  await requireBinding();
+  const response = await handleDiscordStructuredWorkCommand({
+    runtime: input.structuredWork,
+    workspace: input.workspace,
+    command,
+    meetingId: binding.meeting_id,
+    requireCurrent: requireBinding
+  });
+  return {
+    content: response.content,
+    requireCurrent: async () => {
+      await requireBinding();
+      await response.requireCurrent?.();
+    }
+  };
 }
 
 async function executeDecisionRecordCommand(
@@ -865,6 +945,7 @@ async function executeAdmittedCommand(
     | { type: "usage" }
     | DiscordConsultationCommand
     | DiscordDecisionRecordCommand
+    | DiscordStructuredWorkCommand
     | DiscordCaptureReviewCommand
     | DiscordGranolaCommand
   >,
@@ -933,6 +1014,7 @@ async function commandSourceFence(
     isCaptureReviewCommand(command) ||
     isConsultationCommand(command) ||
     isDecisionRecordCommand(command) ||
+    isStructuredWorkCommand(command) ||
     command.type === "usage" ||
     command.type === "bind" ||
     command.type === "start"

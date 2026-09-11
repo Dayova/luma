@@ -1,3 +1,7 @@
+import {
+  structuredWorkRuntimeConfig,
+  readStructuredWorkTargetPolicy
+} from "./structured-work-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { decisionRuntimeConfig } from "./decision-runtime.js";
 import { meetingCaptureRuntimeConfig } from "./meeting-capture-config.js";
@@ -100,15 +104,18 @@ export async function validateProductionEnvironment(
       !context?.parentChannelIds.some((id) => !parents.includes(id)),
       "Context Ask parents must be within the configured Discord channel scope."
     );
+    const structured = structuredWorkRuntimeConfig(env);
     const decision = discordDecisionRecordConfigFromEnv(env);
     decisionRuntimeConfig(env, decision !== undefined);
     const consultation = discordConsultationConfigFromEnv(env);
-    for (const capture of [decision, consultation?.capture])
+    for (const capture of [decision, consultation?.capture, structured?.discord])
       check(
         !capture?.parentChannelIds.some((id) => !parents.includes(id)),
-        "Decision Record and consultation parents must be within the configured Discord channel scope."
+        "Decision, consultation and structured-work parents must be within the configured Discord channel scope."
       );
     const workspaceId = required(env, "LUMA_WORKSPACE_ID");
+    if (structured)
+      await readStructuredWorkTargetPolicy(structured.targetsPath, workspaceId);
     const access = createWorkspaceAccessPolicy({
       workspaceId,
       identityDirectory: createIdentityDirectoryFromEnv(env),
@@ -122,7 +129,7 @@ export async function validateProductionEnvironment(
         "Context Ask users must each uniquely identify an authorized founder."
       );
     }
-    for (const capture of [decision, consultation?.capture]) {
+    for (const capture of [decision, consultation?.capture, structured?.discord]) {
       if (!capture) continue;
       const admitted = [];
       for (const providerUserId of capture.allowedDiscordUserIds) {
@@ -137,7 +144,7 @@ export async function validateProductionEnvironment(
         admitted.length === capture.allowedDiscordUserIds.length &&
           JSON.stringify([...admitted].sort()) ===
             JSON.stringify([...dayovaFounderPersonIds].sort()),
-        "Decision Records and consultations require the exact four uniquely mapped founders."
+        "Decision Records, consultations and structured work require the exact four uniquely mapped founders."
       );
     }
     const budget = aiUsageBudgetSettingsFromEnv(env);
@@ -227,11 +234,12 @@ export async function verifyProductionDiscordApplication(
     if (
       discordContextAskConfigFromEnv(env) ||
       discordConsultationConfigFromEnv(env) ||
-      discordDecisionRecordConfigFromEnv(env)
+      discordDecisionRecordConfigFromEnv(env) ||
+      structuredWorkRuntimeConfig(env)
     ) {
       check(
         (application.flags & ((1 << 18) | (1 << 19))) !== 0,
-        "Enable Message Content intent for the production application before conversation Ask, consultations or Decision Records."
+        "Enable Message Content intent for the production application before conversation Ask, consultations, Decision Records or structured work."
       );
     }
   } catch (error) {

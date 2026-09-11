@@ -1,6 +1,6 @@
 # Compound structured knowledge and work
 
-This implements the owned core/provider slice of [LUM-39](https://linear.app/dayova/issue/LUM-39/p1-execute-compound-discord-commands-across-structured-notion-records), following the [canonical compound-operation contract](https://app.notion.com/p/3d52e87228bf81839c2cda777f8c419e).
+This implements the owned core, production provider/model/source adapters and native Discord ingress for [LUM-39](https://linear.app/dayova/issue/LUM-39/p1-execute-compound-discord-commands-across-structured-notion-records), following the [canonical compound-operation contract](https://app.notion.com/p/3d52e87228bf81839c2cda777f8c419e).
 
 An authenticated explicit command can authorize a configured Structured Record and
 its validation work together. The public Interface stays `observe`, `query`, and
@@ -37,11 +37,123 @@ every write, receipt query and replay.
 module and accepts `{ workspace, subject, structuredWorkRequestId, intentId }`.
 Normal execution and positive-only recovery use the same durable plan.
 
-Discord intent routing/reply and main-runtime configuration are **required
-subsequent composition work**. The actual model and source factories below are
-implemented and tested through MI/FUE. This slice
-does not activate a table, token, bot command or background schedule. It is not a
-claim that the complete Discord feature is deployed.
+The native Discord ingress and owned application factory are implemented. The
+main server must compose the factory as described below before activation; that
+small integration is tracked separately. No table, token, command or schedule has
+been activated by these local tests, and this document does not claim deployment.
+
+## Native commands and main-runtime factory
+
+Enable this separate capability with `LUMA_DISCORD_STRUCTURED_WORK_ENABLED=1`.
+Set `LUMA_DISCORD_STRUCTURED_WORK_PARENT_CHANNEL_IDS` to a subset of the common
+Discord parent scope and `LUMA_DISCORD_STRUCTURED_WORK_ALLOWED_DISCORD_USER_IDS`
+to exactly the four currently and uniquely mapped founder accounts. Optional
+`MAX_MESSAGES` and `MAX_EVIDENCE_CHARS` settings under the same
+prefix use the bounded Conversation capture defaults. Enabling Ask alone never
+activates writes. The existing single Gateway client supplies the separate
+`structured-work` capture purpose and requires Message Content intent.
+
+Post the actual explicit instruction with a leading @Luma mention in an admitted
+thread, for example: “Add this hypothesis to our Hypotheses table and create a
+Linear task to validate it.” Then use:
+
+- `/structured-work request source_message:<original-message-id> target:hypotheses`
+  selects a configured table alias. The author must be the person who wrote the
+  original instruction. The edge reads the exact instruction; no second pasted
+  wording or extra approval is required. Knowledge and work still reconcile inside
+  MI, and missing owner/context produces a retained preview and clarification.
+- Add `meeting:true` to use this thread's existing `/meeting bind` imported Meeting
+  as additional original evidence. The actual Meeting binding and its current
+  imported grants are checked; imported speaker labels never establish an owner.
+- Optional `work_item:<exact-Linear-id>` selects a known existing task, including
+  an archived task. It cannot be silently replaced by model output.
+- `/structured-work status source_message:<id> request_id:<returned-id> [meeting:true]
+page:<number>` exposes every preview field, uncertainty and per-target result in
+  bounded ephemeral pages. The source audience and retained state are rechecked
+  immediately before the reply. Original full details remain in the shared store.
+- `/structured-work recover` with the same address performs read-only positive
+  recovery. It never resends an unknown write. After positive recovery of the first
+  target, repeating the same `request` continues any already-approved pending
+  second target. The same source and selection retain one request ID across new
+  slash interactions and process restarts, so this does not repeat inference.
+
+The source message ID is available through Discord's **Copy Message ID** action
+with Developer Mode enabled. Conceptual questions and quoted/negated instructions
+remain outside this command's execution admission. Requests and status replies are
+founder-only and ephemeral, with mentions disabled; there is no guest support mode.
+
+`structuredWorkRuntimeConfig(env)` validates presence and safe scope before resource
+allocation. `validateStructuredWorkFounderScope(...)` verifies the live identity
+mapping. Required production values are:
+
+- `LUMA_STRUCTURED_WORK_TARGETS_PATH`: absolute protected JSON mapping below.
+- `LUMA_STRUCTURED_WORK_NOTION_API_TOKEN`,
+  `LUMA_STRUCTURED_WORK_NOTION_CREDENTIAL_SCOPE_ID`, and
+  `LUMA_STRUCTURED_WORK_SIGNING_KEY` (at least 32 bytes).
+- Existing `LINEAR_API_KEY` and `LINEAR_TEAM_ID`, plus
+  `LUMA_STRUCTURED_WORK_LINEAR_CREDENTIAL_SCOPE_ID` for the exact work-sharing grant.
+- Existing `OPENAI_API_KEY` and `LUMA_CONTEXT_SHARING_POLICY_PATH`. Both destination
+  grants must explicitly cover all four original recipients. Notion row access is
+  also proved against the exact configured parent by the native adapter.
+
+The protected target file is a versioned, workspace-bound document. This example
+selects existing schema; deploying it never creates schema or new status options:
+
+```json
+{
+  "version": 1,
+  "workspaceId": "workspace_dayova",
+  "targets": [
+    {
+      "key": "hypotheses",
+      "label": "Product Hypotheses & Validation",
+      "dataSourceId": "8fd29131-8312-411d-a833-f320f1afbfaf",
+      "titleField": "hypothesis",
+      "fields": {
+        "hypothesis": { "property": "Hypothesis", "type": "text", "required": true },
+        "evidence": { "property": "Evidence so far", "type": "text" },
+        "status": { "property": "Status", "type": "choice", "required": true }
+      },
+      "defaults": { "status": { "type": "choice", "value": "To validate" } },
+      "sourceProperty": "Source",
+      "ownerProperty": "Owner",
+      "authorizedPersonIds": [
+        "person_jakob",
+        "person_fabius",
+        "person_julius",
+        "person_philipp"
+      ]
+    }
+  ]
+}
+```
+
+This is an example mapping, not an activated configuration. The file must be a
+single-link regular file owned by the effective user or root, at most 65,536 bytes,
+with no group/world write permission; symlinks are refused. Aliases, data sources,
+property mappings, defaults and founder authorities are validated without guessing.
+A changed file immediately withholds current requests until deliberate restart and
+reconciliation. Preserve this file and the env signing key with the existing
+recovery bundle while retained requests may need recovery, even if ingress is off.
+
+`createStructuredWorkRuntime({config, env, workspaceId, database, ledger,
+conversationEvidenceSource, importedSourceAccess?, identityDirectory, accessPolicy,
+work, budget, limits, model})` receives the existing store, source reader, exact
+configured Linear `WorkProvider`, shared budget and identity policy. It returns:
+
+- `configuration`, passed as `structuredWork` to the single `createMeetingIntelligence`.
+- `discord({meetingIntelligence, execution})`, passed as `structuredWork` to the
+  existing Discord bot after its normal `createFollowUpExecution` is created.
+- `stop()`, called after bot/transport drain and before closing the shared database.
+  Bounded provider/model calls may return while an already-started currentness
+  proof is settling. The factory refuses late proof admission and drains those
+  original proof promises before permitting store closure.
+
+The factory creates no separate store, Gateway, scheduler or model budget. Stop
+and drain the existing bot/transport before closing the shared database; their
+admitted command promises include source checks, approved execution and final
+receipts. True external factories may be supplied for deterministic integration
+tests; runtime behavior still flows through the actual MI/FUE implementation.
 
 ## Actual model and original sources
 

@@ -95,7 +95,23 @@ The `packageManager` field in `package.json` lets Corepack select the correct pn
 
 ## Local Environment
 
-Start from:
+To try Luma without accounts, hosting, API charges or external writes:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm local
+```
+
+Open the loopback URL printed in the terminal. The interactive sandbox runs the
+real Meeting Intelligence core with synthetic AI proposals and an isolated
+in-memory database. You can inspect sample evidence, correct ownership, confirm
+or reject decisions, ask scoped questions, replay events and run the offline
+corpus with visible expected/actual results. It does not load `.env` or connect
+to Discord. Ctrl+C stops it and clears the sandbox. See the
+[local testing guide](docs/operations/local-testing.md) for a short walkthrough
+and the distinction between offline correctness and live AI/provider quality.
+
+For a live provider-connected development instance, start from:
 
 ```bash
 cp .env.example .env

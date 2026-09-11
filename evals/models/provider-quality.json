@@ -1,0 +1,38 @@
+[
+  {
+    "label": "openai-gpt-5-6-luna",
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "inputRate": 0.2,
+    "outputRate": 1.2,
+    "pricing": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+    "pricingVerifiedAt": "2026-09-10"
+  },
+  {
+    "label": "anthropic-claude-sonnet-5",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5",
+    "inputRate": 2,
+    "outputRate": 10,
+    "pricing": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "pricingVerifiedAt": "2026-09-10"
+  },
+  {
+    "label": "deepseek-deepseek-flash",
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "inputRate": 0.3,
+    "outputRate": 1.2,
+    "pricing": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "pricingVerifiedAt": "2026-09-10"
+  },
+  {
+    "label": "google-gemini-3-8-flash",
+    "provider": "google",
+    "model": "gemini-3.8-flash",
+    "inputRate": 0.75,
+    "outputRate": 3.75,
+    "pricing": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+    "pricingVerifiedAt": "2026-09-10"
+  }
+]

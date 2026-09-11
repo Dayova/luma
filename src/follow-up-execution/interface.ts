@@ -2,6 +2,10 @@ import type { ConversationContextSubject } from "../context-intelligence/interfa
 import type { ConversationConsultationExecutionRecord } from "../context-intelligence/conversation-consultations.js";
 import type { ConsultationReceipt } from "../consultation/interface.js";
 import type {
+  DecisionExecutionRecord,
+  DecisionSubject
+} from "../domain/decision-records.js";
+import type {
   FollowUpExecutionRecorded,
   FollowUpIntentId,
   MeetingId,
@@ -54,6 +58,21 @@ export interface ConversationFollowUpExecution {
     input: ExecuteConversationFollowUpInput
   ): Promise<ExecuteConversationFollowUpResult>;
   readConsultation(input: ExecuteConversationFollowUpInput): Promise<ConsultationReceipt>;
+}
+export type ExecuteDecisionFollowUpInput = {
+  workspace: WorkspaceConfig;
+  subject: DecisionSubject;
+  decisionRequestId: string;
+  /** Only the canonical approved intent is executable. */
+  intentId: string;
+};
+export type ExecuteDecisionFollowUpResult = {
+  record: DecisionExecutionRecord;
+  idempotencyKey: string;
+};
+export interface DecisionFollowUpExecution {
+  execute(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
+  recover(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
 }
 /** Overloaded execution preserves existing Meeting callers and admits typed Conversations. */
 export type ScopedFollowUpExecution = FollowUpExecution & ConversationFollowUpExecution;

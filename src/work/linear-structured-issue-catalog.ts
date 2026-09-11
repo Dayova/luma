@@ -1,6 +1,7 @@
 import { LinearClient } from "@linear/sdk";
 import { z } from "zod";
 import type { LinearApiIssue } from "./linear-work-item.js";
+import { STRUCTURED_WORK_CATALOG_LIMIT } from "../structured-work/limits.js";
 
 const id = z.string().min(1).max(256);
 const issueSchema = z.object({
@@ -46,13 +47,16 @@ const schema = z.object({
   team: z.object({ id }),
   issues: z.object({
     nodes: z.array(issueSchema).max(100),
-    pageInfo: z.object({ hasNextPage: z.boolean() })
+    pageInfo: z.object({
+      hasNextPage: z.boolean(),
+      endCursor: z.string().min(1).max(2048).nullable()
+    })
   })
 });
-const query = `query LumaStructuredWorkCatalog($teamId: ID!, $teamSelector: String!, $first: Int!) {
+const query = `query LumaStructuredWorkCatalog($teamId: ID!, $teamSelector: String!, $first: Int!, $after: String) {
   team(id: $teamSelector) { id }
-  issues(first: $first, includeArchived: false, filter: {team: {id: {eq: $teamId}}}) {
-    pageInfo { hasNextPage }
+  issues(first: $first, after: $after, orderBy: createdAt, includeArchived: false, filter: {team: {id: {eq: $teamId}}}) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       id identifier title description url updatedAt archivedAt dueDate
       team { id } project { id } parent { id }
@@ -63,7 +67,7 @@ const query = `query LumaStructuredWorkCatalog($teamId: ID!, $teamSelector: Stri
   }
 }`;
 
-/** One exact bounded query replaces SDK lazy relationship reads for every issue. */
+/** Bounded cursor pagination avoids SDK lazy relationship reads for every issue. */
 export function createLinearStructuredIssueCatalog(config: {
   apiKey: string;
   teamId: string;
@@ -78,10 +82,10 @@ export function createLinearStructuredIssueCatalog(config: {
         input.teamId !== config.teamId ||
         !Number.isSafeInteger(input.limit) ||
         input.limit < 1 ||
-        input.limit > 100
+        input.limit > STRUCTURED_WORK_CATALOG_LIMIT
       )
         throw new Error(
-          "The complete Linear scope must select 1–100 issues in its configured team"
+          `The complete Linear scope must select 1–${STRUCTURED_WORK_CATALOG_LIMIT} issues in its configured team`
         );
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -94,43 +98,80 @@ export function createLinearStructuredIssueCatalog(config: {
           signal: controller.signal,
           redirect: "error"
         });
-        const response = await Promise.race([
-          client.client.rawRequest<
-            unknown,
-            { teamId: string; teamSelector: string; first: number }
-          >(query, {
-            teamId: config.teamId,
-            teamSelector: config.teamId,
-            first: input.limit
-          }),
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => {
-              controller.abort();
-              reject(new Error("Linear catalog deadline reached"));
-            }, 15000);
-          })
-        ]);
-        const envelope = schema.parse(response.data);
-        if (envelope.team.id !== config.teamId)
-          throw new Error("The configured team is not readable");
-        const parsed = envelope.issues;
-        if (
-          parsed.nodes.length > input.limit ||
-          parsed.nodes.some((issue) => issue.team.id !== config.teamId) ||
-          new Set(parsed.nodes.map((issue) => issue.id)).size !== parsed.nodes.length ||
-          new Set(parsed.nodes.map((issue) => issue.identifier)).size !==
-            parsed.nodes.length
-        )
-          throw new Error(
-            "The current Linear catalog has inconsistent identities or scope"
-          );
-        if (
-          parsed.nodes.some(
-            (issue) => issue.labels.pageInfo.hasNextPage || issue.labels.nodes.length > 50
+        const expired = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error("Linear catalog deadline reached"));
+          }, 15000);
+        });
+        const nodes: Array<z.infer<typeof issueSchema>> = [];
+        const ids = new Set<string>();
+        const identifiers = new Set<string>();
+        const cursors = new Set<string>();
+        let after: string | null = null;
+        while (nodes.length < input.limit) {
+          controller.signal.throwIfAborted();
+          const first = Math.min(100, input.limit - nodes.length);
+          const response = await Promise.race([
+            client.client.rawRequest<
+              unknown,
+              {
+                teamId: string;
+                teamSelector: string;
+                first: number;
+                after: string | null;
+              }
+            >(query, {
+              teamId: config.teamId,
+              teamSelector: config.teamId,
+              first,
+              after
+            }),
+            expired
+          ]);
+          controller.signal.throwIfAborted();
+          const envelope = schema.parse(response.data);
+          if (envelope.team.id !== config.teamId)
+            throw new Error("The configured team is not readable");
+          const parsed = envelope.issues;
+          if (parsed.nodes.length > first || (after !== null && !parsed.nodes.length))
+            throw new Error("The current Linear catalog has inconsistent page bounds");
+          for (const issue of parsed.nodes) {
+            if (
+              issue.team.id !== config.teamId ||
+              ids.has(issue.id) ||
+              identifiers.has(issue.identifier) ||
+              ids.has(issue.identifier) ||
+              identifiers.has(issue.id)
+            )
+              throw new Error(
+                "The current Linear catalog has inconsistent identities or scope"
+              );
+            ids.add(issue.id);
+            identifiers.add(issue.identifier);
+          }
+          if (
+            parsed.nodes.some(
+              (issue) =>
+                issue.labels.pageInfo.hasNextPage || issue.labels.nodes.length > 50
+            )
           )
-        )
-          return { items: [], complete: false };
-        const items = parsed.nodes
+            return { items: [], complete: false };
+          const cursor = parsed.pageInfo.endCursor;
+          if (
+            (parsed.nodes.length && (cursor === null || cursors.has(cursor))) ||
+            (parsed.pageInfo.hasNextPage && (!parsed.nodes.length || cursor === null))
+          )
+            throw new Error(
+              "The current Linear catalog has inconsistent pagination proof"
+            );
+          nodes.push(...parsed.nodes);
+          if (!parsed.pageInfo.hasNextPage) break;
+          if (nodes.length === input.limit) return { items: [], complete: false };
+          cursors.add(cursor!);
+          after = cursor;
+        }
+        const items = nodes
           .map((issue): LinearApiIssue => ({
             id: issue.id,
             identifier: issue.identifier,
@@ -153,8 +194,8 @@ export function createLinearStructuredIssueCatalog(config: {
             url: issue.url,
             updatedAt: new Date(issue.updatedAt).toISOString()
           }))
-          .sort((a, b) => a.id.localeCompare(b.id));
-        return { items, complete: !parsed.pageInfo.hasNextPage };
+          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        return { items, complete: true };
       } catch {
         // SDK errors contain the original query and response. Do not expose private
         // issue data or mistake HTTP-200 partial GraphQL success for complete absence.

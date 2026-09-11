@@ -31,11 +31,13 @@ function fixture(count = 100) {
       nodes: Array.from({ length: count }, (_, index) =>
         issue(index, index % 2 ? "completed" : "started")
       ),
-      pageInfo: { hasNextPage: false }
+      pageInfo: { hasNextPage: false, endCursor: count ? "cursor:100" : null }
     }
   };
-  const requests: Array<{ query: string; variables: { teamId: string; first: number } }> =
-    [];
+  const requests: Array<{
+    query: string;
+    variables: { teamId: string; first: number; after: string | null };
+  }> = [];
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
     if (typeof init?.body !== "string") throw new Error("Expected native JSON body");
     requests.push(JSON.parse(init.body) as (typeof requests)[number]);
@@ -47,9 +49,48 @@ function fixture(count = 100) {
     );
   });
   const provider = createLinearWorkProvider({ apiKey: "test-only", teamId });
-  const discover = () =>
-    provider.discoverWorkItems!({ workspaceId: "dayova", limit: 100 });
+  const discover = (limit = 100) =>
+    provider.discoverWorkItems!({ workspaceId: "dayova", limit });
   return { wire, requests, fetch, provider, discover };
+}
+
+function paginatedFixture(
+  count: number,
+  input: {
+    delayMs?: number;
+    change?: (wire: ReturnType<typeof fixture>["wire"], page: number) => void;
+  } = {}
+) {
+  const f = fixture(count);
+  const signals: Array<AbortSignal | null | undefined> = [];
+  f.fetch.mockImplementation((_url, init) => {
+    if (typeof init?.body !== "string") throw new Error("Expected native JSON body");
+    const body = JSON.parse(init.body) as (typeof f.requests)[number];
+    f.requests.push(body);
+    signals.push(init.signal);
+    const start = body.variables.after ? Number(body.variables.after.split(":")[1]) : 0;
+    const end = Math.min(start + body.variables.first, count);
+    const wire = {
+      team: { id: teamId },
+      issues: {
+        nodes: f.wire.issues.nodes.slice(start, end).map((row) => structuredClone(row)),
+        pageInfo: {
+          hasNextPage: end < count,
+          endCursor: end > start ? `cursor:${end}` : null
+        }
+      }
+    };
+    input.change?.(wire, f.requests.length);
+    const response = () =>
+      new Response(JSON.stringify({ data: wire }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    return input.delayMs
+      ? new Promise((resolve) => setTimeout(() => resolve(response()), input.delayMs))
+      : Promise.resolve(response());
+  });
+  return { ...f, signals };
 }
 describe("actual Linear complete structured-work catalog", () => {
   it("requires an exact readable team even when the issue filter returns no rows", async () => {
@@ -79,7 +120,8 @@ describe("actual Linear complete structured-work catalog", () => {
     expect(f.requests[0]!.variables).toEqual({
       teamId,
       teamSelector: teamId,
-      first: 100
+      first: 100,
+      after: null
     });
     expect(f.requests[0]!.query).toContain("includeArchived: false");
     expect(f.requests[0]!.query).toContain("labels(first: 51)");
@@ -108,7 +150,7 @@ describe("actual Linear complete structured-work catalog", () => {
   it.each(["issues", "labels", "label-count"])(
     "withholds complete absence when %s pagination is incomplete",
     async (kind) => {
-      const f = fixture(1);
+      const f = fixture(kind === "issues" ? 100 : 1);
       if (kind === "issues") f.wire.issues.pageInfo.hasNextPage = true;
       if (kind === "labels") f.wire.issues.nodes[0]!.labels.pageInfo.hasNextPage = true;
       if (kind === "label-count")
@@ -240,4 +282,124 @@ describe("actual Linear complete structured-work catalog", () => {
     expect(result.externalId).toBe("DAY-1");
     expect(result.title).toBe("Validation 1");
   });
+});
+
+describe("actual Linear bounded multi-page structured catalog", () => {
+  it.each([101, 396, 1000])(
+    "returns all %s issues across native pages with stable creation ordering",
+    async (count) => {
+      const f = paginatedFixture(count);
+      const result = await f.discover(1000);
+      expect(result.complete).toBe(true);
+      expect(result.items).toHaveLength(count);
+      expect(new Set(result.items.map((row) => row.externalId)).size).toBe(count);
+      expect(
+        result.items.find((row) => row.externalId === `DAY-${count - 1}`)?.status
+      ).toBe(count % 2 ? "active" : "completed");
+      expect(f.requests).toHaveLength(Math.ceil(count / 100));
+      expect(
+        f.requests.every((request) => request.query.includes("orderBy: createdAt"))
+      ).toBe(true);
+      expect(f.requests.map((request) => request.variables.after)).toEqual(
+        Array.from({ length: Math.ceil(count / 100) }, (_, index) =>
+          index ? `cursor:${index * 100}` : null
+        )
+      );
+      expect(f.requests.every((request) => request.variables.first <= 100)).toBe(true);
+      expect(f.signals.every((signal) => signal?.aborted)).toBe(true);
+    }
+  );
+
+  it("withholds completeness at the total bound without exposing partial candidates", async () => {
+    const f = paginatedFixture(1001);
+    expect(await f.discover(1000)).toEqual({ items: [], complete: false });
+    expect(f.requests).toHaveLength(10);
+    expect(f.requests.every((request) => request.variables.first === 100)).toBe(true);
+  });
+
+  it("respects a smaller caller bound and refuses a bound above 1000 before native reads", async () => {
+    const f = paginatedFixture(500);
+    expect(await f.discover(250)).toEqual({ items: [], complete: false });
+    expect(f.requests.map((request) => request.variables.first)).toEqual([100, 100, 50]);
+    await expect(f.discover(1001)).rejects.toThrow("1–1000");
+    expect(f.requests).toHaveLength(3);
+  });
+
+  it.each([
+    "id",
+    "identifier",
+    "cross-identity",
+    "cursor",
+    "null-cursor",
+    "empty",
+    "foreign-row",
+    "foreign-team"
+  ])(
+    "rejects a %s inconsistency across pages without claiming absence or requesting a third page",
+    async (kind) => {
+      const f = paginatedFixture(250, {
+        change: (wire, page) => {
+          if (page !== 2) return;
+          const row = wire.issues.nodes[0]!;
+          if (kind === "id") row.id = "issue-0";
+          if (kind === "identifier") row.identifier = "DAY-0";
+          if (kind === "cross-identity") row.identifier = "issue-0";
+          if (kind === "cursor") wire.issues.pageInfo.endCursor = "cursor:100";
+          if (kind === "null-cursor") wire.issues.pageInfo.endCursor = null;
+          if (kind === "empty") wire.issues.nodes = [];
+          if (kind === "foreign-row") row.team.id = "another-team";
+          if (kind === "foreign-team") wire.team.id = "another-team";
+        }
+      });
+      await expect(f.discover(1000)).rejects.toThrow("unavailable");
+      expect(f.requests).toHaveLength(2);
+    }
+  );
+
+  it("withholds an earlier complete page when a later issue has incomplete labels", async () => {
+    const f = paginatedFixture(250, {
+      change: (wire, page) => {
+        if (page === 2) wire.issues.nodes[0]!.labels.pageInfo.hasNextPage = true;
+      }
+    });
+    expect(await f.discover(1000)).toEqual({ items: [], complete: false });
+    expect(f.requests).toHaveLength(2);
+  });
+
+  it("uses one overall deadline across delayed pages and cannot continue after timeout", async () => {
+    vi.useFakeTimers();
+    const f = paginatedFixture(300, { delayMs: 8000 });
+    const pending = expect(f.discover(1000)).rejects.toThrow("unavailable");
+    await vi.advanceTimersByTimeAsync(15001);
+    await pending;
+    expect(f.requests).toHaveLength(2);
+    expect(f.signals.every((signal) => signal?.aborted)).toBe(true);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(f.requests).toHaveLength(2);
+  });
+
+  it.each([200, 429, 503])(
+    "discards prior pages on a later HTTP %s error or partial GraphQL result",
+    async (status) => {
+      const f = paginatedFixture(250);
+      const native = f.fetch.getMockImplementation()!;
+      f.fetch.mockImplementation(async (...args) => {
+        const response = await native(...args);
+        const envelope = JSON.parse(await response.clone().text()) as { data: unknown };
+        return f.requests.length === 2
+          ? new Response(
+              JSON.stringify({
+                data: envelope.data,
+                errors: [{ message: "private issue data" }]
+              }),
+              { status, headers: { "content-type": "application/json" } }
+            )
+          : response;
+      });
+      const outcome = await f.discover(1000).catch((error: unknown) => error);
+      expect(outcome).toBeInstanceOf(Error);
+      expect(String(outcome)).not.toContain("private issue data");
+      expect(f.requests).toHaveLength(2);
+    }
+  );
 });

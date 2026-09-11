@@ -50,11 +50,53 @@ calling a model. Changed text, boundary, author identity or access invalidates t
 proof. Poll result and expiry changes alone do not rewrite the original capture or
 supply decision authority.
 
-The main runtime also requires the configured canonical Decision Records target,
-current source-backed ownership and the budgeted interpreter. Those dependencies
-must be supplied to the scoped MI and Follow-up Execution facades; a Discord feature
-flag alone does not provide them. There is one Gateway client and the ordinary
-shutdown drain waits for admitted decision work and final delivery.
+The main server composes the real Conversation source, governed Notion authority,
+canonical Notion Decision Records adapter and OpenAI interpreter into the same
+scoped MI and Follow-up Execution facades. It uses the existing database, Gateway,
+observed-source ledger and USD30 monthly AI budget. The ordinary shutdown drain
+waits for admitted decision work and final delivery. It can run independently of
+conversation Ask, Meeting analysis and Notion Meeting imports.
+
+The following additional settings are mandatory when enabling the capability:
+
+```dotenv
+LUMA_DECISION_RECORDS_NOTION_API_TOKEN=<dedicated-decision-writer>
+LUMA_DECISION_RECORDS_DATA_SOURCE_ID=<canonical-notion-data-source-uuid>
+LUMA_DECISION_RECORDS_CREDENTIAL_SCOPE_ID=<reviewed-writer-scope>
+LUMA_DECISION_RECORDS_SIGNING_KEY=<stable-protected-key-at-least-32-bytes>
+LUMA_DECISION_AUTHORITY_POLICY_PATH=/etc/luma/decision-authority.json
+LUMA_CONTEXT_SHARING_POLICY_PATH=/etc/luma/context-sharing.json
+LUMA_CONTEXT_NOTION_READONLY_API_TOKEN=<dedicated-read-only-token>
+LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID=<reviewed-read-scope>
+LUMA_CONTEXT_NOTION_PAGE_IDS=<exact-reviewed-pages-including-ownership>
+OPENAI_API_KEY=<shared-ai-account>
+```
+
+Use the existing protected sharing-policy format to grant the exact Decision
+Records data-source ID under the writer scope to all four founder Person IDs.
+Grant the exact ownership page under its separate read-only scope to that same
+original audience. The Notion integration itself must have access to the selected
+data source. Every record's actual parent and retained source grants are checked
+at use time. A configured writer token alone never authorizes disclosure.
+
+The [authority mapping](notion-decision-authority.md) is a protected `0600` regular
+file with the actual ownership page ID, original Markdown SHA-256 and literal
+Human evidence for each responsibility grant. It must be updated from reviewed
+source evidence when that page changes. The authority reader does not promote
+provisional role titles or elapsed meeting dates. Keep the stable signing key with
+encrypted host recovery material; changing it makes existing signed records
+unverifiable. Never place credentials or keys in the source page or repository.
+
+Configuration validation happens before database allocation or Gateway connection.
+Missing scopes, incomplete founder access, malformed IDs and absent credentials
+fail startup. Unavailable current source/destination/authority evidence refuses
+recording before an AI call or canonical mutation. Budget exhaustion is visible
+without another paid call. Live source access, native Notion round-trip, production
+secrets and host recovery still need deployment verification.
+
+This path handles explicit Conversation recording instructions. Automatic candidate
+recognition and actual imported-Meeting Decision audiences are separate required
+work; enabling this flag does not claim they are composed.
 
 ## Receipts, replay and recovery
 

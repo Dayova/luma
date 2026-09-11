@@ -1,4 +1,5 @@
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
+import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
@@ -89,6 +90,7 @@ type StartServerDependencies = {
   createOpenAIContextAnswerer?: typeof createOpenAIContextAnswerer;
   createContextCatalogs?: typeof organizationalContextCatalogsFromEnv;
   createNotionWebhookHttpServer?: typeof createNotionWebhookHttpServer;
+  createDecisionRuntime?: typeof createDecisionRuntime;
 };
 
 const legacyMeetingNotesSourceEnvironment = [
@@ -160,6 +162,7 @@ export async function startServer(
   const aiBudgetSettings = aiUsageBudgetSettingsFromEnv(env);
   const aiRequestLimits = aiRequestLimitsFromEnv(env);
   const contextConfig = organizationalContextRuntimeConfig(env);
+  const decisionConfig = decisionRuntimeConfig(env, decisionRecordConfig !== undefined);
 
   if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
     throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
@@ -293,7 +296,21 @@ export async function startServer(
       outputLanguagePolicy: config.outputLanguagePolicy,
       publishingPolicy: config.publishingPolicy
     };
-    const meetingIntelligence = createMeetingIntelligence({
+    const decisionIntelligence = decisionConfig
+      ? await (dependencies.createDecisionRuntime ?? createDecisionRuntime)({
+          config: decisionConfig,
+          env,
+          workspaceId,
+          database,
+          ledger: observedSourceLedger,
+          conversationEvidenceSource: discordTransport,
+          accessPolicy,
+          budget: aiUsage,
+          limits: aiRequestLimits,
+          model: openAIReasoningModelName
+        })
+      : undefined;
+    const meetingDependencies = {
       database,
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
       ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
@@ -313,7 +330,12 @@ export async function startServer(
             })
           }
         : {})
-    });
+    };
+    const decisionMeetingIntelligence = decisionIntelligence
+      ? createMeetingIntelligence({ ...meetingDependencies, decisionIntelligence })
+      : undefined;
+    const meetingIntelligence =
+      decisionMeetingIntelligence ?? createMeetingIntelligence(meetingDependencies);
     const knowledgeProvider = optionalNotionKnowledgeProvider(env);
     const meetingNotesSource = optionalNotionMeetingNotesSource(
       env,
@@ -439,6 +461,15 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(decisionRecordConfig && decisionMeetingIntelligence
+        ? {
+            decisionRecords: {
+              meetingIntelligence: decisionMeetingIntelligence,
+              execution: followUpExecution,
+              config: decisionRecordConfig
+            }
+          }
+        : {}),
       ...(conversationConsultations
         ? {
             consultations: {

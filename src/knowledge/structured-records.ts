@@ -8,6 +8,8 @@ import type {
 /** Configured structured knowledge. No arbitrary page creation or generic document overwrite. */
 export interface StructuredRecords {
   readonly providerId: string;
+  /** Immutable credential trust boundary and configured target mapping, never a credential. */
+  readonly authorizationScopeId: string;
   inspect(input: {
     audience: StructuredWorkAudience;
     targetKey: string;
@@ -15,6 +17,16 @@ export interface StructuredRecords {
   requireCurrent(input: {
     audience: StructuredWorkAudience;
     snapshot: StructuredRecordSnapshot;
+  }): Promise<void>;
+  /**
+   * Reprove access to every original contributing row under its original scope.
+   * Allows later content edits and newly created rows; does not authorize a write
+   * or assert that the original snapshot is still the current catalog.
+   */
+  requireReadable(input: {
+    audience: StructuredWorkAudience;
+    snapshot: StructuredRecordSnapshot;
+    authorizationScopeId: string;
   }): Promise<void>;
   read(input: {
     audience: StructuredWorkAudience;

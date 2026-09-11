@@ -37,6 +37,8 @@ export type NotionStructuredTarget = {
 };
 export type NotionStructuredRecordsConfig = {
   apiToken: string;
+  /** Stable, nonsecret identity of the configured credential's original trust boundary. */
+  credentialScopeId: string;
   signingKey: string;
   targets: NotionStructuredTarget[];
   identityDirectory: IdentityDirectory;
@@ -144,6 +146,7 @@ export function createNotionStructuredRecords(
 ): StructuredRecords {
   if (
     !config.apiToken.trim() ||
+    !config.credentialScopeId.trim() ||
     Buffer.byteLength(config.signingKey) < 32 ||
     !config.targets.length ||
     config.targets.length > 10 ||
@@ -151,6 +154,11 @@ export function createNotionStructuredRecords(
   )
     throw new Error("Configure exact structured targets and a protected signing key");
   const targets = structuredClone(config.targets);
+  const authorizationScopeId = operationDigest({
+    type: "notion-structured-records-authorization-v1",
+    credentialScopeId: config.credentialScopeId,
+    targets: [...targets].sort((a, b) => a.key.localeCompare(b.key))
+  });
   const { client, request } = createScheduledNotionClient(config.apiToken);
   const targetFor = (key: string) => {
     const target = targets.find((target) => target.key === key);
@@ -354,12 +362,8 @@ export function createNotionStructuredRecords(
       active
     };
   };
-  const list = async (
-    target: NotionStructuredTarget,
-    audience: StructuredWorkAudience,
-    signal: AbortSignal
-  ): Promise<{ records: StructuredRecord[]; complete: boolean }> => {
-    const result = z
+  const listNative = async (target: NotionStructuredTarget, signal: AbortSignal) =>
+    z
       .object({
         results: z.array(z.unknown()).max(100),
         has_more: z.boolean(),
@@ -374,6 +378,12 @@ export function createNotionStructuredRecords(
           })
         )
       );
+  const list = async (
+    target: NotionStructuredTarget,
+    audience: StructuredWorkAudience,
+    signal: AbortSignal
+  ): Promise<{ records: StructuredRecord[]; complete: boolean }> => {
+    const result = await listNative(target, signal);
     const records: StructuredRecord[] = [];
     for (const raw of result.results)
       records.push(await record(raw, target, audience, signal));
@@ -620,6 +630,7 @@ export function createNotionStructuredRecords(
   };
   return {
     providerId: "notion",
+    authorizationScopeId,
     inspect: (input) =>
       bounded((signal) => inspect(input.audience, input.targetKey, signal)),
     requireCurrent: (input) =>
@@ -630,6 +641,68 @@ export function createNotionStructuredRecords(
           ) !== operationDigest(input.snapshot)
         )
           throw new Error("The structured target changed");
+      }),
+    requireReadable: (input) =>
+      bounded(async (signal) => {
+        if (input.authorizationScopeId !== authorizationScopeId)
+          throw new Error("The original structured authorization scope changed");
+        const snapshot = structuredClone(input.snapshot);
+        const target = targetFor(snapshot.schema.targetKey);
+        if (
+          snapshot.records.length > 100 ||
+          new Set(snapshot.records.map((item) => normalizeId(item.reference.externalId)))
+            .size !== snapshot.records.length
+        )
+          throw new Error("The original structured catalog is ambiguous or unbounded");
+        const requireSchema = async () => {
+          if (
+            operationDigest((await schema(target, input.audience, signal)).owned) !==
+            operationDigest(snapshot.schema)
+          )
+            throw new Error("The original structured schema changed");
+        };
+        await requireSchema();
+        const listed = await listNative(target, signal);
+        const complete = !listed.has_more && listed.next_cursor === null;
+        const currentRows = complete
+          ? listed.results.map((raw) => pageSchema.parse(raw))
+          : [];
+        const byId = new Map(currentRows.map((row) => [normalizeId(row.id), row]));
+        if (byId.size !== currentRows.length)
+          throw new Error("The current structured catalog contains ambiguous identities");
+        for (const original of snapshot.records) {
+          const reference = original.reference;
+          if (reference.providerId !== "notion" || reference.objectType !== "document")
+            throw new Error("Wrong original structured provider reference");
+          // A complete unfiltered native listing carries the same page parent,
+          // identity and properties as retrieve. A partial listing proves no
+          // absence, so resolve each exact original reference independently.
+          await grant(input.audience, reference.externalId, "document", signal, target);
+          const raw = complete
+            ? byId.get(normalizeId(reference.externalId))
+            : await readNative(signal, () =>
+                client.pages.retrieve({ page_id: reference.externalId })
+              );
+          if (!raw) throw new Error("An original structured record is no longer present");
+          const current = await record(raw, target, input.audience, signal);
+          if (
+            normalizeId(current.reference.externalId) !==
+              normalizeId(reference.externalId) ||
+            current.reference.url !== reference.url
+          )
+            throw new Error("An original structured record identity changed");
+        }
+        await requireSchema();
+        // Earlier row grants may have changed while later native reads waited.
+        for (const original of snapshot.records)
+          await grant(
+            input.audience,
+            original.reference.externalId,
+            "document",
+            signal,
+            target
+          );
+        await grant(input.audience, target.dataSourceId, "data-source", signal, target);
       }),
     read: (input) =>
       bounded((signal) => read(input.audience, input.targetKey, input.reference, signal)),

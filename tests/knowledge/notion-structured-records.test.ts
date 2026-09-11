@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createNotionStructuredRecords,
+  type NotionStructuredRecordsConfig,
   type NotionStructuredTarget
 } from "../../src/knowledge/notion-structured-records.js";
 import { StructuredRecordNotAppliedError } from "../../src/knowledge/structured-records.js";
@@ -149,9 +150,12 @@ function fixture() {
     throw new Error(`Unexpected native request ${method} ${path}`);
   });
   vi.stubGlobal("fetch", api);
-  const authorize = vi.fn(() => Promise.resolve(grants));
+  const authorize = vi.fn<NotionStructuredRecordsConfig["authorize"]>(() =>
+    Promise.resolve(grants)
+  );
   const config = {
     apiToken: `fake-notion-${Math.random()}`,
+    credentialScopeId: "original-hypotheses-scope",
     signingKey: "a".repeat(32),
     targets: [target],
     identityDirectory: directory,
@@ -159,6 +163,37 @@ function fixture() {
   };
   const make = () => createNotionStructuredRecords(config);
   const provider = make();
+  const seed = (id: string) => {
+    const values: Record<string, unknown> = {
+      Hypothesis: [{ text: { content: `${title}: ${id}` } }],
+      "Evidence so far": [{ text: { content: "Original private evidence" } }],
+      Status: { name: "To validate" },
+      Source: [],
+      Owner: [],
+      "Related work": null
+    };
+    const page: NativePage = {
+      object: "page",
+      id,
+      url: `https://notion.so/${id}`,
+      last_edited_time: "2026-09-11T10:00:00.000Z",
+      parent: { type: "data_source_id", data_source_id: dataSourceId },
+      properties: Object.fromEntries(
+        Object.entries(nativeSchema).map(([name, definition]) => [
+          name,
+          {
+            id: definition["id"],
+            type: definition["type"],
+            [String(definition["type"])]: values[name]
+          }
+        ])
+      ),
+      archived: false,
+      in_trash: false
+    };
+    pages.set(id, page);
+    return page;
+  };
   const plan = async () => {
     const expected = await provider.inspect({ audience, targetKey: target.key });
     const draft: StructuredRecordCreate = {
@@ -190,6 +225,7 @@ function fixture() {
     config,
     authorize,
     target,
+    seed,
     loseAck: () => {
       loseAck = true;
     },
@@ -367,5 +403,160 @@ describe("Actual Notion structured record schema, write and recovery", () => {
     } finally {
       await database.close();
     }
+  });
+});
+
+describe("Retained structured catalog read authorization", () => {
+  const firstId = "25d42c24-6707-4c5c-a607-24b3be3cd011";
+  const secondId = "25d42c24-6707-4c5c-a607-24b3be3cd012";
+  const prepare = async () => {
+    const f = fixture();
+    f.seed(firstId);
+    f.seed(secondId);
+    const snapshot = await f.provider.inspect({ audience, targetKey: f.target.key });
+    return {
+      ...f,
+      input: { audience, snapshot, authorizationScopeId: f.provider.authorizationScopeId }
+    };
+  };
+
+  it("keeps original history readable after content edits and new rows without asserting currentness", async () => {
+    const f = await prepare();
+    const original = f.pages.get(firstId)!;
+    original.properties["Evidence so far"]!["rich_text"] = [
+      { text: { content: "Human corrected the evidence" } }
+    ];
+    original.properties["Status"]!["select"] = { name: "Supported" };
+    original.last_edited_time = "2026-09-11T11:00:00.000Z";
+    f.seed("25d42c24-6707-4c5c-a607-24b3be3cd013");
+    const before = f.calls.length;
+    await expect(f.provider.requireReadable(f.input)).resolves.toBeUndefined();
+    expect(f.calls.slice(before)).toHaveLength(3);
+    expect(
+      f.calls.slice(before).filter((call) => call.path.startsWith("/v1/pages/"))
+    ).toHaveLength(0);
+    expect(f.calls.some((call) => call.path === "/v1/pages")).toBe(false);
+    await expect(f.provider.requireCurrent(f.input)).rejects.toThrow("changed");
+    expect(f.pages.size).toBe(3);
+    expect(f.input.snapshot.records[0]!.fields["evidence"]).toEqual({
+      type: "text",
+      value: "Original private evidence"
+    });
+  });
+
+  it("reproves all 100 original rows with three native reads in a complete catalog", async () => {
+    const f = fixture();
+    for (let index = 0; index < 100; index++)
+      f.seed(`25d42c24-6707-4c5c-a607-${String(index).padStart(12, "0")}`);
+    const snapshot = await f.provider.inspect({ audience, targetKey: f.target.key });
+    const before = f.calls.length;
+    await f.provider.requireReadable({
+      audience,
+      snapshot,
+      authorizationScopeId: f.provider.authorizationScopeId
+    });
+    expect(f.calls.slice(before)).toHaveLength(3);
+    expect(
+      f.calls.slice(before).filter((call) => call.path.endsWith("/query"))
+    ).toHaveLength(1);
+    expect(
+      f.calls.slice(before).filter((call) => call.path.startsWith("/v1/pages"))
+    ).toHaveLength(0);
+  });
+
+  it("uses exact original references when later additions make native discovery partial", async () => {
+    const f = await prepare();
+    f.partial();
+    const before = f.calls.length;
+    await f.provider.requireReadable(f.input);
+    expect(f.calls.slice(before)).toHaveLength(5);
+    expect(
+      f.calls.slice(before).filter((call) => call.path.startsWith("/v1/pages/"))
+    ).toHaveLength(2);
+    f.pages.get(firstId)!.parent.data_source_id = "changed-parent";
+    await expect(f.provider.requireReadable(f.input)).rejects.toThrow("moved");
+  });
+
+  it.each(["credential", "target", "same-id-mapping"])(
+    "refuses an original preview under a replacement %s scope before provider reads",
+    async (change) => {
+      const f = await prepare();
+      if (change === "credential") f.config.credentialScopeId = "replacement-scope";
+      if (change === "target")
+        f.config.targets[0]!.dataSourceId = "f17710bd-6fef-4b80-9cb9-732df14a3325";
+      if (change === "same-id-mapping")
+        f.config.targets[0]!.fields["evidence"]!.property = "Source";
+      const replaced = f.make();
+      expect(replaced.authorizationScopeId).not.toBe(f.input.authorizationScopeId);
+      const before = f.calls.length;
+      await expect(replaced.requireReadable(f.input)).rejects.toThrow("scope changed");
+      expect(f.calls).toHaveLength(before);
+    }
+  );
+
+  it("preserves the scope for token rotation in the same configured trust boundary", async () => {
+    const f = await prepare();
+    f.config.apiToken = "rotated-test-credential";
+    const recreated = f.make();
+    expect(recreated.authorizationScopeId).toBe(f.input.authorizationScopeId);
+    await expect(recreated.requireReadable(f.input)).resolves.toBeUndefined();
+  });
+
+  it.each(["parent", "unselected-row"])(
+    "withholds a catalog-derived preview when the %s grant is revoked",
+    async (change) => {
+      const f = await prepare();
+      f.authorize.mockImplementation((request) =>
+        Promise.resolve(
+          change === "parent"
+            ? request.objectType !== "data-source"
+            : request.externalId !== secondId
+        )
+      );
+      await expect(f.provider.requireReadable(f.input)).rejects.toThrow(
+        "original audience"
+      );
+      expect(f.calls.some((call) => call.path === "/v1/pages")).toBe(false);
+    }
+  );
+
+  it("rechecks earlier row grants after later row reads", async () => {
+    const f = await prepare();
+    let firstRevoked = false;
+    f.authorize.mockImplementation((request) => {
+      if (request.externalId === secondId) firstRevoked = true;
+      return Promise.resolve(!(firstRevoked && request.externalId === firstId));
+    });
+    await expect(f.provider.requireReadable(f.input)).rejects.toThrow(
+      "original audience"
+    );
+  });
+
+  it.each(["removed", "moved", "archived", "identity", "schema"])(
+    "refuses %s original records without treating replacement or current listing as proof",
+    async (change) => {
+      const f = await prepare();
+      const page = f.pages.get(secondId)!;
+      if (change === "removed") f.pages.delete(secondId);
+      if (change === "moved") page.parent.data_source_id = "another-table";
+      if (change === "archived") page.archived = true;
+      if (change === "identity") page.url = "https://notion.so/another-record";
+      if (change === "schema") f.nativeSchema["Evidence so far"]!["id"] = "new-id";
+      await expect(f.provider.requireReadable(f.input)).rejects.toThrow();
+      expect(f.calls.some((call) => call.path === "/v1/pages")).toBe(false);
+    }
+  );
+
+  it("rechecks the original parent for an empty contributing catalog", async () => {
+    const f = fixture();
+    const snapshot = await f.provider.inspect({ audience, targetKey: f.target.key });
+    f.revoke();
+    await expect(
+      f.provider.requireReadable({
+        audience,
+        snapshot,
+        authorizationScopeId: f.provider.authorizationScopeId
+      })
+    ).rejects.toThrow("original audience");
   });
 });

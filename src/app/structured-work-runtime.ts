@@ -295,6 +295,7 @@ export async function createStructuredWorkRuntime(
   }));
   const nativeRecords = (dependencies.createRecords ?? createNotionStructuredRecords)({
     apiToken: env["LUMA_STRUCTURED_WORK_NOTION_API_TOKEN"]!,
+    credentialScopeId: config.notionCredentialScopeId,
     signingKey: env["LUMA_STRUCTURED_WORK_SIGNING_KEY"]!,
     identityDirectory: input.identityDirectory,
     targets,

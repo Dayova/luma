@@ -100,8 +100,10 @@ identity is read directly even when outside ordinary discovery, including an
 archived task. It cannot be silently replaced by the interpreter. Ordinary discovery
 does not claim to enumerate archived Linear issues.
 
-The actual Linear adapter uses its native team filter, bounded connection and
-`hasNextPage`. The generic fuzzy search is not evidence of complete absence. This
+The actual Linear adapter uses one explicit native GraphQL query for the exact
+team, its non-archived issues and the nested fields Luma needs. It verifies the
+selected team is actually readable, every returned issue belongs to it, and both
+issue and label connections are complete. The generic fuzzy search is not evidence of complete absence. This
 bounded catalog approach is appropriate only while the selected table/team fits
 the limit; larger scopes require a separate bounded candidate-index/reconciliation
 design before enabling the feature there.
@@ -114,6 +116,29 @@ unassigned work requires a literal Human instruction; it is not a null fallback.
 The original ownership evidence and unique provider mapping are rechecked before
 execution and replay. These deterministic forms are deliberately bounded; other
 wording returns a targeted ownership clarification rather than guessed assignment.
+
+## Linear discovery bounds
+
+Compound discovery does not use the SDK's lazy per-issue relationship fetches.
+A 100-issue native fixture produces one HTTP request per complete pass, including
+assignee, state, labels, project and parent. Labels have an explicit 51-result
+probe; more than 50 or a further page withholds completeness. This keeps the
+100-issue query below the documented 10,000-point single-query ceiling under
+Linear's published complexity formula. Exact named archived work continues through
+the provider's direct reference read; ordinary discovery includes all workflow
+states but excludes archived issues.
+
+The query uses a scoped SDK transport with a 15-second abort deadline, no retries
+and rejected redirects. HTTP-200 GraphQL partial errors, rate limits, malformed
+fields, duplicate identities, foreign teams and missing pagination proof withhold
+the catalog. Existing source/owner/work-grant fences still run for every pass and
+immediately before a create. A faster read never substitutes for a current proof.
+
+This follows Linear's [custom query and rate-limit guidance](https://linear.app/developers/rate-limiting)
+and [GraphQL error/archived-resource contract](https://linear.app/developers/graphql),
+checked 2026-09-11. The API-key request allowance is shared by the authenticated
+user, including their other keys. The test establishes request counts and behavior
+under delayed native responses; it does not claim a measured live-service latency.
 
 ## Native Notion capability
 

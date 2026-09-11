@@ -1,3 +1,4 @@
+import { createLinearStructuredIssueCatalog } from "./linear-structured-issue-catalog.js";
 import { LinearClient } from "@linear/sdk";
 import type { ExternalReference } from "../domain/model.js";
 import type { UpdateWorkItemInput, WorkItem, WorkProvider } from "./interface.js";
@@ -167,26 +168,28 @@ function createLinearSdkApi(config: LinearWorkProviderConfig): LinearApi {
     new LinearClient({
       apiKey: config.apiKey,
       ...(config.apiUrl ? { apiUrl: config.apiUrl } : {})
+    }),
+    createLinearStructuredIssueCatalog({
+      apiKey: config.apiKey,
+      teamId: config.teamId,
+      ...(config.apiUrl ? { apiUrl: config.apiUrl } : {})
     })
   );
 }
 
 class LinearSdkApi implements LinearApi {
-  constructor(private readonly client: LinearClient) {}
+  constructor(
+    private readonly client: LinearClient,
+    private readonly completeCatalog: ReturnType<
+      typeof createLinearStructuredIssueCatalog
+    >
+  ) {}
 
-  async listIssues(input: {
+  listIssues(input: {
     teamId: string;
     limit: number;
   }): Promise<{ items: LinearApiIssue[]; complete: boolean }> {
-    const result = await this.client.issues({
-      first: input.limit,
-      includeArchived: false,
-      filter: { team: { id: { eq: input.teamId } } }
-    });
-    return {
-      items: await Promise.all(result.nodes.map((issue) => this.toApiIssue(issue))),
-      complete: !result.pageInfo.hasNextPage
-    };
+    return this.completeCatalog.listIssues(input);
   }
 
   async searchIssues(input: {

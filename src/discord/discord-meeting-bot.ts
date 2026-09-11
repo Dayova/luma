@@ -117,7 +117,14 @@ export type DiscordCommand =
       reason?: string;
       execute: boolean;
     })
-  | (DiscordCommandBase & { type: "refresh"; reviewId: string });
+  | (DiscordCommandBase & { type: "refresh"; reviewId: string })
+  | (DiscordCommandBase & {
+      type: "patch";
+      intentId: string;
+      pageId: string;
+      expectedMarkdown: string;
+      replacementMarkdown: string;
+    });
 
 export type DiscordCommandResponse = {
   content: string;
@@ -635,6 +642,8 @@ async function executeAdmittedCommand(
       return bindImportedMeeting(input, command, now);
     case "review":
       return reviewMeeting(input, command);
+    case "patch":
+      return patchCanonicalKnowledge(input, command, now);
     case "owner":
     case "reconcile":
     case "refresh":
@@ -1084,6 +1093,84 @@ async function requireFollowUpExecutionScope(
     thread.guildId !== meetingThread.guild_id
   )
     throw new DiscordChannelAccessError();
+}
+
+async function patchCanonicalKnowledge(
+  input: ScopedDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "patch" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
+  if ("response" in context) return context.response;
+  if (!input.followUpExecution)
+    return { content: "Follow-up execution is not configured." };
+  const pageId = canonicalNotionObjectId(command.pageId);
+  if (!pageId)
+    return { content: "Select the existing canonical Notion page by its exact page ID." };
+  const state = await queryMeetingSnapshot(input, context.meetingThread);
+  const intent = state.followUpIntentions.find(
+    (candidate) => candidate.id === command.intentId
+  );
+  if (intent?.type !== "settle-operational-outcome")
+    return { content: "Select a source-bound settlement from /meeting review first." };
+  const review = state.actionItemReconciliationReviews.find(
+    (item) => item.id === intent.reconciliation.reviewId
+  );
+  const providerId = review?.candidate.source.source.providerId;
+  if (!providerId)
+    return { content: "The source-bound Notion provider could not be established." };
+  await requireImportedMeetingCurrent(input, state);
+  await requireFollowUpExecutionScope(input, command, context.meetingThread);
+  const approval = await input.meetingIntelligence.observe({
+    workspace: input.workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: `discord:${command.interactionId}:canonical-patch`,
+        workspaceId: context.meetingThread.workspace_id,
+        meetingId: context.meetingThread.meeting_id,
+        occurredAt: command.occurredAt,
+        observedAt: now().toISOString(),
+        participantId: context.actor.personId,
+        judgment: {
+          kind: "approve-canonical-knowledge-patch",
+          intentId: intent.id,
+          target: {
+            providerId,
+            objectType: "document",
+            externalId: pageId,
+            url: `https://www.notion.so/${pageId.replaceAll("-", "")}`
+          },
+          expectedMarkdown: command.expectedMarkdown,
+          replacementMarkdown: command.replacementMarkdown
+        }
+      }
+    ]
+  });
+  const error = approval.errors[0];
+  if (error)
+    return {
+      content: `Canonical patch was not approved: ${"message" in error ? error.message : error.code}`
+    };
+  await requireFollowUpExecutionScope(input, command, context.meetingThread);
+  const result = await input.followUpExecution.execute({
+    workspace: input.workspace,
+    meetingId: context.meetingThread.meeting_id,
+    intentId: intent.id
+  });
+  await publishMeetingEvents(input, {
+    workspaceId: context.meetingThread.workspace_id,
+    meetingId: context.meetingThread.meeting_id,
+    events: result.events,
+    mentionPersonIds: [context.actor.personId],
+    idempotencyKeyPrefix: result.idempotencyKey
+  });
+  return {
+    content:
+      result.observation.outcome.status === "succeeded"
+        ? "Canonical knowledge patch and its Meeting Operational Outcome were completed."
+        : `Canonical patch needs attention: ${result.observation.outcome.message} Use /meeting recover intent_id:${intent.id} to inspect an uncertain outcome; conflicts require fresh review.`
+  };
 }
 
 async function approveFollowUp(

@@ -76,12 +76,22 @@ Mutation tests remove matching code, the head change and revocation and require
 the corresponding checks to fail. This runs actual adapters but no live network;
 its source/evidence selection is reported separately from normalized catalogs.
 
-Two checks remain explicitly missing: recall from another actual Meeting, and
-real Notion/Linear/GitHub source mapping
+One check remains explicitly missing: real Notion/Linear/GitHub source mapping
 for standing/authority and current-versus-superseded selection. Programmable
 normalized catalogs prove the core's selection policy, but cannot prove those
 external adapters. The original historical/current Meeting fixtures remain
 separate from this new retrieval coverage.
+
+The version-five corpus adds accepted imported Meeting recall: real immutable
+source admission and Meeting Intelligence analysis, Human confirmation, the owned
+prior-Meeting leaf, and Context Ask in a separate conversation. Its annotations
+check old still-valid ownership, original links, exclusion of unrelated Meetings,
+persisted replay, grant revocation and retained history. Mutation tests alter the
+source statement, Human confirmation and revocation event and require failures.
+The source reader and model remain deterministic external adapters; the scenario also cites an external source through the restricted nonrecursive
+receipt proof. No direct Discord historical grants, live Notion transport, or
+multi-hop Meeting dependency proof is claimed. See
+[the bounded catalog contract](../docs/imported-meeting-recall.md).
 
 The report records exact corpus and sample hashes, sample provenance, model and
 prompt versions, fixed workspace configuration, each observed result, per-check

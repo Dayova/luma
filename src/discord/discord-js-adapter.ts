@@ -984,6 +984,15 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
         ...(reason ? { reason } : {})
       };
     }
+    case "patch":
+      return {
+        ...base,
+        type: "patch",
+        intentId: interaction.options.getString("intent_id", true),
+        pageId: interaction.options.getString("page_id", true),
+        expectedMarkdown: interaction.options.getString("expected", true),
+        replacementMarkdown: interaction.options.getString("replacement", true)
+      };
     case "refresh":
       return {
         ...base,
@@ -1259,6 +1268,41 @@ const meetingCommand = new SlashCommandBuilder()
           .setDescription(
             "Also execute this decision and write its outcome to the original Meeting Note"
           )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("patch")
+      .setDescription(
+        "Approve an exact canonical Notion patch and execute its selected source settlement"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Current suggested settlement Intent from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("page_id")
+          .setDescription("Explicit existing canonical Notion page ID")
+          .setRequired(true)
+          .setMaxLength(36)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("expected")
+          .setDescription("Exact existing Markdown region; must occur once")
+          .setRequired(true)
+          .setMaxLength(6000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("replacement")
+          .setDescription("Exact approved replacement Markdown; cannot be empty")
+          .setRequired(true)
+          .setMaxLength(6000)
       )
   )
   .addSubcommand((command) =>

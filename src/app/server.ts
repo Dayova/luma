@@ -1,9 +1,17 @@
+import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
   organizationalContextCatalogsFromEnv
 } from "./organizational-context-runtime.js";
-import { createOrganizationalContext } from "../organizational-context/organizational-context.js";
+import {
+  createOrganizationalContext,
+  createExternalContextReceiptVerifier
+} from "../organizational-context/organizational-context.js";
+import {
+  createImportedMeetingContextCatalog,
+  importedMeetingContextCatalogId
+} from "../meeting-intelligence/imported-meeting-context-catalog.js";
 import { createMeetingContextGuard } from "../meeting-intelligence/context-guard.js";
 import { discordAllowedParentChannelIdsFromEnv } from "../discord/discord-channel-scope.js";
 import type {
@@ -145,7 +153,7 @@ export async function startServer(
     }
   }
 
-  const contextCatalogs = contextConfig
+  const externalContextCatalogs = contextConfig
     ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
         workspaceId,
         env
@@ -167,9 +175,6 @@ export async function startServer(
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
           discordContextAskConfig !== undefined)
     });
-    const organizationalContext = contextCatalogs
-      ? createOrganizationalContext({ database, catalogs: contextCatalogs })
-      : undefined;
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
         requestedWorkspaceId === workspaceId
@@ -187,6 +192,24 @@ export async function startServer(
       ledger: observedSourceLedger,
       operationalOutcomeMarkerVerifier
     });
+    const contextCatalogs = [...(externalContextCatalogs ?? [])];
+    if (importedSourceAnalysis) {
+      contextCatalogs.push(
+        createImportedMeetingContextCatalog({
+          database,
+          sourceAccess: importedSourceAnalysis.access,
+          externalContext: createExternalContextReceiptVerifier({
+            database,
+            catalogs: externalContextCatalogs ?? [],
+            ignoredEmptyCatalogIds: [importedMeetingContextCatalogId]
+          })
+        })
+      );
+    }
+    const organizationalContext =
+      externalContextCatalogs || contextCatalogs.length
+        ? createOrganizationalContext({ database, catalogs: contextCatalogs })
+        : undefined;
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
@@ -255,7 +278,15 @@ export async function startServer(
       identityDirectory,
       ...(workProvider ? { workProvider } : {}),
       ...(knowledgeProvider ? { knowledgeProvider } : {}),
-      ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
+      ...(operationalOutcomeWriter
+        ? {
+            operationalOutcomeWriter,
+            canonicalKnowledgePatchWriter: createNotionCanonicalKnowledgePatchWriter({
+              token: requireEnv(env, "NOTION_API_TOKEN"),
+              providerId: operationalOutcomeWriter.providerId
+            })
+          }
+        : {}),
       ...(meetingNotesSource
         ? {
             operationalOutcomeSourceExecutionFence:

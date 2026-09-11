@@ -19,6 +19,7 @@ import {
 import { importedObservation } from "./imported-source.js";
 import { score, summarize, type CheckResult } from "./scorer.js";
 import { runRetrievalFixture } from "./retrieval-runner.js";
+import { runImportedMeetingFixture } from "./imported-meeting-runner.js";
 import { runGitHubFixture } from "./github-runner.js";
 
 type RequestRecord = {
@@ -398,7 +399,17 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
     const githubFixtures = [];
     for (const fixture of corpus.githubFixtures)
       githubFixtures.push(await runGitHubFixture(database, fixture, corpus));
-    const fixtures = [...meetingFixtures, ...retrievalFixtures, ...githubFixtures];
+    const importedMeetingFixtures = [];
+    for (const fixture of corpus.importedMeetingFixtures)
+      importedMeetingFixtures.push(
+        await runImportedMeetingFixture(database, fixture, corpus)
+      );
+    const fixtures = [
+      ...meetingFixtures,
+      ...retrievalFixtures,
+      ...githubFixtures,
+      ...importedMeetingFixtures
+    ];
     const checks = fixtures.flatMap((fixture) => fixture.checks);
     const metrics = Object.fromEntries(
       [...new Set(checks.map((check) => check.metric))].map((metric) => [
@@ -454,6 +465,10 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       githubAdapterSelection: knowledgeMeasurements(
         githubFixtures,
         "Real GitHub CodeProvider, catalog and Context Ask with deterministic HTTP and evidence echo; live provider/model quality remains unmeasured."
+      ),
+      importedMeetingSelection: knowledgeMeasurements(
+        importedMeetingFixtures,
+        "Real accepted Notion-shaped captures, MI analysis, original source grants, leaf catalog and Context Ask with deterministic external adapters. No live model, Notion transport or direct Discord historical audience proof is measured."
       ),
       productReadiness: checks.some((check) => check.status !== "passed")
         ? "not-demonstrated"

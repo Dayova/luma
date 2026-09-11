@@ -1,9 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
+  ContextAudience,
   ContextCatalog,
+  ExternalContextReceiptVerifier,
   ContextSource,
   OrganizationalContext,
+  OrganizationalContextBundle,
   OrganizationalContextRequest,
   RetrievedContextSource
 } from "./interface.js";
@@ -68,7 +71,11 @@ export function createOrganizationalContext(input: {
   ) => {
     if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
     const source = await deadline(
-      catalog.read({ audience: structuredClone(request.audience), sourceId }),
+      catalog.read({
+        audience: structuredClone(request.audience),
+        subject: structuredClone(request.subject),
+        sourceId
+      }),
       Math.min(input.timeoutMs ?? 5_000, deadlineAt - Date.now())
     );
     if (source) validateSource(source, sourceId);
@@ -101,6 +108,7 @@ export function createOrganizationalContext(input: {
           const search = await deadline(
             catalog.search({
               audience: structuredClone(request.audience),
+              subject: structuredClone(request.subject),
               concepts: [...request.concepts],
               limit: remaining
             }),
@@ -306,7 +314,7 @@ export function createOrganizationalContext(input: {
       for (const { candidate } of eligible) {
         const { source } = candidate;
         const duplicateKey = digest([
-          normalizedContent(source.content),
+          source.equivalenceKey ?? normalizedContent(source.content),
           source.standing,
           source.authority
         ]);
@@ -379,77 +387,181 @@ export function createOrganizationalContext(input: {
       return bundle;
     },
     async requireCurrent(request, receiptId) {
-      request = structuredClone(request);
-      validateRequest(request);
-      const readDeadline = Date.now() + 15_000;
-      const result = await input.database.query<{
-        request_hash: string;
-        proof_json: string;
-      }>(
-        "SELECT request_hash, proof_json FROM organizational_context_receipts WHERE receipt_id=$1 AND workspace_id=$2",
-        [receiptId, request.audience.workspaceId]
-      );
-      const row = result.rows[0];
-      if (!row || row.request_hash !== requestDigest(request))
-        throw new OrganizationalContextUnavailableError();
-      const receipt = JSON.parse(row.proof_json) as ReceiptProof;
-      if (digest(receipt.catalogIds) !== digest([...catalogs.keys()].sort()))
-        throw new OrganizationalContextUnavailableError();
-      if (receipt.validUntil && now().getTime() >= Date.parse(receipt.validUntil))
-        throw new OrganizationalContextUnavailableError();
-      for (const search of receipt.searches) {
-        if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
-        const catalog = catalogs.get(search.catalogId);
-        if (!catalog) throw new OrganizationalContextUnavailableError();
-        let current: Awaited<ReturnType<ContextCatalog["search"]>>;
-        try {
-          current = await deadline(
-            catalog.search({
-              audience: structuredClone(request.audience),
-              concepts: [...request.concepts],
-              limit: search.limit
-            }),
-            Math.min(input.timeoutMs ?? 5_000, readDeadline - Date.now())
-          );
-        } catch {
-          if (search.failed) continue;
-          throw new OrganizationalContextUnavailableError();
-        }
-        if (
-          search.failed ||
-          current.complete !== search.complete ||
-          digest([...new Set(current.sourceIds)].sort()) !== digest(search.sourceIds)
-        )
-          throw new OrganizationalContextUnavailableError();
-      }
-      for (const outcome of receipt.unavailableReads) {
-        if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
-        const catalog = catalogs.get(outcome.catalogId);
-        if (!catalog) throw new OrganizationalContextUnavailableError();
-        let current: ContextSource | null;
-        try {
-          current = await read(catalog, request, outcome.sourceId, readDeadline);
-        } catch {
-          if (outcome.status === "unavailable") continue;
-          throw new OrganizationalContextUnavailableError();
-        }
-        if (current || outcome.status !== "ineligible")
-          throw new OrganizationalContextUnavailableError();
-      }
-      for (const proof of receipt.sources) {
-        const catalog = catalogs.get(proof.catalogId);
-        if (!catalog) throw new OrganizationalContextUnavailableError();
-        try {
-          const current = await read(catalog, request, proof.sourceId, readDeadline);
-          if (!current || digest(current) !== proof.snapshotId)
-            throw new OrganizationalContextUnavailableError();
-        } catch {
-          throw new OrganizationalContextUnavailableError();
-        }
-      }
+      await verifyReceipt({ ...input, catalogs }, request, receiptId);
     }
   };
 }
+
+/** Construct only with provider catalogs. This port cannot invoke a prior-Meeting leaf. */
+export function createExternalContextReceiptVerifier(input: {
+  database: LumaDatabase;
+  catalogs: readonly ContextCatalog[];
+  ignoredEmptyCatalogIds: readonly string[];
+  now?: () => Date;
+  timeoutMs?: number;
+}): ExternalContextReceiptVerifier {
+  const catalogs = new Map(input.catalogs.map((catalog) => [catalog.id, catalog]));
+  if (
+    catalogs.size !== input.catalogs.length ||
+    input.catalogs.some(
+      (catalog) =>
+        catalog.dependencyKind === "meeting" ||
+        input.ignoredEmptyCatalogIds.includes(catalog.id)
+    )
+  )
+    throw new Error(
+      "External receipt verification accepts only external provider catalogs."
+    );
+  const ignoredEmptyCatalogIds = [...input.ignoredEmptyCatalogIds];
+  return {
+    async requireCurrent({ originalRequest, receiptId, audience }) {
+      const bundle = await verifyReceipt(
+        { ...input, catalogs },
+        originalRequest,
+        receiptId,
+        { audience: structuredClone(audience), ignoredEmptyCatalogIds }
+      );
+      return { sources: bundle.sources };
+    }
+  };
+}
+async function verifyReceipt(
+  input: {
+    database: LumaDatabase;
+    catalogs: Map<string, ContextCatalog>;
+    now?: () => Date;
+    timeoutMs?: number;
+  },
+  request: OrganizationalContextRequest,
+  receiptId: string,
+  external?: { audience: ContextAudience; ignoredEmptyCatalogIds: string[] }
+): Promise<OrganizationalContextBundle> {
+  const catalogs = input.catalogs;
+  const now = input.now ?? (() => new Date());
+  const read = async (
+    catalog: ContextCatalog,
+    bound: OrganizationalContextRequest,
+    sourceId: string,
+    deadlineAt: number
+  ) => {
+    if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
+    const source = await deadline(
+      catalog.read({
+        audience: structuredClone(bound.audience),
+        subject: structuredClone(bound.subject),
+        sourceId
+      }),
+      Math.min(input.timeoutMs ?? 5000, deadlineAt - Date.now())
+    );
+    if (source) validateSource(source, sourceId);
+    return source;
+  };
+  request = structuredClone(request);
+  validateRequest(request);
+  const readDeadline = Date.now() + 15_000;
+  const result = await input.database.query<{
+    request_hash: string;
+    proof_json: string;
+    bundle_json: string;
+  }>(
+    "SELECT request_hash, proof_json, bundle_json FROM organizational_context_receipts WHERE receipt_id=$1 AND workspace_id=$2",
+    [receiptId, request.audience.workspaceId]
+  );
+  const row = result.rows[0];
+  if (!row || row.request_hash !== requestDigest(request))
+    throw new OrganizationalContextUnavailableError();
+  const receipt = JSON.parse(row.proof_json) as ReceiptProof;
+  const bundle = JSON.parse(row.bundle_json) as OrganizationalContextBundle;
+  const ignored = new Set(external?.ignoredEmptyCatalogIds ?? []);
+  if (
+    digest(receipt.catalogIds.filter((id) => !ignored.has(id))) !==
+    digest([...catalogs.keys()].sort())
+  )
+    throw new OrganizationalContextUnavailableError();
+  if (external) {
+    const audience = external.audience;
+    if (
+      audience.workspaceId !== request.audience.workspaceId ||
+      !audience.personIds.length ||
+      new Set(audience.personIds).size !== audience.personIds.length ||
+      audience.personIds.some((person) => !request.audience.personIds.includes(person))
+    )
+      throw new OrganizationalContextUnavailableError();
+    if (
+      bundle.sources.some((source) => source.kind === "previous-meeting-item") ||
+      receipt.sources.some((source) => ignored.has(source.catalogId)) ||
+      receipt.unavailableReads.some((source) => ignored.has(source.catalogId))
+    )
+      throw new OrganizationalContextUnavailableError();
+    request = { ...request, audience: structuredClone(audience) };
+  }
+  if (receipt.validUntil && now().getTime() >= Date.parse(receipt.validUntil))
+    throw new OrganizationalContextUnavailableError();
+  for (const search of receipt.searches) {
+    if (ignored.has(search.catalogId)) {
+      // No prior-Meeting material was discovered or read. Never enter that
+      // catalog to verify a leaf's own dependency graph.
+      if (search.failed || search.sourceIds.length)
+        throw new OrganizationalContextUnavailableError();
+      continue;
+    }
+    if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
+    const catalog = catalogs.get(search.catalogId);
+    if (!catalog) throw new OrganizationalContextUnavailableError();
+    let current: Awaited<ReturnType<ContextCatalog["search"]>>;
+    try {
+      current = await deadline(
+        catalog.search({
+          audience: structuredClone(request.audience),
+          subject: structuredClone(request.subject),
+          concepts: [...request.concepts],
+          limit: search.limit
+        }),
+        Math.min(input.timeoutMs ?? 5_000, readDeadline - Date.now())
+      );
+    } catch {
+      if (search.failed) continue;
+      throw new OrganizationalContextUnavailableError();
+    }
+    if (
+      search.failed ||
+      current.complete !== search.complete ||
+      digest([...new Set(current.sourceIds)].sort()) !== digest(search.sourceIds)
+    )
+      throw new OrganizationalContextUnavailableError();
+  }
+  for (const outcome of receipt.unavailableReads) {
+    if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
+    const catalog = catalogs.get(outcome.catalogId);
+    if (!catalog) throw new OrganizationalContextUnavailableError();
+    let current: ContextSource | null;
+    try {
+      current = await read(catalog, request, outcome.sourceId, readDeadline);
+    } catch {
+      if (outcome.status === "unavailable") continue;
+      throw new OrganizationalContextUnavailableError();
+    }
+    if (current || outcome.status !== "ineligible")
+      throw new OrganizationalContextUnavailableError();
+  }
+  for (const proof of receipt.sources) {
+    const catalog = catalogs.get(proof.catalogId);
+    if (!catalog) throw new OrganizationalContextUnavailableError();
+    try {
+      const current = await read(catalog, request, proof.sourceId, readDeadline);
+      if (
+        !current ||
+        (external && current.kind === "previous-meeting-item") ||
+        digest(current) !== proof.snapshotId
+      )
+        throw new OrganizationalContextUnavailableError();
+    } catch {
+      throw new OrganizationalContextUnavailableError();
+    }
+  }
+  return bundle;
+}
+
 function rank(source: ContextSource): number {
   return (
     { "human-confirmed": 3, source: 2, "ai-inference": 1 }[source.authority] * 10 +

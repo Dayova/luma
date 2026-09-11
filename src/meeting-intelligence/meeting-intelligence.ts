@@ -3513,6 +3513,57 @@ async function applyObservation(
       };
     }
     case "human-judgment-recorded": {
+      if (observation.judgment.kind === "approve-canonical-knowledge-patch") {
+        const judgment = observation.judgment;
+        const approvalEvidence: EvidenceReference = {
+          evidenceId: `evidence:canonical-patch:${opaqueIdentifierSegment(observation.observationId)}`,
+          source: "human-judgment",
+          sourceObjectId: judgment.intentId,
+          sourceVersion: observation.observationId,
+          participantId: observation.participantId,
+          excerpt:
+            "Human Judgment approved one exact canonical knowledge patch and its source settlement."
+        };
+        await insertEvidence(
+          database,
+          state.workspaceId,
+          state.meetingId,
+          approvalEvidence,
+          now
+        );
+        return {
+          state: {
+            ...state,
+            followUpIntentions: state.followUpIntentions.map((intent) =>
+              intent.id === judgment.intentId &&
+              intent.type === "settle-operational-outcome"
+                ? {
+                    ...intent,
+                    status: "approved",
+                    provenance: {
+                      ...intent.provenance,
+                      evidence: [...intent.provenance.evidence, approvalEvidence]
+                    },
+                    canonicalKnowledgePatch: {
+                      id: `canonical-patch:${opaqueIdentifierSegment(observation.observationId)}`,
+                      target: { ...judgment.target },
+                      expectedMarkdown: judgment.expectedMarkdown,
+                      replacementMarkdown: judgment.replacementMarkdown,
+                      approvedBy: observation.participantId,
+                      approvedAt: observation.observedAt,
+                      evidence: structuredClone([
+                        ...intent.provenance.evidence,
+                        approvalEvidence
+                      ])
+                    }
+                  }
+                : intent
+            )
+          },
+          evidenceForAnalysis: [],
+          events: []
+        };
+      }
       if (observation.judgment.kind === "resolve-action-item-reconciliation") {
         return applyActionItemReconciliationHumanJudgment(
           database,
@@ -3779,6 +3830,45 @@ async function validateObservationBeforeAcceptance(
   }
 
   if (observation.type === "human-judgment-recorded") {
+    if (observation.judgment.kind === "approve-canonical-knowledge-patch") {
+      const judgment = observation.judgment;
+      const matching = state.followUpIntentions.filter(
+        (intent) => intent.id === judgment.intentId
+      );
+      const intent = matching[0];
+      const approvalError = validateFollowUpIntentApproval(state, {
+        ...observation,
+        type: "follow-up-intent-approved",
+        intentId: judgment.intentId,
+        approvedBy: observation.participantId
+      });
+      if (
+        approvalError ||
+        matching.length !== 1 ||
+        intent?.type !== "settle-operational-outcome" ||
+        intent.status !== "suggested" ||
+        intent.canonicalKnowledgePatch ||
+        !observation.participantId.trim() ||
+        !intent.provenance.evidence.length ||
+        judgment.target.objectType !== "document" ||
+        !judgment.target.providerId.trim() ||
+        !judgment.target.externalId.trim() ||
+        !judgment.expectedMarkdown.trim() ||
+        !judgment.replacementMarkdown.trim() ||
+        judgment.expectedMarkdown === judgment.replacementMarkdown ||
+        judgment.expectedMarkdown.length > 20_000 ||
+        judgment.replacementMarkdown.length > 20_000
+      ) {
+        return {
+          code: "invalid-observation",
+          observationId: observation.observationId,
+          retryable: false,
+          message:
+            "A canonical knowledge patch requires one current suggested settlement, an explicit existing document, and a bounded nonempty exact replacement. A changed proposal needs fresh review."
+        };
+      }
+      return null;
+    }
     if (observation.judgment.kind === "resolve-action-item-reconciliation") {
       return validateActionItemReconciliationHumanJudgment(state, observation);
     }
@@ -6934,6 +7024,7 @@ function applyHumanJudgment(
     case "resolve-action-item-ownership":
     case "resolve-speaker-attribution":
     case "refresh-action-item-reconciliation":
+    case "approve-canonical-knowledge-patch":
       return state;
   }
 }

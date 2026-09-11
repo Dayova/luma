@@ -52,6 +52,8 @@ describe("Meeting Intelligence organizational context", () => {
         "We should apply the retention policy."
       );
       expect(update.analysisStatus).toBe("completed");
+      expect(update.errors).toEqual([]);
+      expect(update.acceptedObservationIds).toEqual(["with-context"]);
       expect(org.requests[0]?.audience).toEqual(founders);
       expect(org.requests[0]?.audience.personIds).not.toContain("guest-attendee");
       expect(org.requests[0]?.concepts).toContain("retention");
@@ -81,6 +83,11 @@ describe("Meeting Intelligence organizational context", () => {
         (item) => item.id === "action:derived"
       )?.provenance;
       expect(provenance?.contextReceiptIds).toEqual(["receipt-1"]);
+      expect(provenance?.contextCoverage).toEqual({ complete: false });
+      expect(state.contextAvailability).toMatchObject({
+        status: "partial",
+        withheldItemCount: 0
+      });
       expect(
         provenance?.evidence.some(
           (item) => item.source === "knowledge" && item.sourceVersion === "v1"

@@ -72,7 +72,10 @@ answer from the Meeting's own evidence and useful prior state. They explicitly
 report that global retrieval is not configured. A temporary retrieval failure
 uses no cached external fallback and can still analyze independent local
 evidence. Partial source discovery is represented as partial context, not proof
-that no other organizational knowledge exists.
+that no other organizational knowledge exists. Successful bounded retrieval
+does not emit a retryable `context-unavailable` error or make an accepted source
+import appear rejected. Retrieval exceptions, withheld dependencies, and changed
+receipt proofs keep their existing unavailable/deferred behavior.
 
 Currentness is verified at each owned boundary, not through a distributed
 transaction covering a provider, model, local database and Discord. Sources can

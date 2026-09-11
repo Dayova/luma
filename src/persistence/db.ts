@@ -490,6 +490,14 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE operational_outcome_settlement_stages
       ADD COLUMN IF NOT EXISTS operation_digest TEXT;
 
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS prepared_patch_json TEXT;
+    ALTER TABLE operational_outcome_settlement_stages
+      DROP CONSTRAINT IF EXISTS operational_outcome_settlement_stages_stage_check;
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD CONSTRAINT operational_outcome_settlement_stages_stage_check
+      CHECK (stage IN ('work', 'knowledge', 'outcome'));
+
     CREATE INDEX IF NOT EXISTS operational_outcome_settlements_source_root_idx
       ON operational_outcome_settlements (
         source_provider_id, source_document_id, source_object_id

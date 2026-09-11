@@ -84,8 +84,8 @@ The current implementation supports approved `create-work-item`,
 `update-knowledge` proposals are retained only as policy-rejected audit
 records. LUM-11's policy is selected: canonical patches require a Human-selected
 target, an exact region, and the agreed conflict checks. The target-bound patch
-implementation and live proof remain outstanding, so generic canonical document
-creation and updates remain unavailable.
+implementation is available through `/meeting patch`; live proof remains
+outstanding. Generic canonical document creation and updates remain disabled.
 For a historical generic document create whose outcome was already
 indeterminate, or whose execution was interrupted while its reservation was
 still held, `recoverClaimedIntent` may only use the same read-only exact
@@ -120,3 +120,14 @@ the exact prepared marker and release its lease. A durably provider-confirmed
 prewrite interruption or adapter-confirmed no-write is the narrow exception:
 it may abandon its uncalled write and release the lease. It never repeats a
 completed work mutation or writes an unknown page state.
+
+## Canonical knowledge patches
+
+An explicitly authorized Human Judgment can attach one immutable Canonical
+Knowledge Patch to a current suggested source-bound settlement and approve it in
+one observation. A separate durable knowledge stage uses an owned
+`CanonicalKnowledgePatchWriter` capability. Its proven document reference is
+included in the source Meeting's Operational Outcome. Existing generic
+`update-knowledge` intents remain disabled. See the
+[canonical patch runbook](../operations/canonical-knowledge-patches.md) for exact
+selection, conflict, authorization, and recovery behavior.

@@ -5,6 +5,7 @@ import { evaluateCorpus } from "../../evals/runner.js";
 import { reportExitCode, score } from "../../evals/scorer.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { runImportedMeetingFixture } from "../../evals/imported-meeting-runner.js";
+import { runCrossProviderFixture } from "../../evals/cross-provider-runner.js";
 
 const load = () =>
   loadCorpus(
@@ -50,7 +51,7 @@ describe("versioned Meeting product evaluation", () => {
       await database.close();
     }
   });
-  it("consumes every named expectation, measures public behavior, and cannot turn missing retrieval into product readiness", async () => {
+  it("consumes every named expectation and distinguishes complete declared coverage from live product readiness", async () => {
     const network = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValue(new Error("Network forbidden in deterministic evaluation"));
@@ -61,7 +62,8 @@ describe("versioned Meeting product evaluation", () => {
         ...corpus.fixtures,
         ...corpus.retrievalFixtures,
         ...corpus.githubFixtures,
-        ...corpus.importedMeetingFixtures
+        ...corpus.importedMeetingFixtures,
+        ...corpus.crossProviderFixtures
       ].map((fixture) => fixture.id)
     );
     expect(report.summary.failed).toBe(0);
@@ -69,7 +71,7 @@ describe("versioned Meeting product evaluation", () => {
     const missing = report.fixtures
       .flatMap((fixture) => fixture.checks)
       .filter((check) => check.status === "missing");
-    expect(missing.map((check) => check.id)).toEqual(["cross-provider-stale-inclusion"]);
+    expect(missing.map((check) => check.id)).toEqual([]);
     expect(report.knowledgeSelection.relevantCurrentRecall).toEqual({
       recalled: 3,
       relevant: 3,
@@ -104,7 +106,9 @@ describe("versioned Meeting product evaluation", () => {
     expect(
       report.retrievalKnowledgeSelection.contextUse.additionalContextEntries
     ).toBeGreaterThan(0);
-    expect(report.productReadiness).toBe("not-demonstrated");
+    expect(report.productReadiness).toBe("only-declared-corpus-demonstrated");
+    expect(report.crossProviderSelection.relevantCurrentRecall.ratio).toBe(1);
+    expect(report.crossProviderSelection.staleClaimInclusion.included).toBe(0);
     expect(report.usage).toMatchObject({
       paidRequests: 0,
       actualCostUsd: 0,
@@ -115,7 +119,52 @@ describe("versioned Meeting product evaluation", () => {
     expect(network).not.toHaveBeenCalled();
     const checks = report.fixtures.flatMap((fixture) => fixture.checks);
     expect(reportExitCode(checks)).toBe(0);
-    expect(reportExitCode(checks, true)).toBe(1);
+    expect(reportExitCode(checks, true)).toBe(0);
+  }, 20_000);
+
+  it("detects real adapter standing, missing Human acceptance and source revocation regressions", async () => {
+    const { corpus } = await load();
+    const database = await createPgliteDatabase();
+    try {
+      const fixture = structuredClone(corpus.crossProviderFixtures[0]!);
+      fixture.notion.standing = "current";
+      fixture.linear.standing = "current";
+      fixture.github.state = "merged";
+      fixture.revokeBeforeReplay = false;
+      const changed = await runCrossProviderFixture(
+        database,
+        { ...fixture, id: "wrong-standing" },
+        corpus
+      );
+      const failed = changed.checks
+        .filter((check) => check.status === "failed")
+        .map((check) => check.id);
+      expect(failed).toEqual(
+        expect.arrayContaining([
+          "cross-provider-stale-inclusion",
+          "cross-provider-notion-standing",
+          "cross-provider-linear-standing",
+          "cross-provider-github-standing",
+          "cross-provider-revocation-denies-replay",
+          "cross-provider-revocation-denies-delivery",
+          "cross-provider-revocation-denies-fresh"
+        ])
+      );
+      const unaccepted = structuredClone(corpus.crossProviderFixtures[0]!);
+      unaccepted.canonicalRecord.candidate.modality = "proposal";
+      const missingHuman = await runCrossProviderFixture(
+        database,
+        { ...unaccepted, id: "missing-human" },
+        corpus
+      );
+      expect(
+        missingHuman.checks.find(
+          (check) => check.id === "cross-provider-accepted-decision-recall"
+        )?.status
+      ).toBe("failed");
+    } finally {
+      await database.close();
+    }
   }, 20_000);
 
   it("detects missing real code, head-change enforcement and grant revocation in the adapter evaluation", async () => {

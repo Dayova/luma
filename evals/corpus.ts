@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { decisionRecordContentSchema } from "../src/domain/decision-record-schemas.js";
 
 const id = z.string().min(1);
 const check = z
@@ -169,7 +170,7 @@ const retrievalFixture = z
   .strict();
 export const corpusSchema = z
   .object({
-    version: z.literal(5),
+    version: z.literal(6),
     annotationProvenance: id,
     referenceAt: z.string().datetime(),
     timezone: z.literal("Europe/Berlin"),
@@ -198,6 +199,28 @@ export const corpusSchema = z
       )
       .min(1),
     retrievalFixtures: z.array(retrievalFixture).min(1),
+    crossProviderFixtures: z
+      .array(
+        z
+          .object({
+            id,
+            question: id,
+            canonicalRecord: decisionRecordContentSchema,
+            notion: z.object({ content: id, standing: source.shape.standing }).strict(),
+            linear: z.object({ content: id, standing: source.shape.standing }).strict(),
+            github: z
+              .object({
+                content: id,
+                state: z.enum(["draft", "open", "closed", "merged"])
+              })
+              .strict(),
+            revokeBeforeReplay: z.boolean(),
+            expected: z.object({ checks: z.array(id).min(1) }).strict(),
+            assertions: z.array(check).min(1)
+          })
+          .strict()
+      )
+      .min(1),
     importedMeetingFixtures: z
       .array(
         z
@@ -238,6 +261,7 @@ export type CorpusFixture = MeetingCorpus["fixtures"][number];
 export type RetrievalFixture = MeetingCorpus["retrievalFixtures"][number];
 export type ImportedMeetingFixture = MeetingCorpus["importedMeetingFixtures"][number];
 export type GitHubFixture = MeetingCorpus["githubFixtures"][number];
+export type CrossProviderFixture = MeetingCorpus["crossProviderFixtures"][number];
 export type CatalogChange = z.infer<typeof catalogChange>;
 export type SemanticCheck = z.infer<typeof check>;
 export type Metric = SemanticCheck["metric"];
@@ -362,6 +386,7 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
       ...corpus.fixtures,
       ...corpus.retrievalFixtures,
       ...corpus.githubFixtures,
+      ...corpus.crossProviderFixtures,
       ...corpus.importedMeetingFixtures
     ].map((fixture) => fixture.id),
     "fixture ID"
@@ -390,6 +415,7 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
       const target = [
         ...corpus.retrievalFixtures,
         ...corpus.githubFixtures,
+        ...corpus.crossProviderFixtures,
         ...corpus.importedMeetingFixtures
       ].find((value) => value.id === link.fixtureId);
       if (!target?.assertions.some((value) => value.id === link.id))
@@ -438,7 +464,11 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
         throw new Error(`Unknown catalog ${entry.catalogId} in ${fixture.id}`);
     }
   }
-  for (const fixture of [...corpus.githubFixtures, ...corpus.importedMeetingFixtures]) {
+  for (const fixture of [
+    ...corpus.githubFixtures,
+    ...corpus.importedMeetingFixtures,
+    ...corpus.crossProviderFixtures
+  ]) {
     if ("recipients" in fixture) unique(fixture.recipients, `recipient in ${fixture.id}`);
     unique(fixture.expected.checks, `expected check in ${fixture.id}`);
     unique(
@@ -449,7 +479,7 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
       JSON.stringify([...fixture.expected.checks].sort()) !==
       JSON.stringify(fixture.assertions.map((check) => check.id).sort())
     )
-      throw new Error(`Every GitHub expected check must be executable in ${fixture.id}`);
+      throw new Error(`Every adapter expected check must be executable in ${fixture.id}`);
   }
 }
 

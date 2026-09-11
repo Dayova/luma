@@ -6554,4 +6554,84 @@ describe("Human-approved canonical knowledge patches", () => {
       await h.database.close();
     }
   });
+
+  it.each(["proof-recording", "release-and-reread"])(
+    "retains an exact positive canonical proof through a %s persistence failure",
+    async (failure) => {
+      const h = await canonicalPatchHarness(`positive-${failure}-failure`);
+      const query = h.database.query.bind(h.database);
+      let unavailable = false;
+      try {
+        await h.approve();
+        if (failure === "proof-recording") {
+          await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+            ADD CONSTRAINT test_refuse_canonical_terminal_record
+            CHECK (stage <> 'knowledge' OR status IN ('pending','executing'))`);
+        } else {
+          h.writer.afterWrite = () => {
+            unavailable = true;
+            return Promise.resolve();
+          };
+          // Let the positive receipt commit, then interrupt target release,
+          // error recording, and the fallback reread while leaving later
+          // Meeting receipt persistence available.
+          h.database.query = <T>(...args: Parameters<typeof h.database.query>) => {
+            if (
+              unavailable &&
+              (args[0].includes("DELETE FROM operational_outcome_page_leases") ||
+                args[0].includes(
+                  "last_error_code='canonical-knowledge-patch-unresolved'"
+                ) ||
+                args[0].includes("SELECT plan_json"))
+            ) {
+              return Promise.reject(new Error("private canonical store diagnostic"));
+            }
+            return query<T>(...args);
+          };
+        }
+        const result = await h.execution.execute(h.executeInput);
+        unavailable = false;
+        expect(result.observation.outcome).toMatchObject({
+          status: "failed",
+          retryable: false,
+          requiresManualRecovery: true,
+          externalReferences: [
+            expect.objectContaining({ externalId: "canonical-handbook" })
+          ]
+        });
+        expect(JSON.stringify(result)).not.toMatch(
+          /private canonical store diagnostic|test_refuse_canonical_terminal_record/
+        );
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toEqual([]);
+        expect(await h.stages()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              stage: "knowledge",
+              status: failure === "proof-recording" ? "executing" : "succeeded"
+            }),
+            expect.objectContaining({ stage: "outcome", status: "pending" })
+          ])
+        );
+        if (failure === "proof-recording") {
+          await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+            DROP CONSTRAINT test_refuse_canonical_terminal_record`);
+        }
+        const recovered = await h.execution.recover(h.executeInput);
+        expect(recovered.observation.outcome.status).toBe("succeeded");
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toHaveLength(1);
+        expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toEqual([]);
+      } finally {
+        unavailable = false;
+        h.database.query = query;
+        await h.database.close();
+      }
+    }
+  );
 });

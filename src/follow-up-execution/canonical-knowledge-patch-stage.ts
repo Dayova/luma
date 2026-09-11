@@ -16,7 +16,9 @@ import {
 export class CanonicalPatchStageError extends Error {
   constructor(
     readonly disposition: "failed" | "manual" | "resumable",
-    message: string
+    message: string,
+    /** Exact provider reread evidence survives a later local persistence fault. */
+    readonly externalReferences: ExternalReference[] = []
   ) {
     super(message);
   }
@@ -96,6 +98,7 @@ export async function settleCanonicalKnowledgePatch(input: {
     );
   let prepared: PreparedCanonicalKnowledgePatch;
   let crossedBoundary = stage.status !== "pending";
+  let provenReference: ExternalReference | null = null;
   try {
     if (stage.status === "pending") {
       await input.requireCurrent();
@@ -196,6 +199,7 @@ export async function settleCanonicalKnowledgePatch(input: {
       );
     }
     const reference = after.reference;
+    provenReference = { ...reference };
     const result = await input.database.query(
       `UPDATE operational_outcome_settlement_stages SET status='succeeded', reference_json=$4,
        execution_lease_id=$5, last_error_code=NULL, last_error_message=NULL, completed_at=$6, updated_at=$6
@@ -225,21 +229,32 @@ export async function settleCanonicalKnowledgePatch(input: {
     const message =
       error instanceof CanonicalPatchStageError
         ? error.message
-        : crossedBoundary
-          ? "Canonical patch outcome is unknown; only an exact positive reread may recover it."
-          : "The selected canonical document could not be checked completely; no patch was sent.";
-    await input.database.query(
-      `UPDATE operational_outcome_settlement_stages SET status=$4, last_error_code='canonical-knowledge-patch-unresolved',
+        : provenReference
+          ? "The canonical patch's exact result was observed, but its durable record or target release could not be established. Run recovery without repeating the patch."
+          : crossedBoundary
+            ? "Canonical patch outcome is unknown; only an exact positive reread may recover it."
+            : "The selected canonical document could not be checked completely; no patch was sent.";
+    const externalReferences = provenReference ? [provenReference] : [];
+    try {
+      await input.database.query(
+        `UPDATE operational_outcome_settlement_stages SET status=$4, last_error_code='canonical-knowledge-patch-unresolved',
        last_error_message=$5, updated_at=$6
        WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3 AND stage='knowledge' AND status <> 'succeeded'`,
-      [
-        ...keys,
-        crossedBoundary ? "requires-manual-recovery" : "unresolved",
-        message,
-        new Date().toISOString()
-      ]
-    );
-    if (!crossedBoundary) await release();
-    throw new CanonicalPatchStageError(disposition, message);
+        [
+          ...keys,
+          crossedBoundary ? "requires-manual-recovery" : "unresolved",
+          message,
+          new Date().toISOString()
+        ]
+      );
+      if (!crossedBoundary) await release();
+    } catch {
+      throw new CanonicalPatchStageError(
+        "manual",
+        "Canonical patch recovery state could not be recorded or released durably. No patch retry was sent.",
+        externalReferences
+      );
+    }
+    throw new CanonicalPatchStageError(disposition, message, externalReferences);
   }
 }

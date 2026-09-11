@@ -1047,6 +1047,7 @@ async function settleKnowledgeStage(
     throw new PartialOperationalOutcomeSettlementError(
       uniqueExternalReferences([
         ...establishedReferences,
+        ...(error instanceof CanonicalPatchStageError ? error.externalReferences : []),
         ...settlementDurableExternalReferences(current)
       ]),
       "canonical-knowledge-patch-unresolved",

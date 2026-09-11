@@ -23,6 +23,7 @@ import { aiRequestLimitsFromEnv } from "../ai/ai-request.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
+import { createDiscordImportedMeetingAccess } from "../discord/discord-imported-meeting-access.js";
 import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
 import { createOpenAIContextAnswerer } from "../context-intelligence/openai-context-answerer.js";
 import { createContextIntelligence } from "../context-intelligence/context-intelligence.js";
@@ -297,6 +298,18 @@ export async function startServer(
       guildId,
       allowedParentChannelIds,
       aiUsage,
+      ...(meetingNotesSource && importedSourceAnalysis
+        ? {
+            importedMeetingAccess: createDiscordImportedMeetingAccess({
+              workspace,
+              authorizedPersonIds: dayovaFounderPersonIds,
+              ledger: observedSourceLedger,
+              sourceAccess: importedSourceAnalysis.access,
+              providerId: env["LUMA_NOTION_PROVIDER_ID"]?.trim() || "notion",
+              workItemProviderId
+            })
+          }
+        : {}),
       ...(discordContextAskConfig && contextIntelligence
         ? {
             contextAsk: {

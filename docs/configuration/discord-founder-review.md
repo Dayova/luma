@@ -46,8 +46,9 @@ fresh Discord audience proof. Imported Meeting binding, queries, Human decisions
 execution dispatch, source-derived publications, and the actual final slash-command
 reply also require the configured imported-source access capability. Without it,
 retained imported data is not exposed through a newly attached thread. The runtime
-must compose that capability from the dedicated exact-page read-only source,
-current source head, and explicit all-founder sharing policy. Bot token access,
+composes that capability only when canonical Meeting Notes ingestion and the
+dedicated exact-page read-only source access are both configured, using the same
+source ledger and explicit all-founder sharing policy as Meeting analysis. Bot token access,
 a stored binding, and an old response do not grant access. Existing source and
 execution guards remain responsible for each external provider stage.
 

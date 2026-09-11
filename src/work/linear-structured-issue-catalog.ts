@@ -109,8 +109,10 @@ export function createLinearStructuredIssueCatalog(config: {
         const identifiers = new Set<string>();
         const cursors = new Set<string>();
         let after: string | null = null;
+        let pageCount = 0;
         while (nodes.length < input.limit) {
           controller.signal.throwIfAborted();
+          pageCount++;
           const first = Math.min(100, input.limit - nodes.length);
           const response = await Promise.race([
             client.client.rawRequest<
@@ -160,6 +162,7 @@ export function createLinearStructuredIssueCatalog(config: {
           const cursor = parsed.pageInfo.endCursor;
           if (
             (parsed.nodes.length && (cursor === null || cursors.has(cursor))) ||
+            (!parsed.nodes.length && cursor !== null) ||
             (parsed.pageInfo.hasNextPage && (!parsed.nodes.length || cursor === null))
           )
             throw new Error(
@@ -167,7 +170,8 @@ export function createLinearStructuredIssueCatalog(config: {
             );
           nodes.push(...parsed.nodes);
           if (!parsed.pageInfo.hasNextPage) break;
-          if (nodes.length === input.limit) return { items: [], complete: false };
+          if (nodes.length === input.limit || pageCount === Math.ceil(input.limit / 100))
+            return { items: [], complete: false };
           cursors.add(cursor!);
           after = cursor;
         }

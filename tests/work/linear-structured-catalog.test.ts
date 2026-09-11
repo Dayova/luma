@@ -285,6 +285,26 @@ describe("actual Linear complete structured-work catalog", () => {
 });
 
 describe("actual Linear bounded multi-page structured catalog", () => {
+  it("bounds underfilled pages independently of the total returned item count", async () => {
+    const f = paginatedFixture(1001, {
+      change: (wire) => {
+        wire.issues.nodes = wire.issues.nodes.slice(0, 1);
+      }
+    });
+    expect(await f.discover(1000)).toEqual({ items: [], complete: false });
+    expect(f.requests).toHaveLength(10);
+  });
+
+  it("does not accept an empty page with a nonempty cursor as complete absence", async () => {
+    const f = paginatedFixture(0, {
+      change: (wire) => {
+        wire.issues.pageInfo.endCursor = "unexpected-cursor";
+      }
+    });
+    await expect(f.discover(1000)).rejects.toThrow("unavailable");
+    expect(f.requests).toHaveLength(1);
+  });
+
   it.each([101, 396, 1000])(
     "returns all %s issues across native pages with stable creation ordering",
     async (count) => {

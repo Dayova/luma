@@ -409,13 +409,11 @@ describe("governed imported transcript understanding", () => {
       const query =
         type === "participant-brief" ? { type, participantId: "jakob" } : { type };
       const read = () =>
-        f
-          .current()
-          .query({
-            workspaceId: workspace.workspaceId,
-            meetingId: f.observation().meetingId,
-            query
-          });
+        f.current().query({
+          workspaceId: workspace.workspaceId,
+          meetingId: f.observation().meetingId,
+          query
+        });
       const before = JSON.stringify(await read());
       expect(before).toContain(
         type === "participant-brief" ? "Wir pausieren" : "Export prüfen"

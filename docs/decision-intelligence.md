@@ -35,6 +35,22 @@ speaker attribution, with the existing imported/context receipt guards. A config
 return a stable grant identity. Attendance alone does not admit readers. Without that
 grant capability, actual Meeting recording fails closed.
 
+Imported Meetings can instead supply the owned `meetingEvidenceSource` adapter.
+It reconstructs bounded original Evidence from the accepted import, immutable source
+ledger and original source-analysis receipts. Only recipients admitted by every source
+receipt may receive it, and every read rechecks the current exact provider source and
+sharing grant. It does not include generated Meeting analysis or borrowed context.
+Imported transcript sections retain original wording with unknown authors; names,
+attendees and provider summaries do not establish that an owner accepted a decision.
+Without separate grounded Human acceptance, recording returns clarification.
+
+The imported source adapter's `authorizeRetained` is only for historical reads. It
+reconstructs the exact original source/audience and checks live source permissions.
+Changed wording may remain eligible history while the same original sections and
+blocks remain present. Removal, exclusion, reparenting to another page, erased text,
+missing immutable proof or revoked grants withhold that history. This does not change
+the exact current-source proof required for execution or infer any legacy reader grant.
+
 ## Reconciliation and durable execution
 
 The interpreter proposes create, link, amend, supersede, reverse, reject or clarify.

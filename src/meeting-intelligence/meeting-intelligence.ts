@@ -135,6 +135,7 @@ export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
   reasoningModel: ReasoningModel;
   decisionIntelligence?: DecisionIntelligenceConfiguration & {
+    meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
     meetingSourceAudience?: MeetingDecisionSourceAudience;
   };
   /** Read-only catalogs; Meeting Intelligence cannot access WorkProvider writers. */
@@ -324,19 +325,21 @@ export function createMeetingIntelligence(
   };
   if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
   const configuration = input.decisionIntelligence;
-  const meetingSource = configuration.meetingSourceAudience
-    ? createMeetingDecisionEvidenceSource({
-        database: input.database,
-        audience: configuration.meetingSourceAudience,
-        requireContextCurrent: (state) =>
-          contextGuard.requireReceiptsCurrent({
-            workspaceId: state.workspaceId,
-            meetingId: state.meetingId,
-            receiptIds: contextReceiptIds(state)
-          }),
-        now
-      })
-    : undefined;
+  const meetingSource =
+    configuration.meetingEvidenceSource ??
+    (configuration.meetingSourceAudience
+      ? createMeetingDecisionEvidenceSource({
+          database: input.database,
+          audience: configuration.meetingSourceAudience,
+          requireContextCurrent: (state) =>
+            contextGuard.requireReceiptsCurrent({
+              workspaceId: state.workspaceId,
+              meetingId: state.meetingId,
+              receiptIds: contextReceiptIds(state)
+            }),
+          now
+        })
+      : undefined);
   const dependencies = {
     ...configuration,
     database: input.database,

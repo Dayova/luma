@@ -329,6 +329,11 @@ export function createDiscordConsultationProvider(input: {
           found.poll.results.status === "finalized")
       )
         continue;
+      if (!onlyOperation && !ownMarker && plan.replacesConsultationId !== null)
+        throw refusal(
+          "consultation-replacement-open",
+          "A matching poll is still open. Close the original Luma poll, or have its founder author handle it, then create a new explicit replacement referencing this refused consultation. No poll was sent."
+        );
       matches.push(found);
     }
     if (matches.length > 1)

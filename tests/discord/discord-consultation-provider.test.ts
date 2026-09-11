@@ -1,3 +1,10 @@
+import { createPgliteDatabase } from "../../src/persistence/db.js";
+import { createConversationConsultations } from "../../src/context-intelligence/conversation-consultations.js";
+import { createConversationFollowUpExecution } from "../../src/follow-up-execution/conversation-consultation-execution.js";
+import { createObservedSourceLedger } from "../../src/knowledge/observed-source-ledger.js";
+import { createWorkspaceAccessPolicy } from "../../src/access/workspace-access-policy.js";
+import { createLumaTeamIdentityDirectory } from "../../src/identity/static-identity-directory.js";
+import { captureFixture, workspace, requestFixture } from "../consultation/harness.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageFlags, PermissionFlagsBits, Routes } from "discord.js";
 import { createDiscordConsultationProvider } from "../../src/discord/discord-consultation-provider.js";
@@ -70,7 +77,7 @@ function fixture() {
         message_reference: unknown;
       };
       const result = {
-        id: "published",
+        id: messages.length ? `published-${messages.length}` : "published",
         channel_id: "thread",
         author: { id: "bot", bot: true },
         content: data.content,
@@ -96,8 +103,10 @@ function fixture() {
   const get = vi.fn(
     async (route: `/${string}`, options: Parameters<typeof audience.read>[1]) => {
       if (route === Routes.channelMessages("thread")) return structuredClone(messages);
-      if (route === Routes.channelMessage("thread", "published"))
-        return structuredClone(messages[0] ?? null);
+      const message = messages.find(
+        (candidate) => route === Routes.channelMessage("thread", String(candidate["id"]))
+      );
+      if (message) return structuredClone(message);
       const result = await audience.read(route, options);
       if (route === Routes.guildRoles("guild"))
         return (result as Array<object>).map((role) => ({ ...role, mentionable: true }));
@@ -142,6 +151,124 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("advisory Discord consultation provider", () => {
+  it("executes exact canonical replacements without silently reusing an open poll's obsolete purpose or duration", async () => {
+    const f = fixture();
+    const database = await createPgliteDatabase();
+    try {
+      const subject = { ...f.plan.source.subject };
+      const captured = captureFixture();
+      captured.source.sourceObjectId = subject.anchorMessageId;
+      captured.source.parentObjectId = subject.conversationObjectId;
+      captured.snapshot.conversation.conversationObjectId = subject.conversationObjectId;
+      captured.snapshot.conversation.parentConversationObjectId = "parent";
+      captured.snapshot.boundary = {
+        mode: "thread",
+        anchorMessageId: "anchor",
+        firstMessageId: "anchor",
+        lastMessageId: "anchor",
+        messageIds: ["anchor"]
+      };
+      captured.snapshot.messages[0]!.id = "anchor";
+      f.resolveRecipients.mockImplementation((people) =>
+        Promise.resolve(
+          people.length === 1 && people[0] === "person_jakob" ? ["founder"] : null
+        )
+      );
+      const context = createConversationConsultations({
+        database,
+        ledger: createObservedSourceLedger({ database }),
+        evidenceSource: { capture: () => Promise.resolve(structuredClone(captured)) },
+        accessPolicy: createWorkspaceAccessPolicy({
+          workspaceId: workspace.workspaceId,
+          identityDirectory: createLumaTeamIdentityDirectory(),
+          authorizedPersonIds: ["person_jakob"]
+        }),
+        workspaceId: workspace.workspaceId,
+        recipientPersonIds: ["person_jakob"],
+        recipientGroupId: "team"
+      });
+      const execution = createConversationFollowUpExecution({
+        database,
+        consultations: context,
+        provider: f.provider
+      });
+      const request = {
+        ...requestFixture(),
+        subject,
+        instruction: {
+          purpose: f.plan.purpose,
+          question: f.plan.question,
+          options: f.plan.options
+        }
+      };
+      const original = await context.request(request);
+      expect(
+        (await execution.execute({ workspace, subject, intentId: original.intentId }))
+          .observation.outcome.status
+      ).toBe("succeeded");
+      const replacement = await context.request({
+        ...request,
+        consultationId: "replacement",
+        instruction: {
+          ...request.instruction,
+          purpose: "A revised explicit purpose",
+          durationHours: 48,
+          replacesConsultationId: request.consultationId
+        }
+      });
+      const refused = await execution.execute({
+        workspace,
+        subject,
+        intentId: replacement.intentId
+      });
+      expect(refused.observation.outcome).toMatchObject({
+        status: "failed",
+        errorCode: "consultation-replacement-open",
+        requiresManualRecovery: false
+      });
+      expect(
+        (
+          await context.get({
+            workspaceId: workspace.workspaceId,
+            subject,
+            consultationId: "replacement"
+          })
+        ).publication
+      ).toBeNull();
+      expect(f.post).toHaveBeenCalledTimes(1);
+      // A later explicit instruction after the old poll closes has a new canonical operation.
+      const close = await context.requestClose({
+        workspaceId: workspace.workspaceId,
+        subject,
+        consultationId: request.consultationId,
+        actor: request.actor,
+        requestId: "close-original"
+      });
+      expect(
+        (await execution.execute({ workspace, subject, intentId: close.intentId }))
+          .observation.outcome.status
+      ).toBe("succeeded");
+      const corrected = await context.request({
+        ...request,
+        consultationId: "replacement-after-close",
+        instruction: {
+          ...request.instruction,
+          purpose: "A revised explicit purpose",
+          durationHours: 48,
+          replacesConsultationId: "replacement"
+        }
+      });
+      expect(
+        (await execution.execute({ workspace, subject, intentId: corrected.intentId }))
+          .observation.outcome.status
+      ).toBe("succeeded");
+      expect(f.post).toHaveBeenCalledTimes(3); // Original publication, explicit original closure, new publication.
+      expect(f.messages.at(-1)?.["content"]).toContain("A revised explicit purpose");
+      expect(f.messages.at(-1)?.["content"]).toContain("Open for 48 hours");
+    } finally {
+      await database.close();
+    }
+  });
   it("does not duplicate a matching founder poll whose closing state is unknown", async () => {
     const f = fixture();
     await f.provider.publish({ consultation: f.plan, operationId: "fixture" });

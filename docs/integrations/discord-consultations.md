@@ -28,6 +28,10 @@ Meeting Observation or Decision Record is created. Exact repeated requests reuse
 the stored operation; equivalent commands at the same source return the original
 consultation. A different command cannot bypass an uncertain publication in the
 same discussion. Explicit replacements retain the original record and history.
+A replacement never silently reuses an older open matching poll. Close the
+original Luma poll, or have the original founder handle their poll, before making
+the replacement. If an attempted replacement was already refused, the next
+explicit replacement references that refused consultation ID.
 
 Publication uses the existing Discord Gateway's REST transport, with automatic
 network/server-error mutation retries disabled. Every provider operation verifies

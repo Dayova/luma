@@ -5,7 +5,7 @@ This implements the owned core/provider slice of [LUM-39](https://linear.app/day
 An authenticated explicit command can authorize a configured Structured Record and
 its validation work together. The public Interface stays `observe`, `query`, and
 `conclude` on Meeting Intelligence. The request selects a configured semantic table
-alias and preserves the exact original actor, instruction and bounded Conversation.
+alias and preserves the exact original actor, instruction and bounded Conversation or actual imported Meeting.
 Questions, quoted commands and negated instructions do not enter this Execute path.
 The provider/model implementations never receive authority from inferred job titles.
 
@@ -37,10 +37,56 @@ every write, receipt query and replay.
 module and accepts `{ workspace, subject, structuredWorkRequestId, intentId }`.
 Normal execution and positive-only recovery use the same durable plan.
 
-The source adapter, actual model implementation, Discord intent routing/reply and
-main-runtime configuration are **required subsequent composition work**. This slice
+Discord intent routing/reply and main-runtime configuration are **required
+subsequent composition work**. The actual model and source factories below are
+implemented and tested through MI/FUE. This slice
 does not activate a table, token, bot command or background schedule. It is not a
 claim that the complete Discord feature is deployed.
+
+## Actual model and original sources
+
+`createOpenAIStructuredWorkInterpreter({ apiKey, budget, limits, model })` uses the
+existing priced model default and the same durable budget as Ask and Meeting
+analysis. It sends a closed strict Responses schema, no tools, `store: false`,
+the standard tier and no SDK retries. A bounded field key/value array is converted
+into owned semantic fields only after validating field types/options, citations,
+people and existing reconciliation identities. An invalid output settles reported
+usage and approves nothing. Budget/quota/timeout reasons stay visible through MI.
+The native schema follows the [official Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs), checked 2026-09-11.
+
+MI supplies a final disclosure guard. The shared AI request helper runs it after
+durable budget reservation and before the SDK call. Revocation at that boundary
+settles a proved undispatched attempt at zero cost. A timeout before dispatch
+cannot later call the model when a delayed proof completes; a timeout after
+actual dispatch keeps its possible charge unknown. The retained original command
+still prevents an automatic repeat paid interpretation.
+
+`createStructuredWorkEvidenceSource({ conversation, importedMeetings? })` composes
+the existing original Conversation and imported-source proof implementations. Its
+Conversation capture purpose is `structured-work`; the current anchor must retain
+its exact leading @Luma command and original admitted Human author. Original raw
+captures are retained in the shared Observed Source Ledger, with current unique
+identity mappings and exact original audience. Poll tally/expiry changes may evolve;
+changed original wording, options, authors, boundaries or grants cannot authorize
+the old plan. No Decision record or synthetic Meeting is created by this reuse.
+
+An actual Meeting request includes `instructionSubject`, selecting the original
+command Conversation separately. The stored `source` keeps the imported Meeting's
+original revision, hashes, provenance and unattributed original speech untouched;
+`source.instructionSource` retains the complete authenticated command capture.
+Both audiences must match and both current proofs are rechecked before model
+input, write, query and replay. Imported speaker labels and generated summaries
+never establish an owner. The command thread must itself contain independently
+proved Human acceptance, otherwise the candidate preview asks for clarification.
+Provider record bodies retain both distinct sets of original evidence.
+
+Native routing must pass only the current authenticated message, complete bounded
+capture and actual selected Meeting; it must never manufacture an instruction
+from a displayed title or a model answer. It must revalidate the selected Meeting
+binding and current destination audience immediately before rendering private
+receipts, as the existing Decision/consultation ingress does. Work authorization
+must use the protected sharing factory for the exact configured Linear scope/team
+and be supplied to MI; enabling a token or channel alone does not grant access.
 
 ## Reconciliation and ownership
 

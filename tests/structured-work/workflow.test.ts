@@ -11,6 +11,23 @@ afterEach(async () => {
   await database.close();
 });
 describe("MI-owned compound structured knowledge and actual Linear work", () => {
+  it("retains a grounded candidate preview when reconciliation needs an explicit clarification", async () => {
+    const f = structuredWorkFixture(database);
+    f.override((plan) => {
+      plan.work.reconciliation = {
+        action: "clarify",
+        reason:
+          "The existing task is completed; confirm whether further validation is intended."
+      };
+    });
+    const state = await f.make().mi.observe(f.request);
+    expect(state.state).toBe("needs-clarification");
+    expect(state.preview?.record.fields).toHaveProperty("hypothesis");
+    expect(state.preview?.work.reconciliation).toMatchObject({ action: "clarify" });
+    expect(state.approvedIntentId).toBeNull();
+    expect(f.createRecord).not.toHaveBeenCalled();
+    expect(f.createIssue).not.toHaveBeenCalled();
+  });
   it.each([false, true])(
     "uses an actual conditional-update capability and recovers its exact result without a repeat (lost ack: %s)",
     async (lost) => {

@@ -1,3 +1,4 @@
+import { structuredWorkEvidence } from "../domain/structured-work.js";
 import { StructuredWorkClarification } from "./errors.js";
 import { isExplicitStructuredWorkInstruction } from "./explicit-instruction.js";
 import type { WorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
@@ -207,15 +208,10 @@ function prepare(
       "The interpretation changed the explicitly selected target"
     );
   for (const operation of [plan.record, plan.work]) {
-    if (["clarify", "reject"].includes(operation.reconciliation.action))
-      throw new StructuredWorkClarification(
-        "reason" in operation.reconciliation
-          ? operation.reconciliation.reason
-          : "Clarify the operation"
-      );
     if (
       operation.evidenceIds.some(
-        (id) => !stored.state.source.evidence.some((item) => item.id === id)
+        (id) =>
+          !structuredWorkEvidence(stored.state.source).some((item) => item.id === id)
       )
     )
       throw new StructuredWorkClarification(
@@ -249,6 +245,14 @@ function prepare(
     throw new StructuredWorkClarification("Required structured fields are missing");
   plan.record.fields = fields;
   stored.state.preview = plan;
+  for (const operation of [plan.record, plan.work]) {
+    if (["clarify", "reject"].includes(operation.reconciliation.action))
+      throw new StructuredWorkClarification(
+        "reason" in operation.reconciliation
+          ? operation.reconciliation.reason
+          : "Clarify the operation"
+      );
+  }
   const record = selectRecord(stored);
   const work = selectWork(stored);
   if (record && !record.active)
@@ -435,7 +439,7 @@ export function createStructuredWorkIntelligence(
           observation.observationId.length > 512 ||
           !observation.instruction.trim() ||
           observation.instruction.length > 4000 ||
-          bound.subject.type !== "conversation-thread"
+          !["conversation-thread", "meeting"].includes(bound.subject.type)
         )
           throw new Error("One original bounded compound command is required");
         const address: QueryStructuredWork = {
@@ -483,12 +487,22 @@ export function createStructuredWorkIntelligence(
           await input.evidenceSource.capture({
             workspace: bound.workspace,
             subject: bound.subject,
+            ...(observation.instructionSubject
+              ? { instructionSubject: observation.instructionSubject }
+              : {}),
             instruction: observation.instruction,
             actor: observation.actor,
             audience
           })
         );
         if (
+          (bound.subject.type === "meeting" &&
+            (!observation.instructionSubject ||
+              !source.instructionSource ||
+              operationDigest(source.instructionSource.subject) !==
+                operationDigest(observation.instructionSubject))) ||
+          (bound.subject.type === "conversation-thread" &&
+            (!!observation.instructionSubject || !!source.instructionSource)) ||
           operationDigest(source.subject) !== operationDigest(bound.subject) ||
           operationDigest({
             ...source.audience,
@@ -553,14 +567,30 @@ export function createStructuredWorkIntelligence(
             throw new Error("Canonical work changed before interpretation");
           await requireStructuredWorkCurrent(input, stored);
           const plan = structuredWorkInterpretationSchema.parse(
-            await input.interpreter.interpret({
-              workspace: bound.workspace,
-              instruction: observation.instruction,
-              requesterPersonId: person.personId,
-              source: structuredClone(source),
-              records: structuredClone(records),
-              work: structuredClone(work)
-            })
+            await input.interpreter.interpret(
+              {
+                requestId: observation.observationId,
+                workspace: bound.workspace,
+                instruction: observation.instruction,
+                requesterPersonId: person.personId,
+                source: structuredClone(source),
+                records: structuredClone(records),
+                work: structuredClone(work)
+              },
+              {
+                requireCurrent: async () => {
+                  await requireStructuredWorkCurrent(input, stored);
+                  await input.records.requireCurrent({ audience, snapshot: records });
+                  if (
+                    operationDigest(
+                      await searchStructuredWork(input, address.workspaceId, workSearch)
+                    ) !== operationDigest(work)
+                  )
+                    throw new Error("Canonical work changed before model dispatch");
+                  await requireStructuredWorkCurrent(input, stored);
+                }
+              }
+            )
           );
           prepare(stored, plan, input);
           const owner = requireStructuredWorkOwnership(source, plan.work.ownership);

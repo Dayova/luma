@@ -1,3 +1,4 @@
+import { structuredWorkEvidence } from "../domain/structured-work.js";
 import { StructuredWorkClarification } from "./errors.js";
 import type {
   StructuredWorkOwnership,
@@ -14,7 +15,7 @@ export function requireStructuredWorkOwnership(
       "Who owns the validation work? Confirm an owner or explicitly leave it unassigned."
     );
   const selected = ownership.evidenceIds.map((id) =>
-    source.evidence.find((item) => item.id === id)
+    structuredWorkEvidence(source).find((item) => item.id === id)
   );
   if (
     selected.some(
@@ -59,8 +60,10 @@ export function requireStructuredWorkOwnership(
       )
     )
       return false;
-    const position = source.evidence.findIndex((candidate) => candidate.id === item.id);
-    const response = source.evidence[position + 1];
+    const position = structuredWorkEvidence(source).findIndex(
+      (candidate) => candidate.id === item.id
+    );
+    const response = structuredWorkEvidence(source)[position + 1];
     return (
       !!response &&
       response.origin === "human" &&

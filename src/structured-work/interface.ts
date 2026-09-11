@@ -3,6 +3,7 @@ import type {
   ObserveStructuredWork,
   QueryStructuredWork,
   StructuredWorkActor,
+  StructuredWorkConversationSubject,
   StructuredWorkAudience,
   StructuredWorkInterpretation,
   StructuredWorkModelInput,
@@ -25,6 +26,7 @@ export interface StructuredWorkEvidenceSource {
   capture(input: {
     workspace: WorkspaceConfig;
     subject: StructuredWorkSubject;
+    instructionSubject?: StructuredWorkConversationSubject;
     instruction: string;
     actor: StructuredWorkActor;
     audience: StructuredWorkAudience;
@@ -32,7 +34,10 @@ export interface StructuredWorkEvidenceSource {
   requireCurrent(source: StructuredWorkSource): Promise<void>;
 }
 export interface StructuredWorkInterpreter {
-  interpret(input: StructuredWorkModelInput): Promise<StructuredWorkInterpretation>;
+  interpret(
+    input: StructuredWorkModelInput,
+    access: { requireCurrent(this: void): Promise<void> }
+  ): Promise<StructuredWorkInterpretation>;
 }
 export type ExecuteStructuredWork = {
   workspace: WorkspaceConfig;

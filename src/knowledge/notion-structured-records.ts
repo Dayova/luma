@@ -1,3 +1,4 @@
+import { structuredWorkEvidence } from "../domain/structured-work.js";
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 import type { Client } from "@notionhq/client";
@@ -519,7 +520,7 @@ export function createNotionStructuredRecords(
     if (target.sourceProperty)
       result[native.properties[target.sourceProperty]!.id] = {
         rich_text: chunks(
-          draft.source.evidence
+          structuredWorkEvidence(draft.source)
             .map(
               (item) =>
                 item.reference.externalReference?.url ??
@@ -687,7 +688,7 @@ export function createNotionStructuredRecords(
             )
           )
             throw new Error("Required fields are missing");
-          const body = draft.source.evidence
+          const body = structuredWorkEvidence(draft.source)
             .map(
               (item) =>
                 `${item.reference.externalReference?.url ?? item.reference.sourceObjectId ?? item.id}\n${item.text}`

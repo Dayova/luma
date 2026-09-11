@@ -57,10 +57,34 @@ export const structuredWorkInterpretationSchema = z
   })
   .strict()
   .transform((value): StructuredWorkInterpretation => value);
-export const structuredWorkSourceSchema = decisionSourceSchema
-  .refine((source) => source.subject.type === "conversation-thread")
-  .transform((source): StructuredWorkSource => {
-    if (source.subject.type !== "conversation-thread")
-      throw new Error("Select a Conversation source");
-    return { ...source, subject: source.subject };
+export const structuredWorkSourceSchema = z
+  .unknown()
+  .transform((value, ctx): StructuredWorkSource => {
+    const fail = (): never => {
+      ctx.addIssue({ code: "custom", message: "The structured source proof is invalid" });
+      return z.NEVER;
+    };
+    if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
+    const { instructionSource, ...original } = value as Record<string, unknown>;
+    const parsed = decisionSourceSchema.safeParse(original);
+    if (!parsed.success) return fail();
+    if (instructionSource === undefined) return parsed.data;
+    const proof = decisionSourceSchema.safeParse(instructionSource);
+    if (
+      parsed.data.subject.type !== "meeting" ||
+      !proof.success ||
+      proof.data.subject.type !== "conversation-thread" ||
+      proof.data.audience.workspaceId !== parsed.data.audience.workspaceId ||
+      JSON.stringify([...proof.data.audience.personIds].sort()) !==
+        JSON.stringify([...parsed.data.audience.personIds].sort())
+    )
+      return fail();
+    const ids = [...parsed.data.evidence, ...proof.data.evidence].map(
+      (entry) => entry.id
+    );
+    if (new Set(ids).size !== ids.length) return fail();
+    return {
+      ...parsed.data,
+      instructionSource: { ...proof.data, subject: proof.data.subject }
+    };
   });

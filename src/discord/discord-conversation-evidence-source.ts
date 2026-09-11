@@ -279,7 +279,7 @@ async function readAnchor(
   subject: ConversationContextSubject,
   thread: DiscordConversationThread,
   question?: string,
-  purpose?: "consultation" | "decision-record"
+  purpose?: "consultation" | "decision-record" | "structured-work"
 ): Promise<DiscordConversationMessage> {
   const anchor = await input.reader.readMessage({
     conversationObjectId: thread.id,

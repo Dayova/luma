@@ -37,6 +37,8 @@ export function createConversationDecisionEvidenceSource(input: {
   ledger: ObservedSourceLedger;
   accessPolicy: WorkspaceAccessPolicy;
   recipientPersonIds: readonly string[];
+  /** Reuses original-source proof for a different owned capability, without Decision state. */
+  capturePurpose?: "decision-record" | "structured-work";
 }): ConversationDecisionEvidenceSource {
   const recipients = [...input.recipientPersonIds].sort();
   if (
@@ -100,7 +102,7 @@ export function createConversationDecisionEvidenceSource(input: {
         throw unavailable();
       bindings.push({ messageId: message.id, personId });
       const append = (kind: "message" | "poll", text: string) => {
-        const id = `decision-evidence:${hash([boundSubject, revision, message.id, kind])}`;
+        const id = `${input.capturePurpose === "structured-work" ? "structured-work" : "decision"}-evidence:${hash([boundSubject, revision, message.id, kind])}`;
         evidence.push({
           id,
           text,
@@ -255,7 +257,7 @@ export function createConversationDecisionEvidenceSource(input: {
           workspaceId: input.workspaceId,
           subject: boundSubject,
           question: request.instruction,
-          purpose: "decision-record"
+          purpose: input.capturePurpose ?? "decision-record"
         })
       );
       validateCapture(captured, boundSubject);
@@ -296,7 +298,9 @@ export function createConversationDecisionEvidenceSource(input: {
         await input.conversationEvidenceSource.capture({
           workspaceId: input.workspaceId,
           subject: boundSubject,
-          ...(!processedAdmissionId ? { purpose: "decision-record" as const } : {})
+          ...(!processedAdmissionId
+            ? { purpose: input.capturePurpose ?? "decision-record" }
+            : {})
         })
       );
       const proof = await project(
@@ -329,7 +333,9 @@ export function createConversationDecisionEvidenceSource(input: {
           await input.conversationEvidenceSource.capture({
             workspaceId: input.workspaceId,
             subject: boundSubject,
-            ...(!processedAdmissionId ? { purpose: "decision-record" as const } : {})
+            ...(!processedAdmissionId
+              ? { purpose: input.capturePurpose ?? "decision-record" }
+              : {})
           })
         );
         // This fresh projection verifies complete source scope and current unique

@@ -66,6 +66,8 @@ export async function runBudgetedAiRequest(input: {
   input: string;
   schema: Record<string, unknown>;
   limits: AiRequestLimits;
+  /** Fresh disclosure proof after durable reservation, before any provider dispatch. */
+  beforeInvoke?: (signal: AbortSignal) => Promise<void>;
   invoke: (signal: AbortSignal) => Promise<AiResponse>;
 }): Promise<AiResponse> {
   // The text tokenizer cannot have more tokens than UTF-8 bytes. Include the
@@ -103,19 +105,32 @@ export async function runBudgetedAiRequest(input: {
     });
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let dispatched = false;
   try {
-    // Race only the provider read. Accounting stays inside this request's owned
-    // lifetime; a response arriving after timeout cannot write into a closed
-    // store from a detached continuation. Its held charge requires reconciliation.
+    // Race admission and the provider read. A late admission cannot dispatch,
+    // and accounting stays inside this request's owned lifetime: a late provider
+    // response cannot write into a closed store. Its held charge needs reconciliation.
     const response = await Promise.race([
-      input.invoke(controller.signal),
+      (async () => {
+        await input.beforeInvoke?.(controller.signal);
+        if (controller.signal.aborted)
+          throw new AiServiceError(
+            "timeout",
+            "The AI request timed out before dispatch.",
+            { requestDispatched: false }
+          );
+        dispatched = true;
+        return input.invoke(controller.signal);
+      })(),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
           controller.abort();
           reject(
             new AiServiceError(
               "timeout",
-              "The AI request timed out. Its possible charge remains reserved."
+              dispatched
+                ? "The AI request timed out. Its possible charge remains reserved."
+                : "The current source could not be verified before the AI admission deadline. No request was dispatched."
             )
           );
         }, input.limits.timeoutMs);
@@ -185,11 +200,19 @@ export async function runBudgetedAiRequest(input: {
         failureCode: safe.code,
         ...(typeof requestId === "string" ? { providerRequestId: requestId } : {})
       });
-      await input.budget.markUnknown(reservation.reservationId);
+      if (dispatched) await input.budget.markUnknown(reservation.reservationId);
+      else
+        await input.budget.settle(reservation.reservationId, {
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0
+        });
     }
     throw new AiServiceError(safe.code, safe.message, {
       ...safe,
-      requestDispatched: true
+      requestDispatched: dispatched
     });
   } finally {
     if (timeout) clearTimeout(timeout);

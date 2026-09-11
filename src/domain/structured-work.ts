@@ -2,15 +2,17 @@ import type { EvidenceReference, ExternalReference, WorkspaceConfig } from "./mo
 import type { WorkItem } from "../work/interface.js";
 
 /** A bounded original Conversation is never represented as a synthetic Meeting. */
-export type StructuredWorkSubject = {
+export type StructuredWorkConversationSubject = {
   type: "conversation-thread";
   providerId: string;
   conversationObjectId: string;
   anchorMessageId: string;
 };
+export type StructuredWorkSubject =
+  StructuredWorkConversationSubject | { type: "meeting"; meetingId: string };
 export type StructuredWorkAudience = { workspaceId: string; personIds: string[] };
 export type StructuredWorkActor = { providerId: string; providerUserId: string };
-export type StructuredWorkSource = {
+export type StructuredWorkOriginalSource = {
   subject: StructuredWorkSubject;
   revision: string;
   contentHash: string;
@@ -25,6 +27,17 @@ export type StructuredWorkSource = {
     origin: "human" | "provider-derived" | "poll";
   }>;
 };
+export type StructuredWorkSource = StructuredWorkOriginalSource & {
+  /** Distinct original command; imported speaker attribution remains untouched. */
+  instructionSource?: StructuredWorkOriginalSource & {
+    subject: StructuredWorkConversationSubject;
+  };
+};
+export function structuredWorkEvidence(
+  source: StructuredWorkSource
+): StructuredWorkOriginalSource["evidence"] {
+  return [...source.evidence, ...(source.instructionSource?.evidence ?? [])];
+}
 export type StructuredFieldValue =
   | { type: "text"; value: string }
   | { type: "choice"; value: string }
@@ -124,6 +137,8 @@ export type ObserveStructuredWork = {
       instruction: string;
       /** A caller may select a configured alias, never a provider object ID. */
       targetKey: string;
+      /** Original authenticated command boundary when operating on a real Meeting. */
+      instructionSubject?: StructuredWorkConversationSubject;
       /** An explicitly named work identity may be read even when outside ordinary discovery. */
       workItemId?: string;
     }
@@ -140,6 +155,7 @@ export type ConcludeStructuredWork = {
   structuredWorkRequestId: string;
 };
 export type StructuredWorkModelInput = {
+  requestId: string;
   workspace: WorkspaceConfig;
   instruction: string;
   requesterPersonId: string;

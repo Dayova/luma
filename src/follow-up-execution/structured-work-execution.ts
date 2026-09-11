@@ -1,3 +1,4 @@
+import { structuredWorkEvidence } from "../domain/structured-work.js";
 import type { StructuredWorkExecution } from "../structured-work/interface.js";
 import {
   operationDigest,
@@ -23,7 +24,7 @@ import type { CreateWorkItemInput } from "../work/interface.js";
 import type { ExternalReference } from "../domain/model.js";
 
 function evidenceDescription(stored: StoredStructuredWork): string {
-  return stored.state.source.evidence
+  return structuredWorkEvidence(stored.state.source)
     .map(
       (item) =>
         `${item.reference.externalReference?.url ?? item.reference.sourceObjectId ?? item.id}\n${item.text}`

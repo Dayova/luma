@@ -873,7 +873,11 @@ describe("Discord explicit Decision Record entry", () => {
     const guest = { ...candidate, author: { id: "guest", bot: false } };
     const bot = { ...candidate, author: { id: "founder", bot: true } };
     const foreign = { ...candidate, guildId: "other" };
-    for (const excluded of [question, quote, guest, bot, foreign])
+    const negated = {
+      ...mention(),
+      content: "<@bot> Create a decision record, but not yet"
+    };
+    for (const excluded of [question, quote, guest, bot, foreign, negated])
       sdk.emit(Events.MessageCreate, excluded);
     sdk.emit(Events.MessageCreate, candidate);
     await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
@@ -907,6 +911,40 @@ describe("Discord explicit Decision Record entry", () => {
     );
     await live.disconnect();
   });
+  it.each(["usage", "status"])(
+    "keeps %s reachable in an Ask-only channel when Decision Records use another scope",
+    async (question) => {
+      const scope = {
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32_000,
+        minIntervalMs: 60_000
+      };
+      const live = createDiscordJsTransport({
+        token: "test",
+        clientId: "application",
+        guildId: "guild",
+        allowedParentChannelIds: ["parent", "decision-parent"],
+        authorizeHumanReader: (id) => Promise.resolve(id === "founder"),
+        contextAsk: { ...scope, parentChannelIds: ["parent"] },
+        decisionRecords: { ...scope, parentChannelIds: ["decision-parent"] }
+      });
+      const handler = vi.fn(() =>
+        Promise.resolve({ content: "Usage without AI", idempotencyKey: question })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      const candidate = { ...mention(), content: `<@bot> ${question}` };
+      sdk.emit(Events.MessageCreate, candidate);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ question })
+      );
+      expect(handler.mock.calls[0]).toEqual([
+        expect.not.objectContaining({ purpose: "decision-record" })
+      ]);
+      await live.disconnect();
+    }
+  );
   it("keeps an explicit-looking message read-only when only Ask is enabled", async () => {
     const live = transport();
     const handler = vi.fn(() => Promise.resolve(null));

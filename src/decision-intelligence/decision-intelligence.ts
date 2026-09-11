@@ -1,3 +1,4 @@
+import { hasDecisionRecordingRefusal } from "./recording-instruction.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -896,6 +897,11 @@ function validateRequest(request: ObserveDecision): void {
     (!observation.instruction.trim() || observation.instruction.length > 4000)
   )
     throw new Error("The explicit recording instruction must be bounded");
+  if (
+    observation.type === "decision-record-requested" &&
+    hasDecisionRecordingRefusal(observation.instruction)
+  )
+    throw new Error("The recording instruction includes an explicit refusal");
   if (
     observation.type === "decision-candidate-corrected" &&
     (!id(observation.requestId) ||

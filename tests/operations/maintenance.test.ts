@@ -10,6 +10,7 @@ function service() {
   let resumeRequired = false;
   const failures = new Set<string>();
   const receipts: BackupReceipt[] = [];
+  const uploads: Array<{ directory: string; backupId: string }> = [];
   const port: MaintenancePort = {
     now: () => new Date("2026-09-11T03:31:00.000Z"),
     serviceActive: () => Promise.resolve(active),
@@ -37,7 +38,8 @@ function service() {
         directory: "/private/test-backup"
       });
     },
-    uploadAndVerify: () => {
+    uploadAndVerify: (directory, backupId) => {
+      uploads.push({ directory, backupId });
       if (!active) return Promise.reject(new Error("network work extended downtime"));
       if (failures.has("remote"))
         return Promise.reject(new Error("remote verification failed"));
@@ -52,6 +54,7 @@ function service() {
     port,
     failures,
     receipts,
+    uploads,
     active: () => active,
     resumeRequired: () => resumeRequired,
     stop: () => {
@@ -68,6 +71,13 @@ describe("scheduled full-store backup", () => {
     expect(fixture.resumeRequired()).toBe(false);
     expect(fixture.receipts).toEqual([receipt]);
     expect(receipt.capturedAt).toBe("2026-09-11T03:30:00.000Z");
+    expect(receipt.snapshotId).toBe("b".repeat(64));
+    expect(fixture.uploads).toEqual([
+      {
+        directory: "/private/test-backup",
+        backupId: "f36c50ad-cfc3-4fae-89d1-6c4dad7bac27"
+      }
+    ]);
   });
 
   it.each(["copy", "remote"])(

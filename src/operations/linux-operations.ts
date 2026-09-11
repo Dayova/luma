@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { pruneOldColdCopies } from "./cold-copy-retention.js";
 import { constants } from "node:fs";
 import {
   lstat,
@@ -195,6 +196,9 @@ async function backup(config: OperationsConfig): Promise<BackupReceipt> {
     .parse(revision);
   if (release !== `/opt/luma/releases/${revision}`)
     throw new Error("The selected release is not immutable");
+  // Root-owned maintenance directories are validated before this entrypoint.
+  // Prune before downtime, retaining the newest failed attempt for inspection.
+  await pruneOldColdCopies(backupDirectory);
   return runScheduledBackup({
     now: () => new Date(),
     serviceActive: async () => (await serviceStatus()).active,

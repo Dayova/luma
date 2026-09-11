@@ -13,6 +13,9 @@ approved founder-only parent:
    Note root. Ambiguous pages, missing ingestion, unavailable source access, and
    an existing different binding are refused. A binding does not grant source
    access or associate two captures.
+   The thread is a post-meeting review session: binding keeps it ended and does
+   not start a live Meeting. `/meeting note` and `/meeting stop` therefore do not
+   apply; use Ask and the review commands for the retained capture.
 2. `/meeting review` shows original wording and modality, exact source revision,
    ownership and claim ID, canonical search coverage and targets, proposal,
    Human resolution, and Follow-up status. Long material remains available on

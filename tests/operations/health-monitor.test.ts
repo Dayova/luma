@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { publishRuntimeHealth } from "../../src/app/runtime-health.js";
 import {
   assessOperationalHealth,
+  BACKUP_SERVICE_TIMEOUT_MS,
   deliverHealthStatus,
   type AlertState,
   type HealthProblem
@@ -28,6 +29,13 @@ const backup = {
 };
 
 describe("operational health", () => {
+  it("shares the scheduled service's full maintenance timeout", async () => {
+    const unit = await readFile(
+      new URL("../../deploy/luma-backup.service", import.meta.url),
+      "utf8"
+    );
+    expect(unit).toContain(`TimeoutStartSec=${BACKUP_SERVICE_TIMEOUT_MS / 1000}`);
+  });
   it("bounds planned maintenance grace while still alerting on backup failures and low disk", () => {
     const input = {
       now,
@@ -40,9 +48,15 @@ describe("operational health", () => {
     expect(
       assessOperationalHealth({
         ...input,
-        maintenanceStartedAt: "2026-09-11T11:49:59.000Z"
+        maintenanceStartedAt: "2026-09-11T11:00:00.000Z"
       })
     ).toEqual(["runtime-unavailable"]);
+    expect(
+      assessOperationalHealth({
+        ...input,
+        maintenanceStartedAt: "2026-09-11T11:30:00.000Z"
+      })
+    ).toEqual([]);
     expect(
       assessOperationalHealth({
         ...input,

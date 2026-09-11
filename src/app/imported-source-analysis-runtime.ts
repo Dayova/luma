@@ -19,6 +19,7 @@ export function importedSourceAnalysisFromEnv(input: {
   const config = organizationalContextRuntimeConfig(input.env);
   if (!config?.providers.includes("notion")) return undefined;
   const token = input.env["LUMA_CONTEXT_NOTION_READONLY_API_TOKEN"]!.trim();
+  const providerId = input.env["LUMA_NOTION_PROVIDER_ID"]?.trim() || "notion";
   const credentialScopeId = input.env["LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID"]!.trim();
   const pages = new Set(
     input.env["LUMA_CONTEXT_NOTION_PAGE_IDS"]!.split(",").map((value) =>
@@ -42,7 +43,7 @@ export function importedSourceAnalysisFromEnv(input: {
       ledger: input.ledger,
       authorize: ({ source, audience }) => {
         const pageId = canonicalNotionObjectId(source.parentObjectId);
-        return source.providerId === "notion" && pageId && pages.has(pageId)
+        return source.providerId === providerId && pageId && pages.has(pageId)
           ? policy.authorize({
               audience,
               provider: "notion",
@@ -53,10 +54,11 @@ export function importedSourceAnalysisFromEnv(input: {
       },
       evidenceSource: (source) => {
         const pageId = canonicalNotionObjectId(source.parentObjectId);
-        if (source.providerId !== "notion" || !pageId || !pages.has(pageId)) return null;
+        if (source.providerId !== providerId || !pageId || !pages.has(pageId))
+          return null;
         return createNotionObjectScopedMeetingNoteEvidenceSource({
           workspaceId: input.workspaceId,
-          providerId: "notion",
+          providerId,
           pageId,
           reader: createNotionObjectScopedMeetingNoteEvidenceReader({
             pageId,

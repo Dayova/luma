@@ -42,8 +42,11 @@ so slowly verifying an old backup cannot make it current.
 
 Successful temporary download/rehearsal copies and that job's local cold copy
 are removed after verification. The encrypted remote snapshots and canonical
-knowledge/history remain retained. No `forget`, `prune`, expiry, or automatic
-reservation clearing occurs. Failed local artifacts remain for inspection.
+knowledge/history remain retained. No remote `forget`, `prune`, expiry, or automatic
+reservation clearing occurs. Before the next backup stops the service, it keeps
+the newest failed local `cold-<UUID>` attempt for inspection and removes older
+managed cold copies. The new attempt may add one more copy if it fails. Symlinks,
+ordinary files and unrelated directories are untouched.
 
 The service manager runs resume cleanup on failures and interruption. Cleanup
 starts only a service for which the job created a durable resume marker. An
@@ -63,7 +66,8 @@ Every two minutes, `luma-health.service` checks:
 - At least 2 GiB free on both the runtime and backup verification filesystems.
 
 A protected resume marker plus a currently running backup unit grants at most
-ten minutes of planned cold-copy grace for the runtime check. The backup age
+one hour of planned maintenance grace for the runtime check, matching the backup
+service's full stop/copy/verify/resume timeout. The backup age
 and free-space checks still apply. A stale marker or a failed backup process
 does not suppress an outage.
 

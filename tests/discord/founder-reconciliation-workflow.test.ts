@@ -224,6 +224,7 @@ async function harness(
   });
   let readable = true;
   let checks = 0;
+  const audiences: string[][] = [];
   const access = createDiscordImportedMeetingAccess({
     workspace,
     authorizedPersonIds: dayovaFounderPersonIds,
@@ -233,7 +234,7 @@ async function harness(
     sourceAccess: {
       requireCurrent: (request) => {
         checks++;
-        expect(request.audience.personIds).toEqual([...dayovaFounderPersonIds]);
+        audiences.push([...request.audience.personIds]);
         return readable ? Promise.resolve() : Promise.reject(new Error("revoked"));
       }
     }
@@ -272,6 +273,7 @@ async function harness(
     ledger,
     ingested,
     access,
+    audiences,
     bind: () =>
       transport.execute({
         ...base,
@@ -292,9 +294,35 @@ async function harness(
 }
 
 describe("founder reconciliation workflow", () => {
+  it("binds captured Meetings for post-meeting review without admitting a live note or stop", async () => {
+    const h = await harness();
+    expect((await h.bind()).content).toContain("Imported Meeting attached");
+    const before = await h.query();
+    const note = await h.transport.execute({
+      ...base,
+      type: "note",
+      interactionId: "post-meeting-note",
+      text: "Unrelated live note",
+      language: "en"
+    });
+    const stop = await h.transport.execute({
+      ...base,
+      type: "stop",
+      interactionId: "post-meeting-stop"
+    });
+    expect(note.content).toContain("no active Meeting");
+    expect(stop.content).toContain("no active Meeting");
+    expect(await h.query()).toEqual(before);
+    expect(h.getCreates()).toBe(0);
+    expect(h.writes).toEqual([]);
+  });
+
   it("binds the original imported Meeting, resolves ownership, executes once and retains its original-note receipt", async () => {
     const h = await harness();
     expect((await h.bind()).content).toContain("Imported Meeting attached");
+    expect(h.audiences.length).toBeGreaterThan(0);
+    for (const personIds of h.audiences)
+      expect(personIds).toEqual([...dayovaFounderPersonIds]);
     const initial = await h.query();
     const review = await h.transport.execute({
       ...base,

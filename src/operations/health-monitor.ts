@@ -2,6 +2,9 @@ import { z } from "zod";
 import { runtimeHealthSchema } from "../app/runtime-health.js";
 import { backupReceiptSchema } from "./maintenance.js";
 
+/** Matches the complete stop/copy/verify/resume bound in luma-backup.service. */
+export const BACKUP_SERVICE_TIMEOUT_MS = 60 * 60_000;
+
 export const healthProblemSchema = z.enum([
   "runtime-unavailable",
   "gateway-disconnected",
@@ -42,7 +45,8 @@ export function assessOperationalHealth(input: {
   const maintenanceAge = input.maintenanceStartedAt
     ? currentTime - Date.parse(input.maintenanceStartedAt)
     : Infinity;
-  const plannedColdCopy = maintenanceAge >= 0 && maintenanceAge < 10 * 60_000;
+  const plannedColdCopy =
+    maintenanceAge >= 0 && maintenanceAge < BACKUP_SERVICE_TIMEOUT_MS;
   const runtimeAge = runtime.success
     ? currentTime - Date.parse(runtime.data.checkedAt)
     : Infinity;

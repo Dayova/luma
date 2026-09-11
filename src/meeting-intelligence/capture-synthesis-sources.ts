@@ -18,6 +18,7 @@ export type Prepared = {
   materials: Material[];
   bindingDigest: string;
   materialDigest: string;
+  compatibleMaterialDigests: string[];
   anchor: LumaSynthesis["canonicalAnchorRef"];
 };
 class Unavailable extends Error {
@@ -114,16 +115,36 @@ export const prepareCaptureSynthesisSources = async (
     meeting.canonicalAnchorRef ??
     (uniqueAnchors.size === 1 ? [...uniqueAnchors.values()][0]! : null);
   if (!anchor && uniqueAnchors.size > 1) throw new Unavailable();
+  const materialDigest = digest(sorted(materials));
   return {
     meeting,
     audience: boundAudience,
     materials,
     bindingDigest,
-    materialDigest: digest(sorted(materials)),
+    materialDigest,
+    compatibleMaterialDigests: [
+      ...new Set([
+        materialDigest,
+        ...legacyMaterialCollators.map((collator) =>
+          digest(
+            [...materials].sort((a, b) => collator.compare(canonical(a), canonical(b)))
+          )
+        )
+      ])
+    ],
     authorizationScopes,
     anchor
   };
 };
+// Read compatibility only: old releases used the host's default collation.
+// Keep the supported pre-release English/German orders explicit, never guess a
+// matching source from descriptors alone or rewrite a persisted digest.
+const legacyMaterialCollators = ["en-US", "de-DE"].map(
+  (locale) => new Intl.Collator(locale)
+);
+export function matchesMaterialDigest(prepared: Prepared, stored: string): boolean {
+  return prepared.compatibleMaterialDigests.includes(stored);
+}
 export function sorted<T>(values: readonly T[]): T[] {
   return [...values].sort((left, right) => {
     const a = canonical(left),

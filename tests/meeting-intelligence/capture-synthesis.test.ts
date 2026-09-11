@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
 import type { CaptureSynthesisProposal } from "../../src/ai/capture-synthesis-proposal.js";
@@ -5,8 +6,15 @@ import type {
   ReasoningModel,
   StructuredReasoningRequest
 } from "../../src/ai/reasoning-model.js";
-import type { MeetingCaptureRevision } from "../../src/logical-meetings/interface.js";
-import type { MeetingCaptureSetObserved } from "../../src/domain/meeting-capture-synthesis.js";
+import type {
+  LogicalMeeting,
+  MeetingCaptureRevision
+} from "../../src/logical-meetings/interface.js";
+import type {
+  LumaSynthesis,
+  MeetingCaptureSetObserved
+} from "../../src/domain/meeting-capture-synthesis.js";
+import { createMeetingCaptureIngestion } from "../../src/knowledge/meeting-capture-ingestion.js";
 import { createLogicalMeetings } from "../../src/logical-meetings/logical-meetings.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
@@ -66,15 +74,19 @@ function revision(
     externalReference
   };
 }
-async function setup() {
+async function setup(legacyIds = false) {
   const database = await createPgliteDatabase();
   const revisions = new Map<string, MeetingCaptureRevision>();
   const texts = new Map<string, string>();
   const revoked = new Set<string>();
   let audience = ["person_jakob", "person_fabius"];
   let authorizationScopeId = "fixture-original-grant";
+  let opaqueId = 0;
   const logicalMeetings = createLogicalMeetings({
     database,
+    ...(legacyIds
+      ? { createOpaqueId: () => `${++opaqueId % 2 ? "ä" : "z"}-${opaqueId}` }
+      : {}),
     captureRevisionVerifier: {
       verify: ({ revision: value }) =>
         Promise.resolve(
@@ -90,6 +102,7 @@ async function setup() {
   let duringModel: (() => Promise<void>) | undefined;
   let duringRead: (() => void) | undefined;
   let duringAttemptClaim: (() => void) | undefined;
+  let failMigration = false;
   let transformProposal: ((value: CaptureSynthesisProposal) => void) | undefined;
   const model: ReasoningModel = {
     generateStructured: async <T>(request: StructuredReasoningRequest<T>) => {
@@ -121,6 +134,17 @@ async function setup() {
   };
   const databaseWithClaimBoundary: LumaDatabase = new Proxy(database, {
     get(target, property): unknown {
+      if (property === "exec")
+        return (sql: string) => {
+          if (
+            failMigration &&
+            sql.includes("CREATE TABLE IF NOT EXISTS meeting_capture_synthesis")
+          ) {
+            failMigration = false;
+            return Promise.reject(new Error("Temporary schema initialization failure"));
+          }
+          return target.exec(sql);
+        };
       if (property === "query")
         return async <T>(sql: string, params?: unknown[]) => {
           const result = await target.query<T>(sql, params);
@@ -132,44 +156,46 @@ async function setup() {
       return typeof value === "function" ? value.bind(target) : value;
     }
   });
-  const mi = createMeetingIntelligence({
-    database: databaseWithClaimBoundary,
-    reasoningModel: model,
-    captureSynthesis: {
-      logicalMeetings,
-      audience: () =>
-        Promise.resolve({
-          workspaceId: workspace.workspaceId,
-          personIds: [...audience]
-        }),
-      access: {
-        readCurrent: ({ capture, audience: currentAudience }) => {
-          const sourceId = capture.address.externalCaptureId;
-          if (
-            revoked.has(sourceId) ||
-            currentAudience.personIds.some(
-              (id) => !["person_jakob", "person_fabius", "person_julius"].includes(id)
-            ) ||
-            revisions.get(sourceId)?.contentHash !== capture.latestRevision.contentHash
-          )
-            throw new Error("Source unavailable");
-          const result = {
-            authorizationScopeId,
-            canonicalAnchorRef:
-              capture.address.providerId === "notion"
-                ? capture.latestRevision.externalReference
-                : null,
-            materials: capture.latestRevision.materials.map((descriptor) => ({
-              descriptor,
-              text: texts.get(sourceId)!
-            }))
-          };
-          duringRead?.();
-          return Promise.resolve(result);
+  const createMI = () =>
+    createMeetingIntelligence({
+      database: databaseWithClaimBoundary,
+      reasoningModel: model,
+      captureSynthesis: {
+        logicalMeetings,
+        audience: () =>
+          Promise.resolve({
+            workspaceId: workspace.workspaceId,
+            personIds: [...audience]
+          }),
+        access: {
+          readCurrent: ({ capture, audience: currentAudience }) => {
+            const sourceId = capture.address.externalCaptureId;
+            if (
+              revoked.has(sourceId) ||
+              currentAudience.personIds.some(
+                (id) => !["person_jakob", "person_fabius", "person_julius"].includes(id)
+              ) ||
+              revisions.get(sourceId)?.contentHash !== capture.latestRevision.contentHash
+            )
+              throw new Error("Source unavailable");
+            const result = {
+              authorizationScopeId,
+              canonicalAnchorRef:
+                capture.address.providerId === "notion"
+                  ? capture.latestRevision.externalReference
+                  : null,
+              materials: capture.latestRevision.materials.map((descriptor) => ({
+                descriptor,
+                text: texts.get(sourceId)!
+              }))
+            };
+            duringRead?.();
+            return Promise.resolve(result);
+          }
         }
       }
-    }
-  });
+    });
+  let mi = createMI();
   let observation = 0;
   const add = async (value: MeetingCaptureRevision, text = "Wir könnten starten.") => {
     revisions.set(value.address.externalCaptureId, value);
@@ -214,13 +240,21 @@ async function setup() {
   return {
     database,
     logicalMeetings,
-    mi,
+    get mi() {
+      return mi;
+    },
+    recreate: () => {
+      mi = createMI();
+    },
     add,
     observe,
     query,
     revoked,
     texts,
     calls: () => calls,
+    failNextMigration: () => {
+      failMigration = true;
+    },
     setQuote: () => {
       quote = true;
     },
@@ -245,7 +279,258 @@ async function setup() {
   };
 }
 
+// Exact pre-code-unit wire format, used only to install retained release data.
+function legacyCanonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(legacyCanonical).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .filter((key) => object[key] !== undefined)
+    .map((key) => `${JSON.stringify(key)}:${legacyCanonical(object[key])}`)
+    .join(",")}}`;
+}
+const legacyDigest = (value: unknown) =>
+  createHash("sha256").update(legacyCanonical(value)).digest("hex");
+function legacyObservation(meeting: LogicalMeeting): MeetingCaptureSetObserved {
+  const captures = meeting.captureRefs
+    .map((capture) => ({
+      captureId: capture.id,
+      sourceRevision: capture.latestRevision.sourceRevision,
+      contentHash: capture.latestRevision.contentHash
+    }))
+    .sort((a, b) => a.captureId.localeCompare(b.captureId, "en-US"));
+  const binding = meeting.captureRefs
+    .map((capture) => [capture.id, capture.binding, capture.admission])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b), "en-US"));
+  return {
+    type: "meeting-capture-set-observed",
+    observationId: `capture-set:${createHash("sha256")
+      .update(
+        JSON.stringify([
+          workspace.workspaceId,
+          meeting.id,
+          captures,
+          binding,
+          meeting.canonicalAnchorRef
+        ])
+      )
+      .digest("hex")}`,
+    workspaceId: workspace.workspaceId,
+    meetingId: meeting.id,
+    occurredAt: meeting.updatedAt,
+    observedAt: meeting.updatedAt,
+    captures
+  };
+}
+
 describe("Meeting Intelligence capture synthesis", () => {
+  it("keeps the original UUID capture observation ID when switching ingestion to deterministic ordering", async () => {
+    const f = await setup();
+    try {
+      await f.add(revision("notion"));
+      const meeting = (await f.add(revision("granola"))).logicalMeeting;
+      const original = legacyObservation(meeting);
+      expect(
+        (await f.mi.observe({ workspace, observations: [original] })).errors
+      ).toEqual([]);
+      f.recreate();
+      expect(
+        await createMeetingCaptureIngestion({
+          workspace,
+          meetingIntelligence: f.mi
+        }).ingest(meeting)
+      ).toMatchObject({
+        duplicateObservationIds: [original.observationId],
+        analysisStatus: "not-needed",
+        errors: []
+      });
+      expect(f.calls()).toBe(1);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("replays exact retained legacy material and source-set identities after restart without another model charge", async () => {
+    const f = await setup(true);
+    try {
+      await f.add(revision("notion"));
+      const meeting = (await f.add(revision("granola"))).logicalMeeting;
+      const original = legacyObservation(meeting);
+      expect(
+        (await f.mi.observe({ workspace, observations: [original] })).errors
+      ).toEqual([]);
+      const rows = await f.database.query<{ state_json: string }>(
+        "SELECT state_json FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
+        [workspace.workspaceId, meeting.id]
+      );
+      const state = JSON.parse(rows.rows[0]!.state_json) as {
+        materialDigest: string;
+        bindingDigest: string;
+        authorizationScopes: Record<string, string>;
+        judgments: unknown[];
+        synthesis: LumaSynthesis;
+      };
+      const materials = meeting.captureRefs
+        .flatMap((capture) =>
+          capture.latestRevision.materials.map((descriptor) => ({
+            descriptor,
+            text: f.texts.get(capture.address.externalCaptureId)!,
+            captureId: capture.id,
+            sourceRevision: capture.latestRevision.sourceRevision,
+            evidenceId: `capture-evidence:${legacyDigest([capture.id, capture.latestRevision.sourceRevision, descriptor])}`
+          }))
+        )
+        .sort((a, b) => legacyCanonical(a).localeCompare(legacyCanonical(b), "en-US"));
+      const legacyMaterialDigest = legacyDigest(materials);
+      expect(legacyMaterialDigest).not.toBe(state.materialDigest);
+      state.materialDigest = legacyMaterialDigest;
+      state.synthesis.sourceSetDigest = legacyDigest([
+        state.bindingDigest,
+        state.materialDigest,
+        state.authorizationScopes,
+        workspace
+      ]);
+      const legacyAttempt = legacyDigest([
+        state.synthesis.sourceSetDigest,
+        legacyDigest(state.judgments),
+        "capture-synthesis-v1"
+      ]);
+      // Install the immutable prior-release fixture with its original digest and
+      // completed attempt; no production migration is allowed to rewrite these.
+      for (const table of [
+        "meeting_capture_synthesis",
+        "meeting_capture_synthesis_revisions"
+      ])
+        await f.database.query(
+          `UPDATE ${table} SET state_json=$3 WHERE workspace_id=$1 AND meeting_id=$2`,
+          [workspace.workspaceId, meeting.id, JSON.stringify(state)]
+        );
+      await f.database.query(
+        "DELETE FROM meeting_capture_synthesis_attempts WHERE workspace_id=$1 AND meeting_id=$2",
+        [workspace.workspaceId, meeting.id]
+      );
+      await f.database.query(
+        "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key) VALUES($1,$2,$3)",
+        [workspace.workspaceId, meeting.id, legacyAttempt]
+      );
+      f.recreate();
+      expect((await f.query(meeting.id)).synthesis).toEqual(state.synthesis);
+      expect(await f.mi.observe({ workspace, observations: [original] })).toMatchObject({
+        duplicateObservationIds: [original.observationId],
+        analysisStatus: "not-needed",
+        errors: []
+      });
+      expect(
+        await createMeetingCaptureIngestion({
+          workspace,
+          meetingIntelligence: f.mi
+        }).ingest(meeting)
+      ).toMatchObject({ analysisStatus: "not-needed", errors: [] });
+      expect(f.calls()).toBe(1);
+      expect((await f.query(meeting.id)).synthesis?.sourceSetDigest).toBe(
+        state.synthesis.sourceSetDigest
+      );
+      f.revoked.add("granola");
+      expect((await f.query(meeting.id)).availability).toBe("unavailable");
+      f.revoked.clear();
+      expect(
+        (
+          await f.database.query<{ attempt_key: string }>(
+            "SELECT attempt_key FROM meeting_capture_synthesis_attempts WHERE workspace_id=$1 AND meeting_id=$2",
+            [workspace.workspaceId, meeting.id]
+          )
+        ).rows
+      ).toEqual([{ attempt_key: legacyAttempt }]);
+      // A positively completed old attempt does not block genuinely new material.
+      await f.add(revision("notion", "notion", 2));
+      expect(await f.observe(meeting.id)).toMatchObject({
+        analysisStatus: "completed",
+        errors: []
+      });
+      expect(f.calls()).toBe(2);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("holds an unmatched legacy paid attempt instead of inventing a new ordering key and charging again", async () => {
+    const f = await setup();
+    try {
+      const meetingId = (await f.add(revision("granola"))).logicalMeeting.id;
+      expect((await f.query(meetingId)).availability).toBe("not-produced");
+      await f.database.query(
+        "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key) VALUES($1,$2,$3)",
+        [workspace.workspaceId, meetingId, "unknown-legacy-order"]
+      );
+      expect(await f.observe(meetingId)).toMatchObject({
+        analysisStatus: "deferred",
+        acceptedObservationIds: [],
+        errors: [{ code: "analysis-request-indeterminate", retryable: false }]
+      });
+      expect(f.calls()).toBe(0);
+      expect(
+        (
+          await f.database.query(
+            "SELECT attempt_key FROM meeting_capture_synthesis_attempts WHERE workspace_id=$1 AND meeting_id=$2",
+            [workspace.workspaceId, meetingId]
+          )
+        ).rows
+      ).toEqual([{ attempt_key: "unknown-legacy-order" }]);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("withholds an unsupported retained material hash on an unchanged source set without paid re-observation", async () => {
+    const f = await setup();
+    try {
+      const meetingId = (await f.add(revision("granola"))).logicalMeeting.id;
+      await f.observe(meetingId);
+      const rows = await f.database.query<{ state_json: string }>(
+        "SELECT state_json FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
+        [workspace.workspaceId, meetingId]
+      );
+      const state = JSON.parse(rows.rows[0]!.state_json) as { materialDigest: string };
+      state.materialDigest = "unsupported-legacy-order";
+      await f.database.query(
+        "UPDATE meeting_capture_synthesis SET state_json=$3 WHERE workspace_id=$1 AND meeting_id=$2",
+        [workspace.workspaceId, meetingId, JSON.stringify(state)]
+      );
+      f.recreate();
+      expect((await f.query(meetingId)).availability).toBe("unavailable");
+      expect(await f.observe(meetingId)).toMatchObject({
+        analysisStatus: "deferred",
+        acceptedObservationIds: []
+      });
+      expect(f.calls()).toBe(1);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("retries a transient schema initialization failure in the same MI instance without losing observation idempotency", async () => {
+    const f = await setup();
+    try {
+      const meetingId = (await f.add(revision("granola"))).logicalMeeting.id;
+      f.failNextMigration();
+      expect(await f.observe(meetingId, "migration-retry")).toMatchObject({
+        analysisStatus: "deferred",
+        acceptedObservationIds: [],
+        errors: [{ code: "context-unavailable", retryable: true }]
+      });
+      expect(f.calls()).toBe(0);
+      expect(await f.observe(meetingId, "migration-retry")).toMatchObject({
+        analysisStatus: "completed",
+        acceptedObservationIds: ["migration-retry"],
+        errors: []
+      });
+      expect(await f.observe(meetingId, "migration-retry")).toMatchObject({
+        analysisStatus: "not-needed",
+        duplicateObservationIds: ["migration-retry"],
+        errors: []
+      });
+      expect(f.calls()).toBe(1);
+    } finally {
+      await f.database.close();
+    }
+  });
   it("does not disclose retained inferred conflicts through a replacement source grant", async () => {
     const f = await setup();
     try {
@@ -331,6 +616,7 @@ describe("Meeting Intelligence capture synthesis", () => {
         )!;
         expect(counterpart.conflictingClaimIds).toContain(authoritative.id);
         expect(current.claims).toHaveLength(2);
+        if (humanConfirmed) expect(authoritative.authority).toBe("human-confirmed");
       } finally {
         await f.database.close();
       }

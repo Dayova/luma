@@ -17,10 +17,10 @@ export function createMeetingCaptureIngestion(input: {
           sourceRevision: capture.latestRevision.sourceRevision,
           contentHash: capture.latestRevision.contentHash
         }))
-        .sort((left, right) => left.captureId.localeCompare(right.captureId));
+        .sort((left, right) => compare(left.captureId, right.captureId));
       const binding = meeting.captureRefs
         .map((capture) => [capture.id, capture.binding, capture.admission])
-        .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+        .sort((left, right) => compare(JSON.stringify(left), JSON.stringify(right)));
       const fingerprint = createHash("sha256")
         .update(
           JSON.stringify([
@@ -47,4 +47,7 @@ export function createMeetingCaptureIngestion(input: {
       });
     }
   };
+}
+function compare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

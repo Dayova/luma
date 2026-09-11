@@ -6,7 +6,11 @@ import type {
 import type { ContextAudience } from "../organizational-context/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
-import { digest, prepareCaptureSynthesisSources } from "./capture-synthesis-sources.js";
+import {
+  digest,
+  matchesMaterialDigest,
+  prepareCaptureSynthesisSources
+} from "./capture-synthesis-sources.js";
 
 type Stored = {
   synthesis: LumaSynthesis;
@@ -72,7 +76,7 @@ export async function readProcessedCaptureEvidence(input: {
         )
     ) ||
     prepared.bindingDigest !== state.bindingDigest ||
-    prepared.materialDigest !== state.materialDigest ||
+    !matchesMaterialDigest(prepared, state.materialDigest) ||
     digest(prepared.authorizationScopes) !== digest(state.authorizationScopes)
   )
     throw unavailable();

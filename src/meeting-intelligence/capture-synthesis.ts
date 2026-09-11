@@ -6,6 +6,7 @@ import { synthesisActionCandidates } from "./synthesis-action-candidates.js";
 import { readProcessedCaptureEvidence } from "./processed-capture-evidence.js";
 import {
   prepareCaptureSynthesisSources,
+  matchesMaterialDigest,
   digest,
   sorted,
   type Material,
@@ -159,9 +160,16 @@ export function withCaptureSynthesis(input: {
       workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, attempt_key TEXT NOT NULL,
       PRIMARY KEY(workspace_id, meeting_id, attempt_key)
     );
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS source_set_digest TEXT;
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS judgments_digest TEXT;
+    ALTER TABLE meeting_capture_synthesis_attempts ADD COLUMN IF NOT EXISTS ordering_version TEXT;
   `
       )
-      .then(() => ensureSynthesisActionFences(input.database)));
+      .then(() => ensureSynthesisActionFences(input.database))
+      .catch((error: unknown) => {
+        migration = undefined;
+        throw error;
+      }));
   const load = async (workspaceId: string, meetingId: string): Promise<Stored | null> => {
     const result = await input.database.query<{ state_json: string }>(
       "SELECT state_json FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
@@ -352,7 +360,7 @@ export function withCaptureSynthesis(input: {
         if (
           prior &&
           (current.bindingDigest !== prior.bindingDigest ||
-            current.materialDigest !== prior.materialDigest ||
+            !matchesMaterialDigest(current, prior.materialDigest) ||
             digest(current.authorizationScopes) !== digest(prior.authorizationScopes))
         )
           throw new Unavailable();
@@ -373,6 +381,14 @@ export function withCaptureSynthesis(input: {
         );
       }
       const prepared = await prepare(workspaceId, meetingId, prior?.audience);
+      // An unchanged immutable source set with an unrecognized old material
+      // order cannot be treated as new evidence to justify another paid call.
+      if (
+        prior &&
+        prepared.bindingDigest === prior.bindingDigest &&
+        !matchesMaterialDigest(prepared, prior.materialDigest)
+      )
+        throw new Unavailable();
       const currentCaptureIds = new Set(
         prepared.meeting.captureRefs.map((capture) => capture.id)
       );
@@ -397,7 +413,7 @@ export function withCaptureSynthesis(input: {
           observation.expectedSynthesisRevision !== prior.synthesis.revision ||
           !prepared.audience.personIds.includes(observation.participantId) ||
           prepared.bindingDigest !== prior.bindingDigest ||
-          prepared.materialDigest !== prior.materialDigest ||
+          !matchesMaterialDigest(prepared, prior.materialDigest) ||
           digest(prepared.authorizationScopes) !== digest(prior.authorizationScopes)
         )
           throw new Unavailable();
@@ -426,13 +442,17 @@ export function withCaptureSynthesis(input: {
         if (digest(sorted(actual)) !== digest(sorted(observation.captures)))
           throw new Unavailable();
         const workspace = await claimWorkspace(request.workspace);
-        const sourceSetDigest = digest([
-          prepared.bindingDigest,
-          prepared.materialDigest,
-          prepared.authorizationScopes,
-          workspace
-        ]);
-        if (prior?.synthesis.sourceSetDigest === sourceSetDigest) {
+        const sourceSetDigests = prepared.compatibleMaterialDigests.map(
+          (materialDigest) =>
+            digest([
+              prepared.bindingDigest,
+              materialDigest,
+              prepared.authorizationScopes,
+              workspace
+            ])
+        );
+        const sourceSetDigest = sourceSetDigests[0]!;
+        if (prior && sourceSetDigests.includes(prior.synthesis.sourceSetDigest)) {
           await requireSame(workspaceId, meetingId, prepared, audience);
           await input.database.query(
             "INSERT INTO meeting_capture_synthesis_observations(workspace_id,observation_id,meeting_id,payload_json) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
@@ -448,14 +468,58 @@ export function withCaptureSynthesis(input: {
           return update(observation, "not-needed", prior.synthesis.revision, true);
         }
         await requireUnfencedSynthesis(input.database, workspaceId, meetingId);
-        attemptKey = digest([
-          sourceSetDigest,
-          digest(prior?.judgments ?? []),
-          "capture-synthesis-v1"
-        ]);
+        const judgmentsDigest = digest(prior?.judgments ?? []);
+        const compatibleAttemptKeys = sourceSetDigests.map((sourceDigest) =>
+          digest([sourceDigest, judgmentsDigest, "capture-synthesis-v1"])
+        );
+        const previousAttempts = await input.database.query<{
+          attempt_key: string;
+          ordering_version: string | null;
+        }>(
+          "SELECT attempt_key,ordering_version FROM meeting_capture_synthesis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND (ordering_version IS NULL OR attempt_key=ANY($3::text[])) LIMIT 1001",
+          [workspaceId, meetingId, compatibleAttemptKeys]
+        );
+        const unknownLegacy = previousAttempts.rows.filter(
+          (attempt) =>
+            attempt.ordering_version === null &&
+            !compatibleAttemptKeys.includes(attempt.attempt_key)
+        );
+        let unresolvedLegacy = false;
+        if (unknownLegacy.length) {
+          const revisions = await input.database.query<{ state_json: string }>(
+            "SELECT state_json FROM meeting_capture_synthesis_revisions WHERE workspace_id=$1 AND meeting_id=$2 ORDER BY revision DESC LIMIT 1001",
+            [workspaceId, meetingId]
+          );
+          const completed = new Set(
+            revisions.rows.map(({ state_json }) => {
+              const state = JSON.parse(state_json) as Stored;
+              return digest([
+                state.synthesis.sourceSetDigest,
+                digest(state.judgments),
+                "capture-synthesis-v1"
+              ]);
+            })
+          );
+          unresolvedLegacy =
+            revisions.rows.length > 1000 ||
+            unknownLegacy.some((attempt) => !completed.has(attempt.attempt_key));
+        }
+        if (
+          previousAttempts.rows.length > 1000 ||
+          unresolvedLegacy ||
+          previousAttempts.rows.some((attempt) =>
+            compatibleAttemptKeys.includes(attempt.attempt_key)
+          )
+        )
+          throw new AiServiceError(
+            "request-indeterminate",
+            "A retained synthesis attempt cannot be safely redispatched; its original charge and identity require recovery.",
+            { requestDispatched: true }
+          );
+        attemptKey = digest([sourceSetDigest, judgmentsDigest, "capture-synthesis-v1"]);
         const claimAttempt = await input.database.query(
-          "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING attempt_key",
-          [workspaceId, meetingId, attemptKey]
+          "INSERT INTO meeting_capture_synthesis_attempts(workspace_id,meeting_id,attempt_key,source_set_digest,judgments_digest,ordering_version) VALUES($1,$2,$3,$4,$5,'code-unit-v1') ON CONFLICT DO NOTHING RETURNING attempt_key",
+          [workspaceId, meetingId, attemptKey, sourceSetDigest, judgmentsDigest]
         );
         if (!claimAttempt.rows.length) {
           attemptKey = undefined;
@@ -651,7 +715,7 @@ export function withCaptureSynthesis(input: {
       if (
         current.bindingDigest !== state.bindingDigest ||
         digest(current.authorizationScopes) !== digest(state.authorizationScopes) ||
-        current.materialDigest !== state.materialDigest
+        !matchesMaterialDigest(current, state.materialDigest)
       )
         throw new Unavailable();
       await requireSame(scope.workspaceId, scope.meetingId, current, state.audience);

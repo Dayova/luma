@@ -330,7 +330,12 @@ export function createDiscordCaptureReviewRuntime(input: {
         const selected = current.synthesis;
         if (command.type === "synthesis") {
           const content = pageText(
-            renderSynthesis(selected, current.followUpIntentions?.[0]?.status),
+            renderSynthesis(
+              selected,
+              current.followUpIntentions?.find(
+                (intent) => intent.synthesisRevision === selected.revision
+              )?.status
+            ),
             command.page,
             `Logical meeting: ${meetingId} · synthesis revision ${selected.revision}`
           );

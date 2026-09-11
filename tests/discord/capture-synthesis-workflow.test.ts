@@ -452,6 +452,45 @@ async function setup(actionMode = false) {
 }
 
 describe("Native founder capture and synthesis commands", () => {
+  it("labels publication for the displayed synthesis revision when the projection includes older receipts", async () => {
+    const f = await setup();
+    const id = (await f.add("publication-history")).logicalMeeting.id;
+    expect(await f.command("publish", { meeting_id: id, revision: 1 })).toContain(
+      "succeeded"
+    );
+    const prior = await f.query(id);
+    if (prior.type !== "capture-synthesis" || !prior.synthesis)
+      throw new Error("Missing published synthesis");
+    expect(
+      await f.command("judge", {
+        meeting_id: id,
+        revision: 1,
+        claim_id: prior.synthesis.claims[0]!.id,
+        choice: "confirm"
+      })
+    ).toContain("Human confirm recorded");
+    // The public projection permits multiple publication intentions. Supply its
+    // genuine prior receipt alongside the current revision through that port.
+    const query = f.mi.query.bind(f.mi);
+    vi.spyOn(f.mi, "query").mockImplementation(async (request) => {
+      const result = await query(request);
+      return result.type === "capture-synthesis"
+        ? {
+            ...result,
+            followUpIntentions: [
+              ...(prior.followUpIntentions ?? []),
+              ...(result.followUpIntentions ?? [])
+            ]
+          }
+        : result;
+    });
+    const response = await f.command("synthesis", { meeting_id: id });
+    expect(response).toContain("Synthesis revision: 2");
+    expect(response).toContain("Publication: suggested");
+    expect(response).not.toContain("Publication: succeeded");
+    expect(f.publications()).toBe(1);
+    expect(f.calls()).toBe(1);
+  });
   it("makes Granola-only meetings reachable, shows Basic gaps, records exact Human judgments and publishes one canonical anchor", async () => {
     const f = await setup(),
       first = await f.add("granola-only"),

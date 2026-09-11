@@ -365,7 +365,7 @@ async function fixture() {
 }
 
 describe("actual Granola / LogicalMeeting Decision source", () => {
-  it("automatically considers accepted original provider notes and replays with no model or fabricated Meeting", async () => {
+  it("uses the same real LogicalMeeting for accepted provider notes and replays without new inference or fabricated speech", async () => {
     const f = await fixture();
     expect(await f.sync()).toMatchObject({ failures: [] });
     const batch = f.batches[0]!;
@@ -396,10 +396,38 @@ describe("actual Granola / LogicalMeeting Decision source", () => {
       approvedIntentId: null,
       automatic: { recording: "review-only" }
     });
-    expect((await f.database.query("SELECT * FROM meetings")).rows).toHaveLength(0);
+    const synthesis = await f.query();
+    const snapshot = await f.mi.query({
+      workspaceId: workspace.workspaceId,
+      meetingId: f.events[0]!.meetingId,
+      query: { type: "snapshot" }
+    });
+    expect(snapshot).toMatchObject({
+      type: "snapshot",
+      state: {
+        meetingId: synthesis.logicalMeetingId,
+        importedSources: [],
+        participants: [],
+        captureSynthesisActionSource: {
+          revision: synthesis.revision,
+          sourceSetDigest: synthesis.sourceSetDigest,
+          canonicalAnchorRef: null
+        }
+      }
+    });
+    expect(synthesis.logicalMeetingId).toBe(f.events[0]!.meetingId);
+    expect(synthesis.sources).toHaveLength(1);
+    expect(synthesis.sources[0]).toMatchObject({
+      capabilities: { rawTranscript: "unavailable" },
+      externalReference: { providerId: "granola" }
+    });
+    expect(synthesis.claims.every((claim) => claim.quotations.length === 0)).toBe(true);
     expect(
-      (await f.database.query("SELECT * FROM meeting_observations")).rows
-    ).toHaveLength(0);
+      batch.source.evidence.every(
+        (evidence) =>
+          evidence.origin === "provider-derived" && evidence.authorPersonId === null
+      )
+    ).toBe(true);
     expect(
       await f.mi.query({
         workspaceId: workspace.workspaceId,

@@ -76,6 +76,20 @@ The source proof is repeated after the durable paid-attempt claim and before any
 source text reaches the model. Revocation during database admission therefore
 prevents disclosure and safely releases the undispatched attempt.
 
+Fingerprint ordering is now independent of the host locale. Reads retain existing
+material/source-set digests and accept them only when the freshly authorized exact
+material reproduces the deterministic code-unit digest or the explicitly supported
+legacy `en-US`/`de-DE` default collation digest. They do not rewrite archived revisions,
+publication identities or Human judgments. Original UUID capture IDs keep their
+ingestion Observation identity. An unsupported legacy material hash on the unchanged
+binding is withheld rather than treated as new paid evidence. New paid attempts
+record their ordering version and source/judgment digests. A metadata-free legacy
+attempt remains held unless its identity matches an immutable successfully produced
+revision; an unmatched attempt cannot be bypassed by generating a new ordering key.
+The legacy completion lookup is bounded to 1,000 rows/revisions and withholds work
+beyond that bound. Operator recovery must establish the original outcome before
+any charge is retried; clearing these rows is not an ordering migration.
+
 ## Approved canonical publication
 
 `conclude` and the guarded capture-synthesis query expose a suggested
@@ -125,10 +139,12 @@ Outcome publication. Signed Markdown uses native toggle indentation and tolerate
 Notion's removal of empty lines. Literal source markers cannot be interpreted as
 owned-region boundaries. Unknown provider outcomes remain visible for recovery.
 
-## Remaining runtime delivery
+## Runtime integration and live activation
 
-The unified main runtime still needs Granola scheduling, source/MI and publication
-composition, and a founder-facing synthesis/review projection. Live individual
-OAuth/account attestation and real MCP output-shape compatibility validation remain
-activation prerequisites. No personal connection, provider write, canonical page
-or production deployment is activated by these tests.
+Granola scheduling, source/MI and publication composition now run through the
+[shared main runtime](integrations/shared-meeting-capture-runtime.md), with
+[founder-facing capture and synthesis review](configuration/discord-founder-review.md).
+Actual per-owner OAuth/account attestation, reviewed sharing grants and notices,
+dedicated credentials and real MCP/source/provider traces remain activation proof.
+Offline tests do not activate a personal connection, provider write, canonical page
+or production deployment.

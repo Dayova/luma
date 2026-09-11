@@ -58,6 +58,7 @@ function verifyReceipt(
     receipt.operationId !== stage.operationId ||
     !Number.isFinite(Date.parse(receipt.observedAt)) ||
     record.reference.providerId !== providerId ||
+    record.reference.objectType !== "document" ||
     decisionDigest(record.content) !== decisionDigest(expectedContent(stage.stage)) ||
     ("target" in stage.stage &&
       record.reference.externalId !== stage.stage.target.reference.externalId)
@@ -223,6 +224,8 @@ export function createDecisionFollowUpExecution(
           intent.id
         );
         try {
+          // At most three stages: each pass writes or positively recovers one
+          // stage, and the fourth observes completion. Recovery does not resend it.
           for (let iteration = 0; iteration < 4; iteration++) {
             let active = stages.find((stage) => stage.state !== "succeeded");
             if (!active) {

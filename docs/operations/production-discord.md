@@ -216,7 +216,7 @@ Jakob when the host is provisioned; validate one alert deliberately. The service
 restarts failed processes with a delay and stops retrying after five failures
 within five minutes. Investigate failures before `systemctl reset-failed luma`.
 
-## Prove the limited release
+## Run operational smoke checks
 
 Use an explicitly approved test thread and founder actor. Establish all of:
 
@@ -235,6 +235,12 @@ Record exact release, channel scope, runtime start/stop, restore result, and liv
 smoke-test outcome. Never include tokens or captured conversation bodies in the
 deployment record. The service can report AI failures while alive; if the host
 or Gateway is unavailable, a separate host alert is required.
+
+These operational checks do not complete the canonical
+[five-approved-real-meetings product acceptance](https://app.notion.com/p/3d52e87228bf817c9c67e015df3ddf23).
+That acceptance also covers mixed language, ambiguous ownership, later revisions
+and replay, with recorded accuracy, corrections, review effort and AI cost.
+Keep its results separate from the deployment smoke-test record.
 
 ## Update and rollback
 

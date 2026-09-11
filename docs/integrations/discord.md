@@ -378,13 +378,13 @@ second and later questions work in the same thread. Their IDs remain in capture
 metadata, their exclusion is disclosed, and they still consume the scan budget.
 Founder and verified Luma polls are retained as [bounded advisory Evidence](discord-polls.md),
 including unknown results and provisional counts. Unknown bots, webhooks, system messages, unsupported content, and truncated
-history still produce an insufficient-evidence answer. This scope answers the
-selected thread only and needs no Granola or cross-provider retrieval. It never
-creates a Meeting, proposal, Intent,
-Linear issue, Notion page, or any other Follow-up mutation. This is an
-implemented bounded limitation, not a permanent statement that Discord
-conversations cannot later feed the shared Evidence, reconciliation,
-authorization, and execution core.
+history still produce an insufficient-evidence answer. The answer uses the
+selected thread and, when configured, governed organizational retrieval with
+current source and audience proofs. Answer generation is read-only and does not
+create a synthetic Meeting. When automatic Decision processing is separately
+enabled, the admitted conversation also feeds the shared candidate pipeline;
+canonical writes require its current standing recording permission and normal
+source, authority and execution checks. See [Decision Records in Discord](discord-decision-records.md).
 
 Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
 

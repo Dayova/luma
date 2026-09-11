@@ -18,7 +18,7 @@ The Admin endpoint documents agent sharing grants and effective roles, including
 
 ## Main runtime integration
 
-1. Parse `nativeNotionReviewConfig(env)` before creating resources. Existing production preflight stays restrictive until this actual runtime is composed.
+1. The shared main server parses `nativeNotionReviewConfig(env)` before creating resources and composes this runtime when enabled. Production preflight validates the required configuration; live account and provider proofs below remain activation gates.
 2. `createNativeNotionReviewResources({config,database,workspace,ledger,identityDirectory,accessPolicy,operationalOutcomeMarkerVerifier})` returns `workCatalog`, `validate()`, `ownsSource(source)`, `sourceHistoryAccess`, `stop()` and `createRuntime({meetingIntelligence})`. Optional second-argument factories replace only true external adapters for integration verification.
 3. Use its issued dedicated read-only Linear `workCatalog` **instead of** another reconciliation catalog with the same provider ID when constructing the sole MI. Do not append duplicate `linear` catalogs. The independent writer remains confined to Follow-up Execution/approved structured work.
 4. The native runtime constructs callback-free ingestion over that same MI. Do not pass normal capture ingestion or `onProcessedSource`: those can schedule standing automatic Decision writes and would violate the read-only native operation.

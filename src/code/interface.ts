@@ -99,6 +99,13 @@ export type CodeSearchResponse = {
   observedAt: string;
 };
 
+/** Search results are discovery references; callers must read the PR before using it. */
+export type PullRequestSearchResponse = {
+  results: Array<{ repository: string; number: number }>;
+  coverage: CodeReadCoverage;
+  observedAt: string;
+};
+
 export type CodeExcerptReference = Pick<
   CodeSearchResult,
   "repository" | "path" | "commitSha" | "blobSha" | "startLine" | "endLine"
@@ -112,6 +119,7 @@ export interface CodeProvider {
   readonly providerId: string;
   readonly readScope: CodeReadScope;
   getPullRequest(repository: string, number: number): Promise<CodeChange>;
+  searchPullRequests(query: CodeSearchQuery): Promise<PullRequestSearchResponse>;
   getCommit(repository: string, sha: string): Promise<Commit>;
   getRecentActivity(query: RepositoryActivityQuery): Promise<CodeActivityResult>;
   searchCode(query: CodeSearchQuery): Promise<CodeSearchResponse>;

@@ -1,7 +1,11 @@
 import { isAbsolute } from "node:path";
 import type { ContextCatalog } from "../organizational-context/interface.js";
 import { createGitHubCodeProviderFromEnv } from "../code/github-code-provider.js";
-import { createGitHubContextCatalog } from "../organizational-context/github-context-catalog.js";
+import {
+  createGitHubContextCatalog,
+  type GitHubContextAuthorization
+} from "../organizational-context/github-context-catalog.js";
+import { createGitHubChangeContextCatalog } from "../organizational-context/github-change-context-catalog.js";
 import { createNotionContextCatalogFromEnv } from "../organizational-context/notion-context-catalog.js";
 import { createLinearContextCatalogFromEnv } from "../organizational-context/linear-context-catalog.js";
 import type { ContextCatalogAuthorization } from "../organizational-context/catalog-authorization.js";
@@ -71,23 +75,28 @@ export async function organizationalContextCatalogsFromEnv(input: {
           ? request.source.pageId
           : request.source.teamId
     });
-  return config.providers.map((provider) => {
+  return config.providers.flatMap((provider): ContextCatalog[] => {
     switch (provider) {
-      case "github":
-        return createGitHubContextCatalog({
+      case "github": {
+        const github = {
           codeProvider: createGitHubCodeProviderFromEnv(input.env),
-          authorize: (request) =>
+          authorize: (request: Parameters<GitHubContextAuthorization>[0]) =>
             policy.authorize({
               audience: request.audience,
               provider: "github-code",
               credentialScopeId: request.credentialScopeId,
               resource: request.repository
             })
-        });
+        };
+        return [
+          createGitHubContextCatalog(github),
+          createGitHubChangeContextCatalog(github)
+        ];
+      }
       case "notion":
-        return createNotionContextCatalogFromEnv({ ...input, authorize });
+        return [createNotionContextCatalogFromEnv({ ...input, authorize })];
       case "linear":
-        return createLinearContextCatalogFromEnv({ ...input, authorize });
+        return [createLinearContextCatalogFromEnv({ ...input, authorize })];
     }
   });
 }

@@ -68,9 +68,22 @@ no useful terms skips external searches, returns explicit partial coverage, and
 can still use its current conversation evidence. Persisted answers bind the
 derived terms as well as the original question, audience, sources and receipt.
 
-This catalog currently discovers code excerpts. PR, commit and event methods
-are available through the CodeProvider capability but are not silently included
-in catalog searches or claimed as complete implementation-status knowledge.
+The runtime also installs a granted PR/activity catalog. It searches at most
+three literal terms per repository, bounded to six provider discovery calls
+overall, then freshly reads PR metadata before using it. Draft/open PRs remain
+proposed; a closed unmerged PR is historical; merged work is current source
+metadata and does not prove deployment. PR authors/reviewers do not establish
+Dayova ownership or Human decision authority. Body, file, commit and reviewer
+omissions are bounded; source versions include the complete returned metadata.
+
+Relevant recent events are a separate bounded source containing at most twenty
+matching events, their exact URLs and explicit omissions. General recent-change
+questions can select the feed without requiring their question words in event
+titles. Every read repeats current repository access and all-recipient sharing
+checks; there is no cached fallback. The feed is limited to GitHub's last thirty
+days and may lag. Removal from the readable feed invalidates dependent answers;
+stored revisions remain retained. This is partial implementation evidence, not
+complete repository or deployment history.
 
 - `getPullRequest` reads metadata twice around bounded files, commits and reviews
   and rejects a changed source. It reports head/base SHAs, `updatedAt`, and
@@ -79,6 +92,10 @@ in catalog searches or claimed as complete implementation-status knowledge.
   changed files; configured page limits can be lower.
 - `getCommit` accepts a full immutable commit SHA only. An unlinked Git author
   remains `null`; author names or emails are not turned into account identities.
+- `searchPullRequests` uses a literal title/body query restricted to one allowed
+  repository and PRs, with no user-supplied search qualifiers. Returned identities
+  must point to that repository's PR URL; search snippets are never evidence.
+  See [GitHub search API](https://docs.github.com/en/rest/search/search#search-issues-and-pull-requests).
 - `searchCode` accepts a literal phrase within one allowlisted repository, not
   arbitrary GitHub search qualifiers. It resolves the qualified default branch,
   reads matching file bytes at that commit, verifies the Git blob hash, and

@@ -169,7 +169,7 @@ const retrievalFixture = z
   .strict();
 export const corpusSchema = z
   .object({
-    version: z.literal(3),
+    version: z.literal(4),
     annotationProvenance: id,
     referenceAt: z.string().datetime(),
     timezone: z.literal("Europe/Berlin"),
@@ -197,12 +197,31 @@ export const corpusSchema = z
           .strict()
       )
       .min(1),
-    retrievalFixtures: z.array(retrievalFixture).min(1)
+    retrievalFixtures: z.array(retrievalFixture).min(1),
+    githubFixtures: z
+      .array(
+        z
+          .object({
+            id,
+            question: id,
+            repository: id,
+            path: id,
+            content: id,
+            recipients: z.array(id).min(1),
+            changeHeadBeforeReplay: z.boolean(),
+            revokeBeforeFresh: z.boolean(),
+            expected: z.object({ checks: z.array(id).min(1) }).strict(),
+            assertions: z.array(check).min(1)
+          })
+          .strict()
+      )
+      .min(1)
   })
   .strict();
 export type MeetingCorpus = z.infer<typeof corpusSchema>;
 export type CorpusFixture = MeetingCorpus["fixtures"][number];
 export type RetrievalFixture = MeetingCorpus["retrievalFixtures"][number];
+export type GitHubFixture = MeetingCorpus["githubFixtures"][number];
 export type CatalogChange = z.infer<typeof catalogChange>;
 export type SemanticCheck = z.infer<typeof check>;
 export type Metric = SemanticCheck["metric"];
@@ -323,7 +342,9 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
     if (new Set(values).size !== values.length) throw new Error(`Duplicate ${label}`);
   };
   unique(
-    [...corpus.fixtures, ...corpus.retrievalFixtures].map((fixture) => fixture.id),
+    [...corpus.fixtures, ...corpus.retrievalFixtures, ...corpus.githubFixtures].map(
+      (fixture) => fixture.id
+    ),
     "fixture ID"
   );
   for (const fixture of corpus.fixtures) {
@@ -347,7 +368,7 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
       );
     }
     for (const link of fixture.coveredBy) {
-      const target = corpus.retrievalFixtures.find(
+      const target = [...corpus.retrievalFixtures, ...corpus.githubFixtures].find(
         (value) => value.id === link.fixtureId
       );
       if (!target?.assertions.some((value) => value.id === link.id))
@@ -395,6 +416,19 @@ export function validateCoverage(corpus: MeetingCorpus, samples: SampleArchive):
       if (!fixture.catalogs.some((catalog) => catalog.id === entry.catalogId))
         throw new Error(`Unknown catalog ${entry.catalogId} in ${fixture.id}`);
     }
+  }
+  for (const fixture of corpus.githubFixtures) {
+    unique(fixture.recipients, `recipient in ${fixture.id}`);
+    unique(fixture.expected.checks, `expected check in ${fixture.id}`);
+    unique(
+      fixture.assertions.map((check) => check.id),
+      `assertion in ${fixture.id}`
+    );
+    if (
+      JSON.stringify([...fixture.expected.checks].sort()) !==
+      JSON.stringify(fixture.assertions.map((check) => check.id).sort())
+    )
+      throw new Error(`Every GitHub expected check must be executable in ${fixture.id}`);
   }
 }
 

@@ -19,6 +19,7 @@ import {
 import { importedObservation } from "./imported-source.js";
 import { score, summarize, type CheckResult } from "./scorer.js";
 import { runRetrievalFixture } from "./retrieval-runner.js";
+import { runGitHubFixture } from "./github-runner.js";
 
 type RequestRecord = {
   sampleId: string;
@@ -394,7 +395,10 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
     const retrievalFixtures = [];
     for (const fixture of corpus.retrievalFixtures)
       retrievalFixtures.push(await runRetrievalFixture(database, fixture, corpus));
-    const fixtures = [...meetingFixtures, ...retrievalFixtures];
+    const githubFixtures = [];
+    for (const fixture of corpus.githubFixtures)
+      githubFixtures.push(await runGitHubFixture(database, fixture, corpus));
+    const fixtures = [...meetingFixtures, ...retrievalFixtures, ...githubFixtures];
     const checks = fixtures.flatMap((fixture) => fixture.checks);
     const metrics = Object.fromEntries(
       [...new Set(checks.map((check) => check.metric))].map((metric) => [
@@ -446,6 +450,10 @@ export async function evaluateCorpus(corpus: MeetingCorpus, samples: SampleArchi
       retrievalKnowledgeSelection: knowledgeMeasurements(
         retrievalFixtures,
         "Actual Context Ask and governed multi-catalog selection with synthetic normalized sources and evidence-echo model; live model interpretation and real provider linkage are unmeasured."
+      ),
+      githubAdapterSelection: knowledgeMeasurements(
+        githubFixtures,
+        "Real GitHub CodeProvider, catalog and Context Ask with deterministic HTTP and evidence echo; live provider/model quality remains unmeasured."
       ),
       productReadiness: checks.some((check) => check.status !== "passed")
         ? "not-demonstrated"

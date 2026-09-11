@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "annotationProvenance": "The original four fixtures and their named expectations are retained. New structured samples and scenario assertions are agent-authored synthetic annotations and require human review; they are not a human-labeled benchmark.",
   "referenceAt": "2026-09-10T08:00:00.000Z",
   "timezone": "Europe/Berlin",
@@ -159,15 +159,13 @@
           "note": "Strict synthetic reference wording; paraphrase or new claims require annotation review rather than an automatic pass."
         }
       ],
-      "missing": [
+      "missing": [],
+      "coveredBy": [
         {
           "id": "code-context-can-be-linked",
-          "metric": "context-use",
-          "reason": "A normalized programmable catalog is exercised, but actual GitHub CodeProvider linkage is not implemented in this evaluation.",
-          "acceptance": "A code source must be retrieved and linked without asserting that an unverified implementation works."
+          "fixtureId": "github-real-adapter-code"
         }
-      ],
-      "coveredBy": []
+      ]
     },
     {
       "id": "mixed-github-issue",
@@ -2332,6 +2330,120 @@
         }
       ],
       "missing": []
+    }
+  ],
+  "githubFixtures": [
+    {
+      "id": "github-real-adapter-code",
+      "question": "How do we enforce the monthly AI budget?",
+      "repository": "dayova/luma",
+      "path": "src/budget.ts",
+      "content": "// The monthly AI budget gates paid requests.\nexport const monthlyLimitUsd = 30;\n",
+      "recipients": ["person_jakob", "person_fabius", "person_philipp", "person_julius"],
+      "changeHeadBeforeReplay": true,
+      "revokeBeforeFresh": true,
+      "expected": {
+        "checks": [
+          "code-context-can-be-linked",
+          "code-citation-is-pinned",
+          "code-authority-is-source",
+          "code-question-preserved",
+          "code-literal-query-derived",
+          "code-replay-is-persisted",
+          "code-first-model-called-once",
+          "code-changed-head-denies-replay",
+          "code-head-change-does-not-repay",
+          "code-revocation-withholds-fresh",
+          "code-original-snapshot-retained",
+          "code-search-coverage-partial"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "code-context-can-be-linked",
+          "metric": "context-use",
+          "path": ["first", "sources", 0, "content"],
+          "operation": "equals",
+          "expected": "// The monthly AI budget gates paid requests.\nexport const monthlyLimitUsd = 30;\n"
+        },
+        {
+          "id": "code-citation-is-pinned",
+          "metric": "grounding",
+          "path": ["first", "sources", 0, "url"],
+          "operation": "equals",
+          "expected": "https://github.com/dayova/luma/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/budget.ts#L1-L3"
+        },
+        {
+          "id": "code-authority-is-source",
+          "metric": "grounding",
+          "path": ["first", "sources", 0, "authority"],
+          "operation": "equals",
+          "expected": "source"
+        },
+        {
+          "id": "code-question-preserved",
+          "metric": "grounding",
+          "path": ["question"],
+          "operation": "equals",
+          "expected": "How do we enforce the monthly AI budget?"
+        },
+        {
+          "id": "code-literal-query-derived",
+          "metric": "coverage",
+          "path": ["searchTerms"],
+          "operation": "includes",
+          "expected": "budget"
+        },
+        {
+          "id": "code-replay-is-persisted",
+          "metric": "retention",
+          "path": ["replayEqual"],
+          "operation": "equals",
+          "expected": true
+        },
+        {
+          "id": "code-first-model-called-once",
+          "metric": "coverage",
+          "path": ["beforeChangeRequests"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "code-changed-head-denies-replay",
+          "metric": "retention",
+          "path": ["changedReplay"],
+          "operation": "equals",
+          "expected": "context-inquiry-context-changed"
+        },
+        {
+          "id": "code-head-change-does-not-repay",
+          "metric": "coverage",
+          "path": ["afterChangeRequests"],
+          "operation": "equals",
+          "expected": 1
+        },
+        {
+          "id": "code-revocation-withholds-fresh",
+          "metric": "retention",
+          "path": ["freshSources"],
+          "operation": "equals",
+          "expected": 0
+        },
+        {
+          "id": "code-original-snapshot-retained",
+          "metric": "retention",
+          "path": ["retainedAfter"],
+          "operation": "same-as",
+          "expected": ["retainedBefore"]
+        },
+        {
+          "id": "code-search-coverage-partial",
+          "metric": "coverage",
+          "path": ["first", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        }
+      ]
     }
   ]
 }

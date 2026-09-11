@@ -483,6 +483,9 @@ export function withCaptureSynthesis(input: {
           excerpt: material.text,
           externalReference: material.descriptor.externalReference
         }));
+        // Durable configuration/attempt admission awaited after the first proof.
+        // Revalidate before disclosing any bytes or spending the reserved attempt.
+        await requireSame(workspaceId, meetingId, prepared, audience);
         dispatched = true;
         const proposal =
           await input.reasoningModel.generateStructured<CaptureSynthesisProposal>({
@@ -505,7 +508,10 @@ export function withCaptureSynthesis(input: {
                 humanClaims:
                   prior?.synthesis.claims.filter(
                     (claim) => claim.authority !== "inferred"
-                  ) ?? []
+                  ) ?? [],
+                unresolvedConflicts: (prior?.synthesis.claims ?? []).filter(
+                  (claim) => claim.conflictingClaimIds.length > 0
+                )
               })
             ],
             input: {
@@ -522,6 +528,33 @@ export function withCaptureSynthesis(input: {
         // Existing Human Judgment keeps its own claim identity and authority even
         // if a later provider/model omits or renames that claim.
         const humanIds = new Set(humanClaims.map((claim) => claim.id));
+        const mergedClaims = [
+          ...claims.filter((claim) => !humanIds.has(claim.id)),
+          ...structuredClone(humanClaims)
+        ];
+        // Known conflict edges cannot disappear when a later model changes its
+        // flags or omits a counterpart: omission is not resolution evidence.
+        for (const priorClaim of prior?.synthesis.claims ?? []) {
+          if (!priorClaim.conflictingClaimIds.length) continue;
+          const current = mergedClaims.find((claim) => claim.id === priorClaim.id);
+          if (!current) throw new Unavailable();
+          current.conflictingClaimIds = [
+            ...new Set([
+              ...current.conflictingClaimIds,
+              ...priorClaim.conflictingClaimIds
+            ])
+          ];
+        }
+        // Restore reciprocity only
+        // when both claims have current material or retained Human authority.
+        for (const claim of mergedClaims) {
+          for (const otherId of claim.conflictingClaimIds) {
+            const other = mergedClaims.find((item) => item.id === otherId);
+            if (!other) throw new Unavailable();
+            if (!other.conflictingClaimIds.includes(claim.id))
+              other.conflictingClaimIds.push(claim.id);
+          }
+        }
         state = {
           authorizationScopes: prepared.authorizationScopes,
           audience,
@@ -534,10 +567,7 @@ export function withCaptureSynthesis(input: {
             revision: (prior?.synthesis.revision ?? 0) + 1,
             sourceSetDigest,
             producedAt: input.now().toISOString(),
-            claims: [
-              ...claims.filter((claim) => !humanIds.has(claim.id)),
-              ...humanClaims
-            ],
+            claims: mergedClaims,
             sources: prepared.meeting.captureRefs.map((capture) => ({
               captureId: capture.id,
               sourceRevision: capture.latestRevision.sourceRevision,

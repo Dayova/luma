@@ -35,6 +35,12 @@ instance used by the other Meeting workflows.
 
 Claims retain stable identities, individual material citations and confidence.
 Conflicting claims remain separate with reciprocal conflict references. Every
+later synthesis must retain the known unresolved conflict graph, including
+conflicts between inferred claims. Missing counterpart evidence withholds that
+new synthesis and preserves the prior revision; model omission is not treated as
+resolution. Existing counterpart claims retain reciprocal edges even if the
+model forgets the flags.
+Every
 model-derived claim is labelled inferred; it cannot confirm an owner, create work
 or authorize an external mutation. Exact quotations are a separate field and
 must be exact substrings of material explicitly marked verbatim/original speech.
@@ -66,6 +72,10 @@ request. Source changes create a new candidate synthesis revision; unchanged
 material does not. Model output is discarded when current source, grant or binding
 proof changes in flight. A separately accepted Human revision is never overwritten
 by a stale model result.
+
+The source proof is repeated after the durable paid-attempt claim and before any
+source text reaches the model. Revocation during database admission therefore
+prevents disclosure and safely releases the undispatched attempt.
 
 ## Remaining LUM-35 delivery work
 

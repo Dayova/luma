@@ -9,7 +9,7 @@ import type { MeetingCaptureRevision } from "../../src/logical-meetings/interfac
 import type { MeetingCaptureSetObserved } from "../../src/domain/meeting-capture-synthesis.js";
 import { createLogicalMeetings } from "../../src/logical-meetings/logical-meetings.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
-import { createPgliteDatabase } from "../../src/persistence/db.js";
+import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
 
 const workspace = { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" };
 const at = "2026-09-11T09:00:00.000Z";
@@ -89,6 +89,8 @@ async function setup() {
   let quote = false;
   let duringModel: (() => Promise<void>) | undefined;
   let duringRead: (() => void) | undefined;
+  let duringAttemptClaim: (() => void) | undefined;
+  let transformProposal: ((value: CaptureSynthesisProposal) => void) | undefined;
   const model: ReasoningModel = {
     generateStructured: async <T>(request: StructuredReasoningRequest<T>) => {
       calls += 1;
@@ -106,6 +108,7 @@ async function setup() {
           conflictingKeys: request.evidence.length > 1 && index === 0 ? ["claim-1"] : []
         }))
       };
+      transformProposal?.(value);
       return {
         value: value as T,
         metadata: {
@@ -116,8 +119,21 @@ async function setup() {
       };
     }
   };
+  const databaseWithClaimBoundary: LumaDatabase = new Proxy(database, {
+    get(target, property): unknown {
+      if (property === "query")
+        return async <T>(sql: string, params?: unknown[]) => {
+          const result = await target.query<T>(sql, params);
+          if (sql.startsWith("INSERT INTO meeting_capture_synthesis_attempts"))
+            duringAttemptClaim?.();
+          return result;
+        };
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
   const mi = createMeetingIntelligence({
-    database,
+    database: databaseWithClaimBoundary,
     reasoningModel: model,
     captureSynthesis: {
       logicalMeetings,
@@ -219,11 +235,90 @@ async function setup() {
     },
     duringRead: (hook: () => void) => {
       duringRead = hook;
+    },
+    duringAttemptClaim: (hook: () => void) => {
+      duringAttemptClaim = hook;
+    },
+    transformProposal: (hook: (value: CaptureSynthesisProposal) => void) => {
+      transformProposal = hook;
     }
   };
 }
 
 describe("Meeting Intelligence capture synthesis", () => {
+  it("rechecks source grants after durable paid admission and before disclosing evidence to the model", async () => {
+    const f = await setup();
+    try {
+      const meetingId = (await f.add(revision("granola"))).logicalMeeting.id;
+      f.duringAttemptClaim(() => {
+        f.revoked.add("granola");
+      });
+      expect(await f.observe(meetingId)).toMatchObject({
+        analysisStatus: "deferred",
+        acceptedObservationIds: []
+      });
+      expect(f.calls()).toBe(0);
+      f.revoked.clear();
+      f.duringAttemptClaim(() => {});
+      expect(await f.observe(meetingId)).toMatchObject({ analysisStatus: "completed" });
+      expect(f.calls()).toBe(1);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it.each([false, true])(
+    "withholds an omitted conflict counterpart and restores reciprocal edges on a later coherent source revision (Human confirmed=%s)",
+    async (humanConfirmed) => {
+      const f = await setup();
+      try {
+        const meetingId = (await f.add(revision("notion"))).logicalMeeting.id;
+        await f.add(revision("granola"), "Wir starten erst nach dem Review.");
+        await f.observe(meetingId);
+        const first = (await f.query(meetingId)).synthesis!;
+        if (humanConfirmed)
+          await f.mi.observe({
+            workspace,
+            observations: [
+              {
+                type: "capture-synthesis-judgment-recorded",
+                observationId: "human-conflict",
+                workspaceId: workspace.workspaceId,
+                meetingId,
+                occurredAt: at,
+                observedAt: at,
+                participantId: "person_jakob",
+                expectedSynthesisRevision: 1,
+                claimId: first.claims[0]!.id,
+                judgment: { kind: "confirm" }
+              }
+            ]
+          });
+        await f.add(revision("notion", "notion", 2));
+        f.transformProposal((proposal) => {
+          proposal.claims = [proposal.claims[0]!];
+          proposal.claims[0]!.conflictingKeys = [];
+        });
+        expect(await f.observe(meetingId)).toMatchObject({ analysisStatus: "deferred" });
+        expect((await f.query(meetingId)).availability).toBe("unavailable");
+        await f.add(revision("notion", "notion", 3));
+        f.transformProposal((proposal) => {
+          for (const claim of proposal.claims) claim.conflictingKeys = [];
+        });
+        expect(await f.observe(meetingId)).toMatchObject({ analysisStatus: "completed" });
+        const current = (await f.query(meetingId)).synthesis!;
+        const authoritative = current.claims.find(
+          (claim) => claim.id === first.claims[0]!.id
+        )!;
+        const counterpart = current.claims.find(
+          (claim) => claim.id === authoritative.conflictingClaimIds[0]
+        )!;
+        expect(counterpart.conflictingClaimIds).toContain(authoritative.id);
+        expect(current.claims).toHaveLength(2);
+      } finally {
+        await f.database.close();
+      }
+    }
+  );
   it("reports budget exhaustion and retries only a proven undispatched synthesis attempt", async () => {
     const f = await setup();
     try {

@@ -838,3 +838,151 @@ describe("Discord production channel resolution and delivery", () => {
     expect(destination.send).not.toHaveBeenCalled();
   });
 });
+
+describe("Discord explicit Decision Record entry", () => {
+  function decisionTransport() {
+    return createDiscordJsTransport({
+      token: "test",
+      clientId: "application",
+      guildId: "guild",
+      allowedParentChannelIds: ["parent"],
+      authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+      decisionRecords: {
+        parentChannelIds: ["parent"],
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32_000,
+        minIntervalMs: 60_000
+      }
+    });
+  }
+  it("routes original explicit instructions with a separate purpose while ignoring questions, quotes and guests", async () => {
+    const live = decisionTransport();
+    const handler = vi.fn(() =>
+      Promise.resolve({ content: "Retained decision result", idempotencyKey: "decision" })
+    );
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    expect(sdk.clientOptions.mock.calls[0]?.[0].rest?.retries).toBe(0);
+    expect(JSON.stringify(sdk.register.mock.calls[0]?.[1])).toContain(
+      '"name":"decision-record"'
+    );
+    const candidate = mention();
+    candidate.content = "<@bot> record this decision";
+    const question = { ...mention(), content: "<@bot> Should we record this decision?" };
+    const quote = { ...mention(), content: "> <@bot> record this decision" };
+    const guest = { ...candidate, author: { id: "guest", bot: false } };
+    const bot = { ...candidate, author: { id: "founder", bot: true } };
+    const foreign = { ...candidate, guildId: "other" };
+    for (const excluded of [question, quote, guest, bot, foreign])
+      sdk.emit(Events.MessageCreate, excluded);
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        question: "record this decision",
+        purpose: "decision-record",
+        actorDiscordUserId: "founder",
+        messageId: "message"
+      })
+    );
+    expect(candidate.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedMentions: { parse: [], repliedUser: false },
+        enforceNonce: true
+      })
+    );
+    await live.disconnect();
+  });
+  it("keeps deterministic usage mentions reachable with Decision Records enabled and Ask off", async () => {
+    const live = decisionTransport();
+    const handler = vi.fn(() =>
+      Promise.resolve({ content: "Usage without AI", idempotencyKey: "usage" })
+    );
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = mention();
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ purpose: "decision-record", question: "usage" })
+    );
+    await live.disconnect();
+  });
+  it("keeps an explicit-looking message read-only when only Ask is enabled", async () => {
+    const live = transport();
+    const handler = vi.fn(() => Promise.resolve(null));
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = mention();
+    candidate.content = "<@bot> create a decision record based on the discussion above";
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => handler.mock.calls.length).toBe(1);
+    expect(handler.mock.calls[0]).toEqual([
+      expect.not.objectContaining({ purpose: "decision-record" })
+    ]);
+    expect(JSON.stringify(sdk.register.mock.calls[0]?.[1])).not.toContain(
+      '"name":"decision-record"'
+    );
+    await live.disconnect();
+  });
+  it("withholds the stale receipt when its owned final source proof fails", async () => {
+    const live = decisionTransport();
+    await live.connect(
+      () => Promise.resolve({ content: "unused" }),
+      () =>
+        Promise.resolve({
+          content: "private old decision",
+          idempotencyKey: "decision",
+          requireCurrent: () =>
+            Promise.reject(new Error("source or Human correction changed"))
+        })
+    );
+    const candidate = mention();
+    candidate.content = "<@bot> record this decision";
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(JSON.stringify(candidate.reply.mock.calls)).not.toContain(
+      "private old decision"
+    );
+    expect(JSON.stringify(candidate.reply.mock.calls)).toContain(
+      "changed or is no longer readable"
+    );
+    await live.disconnect();
+  });
+  it.each(["status", "recover"])(
+    "registers and maps source-bound /decision-record %s",
+    async (subcommand) => {
+      const live = decisionTransport();
+      const handler = vi.fn(() => Promise.resolve({ content: "Retained result" }));
+      await live.connect(handler);
+      const fields: Record<string, string> = {
+        source_message: "message",
+        request_id: "decision-request"
+      };
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "decision-record",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "interaction",
+        channelId: "thread",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-11T10:00:00Z"),
+        options: {
+          getSubcommand: () => subcommand,
+          getString: (key: string) => fields[key] ?? null
+        },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      sdk.emit(Events.InteractionCreate, interaction);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          type: `decision-record-${subcommand}`,
+          sourceMessageId: "message",
+          requestId: "decision-request"
+        })
+      );
+      await live.disconnect();
+    }
+  );
+});

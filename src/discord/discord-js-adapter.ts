@@ -1,5 +1,9 @@
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
 import {
+  discordDecisionRecordConfigFromEnv,
+  isExplicitDecisionRecordInstruction
+} from "./discord-decision-record-runtime.js";
+import {
   discordConsultationConfigFromEnv,
   type DiscordConsultationConfig
 } from "./discord-consultation-runtime.js";
@@ -53,6 +57,7 @@ import {
 import {
   discordContextAskConfigFromEnv,
   discordContextAskMentionFromCandidate,
+  questionAfterLeadingDiscordBotMention,
   type DiscordContextAskConfig,
   type DiscordContextAskMessageCandidate,
   type DiscordContextAskMention
@@ -75,6 +80,7 @@ export type DiscordJsTransportConfig = {
   authorizeHumanReader: (discordUserId: string) => Promise<boolean>;
   contextAsk?: DiscordContextAskConfig;
   consultations?: DiscordConsultationConfig;
+  decisionRecords?: DiscordContextAskConfig;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
@@ -100,8 +106,11 @@ export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
   if (
-    [config.contextAsk, config.consultations?.capture].some((capture) =>
-      capture?.parentChannelIds.some((id) => !config.allowedParentChannelIds.includes(id))
+    [config.contextAsk, config.consultations?.capture, config.decisionRecords].some(
+      (capture) =>
+        capture?.parentChannelIds.some(
+          (id) => !config.allowedParentChannelIds.includes(id)
+        )
     )
   ) {
     throw new Error(
@@ -111,7 +120,7 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
-    ...(config.consultations ? { retries: 0 } : {}),
+    ...(config.consultations || config.decisionRecords ? { retries: 0 } : {}),
     makeRequest: (
       url: string,
       init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
@@ -123,7 +132,7 @@ export function createDiscordJsTransport(
   };
   const client = new Client({
     intents: discordGatewayIntentsForContextAsk(
-      config.contextAsk ?? config.consultations?.capture
+      config.contextAsk ?? config.consultations?.capture ?? config.decisionRecords
     ),
     rest: restOptions
   });
@@ -191,8 +200,18 @@ export function createDiscordJsTransport(
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const rawDecisionEvidenceSource = config.decisionRecords
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.decisionRecords,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
   const conversationEvidenceSource: ConversationEvidenceSource | null =
-    rawConversationEvidenceSource || rawConsultationEvidenceSource
+    rawConversationEvidenceSource ||
+    rawConsultationEvidenceSource ||
+    rawDecisionEvidenceSource
       ? {
           async capture(input) {
             await channelScope.requireChannel(
@@ -202,7 +221,9 @@ export function createDiscordJsTransport(
             const source =
               input.purpose === "consultation"
                 ? rawConsultationEvidenceSource
-                : rawConversationEvidenceSource;
+                : input.purpose === "decision-record"
+                  ? rawDecisionEvidenceSource
+                  : rawConversationEvidenceSource;
             if (!source)
               throw new Error(
                 "The requested Conversation capture purpose is not enabled"
@@ -223,7 +244,7 @@ export function createDiscordJsTransport(
     if (disconnected) return;
     if (
       !interaction.isChatInputCommand() ||
-      !["meeting", "consultation"].includes(interaction.commandName)
+      !["meeting", "consultation", "decision-record"].includes(interaction.commandName)
     ) {
       return;
     }
@@ -256,23 +277,32 @@ export function createDiscordJsTransport(
 
   client.on(Events.MessageCreate, (message) => {
     const handler = contextAskHandler;
-    const contextAsk = config.contextAsk;
     const botUserId = client.user?.id;
 
-    if (!handler || !contextAsk || !botUserId) {
+    if (!handler || !botUserId) {
       return;
     }
+
+    const originalInstruction =
+      questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
+    const decisionRequest =
+      config.decisionRecords &&
+      (isExplicitDecisionRecordInstruction(originalInstruction) ||
+        /^(?:usage|status)$/iu.test(originalInstruction.trim()));
+    const captureConfig = decisionRequest ? config.decisionRecords : config.contextAsk;
+    if (!captureConfig) return;
 
     const ask = discordContextAskMentionFromCandidate({
       candidate: discordContextAskMessageCandidate(message),
       botUserId,
       guildId: config.guildId,
-      config: contextAsk
+      config: captureConfig
     });
 
     if (!ask) {
       return;
     }
+    if (decisionRequest) ask.purpose = "decision-record";
 
     trackDelivery(
       handleContextAskMention({
@@ -521,6 +551,9 @@ export function createDiscordJsTransportFromEnv(
     ...(contextAsk ? { contextAsk } : {}),
     ...(discordConsultationConfigFromEnv(env)
       ? { consultations: discordConsultationConfigFromEnv(env)! }
+      : {}),
+    ...(discordDecisionRecordConfigFromEnv(env)
+      ? { decisionRecords: discordDecisionRecordConfigFromEnv(env)! }
       : {})
   });
 }
@@ -548,7 +581,8 @@ async function registerMeetingCommand(
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
     body: [
       meetingCommand.toJSON(),
-      ...(config.consultations ? [consultationCommand.toJSON()] : [])
+      ...(config.consultations ? [consultationCommand.toJSON()] : []),
+      ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : [])
     ],
     signal
   });
@@ -1007,6 +1041,16 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "decision-record") {
+    if (subcommand !== "status" && subcommand !== "recover")
+      throw new Error("Unknown Decision Record command");
+    return {
+      ...base,
+      type: `decision-record-${subcommand}`,
+      sourceMessageId: interaction.options.getString("source_message", true),
+      requestId: interaction.options.getString("request_id", true)
+    };
+  }
   if (interaction.commandName === "consultation") {
     const sourceMessageId = interaction.options.getString("source_message", true);
     if (subcommand === "start") {
@@ -1691,5 +1735,40 @@ function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
         .setName("consultation_id")
         .setDescription("Canonical consultation ID returned by Luma")
         .setRequired(true)
+    );
+}
+
+const decisionRecordCommand = new SlashCommandBuilder()
+  .setName("decision-record")
+  .setDescription("Check an explicitly requested Decision Record")
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("status")
+        .setDescription("Read the retained result of an explicit recording request")
+    )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("recover")
+        .setDescription("Check for an existing uncertain write without resending it")
+    )
+  );
+function decisionRecordAddress(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("source_message")
+        .setDescription("Original @Luma message ID in this discussion")
+        .setRequired(true)
+        .setMaxLength(22)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("request_id")
+        .setDescription("Request ID returned by Luma")
+        .setRequired(true)
+        .setMaxLength(512)
     );
 }

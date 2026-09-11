@@ -102,6 +102,31 @@ describe("DiscordConversationEvidenceSource", () => {
       source.capture({ ...captureInput(), purpose: "consultation" })
     ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
   });
+  it("requires the exact original leading @Luma instruction for decision-record capture", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    reader.anchor!.content = "<@bot_luma> record this decision";
+    const source = createSource(reader);
+    const captured = await source.capture({
+      ...captureInput(),
+      purpose: "decision-record",
+      question: "record this decision"
+    });
+    expect(captured.snapshot.messages.at(-1)?.text).toBe(
+      "<@bot_luma> record this decision"
+    );
+    await expect(
+      source.capture({
+        ...captureInput(),
+        purpose: "decision-record",
+        question: "update the existing decision"
+      })
+    ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+    reader.anchor!.content = "record this decision";
+    reader.anchor!.mentionedDiscordUserIds = [];
+    await expect(
+      source.capture({ ...captureInput(), purpose: "decision-record" })
+    ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+  });
   it("refuses an anchor whose poll and original text exceed the evidence budget before scanning history", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     const poll = discordPollEvidence(

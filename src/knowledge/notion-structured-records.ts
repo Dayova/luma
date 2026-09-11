@@ -157,7 +157,7 @@ export function createNotionStructuredRecords(
   const authorizationScopeId = operationDigest({
     type: "notion-structured-records-authorization-v1",
     credentialScopeId: config.credentialScopeId,
-    targets: [...targets].sort((a, b) => a.key.localeCompare(b.key))
+    targets: [...targets].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
   });
   const { client, request } = createScheduledNotionClient(config.apiToken);
   const targetFor = (key: string) => {

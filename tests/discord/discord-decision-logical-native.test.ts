@@ -303,7 +303,8 @@ async function setup() {
       options: {
         getSubcommand: () => subcommand,
         getString: (key: string) => values[key] ?? null,
-        getInteger: (key: string) => (values[key] ? Number(values[key]) : null)
+        getInteger: (key: string) => (values[key] ? Number(values[key]) : null),
+        getBoolean: (key: string) => (values[key] === "true" ? true : null)
       },
       deferReply: vi.fn(() => Promise.resolve()),
       editReply: vi.fn<
@@ -391,7 +392,10 @@ describe("native LogicalMeeting Decision addressing", () => {
   it("addresses automatic Granola candidates and recovers the original uncertain approved write", async () => {
     const f = await setup();
     await f.queue();
-    const candidates = await f.command("candidates", { meeting_id: logicalId });
+    const candidates = await f.command("candidates", {
+      meeting_id: logicalId,
+      retry: "true"
+    });
     expect(candidates.content).toContain("candidate 1/1");
     expect(candidates.content).toContain(`Meeting ID (meeting_id): ${logicalId}`);
     const requestId = candidates.content.match(/Request ID: ([^\n]+)\./)?.[1],

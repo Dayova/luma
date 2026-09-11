@@ -1175,6 +1175,7 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
       return {
         ...base,
         type: "decision-record-candidates",
+        ...(interaction.options.getBoolean("retry") ? { retry: true } : {}),
         ...meetingAddress,
         ...(sourceMessageId ? { sourceMessageId } : {}),
         ...(candidate ? { candidate } : {}),
@@ -2250,6 +2251,11 @@ const decisionRecordCommand = new SlashCommandBuilder()
       .setName("candidates")
       .setDescription(
         "Review automatic decisions from this Meeting or a captured conversation"
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("retry")
+          .setDescription("Retry only a proved unsent AI attempt after fixing its cause")
       )
       .addStringOption((option) =>
         option

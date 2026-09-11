@@ -38,9 +38,11 @@ export async function createAutomaticDecisionProcessing(input: {
   database: LumaDatabase;
   workspace: WorkspaceConfig;
   meetingIntelligence: AutomaticDecisionIntelligence;
+  now?: () => Date;
 }) {
   const workspace = structuredClone(input.workspace),
     database = input.database;
+  const now = input.now ?? (() => new Date());
   await database.exec(`CREATE TABLE IF NOT EXISTS automatic_decision_jobs (
     workspace_id TEXT NOT NULL, job_id TEXT NOT NULL, subject_hash TEXT NOT NULL,
     payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL,
@@ -48,7 +50,8 @@ export async function createAutomaticDecisionProcessing(input: {
     batch_id TEXT, created_at BIGINT GENERATED ALWAYS AS IDENTITY,
     PRIMARY KEY(workspace_id,job_id)
   ); CREATE INDEX IF NOT EXISTS automatic_decision_jobs_queue
-    ON automatic_decision_jobs(workspace_id,phase,created_at);`);
+    ON automatic_decision_jobs(workspace_id,phase,created_at);
+    ALTER TABLE automatic_decision_jobs ADD COLUMN IF NOT EXISTS retry_at BIGINT;`);
   await database.query(
     "UPDATE automatic_decision_jobs SET phase='interrupted' WHERE workspace_id=$1 AND phase='processing'",
     [workspace.workspaceId]
@@ -58,32 +61,90 @@ export async function createAutomaticDecisionProcessing(input: {
   let wakePending = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<void> | undefined;
-  const schedule = () => {
+  // Only a fresh process needs to inspect crash-interrupted jobs. This is a
+  // read-only MI proof, never extraction or a provider dispatch.
+  let interruptedCursor: number | null = 0;
+  const manual = new Set<Promise<unknown>>();
+  const schedule = (delayMs = 0) => {
     if (!active || closed) return;
-    wakePending = true;
-    if (timer || running) return;
-    timer = setTimeout(() => {
+    if (delayMs === 0) {
+      wakePending = true;
+      if (timer) clearTimeout(timer);
       timer = undefined;
-      wakePending = false;
-      void drain();
-    }, 0);
+    }
+    if (timer || running) return;
+    timer = setTimeout(
+      () => {
+        timer = undefined;
+        wakePending = false;
+        void drain();
+      },
+      Math.min(delayMs, 2_147_483_647)
+    );
     timer.unref();
   };
   const drain = (): Promise<void> => {
     if (running) return running;
     if (!active || closed) return Promise.resolve();
+    let nextRetryAt: number | undefined;
     running = (async () => {
+      while (active && !closed && interruptedCursor !== null) {
+        const recovered = await database.query<{
+          job_id: string;
+          payload_json: string;
+          payload_hash: string;
+          batch_id: string | null;
+          created_at: number;
+        }>(
+          "SELECT job_id,payload_json,payload_hash,batch_id,created_at::float8 AS created_at FROM automatic_decision_jobs WHERE workspace_id=$1 AND phase='interrupted' AND created_at>$2 ORDER BY created_at LIMIT 100",
+          [workspace.workspaceId, interruptedCursor]
+        );
+        for (const row of recovered.rows) {
+          if (!active || closed) break;
+          interruptedCursor = row.created_at;
+          try {
+            const payload: unknown = JSON.parse(row.payload_json);
+            const job = jobSchema.parse(payload);
+            if (
+              decisionDigest(payload) !== row.payload_hash ||
+              decisionDigest(job) !== row.job_id
+            )
+              throw new Error("Automatic source notification integrity failed");
+            const batch = await input.meetingIntelligence.query({
+              workspaceId: workspace.workspaceId,
+              subject: job.subject,
+              query: {
+                type: "automatic-decision-candidates",
+                ...(row.batch_id ? { batchId: row.batch_id } : {})
+              }
+            });
+            const retry = batch.analysisRetry;
+            if (
+              retry?.canRetry &&
+              retry.disposition === "not-dispatched" &&
+              (retry.lastObservationId === `source-job:${row.job_id}` ||
+                retry.lastObservationId ===
+                  `source-job:${row.job_id}:retry:${retry.attempts - 1}`)
+            )
+              await saveOutcome(row.job_id, batch, "interrupted");
+          } catch {
+            // Missing, changed or unknown original proof remains interrupted.
+          }
+        }
+        if (active && !closed && recovered.rows.length < 100) interruptedCursor = null;
+      }
       while (active && !closed) {
         const rows = await database.query<{
           job_id: string;
           payload_json: string;
           payload_hash: string;
+          batch_id: string | null;
         }>(
-          `UPDATE automatic_decision_jobs SET phase='processing'
+          `UPDATE automatic_decision_jobs SET phase='processing',retry_at=NULL
           WHERE workspace_id=$1 AND job_id=(SELECT job_id FROM automatic_decision_jobs
-          WHERE workspace_id=$1 AND phase='queued' ORDER BY created_at LIMIT 1)
-          AND phase='queued' RETURNING job_id,payload_json,payload_hash`,
-          [workspace.workspaceId]
+          WHERE workspace_id=$1 AND (phase='queued' OR (phase='unavailable' AND retry_at<=$2)) ORDER BY created_at LIMIT 1)
+          AND (phase='queued' OR (phase='unavailable' AND retry_at<=$2)) RETURNING job_id,payload_json,payload_hash,batch_id`,
+          [workspace.workspaceId, now().getTime()]
         );
         const row = rows.rows[0];
         if (!row) break;
@@ -98,31 +159,40 @@ export async function createAutomaticDecisionProcessing(input: {
           // Notifications signal fresh work for a subject. MI captures its current
           // accepted original source, and coalesces overlapping notifications by
           // that exact source revision, audience and authorization proof.
+          const retained = row.batch_id
+            ? await input.meetingIntelligence.query({
+                workspaceId: workspace.workspaceId,
+                subject: job.subject,
+                query: { type: "automatic-decision-candidates", batchId: row.batch_id }
+              })
+            : null;
           const batch = await input.meetingIntelligence.observe({
             workspace,
             subject: job.subject,
             observations: [
               {
                 type: "decision-source-processed",
-                observationId: `source-job:${row.job_id}`
+                observationId: retained
+                  ? `source-job:${row.job_id}:retry:${retained.analysisRetry?.attempts ?? 0}`
+                  : `source-job:${row.job_id}`,
+                ...(row.batch_id ? { retryBatchId: row.batch_id } : {})
               }
             ]
           });
-          await database.query(
-            "UPDATE automatic_decision_jobs SET phase=$3,batch_id=$4 WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
-            [
-              workspace.workspaceId,
-              row.job_id,
-              batch.status === "completed" ? "completed" : "unavailable",
-              batch.batchId
-            ]
-          );
+          await saveOutcome(row.job_id, batch);
         } catch {
           await database.query(
-            "UPDATE automatic_decision_jobs SET phase='unavailable' WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
+            "UPDATE automatic_decision_jobs SET phase='unavailable',retry_at=NULL WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
             [workspace.workspaceId, row.job_id]
           );
         }
+      }
+      if (active && !closed) {
+        const due = await database.query<{ retry_at: number | null }>(
+          "SELECT min(retry_at)::float8 AS retry_at FROM automatic_decision_jobs WHERE workspace_id=$1 AND phase='unavailable'",
+          [workspace.workspaceId]
+        );
+        nextRetryAt = due.rows[0]?.retry_at ?? undefined;
       }
     })()
       .catch(() => {
@@ -133,8 +203,31 @@ export async function createAutomaticDecisionProcessing(input: {
       .finally(() => {
         running = undefined;
         if (wakePending) schedule();
+        else if (nextRetryAt !== undefined)
+          schedule(Math.max(0, nextRetryAt - now().getTime()));
       });
     return running;
+  };
+  const saveOutcome = async (
+    jobId: string,
+    batch: AutomaticDecisionBatch,
+    expectedPhase?: Phase
+  ) => {
+    const retryAt =
+      batch.analysisRetry?.canRetry && batch.analysisRetry.nextAttemptAt
+        ? Date.parse(batch.analysisRetry.nextAttemptAt)
+        : null;
+    await database.query(
+      "UPDATE automatic_decision_jobs SET phase=$3,batch_id=$4,retry_at=$5 WHERE workspace_id=$1 AND job_id=$2 AND ($6::text IS NULL OR phase=$6)",
+      [
+        workspace.workspaceId,
+        jobId,
+        batch.status === "completed" ? "completed" : "unavailable",
+        batch.batchId,
+        Number.isFinite(retryAt) ? retryAt : null,
+        expectedPhase ?? null
+      ]
+    );
   };
   const enqueue = async (workspaceId: string, raw: Job) => {
     if (closed) throw new Error("Automatic Decision processing is closed");
@@ -154,9 +247,9 @@ export async function createAutomaticDecisionProcessing(input: {
     active = false;
     if (timer) clearTimeout(timer);
     timer = undefined;
-    return running ?? Promise.resolve();
+    return Promise.allSettled([...(running ? [running] : []), ...manual]).then(() => {});
   };
-  return {
+  const api = {
     conversation(this: void, event: ProcessedConversationSourceEvent) {
       return enqueue(event.workspaceId, {
         subject: event.subject,
@@ -207,6 +300,40 @@ export async function createAutomaticDecisionProcessing(input: {
       for (const row of rows.rows) result[row.phase] = row.count;
       return result;
     },
+    retry(subject: DecisionSubject, observationId: string): Promise<void> {
+      if (closed || !active)
+        return Promise.reject(new Error("Automatic Decision processing is paused"));
+      if (!observationId.trim() || observationId.length > 512)
+        return Promise.reject(new Error("A stable retry instruction is required"));
+      subject = decisionSubjectSchema.parse(structuredClone(subject));
+      const task = (async () => {
+        const before = await api.review(subject);
+        if (!before.batch?.analysisRetry?.canRetry) return;
+        const rows = await database.query<{ job_id: string; batch_id: string | null }>(
+          "SELECT job_id,batch_id FROM automatic_decision_jobs WHERE workspace_id=$1 AND subject_hash=$2 ORDER BY created_at DESC LIMIT 1",
+          [workspace.workspaceId, decisionDigest(subject)]
+        );
+        const row = rows.rows[0];
+        if (!row || (row.batch_id && row.batch_id !== before.batch.batchId))
+          throw new Error("The retry notification changed");
+        const batch = await input.meetingIntelligence.observe({
+          workspace,
+          subject,
+          observations: [
+            {
+              type: "decision-source-processed",
+              observationId,
+              retryBatchId: before.batch.batchId,
+              retryBeforeScheduled: true
+            }
+          ]
+        });
+        await saveOutcome(row.job_id, batch);
+        schedule();
+      })().finally(() => manual.delete(task));
+      manual.add(task);
+      return task;
+    },
     async review(
       subject: DecisionSubject
     ): Promise<{ batch: AutomaticDecisionBatch | null; status: Phase | "unseen" }> {
@@ -240,6 +367,7 @@ export async function createAutomaticDecisionProcessing(input: {
       }
     }
   };
+  return api;
 }
 export type AutomaticDecisionProcessing = Awaited<
   ReturnType<typeof createAutomaticDecisionProcessing>

@@ -1,3 +1,8 @@
+import {
+  automaticRetryState,
+  failedAutomaticAttempt,
+  type AutomaticDetectionAttempt
+} from "./automatic-retry.js";
 import { z } from "zod";
 import type {
   AutomaticDecisionBatch,
@@ -51,8 +56,12 @@ export interface AutomaticDecisionIntelligence {
   query(input: QueryAutomaticDecisions): Promise<AutomaticDecisionBatch>;
   conclude(input: ConcludeAutomaticDecisions): Promise<AutomaticDecisionConclusion>;
 }
-type StoredBatch = Omit<AutomaticDecisionBatch, "candidates" | "duplicate"> & {
+type StoredBatch = Omit<
+  AutomaticDecisionBatch,
+  "candidates" | "duplicate" | "analysisRetry"
+> & {
   requestIds: string[];
+  attempts?: AutomaticDetectionAttempt[];
 };
 const detectionSchema = z
   .object({
@@ -251,10 +260,12 @@ export function createAutomaticDecisionIntelligence(
       decisionDigest(batch)
     )
       throw new Error("Automatic Decision batch changed during delivery");
-    const { requestIds: _ids, ...value } = batch;
+    const { requestIds: _ids, attempts, ...value } = batch;
+    const analysisRetry = automaticRetryState(attempts);
     void _ids;
     return {
       ...value,
+      ...(analysisRetry ? { analysisRetry } : {}),
       candidates,
       duplicate: false,
       ...(withheld
@@ -276,7 +287,11 @@ export function createAutomaticDecisionIntelligence(
         request.observations.length !== 1 ||
         observation?.type !== "decision-source-processed" ||
         !observation.observationId.trim() ||
-        observation.observationId.length > 512
+        observation.observationId.length > 512 ||
+        (observation.retryBatchId !== undefined &&
+          (!observation.retryBatchId.trim() || observation.retryBatchId.length > 512)) ||
+        (observation.retryBeforeScheduled !== undefined &&
+          (observation.retryBeforeScheduled !== true || !observation.retryBatchId))
       )
         throw new Error("One bounded processed-source Observation is required");
       const result = await withExecutionRunLock(
@@ -304,6 +319,10 @@ export function createAutomaticDecisionIntelligence(
             throw new Error("The processed source changed its subject or audience");
           await requireSource(source);
           const batchId = `decision-batch:${decisionDigest({ workspaceId: request.workspace.workspaceId, subject: request.subject, authorizationHash: source.authorizationHash, contentHash: source.contentHash, revision: source.revision, audience: source.audience })}`;
+          if (observation.retryBatchId && observation.retryBatchId !== batchId)
+            throw new Error(
+              "The retry source no longer matches its exact original batch"
+            );
           await saveDecisionObservation(
             input.database,
             request.workspace.workspaceId,
@@ -320,7 +339,29 @@ export function createAutomaticDecisionIntelligence(
             }
           );
           const prior = await load(request.workspace.workspaceId, batchId);
-          if (prior) return { batch: prior, duplicate: true };
+          const retry = prior ? automaticRetryState(prior.attempts) : undefined;
+          if (observation.retryBatchId && !prior)
+            throw new Error("The original retry batch is missing");
+          if (
+            prior &&
+            (!retry?.canRetry ||
+              prior.requestIds.length ||
+              (observation.retryBeforeScheduled &&
+                prior.attempts?.some(
+                  (attempt) => attempt.observationId === observation.observationId
+                )) ||
+              (!observation.retryBeforeScheduled &&
+                (!retry.nextAttemptAt ||
+                  now().getTime() < Date.parse(retry.nextAttemptAt))))
+          )
+            return { batch: prior, duplicate: true };
+          const attempt: AutomaticDetectionAttempt = {
+            observationId: observation.observationId,
+            startedAt: now().toISOString(),
+            disposition: "unknown",
+            retryAt: null
+          };
+          const attempts = [...(prior?.attempts ?? []), attempt];
           const batch: StoredBatch = {
             batchId,
             subject: request.subject,
@@ -329,7 +370,8 @@ export function createAutomaticDecisionIntelligence(
             message:
               "Automatic interpretation is incomplete. It will not silently rerun after interruption.",
             complete: false,
-            requestIds: []
+            requestIds: [],
+            attempts
           };
           await save(request.workspace.workspaceId, batch);
           // These reads may be unavailable; original evidence remains reviewable and inference cannot authorize a write.
@@ -371,16 +413,17 @@ export function createAutomaticDecisionIntelligence(
           } catch {
             grants = [];
           }
+          let detectorReturned = false;
           try {
-            const detection = detectionSchema.parse(
-              await configuration.detector.detect({
-                workspace: request.workspace,
-                batchId,
-                source: structuredClone(source),
-                authority: structuredClone(authority),
-                catalog: structuredClone(catalog)
-              })
-            );
+            const detected = await configuration.detector.detect({
+              workspace: request.workspace,
+              batchId,
+              source: structuredClone(source),
+              authority: structuredClone(authority),
+              catalog: structuredClone(catalog)
+            });
+            detectorReturned = true;
+            const detection = detectionSchema.parse(detected);
             await requireSource(source);
             if (authority)
               await input.authority.requireCurrent({ audience, snapshot: authority });
@@ -557,6 +600,7 @@ export function createAutomaticDecisionIntelligence(
                       other.state.candidate?.scopeId === entry.state.candidate?.scopeId
                   ).length > 1
               );
+            attempts[attempts.length - 1] = { ...attempt, disposition: "completed" };
             batch.status = batch.complete ? "completed" : "needs-clarification";
             batch.message = batch.complete
               ? "Candidates retain their modality, reconciliation and independent recording authorization."
@@ -579,6 +623,15 @@ export function createAutomaticDecisionIntelligence(
               );
             });
           } catch (error) {
+            attempts[attempts.length - 1] = failedAutomaticAttempt(
+              attempt,
+              // A later admission/persistence failure cannot undo a completed
+              // detector call's possible charge, even if that error is unsent.
+              detectorReturned ? undefined : error,
+              now(),
+              request.workspace.timezone,
+              attempts.length
+            );
             batch.status = "needs-clarification";
             batch.complete = false;
             batch.requestIds = [];

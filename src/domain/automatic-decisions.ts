@@ -41,7 +41,16 @@ export type AutomaticDecisionDetection = {
 export type ObserveProcessedDecisionSource = {
   workspace: WorkspaceConfig;
   subject: DecisionSubject;
-  observations: [{ type: "decision-source-processed"; observationId: string }];
+  observations: [
+    {
+      type: "decision-source-processed";
+      observationId: string;
+      /** Binds a retry to its exact prior batch; no new source may be substituted. */
+      retryBatchId?: string;
+      /** Authenticated explicit retry may bypass the schedule, never the attempt/dispatch proof. */
+      retryBeforeScheduled?: true;
+    }
+  ];
 };
 export type QueryAutomaticDecisions = {
   workspaceId: string;
@@ -57,6 +66,15 @@ export type AutomaticDecisionBatch = {
   complete: boolean;
   candidates: DecisionRequestState[];
   duplicate: boolean;
+  analysisRetry?: {
+    disposition: "not-dispatched" | "unknown" | "completed";
+    /** Exact durable attempt identity; links a recovered unsent result to its source job. */
+    lastObservationId: string;
+    attempts: number;
+    maxAttempts: number;
+    canRetry: boolean;
+    nextAttemptAt: string | null;
+  };
 };
 export type ConcludeAutomaticDecisions = {
   workspaceId: string;

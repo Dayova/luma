@@ -118,7 +118,8 @@ export type DiscordDecisionRecordRuntime = {
     }): Promise<string | null>;
     currentAudience(workspaceId: string): Promise<DecisionAudience | null>;
   };
-  automatic?: Pick<AutomaticDecisionProcessing, "review">;
+  automatic?: Pick<AutomaticDecisionProcessing, "review"> &
+    Partial<Pick<AutomaticDecisionProcessing, "retry">>;
   meetingIntelligence: DecisionIntelligence;
   execution: DecisionFollowUpExecution;
   config: DiscordContextAskConfig;
@@ -134,6 +135,7 @@ export type DiscordDecisionRecordCommand =
           }
         | {
             type: "decision-record-candidates";
+            retry?: boolean;
             sourceMessageId?: string;
             candidate?: number;
             page?: number;
@@ -245,6 +247,14 @@ export async function handleDiscordDecisionRecordCommand(input: {
         content:
           "Automatic decision processing is not enabled. Explicit recording and /meeting usage remain available."
       };
+    if (command.retry) {
+      if (!runtime.automatic.retry) throw new Error("Automatic retry is not configured");
+      await input.requireCurrent?.();
+      await runtime.automatic.retry(
+        subject,
+        `discord:${command.interactionId}:automatic-retry`
+      );
+    }
     const result = await runtime.automatic.review(subject);
     const selected = command.candidate ?? 1;
     if (!Number.isSafeInteger(selected) || selected < 1)
@@ -269,11 +279,20 @@ export async function handleDiscordDecisionRecordCommand(input: {
                 "Automatic decision analysis was interrupted. Luma has not repeated the paid request. Check /meeting usage before starting a fresh explicit request."
             } as const
           )[result.status];
+    const retry = batch?.analysisRetry;
+    const retryGuidance =
+      !retry || retry.disposition === "completed"
+        ? ""
+        : retry.canRetry
+          ? `\nNo AI request was dispatched. Retry ${retry.attempts + 1}/${retry.maxAttempts} is scheduled for ${retry.nextAttemptAt}. After fixing the budget or configuration, use this candidates command with retry:true for an earlier attempt. Current source and permissions are checked again.`
+          : retry.disposition === "not-dispatched"
+            ? `\nAll ${retry.maxAttempts} bounded attempts were refused before dispatch. No automatic retry remains; resolve the cause and use a new explicit recording request.`
+            : "\nA previous request may have been dispatched. Luma will not repeat it automatically or through retry:true; check /meeting usage and the retained result before a new explicit request.";
     return {
       content:
         input.logicalMeetingId && !candidate
-          ? `Meeting ID (meeting_id): ${input.logicalMeetingId}.\n${content}`
-          : content,
+          ? `Meeting ID (meeting_id): ${input.logicalMeetingId}.\n${content}${retryGuidance}`
+          : `${content}${retryGuidance}`,
       requireCurrent: async () => {
         await input.requireCurrent?.();
         if (

@@ -1,3 +1,4 @@
+import { handleDiscordDecisionRecordCommand } from "../../src/discord/discord-decision-record-runtime.js";
 import { createAutomaticDecisionProcessing } from "../../src/app/automatic-decision-processing.js";
 import {
   standingFixture,
@@ -31,6 +32,8 @@ afterEach(async () => {
   await database.close();
 });
 function fixture() {
+  let currentTime = "2026-09-11T10:00:00Z";
+  const now = () => new Date(currentTime);
   const original = decisionRecord(),
     source = structuredClone(original.source),
     authority = structuredClone(original.authority.snapshot);
@@ -222,7 +225,7 @@ function fixture() {
         generateStructured: () => Promise.reject(new Error("No Meeting model call"))
       },
       decisionIntelligence: configuration,
-      now: () => new Date("2026-09-11T10:00:00Z")
+      now
     });
   const addRecord = () => {
     const content = decisionRecord("prior");
@@ -241,6 +244,10 @@ function fixture() {
     return value;
   };
   return {
+    now,
+    setTime: (value: string) => {
+      currentTime = value;
+    },
     source,
     authority,
     audience,
@@ -546,6 +553,183 @@ describe("automatic Decision candidates through Meeting Intelligence", () => {
     await f.make().observe(f.request);
     expect(f.detect).toHaveBeenCalledTimes(1);
   });
+  it("waits for the real calendar budget reset, then re-proves the same source without losing the first refusal", async () => {
+    const f = fixture();
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    const first = await f.make().observe(f.request);
+    expect(first.analysisRetry).toMatchObject({
+      disposition: "not-dispatched",
+      attempts: 1,
+      canRetry: true,
+      nextAttemptAt: "2026-09-30T22:00:00.000Z"
+    });
+    f.setTime("2026-09-30T21:59:59Z");
+    expect((await f.make().observe(f.request)).duplicate).toBe(true);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    f.setTime("2026-09-30T22:00:00Z");
+    const result = await f.make().observe(f.request);
+    expect(result.batchId).toBe(first.batchId);
+    expect(result.analysisRetry).toMatchObject({
+      disposition: "completed",
+      attempts: 2,
+      canRetry: false
+    });
+    expect(result.candidates).toHaveLength(1);
+    expect(f.detect).toHaveBeenCalledTimes(2);
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("bounds explicit unsent retries and makes the same retry instruction idempotent", async () => {
+    const f = fixture();
+    f.detect.mockRejectedValue(
+      new AiServiceError("not-configured", "Model unavailable", {
+        requestDispatched: false
+      })
+    );
+    const first = await f.make().observe(f.request);
+    const retry = (id: string): ObserveProcessedDecisionSource => ({
+      ...f.request,
+      observations: [
+        {
+          type: "decision-source-processed",
+          observationId: id,
+          retryBatchId: first.batchId,
+          retryBeforeScheduled: true
+        }
+      ]
+    });
+    const second = await f.make().observe(retry("retry-one"));
+    expect(second.analysisRetry).toMatchObject({ attempts: 2, canRetry: true });
+    expect((await f.make().observe(retry("retry-one"))).duplicate).toBe(true);
+    const last = await f.make().observe(retry("retry-two"));
+    expect(last.analysisRetry).toMatchObject({
+      attempts: 3,
+      canRetry: false,
+      nextAttemptAt: null
+    });
+    await f.make().observe(retry("retry-three"));
+    f.setTime("2027-01-01T00:00:00Z");
+    await f.make().observe(f.request);
+    expect(f.detect).toHaveBeenCalledTimes(3);
+  });
+  it.each([undefined, true])(
+    "never retries an ambiguous or dispatched request (%s)",
+    async (requestDispatched) => {
+      const f = fixture();
+      f.detect.mockRejectedValueOnce(
+        new AiServiceError(
+          "timeout",
+          "Outcome unknown",
+          requestDispatched === undefined ? {} : { requestDispatched }
+        )
+      );
+      const first = await f.make().observe(f.request);
+      expect(first.analysisRetry).toMatchObject({
+        disposition: "unknown",
+        attempts: 1,
+        canRetry: false
+      });
+      f.setTime("2027-01-01T00:00:00Z");
+      await f.make().observe({
+        ...f.request,
+        observations: [
+          {
+            type: "decision-source-processed",
+            observationId: "manual-retry",
+            retryBatchId: first.batchId,
+            retryBeforeScheduled: true
+          }
+        ]
+      });
+      await f.make().observe(f.request);
+      expect(f.detect).toHaveBeenCalledTimes(1);
+    }
+  );
+  it("does not mistake a later source admission refusal for an unsent detector request", async () => {
+    const f = fixture();
+    f.detect.mockImplementationOnce(() => {
+      f.requireSource.mockRejectedValueOnce(
+        new AiServiceError("unavailable", "Admission unavailable", {
+          requestDispatched: false
+        })
+      );
+      return Promise.resolve(structuredClone(f.detection));
+    });
+    const first = await f.make().observe(f.request);
+    expect(first.analysisRetry).toMatchObject({
+      disposition: "unknown",
+      canRetry: false
+    });
+    await f.make().observe({
+      ...f.request,
+      observations: [
+        {
+          type: "decision-source-processed",
+          observationId: "retry",
+          retryBatchId: first.batchId,
+          retryBeforeScheduled: true
+        }
+      ]
+    });
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it.each(["changed-source", "revoked-source", "expanded-audience"])(
+    "refuses retry against %s before another model attempt",
+    async (change) => {
+      const f = fixture();
+      f.detect.mockRejectedValueOnce(
+        new AiServiceError("not-configured", "Not configured", {
+          requestDispatched: false
+        })
+      );
+      const first = await f.make().observe(f.request);
+      if (change === "changed-source") f.source.contentHash = "changed";
+      else if (change === "revoked-source") f.revokeSource();
+      else f.audience.personIds.push("outsider");
+      await expect(
+        f.make().observe({
+          ...f.request,
+          observations: [
+            {
+              type: "decision-source-processed",
+              observationId: "retry",
+              retryBatchId: first.batchId,
+              retryBeforeScheduled: true
+            }
+          ]
+        })
+      ).rejects.toThrow();
+      expect(f.detect).toHaveBeenCalledTimes(1);
+    }
+  );
+  it("rechecks current ownership and standing permission on an explicit retry", async () => {
+    const f = fixture();
+    f.enable();
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("not-configured", "Not configured", { requestDispatched: false })
+    );
+    const first = await f.make().observe(f.request);
+    f.revokePolicy();
+    f.revokeAuthority();
+    const result = await f.make().observe({
+      ...f.request,
+      observations: [
+        {
+          type: "decision-source-processed",
+          observationId: "retry",
+          retryBatchId: first.batchId,
+          retryBeforeScheduled: true
+        }
+      ]
+    });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]!.approvedIntentId).toBeNull();
+    expect(f.provider.write).not.toHaveBeenCalled();
+    expect(f.detect).toHaveBeenCalledTimes(2);
+  });
   it("preserves Human correction on replay and keeps later inference from overriding it", async () => {
     const f = fixture(),
       mi = f.make(),
@@ -610,6 +794,62 @@ function wireDetection(f: ReturnType<typeof fixture>) {
   };
 }
 describe("actual automatic model composition and batches", () => {
+  it("repairs a zero-cap refusal through the real shared budget and detector with exactly one paid dispatch", async () => {
+    const f = fixture();
+    const client = {
+      create: vi.fn(() =>
+        Promise.resolve({
+          outputText: JSON.stringify(wireDetection(f)),
+          model: "gpt-5.6-luna",
+          serviceTier: "default",
+          status: "completed",
+          providerResponseId: "repaired",
+          usage: {
+            inputTokens: 100,
+            cachedInputTokens: 0,
+            cacheWriteTokens: 0,
+            outputTokens: 10,
+            reasoningTokens: 0
+          }
+        })
+      )
+    };
+    f.configuration.automatic!.detector = createOpenAIAutomaticDecisionDetector({
+      client,
+      budget: createAiUsageBudget({ database, monthlyLimitUsd: 0, now: f.now })
+    });
+    const first = await f.make().observe(f.request);
+    expect(first.analysisRetry).toMatchObject({
+      disposition: "not-dispatched",
+      canRetry: true
+    });
+    expect(client.create).not.toHaveBeenCalled();
+    const budget = createAiUsageBudget({ database, monthlyLimitUsd: 30, now: f.now });
+    f.configuration.automatic!.detector = createOpenAIAutomaticDecisionDetector({
+      client,
+      budget
+    });
+    const retry: ObserveProcessedDecisionSource = {
+      ...f.request,
+      observations: [
+        {
+          type: "decision-source-processed",
+          observationId: "repaired-config",
+          retryBatchId: first.batchId,
+          retryBeforeScheduled: true
+        }
+      ]
+    };
+    const result = await f.make().observe(retry);
+    await f.make().observe(retry);
+    expect(result.candidates).toHaveLength(1);
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(await budget.getStatus("dayova")).toMatchObject({
+      requestCount: 1,
+      reservedUsd: 0,
+      unknownUsd: 0
+    });
+  });
   it("runs the actual native Responses request with shared durable accounting, no tools/storage/retries and zero replay spend", async () => {
     const f = fixture(),
       budget = createAiUsageBudget({ database });
@@ -886,7 +1126,8 @@ describe("durable automatic source processing through public MI", () => {
     const worker = await createAutomaticDecisionProcessing({
       database,
       workspace: f.request.workspace,
-      meetingIntelligence: f.make()
+      meetingIntelligence: f.make(),
+      now: f.now
     });
     workers.push(worker);
     const notify = () =>
@@ -907,6 +1148,201 @@ describe("durable automatic source processing through public MI", () => {
           });
     return { worker, notify };
   }
+  it("persists the scheduled budget reset across restart and resumes the exact unsent batch once", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    await first.notify();
+    first.worker.start();
+    await expect.poll(async () => (await first.worker.status()).unavailable).toBe(1);
+    const original = (await first.worker.review(f.source.subject)).batch!;
+    await first.worker.stop();
+    const second = await workerFor(f);
+    second.worker.start();
+    await second.notify();
+    await second.worker.pause();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    f.setTime(original.analysisRetry!.nextAttemptAt!);
+    second.worker.start();
+    await expect.poll(async () => (await second.worker.status()).completed).toBe(1);
+    const result = (await second.worker.review(f.source.subject)).batch!;
+    expect(result.batchId).toBe(original.batchId);
+    expect(result.analysisRetry).toMatchObject({ attempts: 2, disposition: "completed" });
+    expect(f.detect).toHaveBeenCalledTimes(2);
+    expect(
+      (await database.query("SELECT retry_at FROM automatic_decision_jobs")).rows
+    ).toEqual([{ retry_at: null }]);
+  });
+  it("recovers an unsent MI result after a crash before its queue receipt, without guessing another job's proof", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    await first.notify();
+    first.worker.start();
+    await expect.poll(async () => (await first.worker.status()).unavailable).toBe(1);
+    const original = (await first.worker.review(f.source.subject)).batch!;
+    await first.worker.stop();
+    // Actual durable MI history survives, but neither batch link nor outcome made
+    // it into the queue receipt before process exit.
+    await database.query(
+      "UPDATE automatic_decision_jobs SET phase='processing',batch_id=NULL,retry_at=NULL"
+    );
+    f.setTime(original.analysisRetry!.nextAttemptAt!);
+    const second = await workerFor(f);
+    second.worker.start();
+    await expect.poll(async () => (await second.worker.status()).completed).toBe(1);
+    expect((await second.worker.review(f.source.subject)).batch?.batchId).toBe(
+      original.batchId
+    );
+    expect(f.detect).toHaveBeenCalledTimes(2);
+  });
+  it("does not schedule an interrupted job using an unrelated latest unsent batch", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    const foreign = await f.make().observe(f.request);
+    await first.notify();
+    await first.worker.stop();
+    await database.query("UPDATE automatic_decision_jobs SET phase='processing'");
+    f.setTime(foreign.analysisRetry!.nextAttemptAt!);
+    const second = await workerFor(f);
+    const proofs = f.requireSource.mock.calls.length;
+    second.worker.start();
+    await expect.poll(() => f.requireSource.mock.calls.length).toBeGreaterThan(proofs);
+    await second.worker.pause();
+    expect(await second.worker.status()).toMatchObject({ interrupted: 1, completed: 0 });
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it("keeps candidates read-only, offers explicit repair and rechecks final Discord delivery", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    await notify();
+    worker.start();
+    await expect.poll(async () => (await worker.status()).unavailable).toBe(1);
+    const mi = f.make();
+    if (f.source.subject.type !== "conversation-thread") throw new Error("fixture");
+    const runtime = {
+      automatic: worker,
+      meetingIntelligence: mi,
+      execution: createFollowUpExecution({ database, meetingIntelligence: mi }),
+      config: {
+        parentChannelIds: ["parent"],
+        allowedDiscordUserIds: ["jakob-user"],
+        maxMessages: 50,
+        maxEvidenceChars: 32000,
+        minIntervalMs: 60000
+      }
+    };
+    const command = {
+      type: "decision-record-candidates" as const,
+      interactionId: "read",
+      guildId: "guild",
+      channelId: f.source.subject.conversationObjectId,
+      sourceMessageId: f.source.subject.anchorMessageId,
+      actorDiscordUserId: "jakob-user",
+      occurredAt: f.now().toISOString()
+    };
+    const read = await handleDiscordDecisionRecordCommand({
+      runtime,
+      workspace: f.request.workspace,
+      command,
+      requireCurrent: f.requireSource
+    });
+    expect(read.content).toContain("retry:true");
+    expect(read.content).toContain("2026-09-30T22:00:00.000Z");
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    const retryCommand = { ...command, interactionId: "repair", retry: true };
+    const repaired = await handleDiscordDecisionRecordCommand({
+      runtime,
+      workspace: f.request.workspace,
+      command: retryCommand,
+      requireCurrent: f.requireSource
+    });
+    await handleDiscordDecisionRecordCommand({
+      runtime,
+      workspace: f.request.workspace,
+      command: retryCommand,
+      requireCurrent: f.requireSource
+    });
+    expect(repaired.content).toContain("candidate 1/1");
+    expect(f.detect).toHaveBeenCalledTimes(2);
+    expect(f.provider.write).not.toHaveBeenCalled();
+    f.revokeSource();
+    await expect(repaired.requireCurrent!()).rejects.toThrow();
+  });
+  it("coalesces concurrent explicit requests and drains the admitted model before shutdown", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("not-configured", "Not configured", { requestDispatched: false })
+    );
+    await notify();
+    worker.start();
+    await expect.poll(async () => (await worker.status()).unavailable).toBe(1);
+    let release = () => {};
+    const pending = new Promise<AutomaticDecisionDetection>((resolve) => {
+      release = () => resolve(structuredClone(f.detection));
+    });
+    f.detect.mockImplementationOnce(() => pending);
+    const retry = worker.retry(f.source.subject, "repair");
+    await expect.poll(() => f.detect.mock.calls.length).toBe(2);
+    const duplicate = worker.retry(f.source.subject, "repair");
+    const other = worker.retry(f.source.subject, "other-repair");
+    const before = await worker.review(f.source.subject);
+    expect(before.batch?.analysisRetry).toMatchObject({
+      disposition: "unknown",
+      canRetry: false
+    });
+    let stopped = false;
+    const stop = worker.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    await expect(worker.retry(f.source.subject, "too-late")).rejects.toThrow("paused");
+    release();
+    await Promise.all([retry, duplicate, other, stop]);
+    expect(f.detect).toHaveBeenCalledTimes(2);
+    expect((await worker.review(f.source.subject)).batch?.candidates).toHaveLength(1);
+  });
+  it("never schedules or manually repeats an unknown dispatched operation after restart", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("timeout", "Unknown outcome", { requestDispatched: true })
+    );
+    await first.notify();
+    first.worker.start();
+    await expect.poll(async () => (await first.worker.status()).unavailable).toBe(1);
+    await first.worker.stop();
+    f.setTime("2027-01-01T00:00:00Z");
+    const second = await workerFor(f);
+    second.worker.start();
+    await second.worker.retry(f.source.subject, "manual");
+    await second.notify();
+    await second.worker.pause();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    expect(
+      (await second.worker.review(f.source.subject)).batch?.analysisRetry
+    ).toMatchObject({ canRetry: false, disposition: "unknown" });
+  });
   it("does not strand an accepted source arriving while the empty queue read finishes", async () => {
     const f = fixture(),
       { worker, notify } = await workerFor(f);

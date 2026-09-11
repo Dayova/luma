@@ -198,3 +198,20 @@ LogicalMeeting queue when available. Status, acceptance and recovery without an
 explicit `meeting_id` continue to address the original imported request subject.
 They never silently retarget old request IDs to a different LogicalMeeting.
 The imported binding and capture resolution are both checked again at delivery.
+
+### Automatic analysis recovery
+
+A refusal proved to occur before an AI request was sent is retained with its next
+retry time. The queue resumes it after restart, rechecking the exact original
+source, audience, ownership and standing permission. Monthly or daily budget
+refusals wait until their calendar reset; other unsent refusals use bounded
+backoff. Each original source batch permits at most three total attempts.
+
+`/decision-record candidates` stays read-only and displays the failure and retry
+time. After repairing configuration or raising the existing budget, an admitted
+founder may use the same command with `retry:true` for an earlier attempt. This
+does not authorize recording or bypass the shared budget. Replaying the same
+interaction does not consume another attempt. Unknown or dispatched attempts,
+including legacy batches without a durable unsent proof, are never repeated by
+this option or the scheduler. Check `/meeting usage` and the retained result
+before starting a new explicit request.

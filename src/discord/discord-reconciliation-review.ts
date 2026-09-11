@@ -22,11 +22,16 @@ export function renderReconciliationReviewPages(input: {
       `Source revision: ${source.sourceRevision} / ${source.contentHash}`,
       `Original wording: ${review.candidate.originalText}`,
       `Modality: ${review.candidate.modality.kind}`,
+      `Normalized deadline: ${review.candidate.deadline.normalizedDate ?? "unresolved"} (${review.candidate.deadline.timezone}; ${review.candidate.deadline.confidence})`,
       `Ownership claim: ${current.ownershipClaimId}`,
       `Ownership: ${ownershipLabel(current)}`,
       `Proposed: ${review.outcome.type} — ${review.outcome.rationale}`,
       `Effective: ${current.effectiveOutcome.type}`
     );
+    if (current.humanResolution)
+      lines.push(
+        `Human decision: ${current.humanResolution.participantId} at ${current.humanResolution.resolvedAt}; ${current.effectiveOutcome.rationale}`
+      );
     if (current.conflictingCandidateIds.length)
       lines.push(`Conflicting candidates: ${current.conflictingCandidateIds.join(", ")}`);
     const seen = new Set<string>();

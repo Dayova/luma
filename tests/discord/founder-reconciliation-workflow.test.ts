@@ -304,6 +304,20 @@ describe("founder reconciliation workflow", () => {
     });
     expect(review.content).toContain(initial.proposal.id);
     expect(review.content).toContain("Jakob will prepare");
+    const allReviewPages = [review.content];
+    for (let page = 2; page < 5; page++) {
+      const next = await h.transport.execute({
+        ...base,
+        type: "review",
+        interactionId: `inspect-deadline-${page}`,
+        page
+      });
+      if (next.content.startsWith("Choose a review page")) break;
+      allReviewPages.push(next.content);
+    }
+    expect(allReviewPages.join("\n")).toContain(
+      "Normalized deadline: 2026-09-11 (Europe/Berlin; normalized)"
+    );
     expect(review.requireCurrent).toBeTypeOf("function");
     const early = await h.transport.execute({
       ...base,

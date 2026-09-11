@@ -207,7 +207,7 @@ export async function handleDiscordDecisionRecordCommand(input: {
     const batch = result.batch;
     const candidate = batch?.candidates[selected - 1];
     const content = candidate
-      ? `Automatic decisions: candidate ${selected}/${batch!.candidates.length}.${batch!.complete ? "" : " Analysis is incomplete."}\n${renderDecisionRecordResponse(candidate, command.page)}`
+      ? `Automatic decisions: candidate ${selected}/${batch.candidates.length}.${batch.complete ? "" : " Analysis is incomplete."}\n${renderDecisionRecordResponse(candidate, command.page)}`
       : batch
         ? `${batch.message.slice(0, 1200)}\n${batch.candidates.length} retained candidates. Select candidate:1 through candidate:${Math.max(1, batch.candidates.length)}. /meeting usage remains available.`
         : (

@@ -155,7 +155,7 @@ export async function createAutomaticDecisionProcessing(input: {
     return running ?? Promise.resolve();
   };
   return {
-    conversation(event: ProcessedConversationSourceEvent) {
+    conversation(this: void, event: ProcessedConversationSourceEvent) {
       return enqueue(event.workspaceId, {
         subject: event.subject,
         eventId: event.admissionId,
@@ -163,7 +163,7 @@ export async function createAutomaticDecisionProcessing(input: {
         contentHash: event.contentHash
       });
     },
-    meeting(event: ProcessedMeetingSourceEvent) {
+    meeting(this: void, event: ProcessedMeetingSourceEvent) {
       return enqueue(event.workspaceId, {
         subject: { type: "meeting", meetingId: event.meetingId },
         eventId: event.observationId,

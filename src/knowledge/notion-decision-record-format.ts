@@ -39,9 +39,9 @@ export function renderNotionDecisionRecord(
     "<details>",
     "<summary>Evidence and revision history</summary>",
     "",
-    "```json",
-    JSON.stringify({ archive: validated, signature }),
-    "```",
+    "\t```json",
+    `\t${JSON.stringify({ archive: validated, signature })}`,
+    "\t```",
     "</details>",
     END
   ].join("\n");
@@ -71,7 +71,7 @@ export function parseNotionDecisionRecord(input: {
     throw new Error("Decision page has no unique complete owned record");
   const section = input.markdown.slice(start, end + END.length);
   const wire =
-    /<summary>Evidence and revision history<\/summary>\s*```json\n([^\n]+)\n```\s*<\/details>/u.exec(
+    /<summary>Evidence and revision history<\/summary>\n(?:\n)*\t```json\n\t([^\n]+)\n\t```\s*<\/details>/u.exec(
       section
     )?.[1];
   if (!wire) throw new Error("Decision evidence/history is unavailable");
@@ -97,7 +97,8 @@ export function parseNotionDecisionRecord(input: {
   if (
     recordIds.size !== 1 ||
     operationIds.size !== parsed.archive.revisions.length ||
-    section !== renderNotionDecisionRecord(parsed.archive, input.signingKey)
+    normalizeEmptyLines(section) !==
+      normalizeEmptyLines(renderNotionDecisionRecord(parsed.archive, input.signingKey))
   )
     throw new Error(
       "Decision record content or history was changed outside its approved operation"
@@ -165,12 +166,14 @@ function renderCurrent(record: DecisionRecordContent): string[] {
   return lines;
 }
 function plain(text: string): string {
-  return text
-    .replace(/[\r\n]+/gu, " ")
-    .replace(/&/gu, "&amp;")
-    .replace(/</gu, "&lt;")
-    .replace(/>/gu, "&gt;")
-    .replace(/[\\`*_[\]{}()#!|~]/gu, "\\$&");
+  return text.replace(/[\r\n]+/gu, " ").replace(/[\\`*_[\]{}()#!|~$^<>]/gu, "\\$&");
+}
+/** Notion strips plain empty lines. Code payload is one nonempty literal JSON line. */
+function normalizeEmptyLines(markdown: string): string {
+  return markdown
+    .split("\n")
+    .filter((line) => line !== "")
+    .join("\n");
 }
 function safeUrl(text: string): string {
   const url = new URL(text);

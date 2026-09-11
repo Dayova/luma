@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   CanonicalDecisionRecord,
   DecisionAudience,
+  DecisionAuthoritySnapshot,
   DecisionCatalogSnapshot,
   DecisionRecordContent,
   DecisionSource,
@@ -55,6 +56,11 @@ export type NotionDecisionRecordsConfig = {
     audience: DecisionAudience;
     source: DecisionSource;
   }): Promise<boolean>;
+  /** Historical authority evidence has its own current source permission fence. */
+  authorizeRetainedAuthority(input: {
+    audience: DecisionAudience;
+    snapshot: DecisionAuthoritySnapshot;
+  }): Promise<boolean>;
   transport?: NotionDecisionTransport;
   now?: () => Date;
 };
@@ -82,7 +88,8 @@ export function createNotionDecisionRecords(
     !config.token.trim() ||
     Buffer.byteLength(config.signingKey) < 32 ||
     typeof config.authorize !== "function" ||
-    typeof config.authorizeRetainedSource !== "function"
+    typeof config.authorizeRetainedSource !== "function" ||
+    typeof config.authorizeRetainedAuthority !== "function"
   )
     throw safeFailure();
   const workspaceId = config.workspaceId;
@@ -115,6 +122,8 @@ export function createNotionDecisionRecords(
     audience: DecisionAudience,
     archive: DecisionRecordArchive
   ) {
+    const sources = new Set<string>();
+    const authorities = new Set<string>();
     for (const revision of archive.revisions) {
       const source = revision.content.source;
       if (
@@ -123,13 +132,30 @@ export function createNotionDecisionRecords(
       )
         throw safeFailure();
       deadline.check();
-      if (
-        !(await config.authorizeRetainedSource({
-          audience: structuredClone(audience),
-          source: structuredClone(source)
-        }))
-      )
-        throw safeFailure();
+      const sourceKey = decisionDigest(source);
+      if (!sources.has(sourceKey)) {
+        if (
+          !(await config.authorizeRetainedSource({
+            audience: structuredClone(audience),
+            source: structuredClone(source)
+          }))
+        )
+          throw safeFailure();
+        sources.add(sourceKey);
+      }
+      const snapshot = revision.content.authority.snapshot;
+      const authorityKey = decisionDigest(snapshot);
+      if (!authorities.has(authorityKey)) {
+        deadline.check();
+        if (
+          !(await config.authorizeRetainedAuthority({
+            audience: structuredClone(audience),
+            snapshot: structuredClone(snapshot)
+          }))
+        )
+          throw safeFailure();
+        authorities.add(authorityKey);
+      }
       deadline.check();
     }
   }

@@ -15,6 +15,7 @@ function fixture() {
   const pages = new Map<string, { parent: string; markdown: string; version: string }>();
   let targetGranted = true;
   let sourceGranted = true;
+  let authorityGranted = true;
   let uncertainCreate = false;
   const mutationLog: string[] = [];
   const hooks: { beforeList?: () => Promise<void>; afterCreate?: () => void } = {};
@@ -84,6 +85,7 @@ function fixture() {
           input.audience.personIds.every((person) => audience.personIds.includes(person))
       ),
     authorizeRetainedSource: () => Promise.resolve(sourceGranted),
+    authorizeRetainedAuthority: () => Promise.resolve(authorityGranted),
     now: () => new Date("2026-09-11T10:03:00Z")
   };
   const make = () => createNotionDecisionRecords({ ...config, transport });
@@ -104,6 +106,9 @@ function fixture() {
     denySource: () => {
       sourceGranted = false;
     },
+    denyAuthority: () => {
+      authorityGranted = false;
+    },
     loseCreateResponse: () => {
       uncertainCreate = true;
     }
@@ -120,6 +125,59 @@ afterEach(() => {
 });
 
 describe("canonical Notion Decision Records", () => {
+  it("retains a recoverable native toggle through documented empty-line normalization and escaped prose", async () => {
+    const f = fixture();
+    const create = f.transport.create.bind(f.transport);
+    f.transport.create = async (input) => {
+      const result = await create(input);
+      const page = f.pages.get(firstPageId)!;
+      if (
+        !page.markdown.includes(
+          "<summary>Evidence and revision history</summary>\n\n\t```json\n\t{"
+        )
+      )
+        throw new Error("Notion requires indented toggle children");
+      page.markdown = page.markdown
+        .split("\n")
+        .filter((line) => line !== "")
+        .join("\n");
+      return result;
+    };
+    const request = createInput();
+    request.stage.record.candidate.statement.text =
+      "Budget $30; x^2 < limit > 0 & history stays.";
+    const receipt = await f.records.write(request);
+    expect(receipt.record.content).toEqual(request.stage.record);
+    expect(f.pages.get(firstPageId)!.markdown).toContain(
+      "Budget \\$30; x\\^2 \\< limit \\> 0 & history stays."
+    );
+    const content = structuredClone(receipt.record.content);
+    content.candidate.statement.text = "The approved budget remains $30.";
+    const amended = await f.records.write({
+      audience,
+      operationId: "normalized-amend",
+      stage: { type: "amend-record", target: receipt.record, record: content }
+    });
+    expect(amended.record.content.candidate.statement.text).toBe(
+      content.candidate.statement.text
+    );
+    expect(f.mutationLog).toEqual(["create", "replace"]);
+  });
+  it("withholds retained ownership evidence after its own source grant is revoked", async () => {
+    const f = fixture();
+    const request = createInput();
+    const created = await f.records.write(request);
+    f.denyAuthority();
+    expect(
+      await f.records.read({ audience, recordId: created.record.content.id })
+    ).toBeNull();
+    expect((await f.records.discover({ audience, limit: 100 })).complete).toBe(false);
+    await expect(f.records.findWritten(request)).rejects.toThrow();
+    await expect(f.records.write(request)).rejects.toBeInstanceOf(
+      DecisionWriteNotAppliedError
+    );
+    expect(f.mutationLog).toEqual(["create"]);
+  });
   it("creates one canonical record, replays the exact operation and rediscovers it after recreation", async () => {
     const f = fixture();
     const input = createInput();

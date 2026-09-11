@@ -21,13 +21,19 @@ atomic exact-region operation. Content outside the owned region is preserved.
 
 The adapter requires the canonical data source ID, write integration token, a
 stable protected signing key of at least 32 bytes, and current authorization
-callbacks for the destination and every retained original source. Every actual
+callbacks for the destination, every retained original source and each retained
+authority snapshot's own source. Every actual
 recipient must belong to each revision's original audience and retain source
 access. The source callback must verify access, deletion and exclusion without
 requiring old wording to equal the latest wording: old eligible evidence is
 history. Destination access alone cannot authorize disclosure of private source
 evidence. Include the protected signing key in the host's encrypted recovery
 material; never put it in Notion or logs.
+
+Toggle child blocks use native tab indentation and prose escapes Notion's special
+characters. Only plain empty lines are normalized when verifying the readable
+region; the complete signed archive and all nonempty text still have to match.
+The exact reread section remains the old region used for a subsequent update.
 
 The signed archive binds the workspace, data source and complete revision history.
 Tampering inside the owned region, moving a record, duplicate record identities,

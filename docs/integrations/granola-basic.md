@@ -119,7 +119,11 @@ without making a network request. Startup configuration is:
 
 The key must be a regular single-link file owned by root or the runtime user,
 without symlinks or group/other permissions (for example mode `0600`). It must be
-backed up separately and restored with the database. Wrong keys and corrupted
+retained separately from the database and restored with it. The
+[unattended backup](../operations/unattended-operations.md) includes its exact
+bytes in the encrypted runtime recovery bundle and proves decryption on an
+isolated restore before reporting success. Keep the independently held repository
+password recovery material as well. Wrong keys and corrupted
 credential rows fail startup. Never print it, put it in source control, or replace
 it casually: it decrypts retained credentials. The existing owned Luma database
 stores AES-256-GCM ciphertext with workspace and founder identities authenticated

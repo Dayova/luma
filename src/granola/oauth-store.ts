@@ -68,32 +68,8 @@ export async function createGranolaOAuthStore(input: {
       return Buffer.concat([nonce, cipher.getAuthTag(), encrypted]).toString("base64");
     }
   };
-  const decode = (owner: string, ciphertext: string) => {
-    try {
-      const bytes = Buffer.from(ciphertext, "base64");
-      if (bytes.length < 29 || bytes.length > 250_000) throw new Error();
-      const cipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(0, 12));
-      cipher.setAAD(aad(owner));
-      cipher.setAuthTag(bytes.subarray(12, 28));
-      const state = granolaOAuthStateSchema.parse(
-        JSON.parse(
-          Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString(
-            "utf8"
-          )
-        )
-      );
-      if (
-        state.ownerPersonId !== owner ||
-        (state.policy &&
-          (state.policy.ownerPersonId !== owner ||
-            state.policy.connectionId !== state.connectionId))
-      )
-        throw new Error();
-      return state;
-    } catch {
-      throw new GranolaOAuthError("store-unavailable");
-    }
-  };
+  const decode = (owner: string, ciphertext: string) =>
+    decodeGranolaOAuthState(key, input.workspaceId, owner, ciphertext);
   const read = async (owner: string): Promise<GranolaOAuthState | null> => {
     const rows = await input.database.query<{ ciphertext: string }>(
       "SELECT ciphertext FROM granola_oauth_connections WHERE workspace_id=$1 AND owner_person_id=$2",
@@ -136,4 +112,76 @@ export async function createGranolaOAuthStore(input: {
       });
     }
   };
+}
+
+function decodeGranolaOAuthState(
+  key: Uint8Array,
+  workspaceId: string,
+  owner: string,
+  ciphertext: string
+): GranolaOAuthState {
+  try {
+    const bytes = Buffer.from(ciphertext, "base64");
+    if (bytes.length < 29 || bytes.length > 250_000) throw new Error();
+    const cipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(0, 12));
+    cipher.setAAD(
+      Buffer.from(JSON.stringify(["luma-granola-oauth-v1", workspaceId, owner]))
+    );
+    cipher.setAuthTag(bytes.subarray(12, 28));
+    const state = granolaOAuthStateSchema.parse(
+      JSON.parse(
+        Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString(
+          "utf8"
+        )
+      )
+    );
+    if (
+      state.ownerPersonId !== owner ||
+      (state.policy &&
+        (state.policy.ownerPersonId !== owner ||
+          state.policy.connectionId !== state.connectionId))
+    )
+      throw new Error();
+    return state;
+  } catch {
+    throw new GranolaOAuthError("store-unavailable");
+  }
+}
+
+/** Read every retained encrypted row on a quarantined restore without creating a store or refreshing credentials. */
+export async function verifyGranolaOAuthRecovery(input: {
+  database: Pick<LumaDatabase, "query">;
+  workspaceId: string;
+  encryptionKey?: Uint8Array;
+}): Promise<number> {
+  const table = (
+    await input.database.query<{ name: string | null }>(
+      "SELECT to_regclass('public.granola_oauth_connections')::text AS name"
+    )
+  ).rows[0]?.name;
+  if (!table) return 0;
+  const rows = (
+    await input.database.query<{
+      workspace_id: string;
+      owner_person_id: string;
+      ciphertext: string;
+    }>(
+      "SELECT workspace_id,owner_person_id,ciphertext FROM granola_oauth_connections ORDER BY workspace_id,owner_person_id LIMIT 5"
+    )
+  ).rows;
+  if (!rows.length) return 0;
+  if (
+    rows.length > 4 ||
+    input.encryptionKey?.length !== 32 ||
+    rows.some((row) => row.workspace_id !== input.workspaceId)
+  )
+    throw new GranolaOAuthError("store-unavailable");
+  for (const row of rows)
+    decodeGranolaOAuthState(
+      input.encryptionKey,
+      input.workspaceId,
+      row.owner_person_id,
+      row.ciphertext
+    );
+  return rows.length;
 }

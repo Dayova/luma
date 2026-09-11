@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  verifyRuntimeRecoveryMaterial,
+  verifyRestoredRuntimeRecovery
+} from "./runtime-recovery-material.js";
+import {
   restoreFullStoreBackup,
   verifyFullStoreBackup,
   verifyIsolatedRestoredStore
@@ -20,10 +24,12 @@ export async function archiveAndVerifyBackup(input: {
   backupId: string;
   scratchParent: string;
   restic: ResticCommand;
+  authenticationSecret: Uint8Array;
 }): Promise<string> {
   const original = await verifyFullStoreBackup(input.directory);
   if (original.backupId !== input.backupId)
     throw new Error("The captured backup identity changed");
+  const recovery = await verifyRuntimeRecoveryMaterial(input);
   await input.restic(
     ["--json", "--quiet", "backup", ".", "--tag", "luma", "--tag", input.backupId],
     { cwd: input.directory, timeout: 20 * 60_000 }
@@ -48,8 +54,19 @@ export async function archiveAndVerifyBackup(input: {
   const manifest = await verifyFullStoreBackup(restored);
   if (JSON.stringify(manifest) !== JSON.stringify(original))
     throw new Error("The downloaded backup differs from the captured store");
+  await verifyRuntimeRecoveryMaterial({
+    ...input,
+    directory: restored,
+    expected: recovery
+  });
   await restoreFullStoreBackup({ backupDir: restored, restoreDir: rehearsal });
   await verifyIsolatedRestoredStore(rehearsal);
+  await verifyRestoredRuntimeRecovery({
+    ...input,
+    directory: restored,
+    restoreDir: rehearsal,
+    expected: recovery
+  });
   // Remove only this invocation's verified duplicates. Remote snapshots and
   // canonical history stay retained without age expiry. Failed copies remain.
   await rm(rehearsal, { recursive: true });

@@ -100,6 +100,24 @@ async function setup(initial: ContextSource[]) {
 }
 
 describe("governed organizational retrieval", () => {
+  it("keeps disputed Human Judgment ahead of current AI claims under a one-result budget", async () => {
+    const { context } = await setup([
+      source("model", {
+        content: "Luma budget inferred as unlimited.",
+        authority: "ai-inference",
+        standing: "current"
+      }),
+      source("human", {
+        content: "Luma budget increase remains disputed.",
+        authority: "human-confirmed",
+        standing: "disputed"
+      })
+    ]);
+    const result = await context.retrieve({ ...request, limit: 1 });
+    expect(result.sources.map((entry) => entry.id)).toEqual(["human"]);
+    expect(result.sources[0]?.standing).toBe("disputed");
+    expect(result.retrieval.complete).toBe(false);
+  });
   it("binds receipts to the original audience while callers and catalog inputs mutate", async () => {
     const database = await createPgliteDatabase();
     databases.push(database);

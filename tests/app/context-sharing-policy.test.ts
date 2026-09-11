@@ -44,6 +44,8 @@ describe("live explicit organizational sharing policy", () => {
     const { policy, request } = await setup();
     await policy.validate();
     expect(await policy.authorize(request)).toBe(true);
+    expect(await policy.authorize({ ...request, resource: "dayova/luma" })).toBe(true);
+    expect(await policy.authorize({ ...request, resource: "DAYOVA/LUMA" })).toBe(true);
     expect(await policy.authorize({ ...request, resource: "Dayova/private" })).toBe(
       false
     );
@@ -61,6 +63,18 @@ describe("live explicit organizational sharing policy", () => {
         ...request,
         audience: { ...request.audience, personIds: ["guest"] }
       })
+    ).toBe(false);
+  });
+  it("retains case-sensitive matching for opaque Linear resource identities", async () => {
+    const { path, document, policy, request } = await setup();
+    document.grants[0]!.provider = "linear";
+    document.grants[0]!.resources = ["TeamOpaqueId"];
+    await writeFile(path, JSON.stringify(document));
+    expect(
+      await policy.authorize({ ...request, provider: "linear", resource: "TeamOpaqueId" })
+    ).toBe(true);
+    expect(
+      await policy.authorize({ ...request, provider: "linear", resource: "teamopaqueid" })
     ).toBe(false);
   });
   it("takes revocation and narrower recipient grants into account without restarting", async () => {

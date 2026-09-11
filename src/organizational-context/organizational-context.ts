@@ -452,11 +452,10 @@ export function createOrganizationalContext(input: {
 }
 function rank(source: ContextSource): number {
   return (
+    { "human-confirmed": 3, source: 2, "ai-inference": 1 }[source.authority] * 10 +
     { current: 4, disputed: 3, proposed: 2, historical: 1, superseded: 0 }[
       source.standing
-    ] *
-      10 +
-    { "human-confirmed": 3, source: 2, "ai-inference": 1 }[source.authority]
+    ]
   );
 }
 function relevance(source: ContextSource, concepts: string[]): number {

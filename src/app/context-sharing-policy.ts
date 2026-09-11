@@ -109,6 +109,7 @@ function sameResource(
       canonicalNotionObjectId(left) !== null &&
       canonicalNotionObjectId(left) === canonicalNotionObjectId(right)
     );
+  if (provider === "github-code") return left.toLowerCase() === right.toLowerCase();
   return left === right;
 }
 function invalidPolicy(): Error {

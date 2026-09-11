@@ -2,8 +2,10 @@ import type { LumaDatabase } from "../persistence/db.js";
 import { createLogicalMeetings } from "../logical-meetings/logical-meetings.js";
 import type {
   LogicalMeetings,
+  LogicalMeeting,
   MeetingCaptureAddress
 } from "../logical-meetings/interface.js";
+import type { MeetingUpdate } from "../meeting-intelligence/interface.js";
 import type { GranolaMcpClient } from "./mcp-client.js";
 import { GranolaSourceError } from "./mcp-client.js";
 import type { GranolaPolicy } from "./policy.js";
@@ -29,6 +31,8 @@ export async function createGranolaCaptureIngestionRuntime(input: {
   intervalMs?: number;
   perConnectionLimit?: number;
   report?: (result: GranolaSyncResult) => void | Promise<void>;
+  /** Source delivery into the shared MI instance. Included in the owned run/drain. */
+  onResolved?: (meeting: LogicalMeeting) => Promise<MeetingUpdate>;
 }): Promise<{
   start(): void;
   stop(): Promise<void>;
@@ -138,6 +142,9 @@ export async function createGranolaCaptureIngestionRuntime(input: {
             if (outcome.status === "accepted") {
               result.accepted += 1;
               if (outcome.decision.effect === "unchanged") result.unchanged += 1;
+              const update = await input.onResolved?.(outcome.decision.logicalMeeting);
+              for (const error of update?.errors ?? [])
+                result.failures.push({ connectionId, code: error.code });
             } else if (outcome.status === "excluded") result.withheld += 1;
             else result.failures.push({ connectionId, code: outcome.code });
           } catch (error) {

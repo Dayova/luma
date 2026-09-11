@@ -1,3 +1,5 @@
+import { withCaptureSynthesis } from "./capture-synthesis.js";
+import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
 import {
   createDecisionIntelligence,
   type DecisionIntelligenceConfiguration
@@ -138,6 +140,7 @@ export type CreateMeetingIntelligenceInput = {
     meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
     meetingSourceAudience?: MeetingDecisionSourceAudience;
   };
+  captureSynthesis?: CaptureSynthesisConfiguration;
   /** Read-only catalogs; Meeting Intelligence cannot access WorkProvider writers. */
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
@@ -264,7 +267,7 @@ export function createMeetingIntelligence(
   };
   const contextGuard = createMeetingContextGuard(contextConfiguration);
 
-  const meeting: MeetingIntelligence = {
+  const base: MeetingIntelligence = {
     observe: (observeInput) => {
       const bound = structuredClone(observeInput);
       const run = () =>
@@ -323,6 +326,13 @@ export function createMeetingIntelligence(
         concludeInput
       )
   };
+  const meeting = withCaptureSynthesis({
+    base,
+    database: input.database,
+    reasoningModel: input.reasoningModel,
+    ...(input.captureSynthesis ? { configuration: input.captureSynthesis } : {}),
+    now
+  });
   if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
   const configuration = input.decisionIntelligence;
   const meetingSource =
@@ -3726,6 +3736,11 @@ async function applyObservation(
         evidenceForAnalysis: [],
         events: []
       };
+    case "meeting-capture-set-observed":
+    case "capture-synthesis-judgment-recorded":
+      throw new Error(
+        "Capture Observations must pass through the owned synthesis implementation."
+      );
   }
 }
 

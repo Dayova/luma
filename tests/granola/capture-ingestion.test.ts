@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
+import { createMeetingCaptureIngestion } from "../../src/knowledge/meeting-capture-ingestion.js";
+import { createGranolaMeetingCaptureAccess } from "../../src/granola/meeting-capture-access.js";
+import type { CaptureSynthesisProposal } from "../../src/ai/capture-synthesis-proposal.js";
+import type { StructuredReasoningRequest } from "../../src/ai/reasoning-model.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createGranolaCaptureIngestionRuntime } from "../../src/granola/capture-ingestion-runtime.js";
 import type { GranolaMcpClient, GranolaReadTool } from "../../src/granola/mcp-client.js";
@@ -95,6 +100,93 @@ async function latest(
 }
 
 describe("Granola capture ingestion through LogicalMeetings", () => {
+  it("delivers the actual guarded Basic capture into MI synthesis within the owned ingestion run", async () => {
+    const database = await createPgliteDatabase();
+    const f = fixture();
+    const requests: StructuredReasoningRequest<unknown>[] = [];
+    let meetingId = "";
+    const runtime = await createGranolaCaptureIngestionRuntime({
+      database,
+      workspaceId,
+      connections: [{ connectionId: "jakob", client: f.client }],
+      policy: { read: () => Promise.resolve(structuredClone(f.policy)) },
+      onResolved: (meeting) => {
+        meetingId = meeting.id;
+        return ingestion.ingest(meeting);
+      }
+    });
+    const mi = createMeetingIntelligence({
+      database,
+      reasoningModel: {
+        generateStructured: <T>(request: StructuredReasoningRequest<T>) => {
+          requests.push(request);
+          const evidence = request.evidence[0]!;
+          const value: CaptureSynthesisProposal = {
+            claims: [
+              {
+                key: "launch",
+                kind: "question",
+                text: "Start bleibt ein Vorschlag.",
+                evidenceIds: [evidence.evidenceId],
+                confidence: "medium",
+                quotations: [],
+                conflictingKeys: []
+              }
+            ]
+          };
+          return Promise.resolve({
+            value: value as T,
+            metadata: {
+              provider: "fixture",
+              model: "fixture",
+              promptVersion: request.promptVersion
+            }
+          });
+        }
+      },
+      captureSynthesis: {
+        logicalMeetings: runtime.logicalMeetings,
+        access: createGranolaMeetingCaptureAccess({
+          sources: [{ connectionId: "jakob", source: runtime.sources[0]! }]
+        }),
+        audience: () => Promise.resolve({ workspaceId, personIds: ["person_jakob"] })
+      }
+    });
+    const ingestion = createMeetingCaptureIngestion({
+      workspace: { workspaceId, timezone: "Europe/Berlin" },
+      meetingIntelligence: mi
+    });
+    try {
+      expect(await runtime.syncOnce()).toMatchObject({
+        accepted: 1,
+        withheld: 1,
+        failures: []
+      });
+      const query = () =>
+        mi.query({ workspaceId, meetingId, query: { type: "capture-synthesis" } });
+      expect(await query()).toMatchObject({
+        availability: "available",
+        synthesis: {
+          revision: 1,
+          canonicalAnchorRef: null,
+          coverage: "partial",
+          claims: [{ text: "Start bleibt ein Vorschlag.", quotations: [] }]
+        }
+      });
+      expect(JSON.stringify(requests)).not.toContain("PRIVATE PERSONAL MATERIAL");
+      expect(requests[0]?.evidence[0]?.source).toBe("knowledge");
+      expect(await runtime.syncOnce()).toMatchObject({ unchanged: 1, failures: [] });
+      expect(requests).toHaveLength(1);
+      f.policy.excludedMeetingIds.push("work");
+      expect(await query()).toMatchObject({
+        availability: "unavailable",
+        synthesis: null
+      });
+    } finally {
+      await runtime.stop();
+      await database.close();
+    }
+  });
   it("discovers an eligible Basic capture, retains derived Evidence, and replays unchanged content without new revisions or bindings", async () => {
     const database = await createPgliteDatabase();
     const f = fixture();

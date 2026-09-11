@@ -1,3 +1,8 @@
+import type {
+  MeetingCaptureSetObserved,
+  CaptureSynthesisJudgmentRecorded
+} from "./meeting-capture-synthesis.js";
+
 export type WorkspaceId = string;
 export type MeetingId = string;
 export type ObservationId = string;
@@ -675,6 +680,8 @@ export type ExternalActivityObserved = ObservationBase & {
 };
 
 export type MeetingObservation =
+  | MeetingCaptureSetObserved
+  | CaptureSynthesisJudgmentRecorded
   | MeetingStarted
   | MeetingEnded
   | UtteranceCommitted

@@ -1,4 +1,5 @@
 import type { LumaDatabase } from "../persistence/db.js";
+import { isDeepStrictEqual } from "node:util";
 import type { ContextAudience } from "../organizational-context/interface.js";
 import type {
   CaptureRevisionVerifier,
@@ -29,7 +30,11 @@ export interface GranolaMeetingCaptureSource extends MeetingCaptureSource {
   readCurrent(input: {
     revision: MeetingCaptureRevision;
     audience: ContextAudience;
-  }): Promise<{ text: string; provenance: "provider-derived" }>;
+  }): Promise<{
+    text: string;
+    provenance: "provider-derived";
+    authorizationScopeId: string;
+  }>;
   knownCaptures(): Promise<MeetingCaptureAddress[]>;
 }
 type Archive = {
@@ -106,7 +111,7 @@ export async function createGranolaMeetingCaptureSource(input: {
       ]
     );
     const row = rows.rows[0];
-    if (!row || digest(JSON.parse(row.descriptor_json) as unknown) !== digest(revision))
+    if (!row || !isDeepStrictEqual(JSON.parse(row.descriptor_json) as unknown, revision))
       throw new GranolaSourceError("source-changed");
     return row;
   };
@@ -306,7 +311,16 @@ export async function createGranolaMeetingCaptureSource(input: {
       )
         throw new GranolaSourceError("source-changed");
       await requirePolicy(bound);
-      return { text: row.material, provenance: "provider-derived" };
+      return {
+        text: row.material,
+        provenance: "provider-derived",
+        authorizationScopeId: digest([
+          input.workspaceId,
+          input.connectionId,
+          row.account_fingerprint,
+          row.opt_in_id
+        ])
+      };
     },
     async knownCaptures() {
       const rows = await input.database.query<{ capture_id: string }>(

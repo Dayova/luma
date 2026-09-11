@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createPgliteDatabase } from "../../src/persistence/db.js";
+import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
+import type { CaptureSynthesisProposal } from "../../src/ai/capture-synthesis-proposal.js";
 import {
   createOpenAIReasoningModel,
   type OpenAIResponseClient,
@@ -37,6 +40,89 @@ class FakeOpenAIResponseClient implements OpenAIResponseClient {
 }
 
 describe("OpenAI ReasoningModel", () => {
+  it("uses the shared durable budget for capture synthesis and validates its cited Evidence", async () => {
+    const database = await createPgliteDatabase();
+    const budget = createAiUsageBudget({ database, monthlyLimitUsd: 30 });
+    const requests: OpenAIResponseRequest[] = [];
+    let unknownCitation = false;
+    const model = createOpenAIReasoningModel({
+      budget,
+      model: "gpt-5.6-luna",
+      client: {
+        create: (request) => {
+          requests.push(request);
+          const value: CaptureSynthesisProposal = {
+            claims: [
+              {
+                key: "release",
+                kind: "question",
+                text: "Start remains open.",
+                evidenceIds: [unknownCitation ? "invented" : "capture-1"],
+                quotations: [],
+                conflictingKeys: [],
+                confidence: "medium"
+              }
+            ]
+          };
+          return Promise.resolve({
+            outputText: JSON.stringify(value),
+            model: "gpt-5.6-luna",
+            serviceTier: "default",
+            status: "completed",
+            usage: {
+              inputTokens: 100,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 0,
+              outputTokens: 20,
+              reasoningTokens: 0
+            }
+          });
+        }
+      }
+    });
+    const request = {
+      workspaceId: "workspace_dayova",
+      meetingId: "logical-meeting-1",
+      purpose: "understand-discussion" as const,
+      promptVersion: "capture-synthesis-v1",
+      schemaName: "CaptureSynthesisProposal",
+      evidence: [
+        {
+          evidenceId: "capture-1",
+          source: "knowledge" as const,
+          sourceObjectId: "capture-1",
+          excerpt: "We could start."
+        }
+      ],
+      context: [],
+      input: {}
+    };
+    try {
+      expect(
+        (await model.generateStructured<CaptureSynthesisProposal>(request)).value
+          .claims[0]?.evidenceIds
+      ).toEqual(["capture-1"]);
+      expect(requests[0]).toMatchObject({
+        strict: true,
+        schemaName: "CaptureSynthesisProposal"
+      });
+      const status = await budget.getStatus(request.workspaceId);
+      expect(status).toMatchObject({
+        monthlyLimitUsd: 30,
+        requestCount: 1,
+        unknownUsd: 0,
+        reservedUsd: 0,
+        byCapability: [{ capability: "meeting-capture-synthesis", requestCount: 1 }]
+      });
+      expect(status.spentUsd).toBeGreaterThan(0);
+      unknownCitation = true;
+      await expect(
+        model.generateStructured<CaptureSynthesisProposal>(request)
+      ).rejects.toThrow("unknown evidence ID");
+    } finally {
+      await database.close();
+    }
+  });
   it("uses strict structured output and validates Meeting analysis before returning it", async () => {
     const client = new FakeOpenAIResponseClient();
     const model = createOpenAIReasoningModel({

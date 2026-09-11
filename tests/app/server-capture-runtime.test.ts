@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { startServer } from "../../src/app/server.js";
+import { LumaStartupCancelledError, startServer } from "../../src/app/server.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createGranolaOAuthCallbackHost } from "../../src/app/granola-oauth-callback-host.js";
 import { granolaOAuthRuntimeConfig } from "../../src/app/granola-oauth-runtime.js";
@@ -31,6 +31,68 @@ function environment(): NodeJS.ProcessEnv {
   };
 }
 describe("shared capture production composition", () => {
+  it("closes callback admission during cancelled startup while an owned transport is still draining", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "luma-capture-cancel-"));
+    const database = await createPgliteDatabase();
+    const controller = new AbortController();
+    let release: () => void = () => undefined;
+    const drain = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let callback: Awaited<ReturnType<typeof createGranolaOAuthCallbackHost>> | undefined;
+    const disconnect = vi.fn(() => drain);
+    const transport: DiscordJsTransport = {
+      connect: () => {
+        expect(callback?.status().listening).toBe(true);
+        controller.abort();
+        return Promise.reject(new DOMException("cancelled", "AbortError"));
+      },
+      disconnect,
+      resolveChannel: () => Promise.resolve(null),
+      createThread: () => Promise.reject(new Error("No thread creation")),
+      sendMessage: () => Promise.reject(new Error("No message send")),
+      capture: () => Promise.reject(new Error("No source capture"))
+    };
+    try {
+      const key = join(directory, "granola.key"),
+        sharing = join(directory, "sharing.json");
+      await writeFile(key, randomBytes(32), { mode: 0o600 });
+      await writeFile(
+        sharing,
+        JSON.stringify({ version: 1, workspaceId: "workspace_dayova", grants: [] }),
+        { mode: 0o600 }
+      );
+      const startup = startServer(
+        {
+          ...environment(),
+          LUMA_GRANOLA_CREDENTIAL_KEY_PATH: key,
+          LUMA_CONTEXT_SHARING_POLICY_PATH: sharing
+        },
+        {
+          createDatabase: () => Promise.resolve(database),
+          createDiscordTransport: () => transport,
+          createGranolaCallbackHost: async (input) => {
+            callback = await createGranolaOAuthCallbackHost({ ...input, port: 0 });
+            return callback;
+          }
+        },
+        controller.signal
+      );
+      const rejected = expect(startup).rejects.toBeInstanceOf(LumaStartupCancelledError);
+      await vi.waitFor(() => expect(disconnect).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(callback?.status().listening).toBe(false));
+      expect(database.closed).toBe(false);
+      release();
+      await rejected;
+      expect(database.closed).toBe(true);
+    } finally {
+      release();
+      await callback?.stop();
+      if (!database.closed) await database.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("starts founder onboarding and capture review on one store without consent, source reads or paid calls, then closes its listener and store", async () => {
     const directory = await mkdtemp(join(tmpdir(), "luma-capture-app-"));
     const database = await createPgliteDatabase();

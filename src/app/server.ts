@@ -259,7 +259,8 @@ export async function startServer(
     : undefined;
   if (startupSignal?.aborted) throw new LumaStartupCancelledError();
   const database = await createDatabase(env["LUMA_PGLITE_DATA_DIR"] ?? ".luma/pglite");
-  const startupCleanup: Array<() => Promise<void>> = [() => database.close()];
+  const startupCleanup: Array<() => Promise<void>> = [];
+  const startupAdmissionStops: Array<() => Promise<void>> = [];
   try {
     // A database initialization already in flight must finish before we can
     // close its owned resources; never race away from an unreturned handle.
@@ -341,7 +342,10 @@ export async function startServer(
             : {})
         })
       : undefined;
-    if (captureRuntime) startupCleanup.push(() => captureRuntime.stop());
+    if (captureRuntime) {
+      startupAdmissionStops.push(() => captureRuntime.pauseIntake());
+      startupCleanup.push(() => captureRuntime.stop());
+    }
     const refreshGranolaConnections = async () => {
       if (!granolaConnections || !captureRuntime)
         throw new Error("Granola capture is unavailable");
@@ -363,7 +367,10 @@ export async function startServer(
             afterConnectionsChanged: refreshGranolaConnections
           })
         : undefined;
-    if (granolaCallback) startupCleanup.push(() => granolaCallback.stop());
+    if (granolaCallback) {
+      startupAdmissionStops.push(() => granolaCallback.stop());
+      startupCleanup.push(() => granolaCallback.stop());
+    }
     const meetingSynthesisWriter = captureConfig
       ? await (
           dependencies.createMeetingSynthesisWriter ?? createMeetingSynthesisRuntime
@@ -386,8 +393,10 @@ export async function startServer(
           model: openAIReasoningModelName
         })
       : undefined;
-    if (decisionIntelligence)
+    if (decisionIntelligence) {
+      startupAdmissionStops.push(() => decisionIntelligence.recall.stop());
       startupCleanup.push(() => decisionIntelligence.recall.stop());
+    }
     const providerContextCatalogs = [
       ...(externalContextCatalogs ?? []),
       ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
@@ -466,6 +475,7 @@ export async function startServer(
         })
       : undefined;
     if (meetingNotesSync) {
+      startupAdmissionStops.push(() => meetingNotesSync.stop());
       startupCleanup.push(() => meetingNotesSync.stop());
     }
     const conversationConsultations = consultationConfig
@@ -508,7 +518,10 @@ export async function startServer(
               : {})
           })
         : undefined;
-    if (notionWebhook) startupCleanup.push(() => notionWebhook.stop());
+    if (notionWebhook) {
+      startupAdmissionStops.push(() => notionWebhook.stop());
+      startupCleanup.push(() => notionWebhook.stop());
+    }
     const followUpExecution = createFollowUpExecution({
       database,
       ...(meetingSynthesisWriter ? { meetingSynthesisWriter } : {}),
@@ -628,6 +641,7 @@ export async function startServer(
     });
 
     transportOwnedByBot = true;
+    startupAdmissionStops.push(() => bot.stop());
     startupCleanup.push(() => bot.stop());
     if (granolaCallback) await granolaCallback.start();
     await bot.start(startupSignal);
@@ -674,16 +688,24 @@ export async function startServer(
       }
     };
   } catch (error) {
-    // A rejected startup cannot return stop() to its caller. Release every
-    // acquired resource in reverse order and preserve the original failure.
+    // A rejected startup cannot return stop() to its caller. Stop every ingress
+    // immediately, then drain owned dependencies before closing persistence.
+    // A failed or timed-out drain must retain the unclean store lease.
     let cleanupFailed = false;
-    for (const cleanup of startupCleanup.reverse()) {
-      try {
-        await cleanup();
-      } catch {
-        cleanupFailed = true;
-        // Continue releasing the remaining resources before rethrowing.
-      }
+    try {
+      await drainBeforeClose(
+        (async () => {
+          const drains = await Promise.allSettled(
+            startupAdmissionStops.map((stop) => Promise.resolve().then(stop))
+          );
+          const failure = drains.find((result) => result.status === "rejected");
+          if (failure?.status === "rejected") throw failure.reason;
+          for (const cleanup of startupCleanup.reverse()) await cleanup();
+        })()
+      );
+      await database.close();
+    } catch {
+      cleanupFailed = true;
     }
     if (
       !cleanupFailed &&

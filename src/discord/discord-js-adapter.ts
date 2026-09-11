@@ -1122,6 +1122,57 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
   }
 
   switch (subcommand) {
+    case "captures":
+    case "synthesis": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: subcommand,
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "judge": {
+      const choice = interaction.options.getString("choice", true);
+      if (choice !== "confirm" && choice !== "correct" && choice !== "reject")
+        throw new Error("Unknown synthesis judgment");
+      const meetingId = interaction.options.getString("meeting_id"),
+        text = interaction.options.getString("text");
+      return {
+        ...base,
+        type: "judge",
+        revision: interaction.options.getInteger("revision", true),
+        claimId: interaction.options.getString("claim_id", true),
+        choice,
+        ...(meetingId ? { meetingId } : {}),
+        ...(text ? { text } : {})
+      };
+    }
+    case "publish": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: "publish",
+        revision: interaction.options.getInteger("revision", true),
+        recover: interaction.options.getBoolean("recover") ?? false,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "capture-link": {
+      const choice = interaction.options.getString("choice", true);
+      if (choice !== "bind" && choice !== "separate")
+        throw new Error("Unknown capture binding judgment");
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "capture-link",
+        meetingId: interaction.options.getString("meeting_id", true),
+        captureId: interaction.options.getString("capture_id", true),
+        revision: interaction.options.getInteger("revision", true),
+        choice,
+        ...(reason ? { reason } : {})
+      };
+    }
     case "bind": {
       return {
         ...base,
@@ -1361,6 +1412,158 @@ function renderDiscordMessage(content: string, marker: string | undefined): stri
 const meetingCommand = new SlashCommandBuilder()
   .setName("meeting")
   .setDescription("Run a Luma Meeting in Discord")
+
+  .addSubcommand((command) =>
+    command
+      .setName("captures")
+      .setDescription(
+        "List shared logical meetings or inspect original capture capabilities"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise this bound thread or the shared list"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("synthesis")
+      .setDescription(
+        "Review derived claims, contradictions and canonical publication status"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise resolve this imported Meeting thread"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("judge")
+      .setDescription("Confirm, correct or reject one exact synthesis claim as a founder")
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact synthesis revision from /meeting synthesis")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("claim_id")
+          .setDescription("Exact claim ID from /meeting synthesis")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Human judgment")
+          .setRequired(true)
+          .addChoices(
+            { name: "Confirm claim", value: "confirm" },
+            { name: "Correct claim", value: "correct" },
+            { name: "Reject claim", value: "reject" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("text")
+          .setDescription("Full replacement claim text when correcting")
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("publish")
+      .setDescription(
+        "Approve this synthesis revision for canonical publication, or recover an uncertain write"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact reviewed synthesis revision")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("recover")
+          .setDescription(
+            "Only check the result of an uncertain publication; never resend"
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("capture-link")
+      .setDescription(
+        "Explicitly bind a capture to a logical meeting or keep it separate; retain originals"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("capture_id")
+          .setDescription("Exact capture ID from /meeting captures")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting to join, or the logical meeting to remain separate from"
+          )
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact source revision from /meeting captures")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Explicit Human capture binding")
+          .setRequired(true)
+          .addChoices(
+            { name: "Bind to this logical meeting", value: "bind" },
+            { name: "Keep separate from this logical meeting", value: "separate" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason for this binding judgment")
+          .setMaxLength(1000)
+      )
+  )
   .addSubcommand((command) =>
     command
       .setName("bind")

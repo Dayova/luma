@@ -241,6 +241,8 @@ export type HumanCaptureBindingJudgment = {
   captureId: MeetingCaptureId;
   observedAt: string;
   reason: string | null;
+  /** Optional read-to-write precondition, checked under the workspace lock. */
+  expectedCapture?: { sourceRevision: number; contentHash: string; bindingId: string };
   judgment:
     | { type: "bind"; logicalMeetingId: LogicalMeetingId }
     | {

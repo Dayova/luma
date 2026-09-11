@@ -1,4 +1,10 @@
 import {
+  isCaptureReviewCommand,
+  DiscordCaptureReviewUnavailableError,
+  type DiscordCaptureReviewCommand,
+  type DiscordCaptureReviewRuntime
+} from "./discord-capture-review-runtime.js";
+import {
   discordDecisionRequestId,
   handleDiscordDecisionRecordCommand,
   handleDiscordDecisionRecordMention,
@@ -76,6 +82,7 @@ export type DiscordCommandBase = {
 
 export type DiscordCommand =
   | DiscordConsultationCommand
+  | DiscordCaptureReviewCommand
   | DiscordDecisionRecordCommand
   | (DiscordCommandBase & {
       type: "start";
@@ -201,6 +208,7 @@ export type CreateDiscordMeetingBotInput = {
   meetingIntelligence: MeetingIntelligence;
   followUpExecution?: FollowUpExecution;
   consultations?: DiscordConsultationRuntime;
+  captureReview?: DiscordCaptureReviewRuntime;
   decisionRecords?: DiscordDecisionRecordRuntime;
   identityDirectory: IdentityDirectory;
   /** Explicit workspace admission; identity mappings and participants grant no access. */
@@ -631,8 +639,9 @@ async function handleCommand(
   try {
     const sourceFence = await commandSourceFence(input, command);
     await sourceFence?.();
-    const response =
-      command.type === "usage"
+    const response = isCaptureReviewCommand(command)
+      ? await handleCaptureReview(input, command, accessPolicy)
+      : command.type === "usage"
         ? { content: await readAiUsage(input) }
         : isConsultationCommand(command)
           ? input.consultations
@@ -691,6 +700,7 @@ async function handleCommand(
       };
     return {
       content:
+        error instanceof DiscordCaptureReviewUnavailableError ||
         error instanceof ImportedMeetingReviewUnavailableError ||
         error instanceof ConversationConsultationError
           ? error.message
@@ -764,6 +774,32 @@ async function executeDecisionRecordCommand(
   };
 }
 
+async function handleCaptureReview(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordCaptureReviewCommand,
+  accessPolicy: WorkspaceAccessPolicy
+): Promise<DiscordCommandResponse> {
+  if (!input.captureReview)
+    return { content: "Captured meeting synthesis is not configured in this workspace." };
+  const actor = await accessPolicy.authorize({
+    workspaceId: input.workspace.workspaceId,
+    providerId: "discord",
+    providerUserId: command.actorDiscordUserId
+  });
+  if (!actor) throw new DiscordChannelAccessError();
+  const thread = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  return input.captureReview.handle({
+    command,
+    actorPersonId: actor.personId,
+    ...(thread ? { boundMeetingId: thread.meeting_id } : {})
+  });
+}
+
 async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string> {
   if (!input.aiUsage)
     return "AI usage tracking is not configured. A founder needs to check the AI provider and pricing configuration before paid AI use.";
@@ -796,7 +832,10 @@ async function executeAdmittedCommand(
   input: ScopedDiscordMeetingBotInput,
   command: Exclude<
     DiscordCommand,
-    { type: "usage" } | DiscordConsultationCommand | DiscordDecisionRecordCommand
+    | { type: "usage" }
+    | DiscordConsultationCommand
+    | DiscordDecisionRecordCommand
+    | DiscordCaptureReviewCommand
   >,
   now: () => Date
 ): Promise<DiscordCommandResponse> {
@@ -859,6 +898,7 @@ async function commandSourceFence(
   command: DiscordCommand
 ): Promise<(() => Promise<void>) | undefined> {
   if (
+    isCaptureReviewCommand(command) ||
     isConsultationCommand(command) ||
     isDecisionRecordCommand(command) ||
     command.type === "usage" ||

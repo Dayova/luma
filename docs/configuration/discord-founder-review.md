@@ -60,3 +60,56 @@ Notion review parity and real-source Activity proof remain part of LUM-5;
 canonical document patching and durable `knowledgeReferences` remain LUM-11 and
 therefore keep the full LUM-6 acceptance open. This surface exposes the existing
 source-bound settlement foundation; it does not claim those missing capabilities.
+
+## Logical capture and synthesis review
+
+With `createDiscordCaptureReviewRuntime` composed into the bot's `captureReview`
+input, founders can also reach Logical Meetings with no Notion Meeting Note,
+including Granola Basic captures:
+
+- `/meeting captures` lists five retained Logical Meetings per page, withholding
+  any row whose current source or original sharing with all four founders cannot
+  be verified. Use it in an approved parent channel to list across meetings.
+  `meeting_id:<ID>` shows exact capture IDs, source revisions, binding status,
+  provider capabilities and the canonical reference. `page` exposes longer views.
+- `/meeting synthesis meeting_id:<ID>` displays the current derived revision,
+  full claim wording, source citations, Human authority, unresolved contradictions,
+  coverage and publication status. Long claims and quotations span numbered pages.
+  Provider-derived notes never become verbatim transcript evidence.
+- `/meeting judge revision:<N> claim_id:<ID> choice:confirm|correct|reject`
+  records an authenticated founder's Human Judgment. `correct` also needs `text`.
+  The exact displayed synthesis revision is required; an older revision cannot
+  approve or overwrite a newer judgment.
+- `/meeting publish revision:<N>` explicitly approves and executes the current
+  synthesis publication Intent through Meeting Intelligence and Follow-up
+  Execution. The command accepts neither an arbitrary body nor a publication
+  target. `recover:true` checks an uncertain write using retained positive evidence
+  and never resends it. Successful publication exposes the same canonical anchor
+  through Logical Meetings after restart.
+- `/meeting capture-link capture_id:<ID> meeting_id:<ID> revision:<source revision>
+choice:bind|separate` records an explicit Human binding. `bind` joins the target
+  Logical Meeting; `separate` excludes the capture from the named Logical Meeting
+  and lets the owned binding module create a separate identity when necessary.
+  Both groups must have current source access for all founders. The exact source
+  revision, content hash and prior binding are checked again under the shared
+  workspace lock; a queued command cannot overwrite a newer capture or Human
+  binding. Original capture
+  revisions remain immutable. Source ingestion wakes Meeting Intelligence after
+  an accepted binding; a budget/source failure leaves the Human binding retained
+  and synthesis pending or unavailable, without discarding prior judgments.
+
+The optional `meeting_id` defaults to this thread's existing imported Meeting
+binding. Resolution uses the actual imported source identities and persisted
+capture membership; it neither invents a Logical Meeting ID nor joins captures.
+An ambiguous mapping requires choosing a Logical Meeting from the shared list.
+The original `/meeting review`, ownership and reconciliation paths retain their
+original imported Meeting binding.
+
+The private review factory receives the owned database, workspace, Logical
+Meetings, live capture access, final Meeting Intelligence and Follow-up Execution
+facades, and the four founder Person IDs. The existing bot admission and live
+Discord audience checks wrap every operation. Exact source projection, original
+account scope and current audience checks run again immediately before the native
+reply. Source capabilities and all paginated content remain withheld after a grant
+or source change. This composition does not activate a personal Granola connection,
+change source policy, or publish anything merely by listing or reviewing it.

@@ -761,6 +761,9 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         REFERENCES logical_meeting_capture_binding_history (workspace_id, binding_id)
     );
 
+    ALTER TABLE logical_meeting_capture_binding_judgments
+      ADD COLUMN IF NOT EXISTS expected_capture_json TEXT;
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS start_message_sent_at TEXT;
 

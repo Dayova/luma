@@ -162,6 +162,18 @@ export async function createDecisionRuntime(
     accessPolicy: input.accessPolicy,
     audience
   });
+  // A provider deadline can cancel the caller before a source port has finished
+  // its own ledger reads. Retain those owned promises until the store may close.
+  const retainedProofs = new Set<Promise<boolean>>();
+  const retained = (signal: AbortSignal | undefined, work: () => Promise<boolean>) => {
+    const pending = (async () => {
+      if (signal?.aborted) return false;
+      const allowed = await work();
+      return !signal?.aborted && allowed;
+    })().finally(() => retainedProofs.delete(pending));
+    retainedProofs.add(pending);
+    return pending;
+  };
   const recordPolicy: Omit<NotionDecisionRecordsConfig, "token" | "transport"> = {
     workspaceId,
     dataSourceId: config.dataSourceId,
@@ -174,13 +186,17 @@ export async function createDecisionRuntime(
         resource: dataSourceId
       }),
     authorizeRetainedSource: (request) =>
-      request.source.subject.type === "meeting"
-        ? (meetingEvidenceSource?.authorizeRetained(request) ?? Promise.resolve(false))
-        : evidenceSource.authorizeRetained(request),
+      retained(request.signal, () =>
+        request.source.subject.type === "meeting"
+          ? (meetingEvidenceSource?.authorizeRetained(request) ?? Promise.resolve(false))
+          : evidenceSource.authorizeRetained(request)
+      ),
     authorizeRetainedAuthority: (request) =>
-      authority.authorizeRetainedAuthority(request),
+      retained(request.signal, () => authority.authorizeRetainedAuthority(request)),
     authorizeRetainedHumanReview: (request) =>
-      humanReviewAccess.authorizeRetainedHumanReview(request)
+      retained(request.signal, () =>
+        humanReviewAccess.authorizeRetainedHumanReview(request)
+      )
   };
   const records = (dependencies.createRecords ?? createNotionDecisionRecords)({
     ...recordPolicy,
@@ -207,7 +223,13 @@ export async function createDecisionRuntime(
     audience: () => audience(workspaceId)
   });
   return {
-    recall,
+    recall: {
+      ...recall,
+      async stop() {
+        await recall.stop();
+        await Promise.allSettled([...retainedProofs]);
+      }
+    },
     authority,
     records,
     evidenceSource,

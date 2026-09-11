@@ -158,6 +158,17 @@ describe("shared capture production composition", () => {
         occurredAt: "2026-09-11T10:00:00.000Z"
       });
       expect(result.content).toContain("No currently shared captures");
+      const onboarding = await command({
+        type: "granola-status",
+        page: 1,
+        guildId: "guild",
+        channelId: parent,
+        interactionId: "granola-status",
+        actorDiscordUserId: "779381502311137301",
+        occurredAt: "2026-09-11T10:00:00.000Z"
+      });
+      expect(onboarding.content).toContain("/granola connect");
+      expect(onboarding.content).toContain("No meetings are shared");
       expect((await database.query("SELECT * FROM meetings")).rows).toEqual([]);
       expect((await database.query("SELECT * FROM ai_usage_requests")).rows).toEqual([]);
       expect(fetchSpy).not.toHaveBeenCalled();

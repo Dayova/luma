@@ -10,6 +10,7 @@ import {
 } from "./granola-oauth-runtime.js";
 import { createGranolaOAuthCallbackHost } from "./granola-oauth-callback-host.js";
 import { createDiscordCaptureReviewRuntime } from "../discord/discord-capture-review-runtime.js";
+import { createDiscordGranolaRuntime } from "../discord/discord-granola-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
@@ -579,6 +580,17 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(granolaConnections && granolaCallback
+        ? {
+            granola: await createDiscordGranolaRuntime({
+              database,
+              workspaceId,
+              connections: granolaConnections,
+              begin: (request) => granolaCallback.begin(request),
+              afterConnectionsChanged: refreshGranolaConnections
+            })
+          }
+        : {}),
       ...(captureRuntime
         ? {
             captureReview: createDiscordCaptureReviewRuntime({

@@ -19,6 +19,13 @@ import {
 import type { DecisionEvidenceSource } from "./ports.js";
 
 type ConversationSubject = Extract<DecisionSubject, { type: "conversation-thread" }>;
+export interface ConversationDecisionEvidenceSource extends DecisionEvidenceSource {
+  /** Read/projection permission for immutable retained history; never authorizes execution. */
+  authorizeRetained(input: {
+    audience: DecisionAudience;
+    source: DecisionSource;
+  }): Promise<boolean>;
+}
 
 /** Original bounded Conversation evidence, with fresh identity and original-audience proof. */
 export function createConversationDecisionEvidenceSource(input: {
@@ -27,7 +34,7 @@ export function createConversationDecisionEvidenceSource(input: {
   ledger: ObservedSourceLedger;
   accessPolicy: WorkspaceAccessPolicy;
   recipientPersonIds: readonly string[];
-}): DecisionEvidenceSource {
+}): ConversationDecisionEvidenceSource {
   const recipients = [...input.recipientPersonIds].sort();
   if (
     !input.workspaceId.trim() ||
@@ -130,7 +137,43 @@ export function createConversationDecisionEvidenceSource(input: {
     };
   }
 
-  const source: DecisionEvidenceSource = {
+  async function originalProof(original: DecisionSource) {
+    const boundSubject = subject(original.subject);
+    const boundAudience = audience(original.audience);
+    const revision = Number(original.revision);
+    if (
+      !Number.isSafeInteger(revision) ||
+      revision < 1 ||
+      String(revision) !== original.revision
+    )
+      throw unavailable();
+    const retained = await input.ledger.get({
+      workspaceId: input.workspaceId,
+      source: {
+        providerId: boundSubject.providerId,
+        sourceKind: "conversation",
+        sourceObjectId: boundSubject.anchorMessageId
+      },
+      revision
+    });
+    if (!retained || retained.contentHash !== original.contentHash) throw unavailable();
+    const prior = await project(
+      {
+        source: retained.source,
+        providerVersion: retained.providerVersion,
+        snapshot: retained.snapshot,
+        observedAt: retained.capturedAt
+      },
+      boundSubject,
+      boundAudience,
+      original.revision,
+      retained.capturedAt
+    );
+    if (hash(prior) !== hash(original)) throw unavailable();
+    return { boundSubject, boundAudience, retained };
+  }
+
+  const source: ConversationDecisionEvidenceSource = {
     async capture(request) {
       request = structuredClone(request);
       const boundSubject = subject(request.subject);
@@ -186,38 +229,7 @@ export function createConversationDecisionEvidenceSource(input: {
     },
     async requireCurrent(original) {
       original = structuredClone(original);
-      const boundSubject = subject(original.subject);
-      const boundAudience = audience(original.audience);
-      const revision = Number(original.revision);
-      if (
-        !Number.isSafeInteger(revision) ||
-        revision < 1 ||
-        String(revision) !== original.revision
-      )
-        throw unavailable();
-      const retained = await input.ledger.get({
-        workspaceId: input.workspaceId,
-        source: {
-          providerId: boundSubject.providerId,
-          sourceKind: "conversation",
-          sourceObjectId: boundSubject.anchorMessageId
-        },
-        revision
-      });
-      if (!retained || retained.contentHash !== original.contentHash) throw unavailable();
-      const prior = await project(
-        {
-          source: retained.source,
-          providerVersion: retained.providerVersion,
-          snapshot: retained.snapshot,
-          observedAt: retained.capturedAt
-        },
-        boundSubject,
-        boundAudience,
-        original.revision,
-        retained.capturedAt
-      );
-      if (hash(prior) !== hash(original)) throw unavailable();
+      const { boundSubject, boundAudience } = await originalProof(original);
       const current = structuredClone(
         await input.conversationEvidenceSource.capture({
           workspaceId: input.workspaceId,
@@ -233,9 +245,70 @@ export function createConversationDecisionEvidenceSource(input: {
         original.capturedAt
       );
       if (proof.authorizationHash !== original.authorizationHash) throw unavailable();
+    },
+    async authorizeRetained(request) {
+      try {
+        const { source: original, audience: requested } = structuredClone(request);
+        if (
+          requested.workspaceId !== input.workspaceId ||
+          !requested.personIds.length ||
+          new Set(requested.personIds).size !== requested.personIds.length ||
+          requested.personIds.some(
+            (personId) => !original.audience.personIds.includes(personId)
+          )
+        )
+          return false;
+        // Reconstruct the original source from its immutable ledger revision. A
+        // canonical page cannot supply a replacement audience or invented excerpt.
+        const { boundSubject, boundAudience, retained } = await originalProof(original);
+        const current = structuredClone(
+          await input.conversationEvidenceSource.capture({
+            workspaceId: input.workspaceId,
+            subject: boundSubject,
+            purpose: "decision-record"
+          })
+        );
+        // This fresh projection verifies complete source scope and current unique
+        // author identities. Its new words never replace the retained source.
+        await project(
+          current,
+          boundSubject,
+          boundAudience,
+          original.revision,
+          original.capturedAt
+        );
+        return (
+          hash(retainedBoundary(retained.snapshot)) ===
+          hash(retainedBoundary(current.snapshot))
+        );
+      } catch {
+        return false;
+      }
     }
   };
   return source;
+}
+
+/** Stable object identities and source presence, excluding mutable wording/labels. */
+function retainedBoundary(snapshot: RawConversationSnapshot): unknown {
+  return {
+    conversationObjectId: snapshot.conversation.conversationObjectId,
+    parentConversationObjectId: snapshot.conversation.parentConversationObjectId,
+    boundary: snapshot.boundary,
+    messages: snapshot.messages.map((message) => {
+      if (message.state !== "available") throw unavailable();
+      return {
+        id: message.id,
+        ordinal: message.ordinal,
+        providerUserId: message.author.providerUserId,
+        createdAt: message.createdAt,
+        replyToMessageId: message.replyToMessageId,
+        url: message.url,
+        hasText: !!message.text.trim(),
+        pollOrigin: message.poll?.wordingOrigin ?? null
+      };
+    })
+  };
 }
 
 function validateCapture(

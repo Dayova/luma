@@ -219,5 +219,118 @@ describe("Bounded Conversation Decision Evidence", () => {
     expect(source.evidence[1]!.text).toContain('"status":"unknown"');
     message.poll.options[0]!.text = "Changed choice";
     await expect(f.source.requireCurrent(source)).rejects.toThrow();
+    await expect(
+      f.source.authorizeRetained({ source, audience: source.audience })
+    ).resolves.toBe(true);
+    expect(source.evidence[1]!.text).toContain('"status":"unknown"');
+    delete message.poll;
+    await expect(
+      f.source.authorizeRetained({ source, audience: source.audience })
+    ).resolves.toBe(false);
+  });
+});
+
+describe("Retained Conversation Decision source authorization", () => {
+  it("admits retained wording after an edit for original recipients while exact execution proof rejects the changed source", async () => {
+    const f = fixture();
+    const original = await f.source.capture(f.request);
+    const snapshots = (await database.query("SELECT * FROM observed_source_snapshots"))
+      .rows;
+    const heads = (await database.query("SELECT * FROM observed_sources")).rows;
+    const edited = f.current.snapshot.messages[0]!;
+    if (edited.state !== "available") throw new Error("fixture");
+    edited.text = "RevenueCat ist jetzt der aktuelle Vorschlag.";
+    edited.editedAt = "2026-09-11T12:00:00.000Z";
+    edited.author.displayName = "A renamed founder";
+    f.current.snapshot.conversation.title = "Updated discussion label";
+    await expect(f.source.requireCurrent(original)).rejects.toThrow();
+    await expect(
+      f.source.authorizeRetained({ source: original, audience: original.audience })
+    ).resolves.toBe(true);
+    await expect(
+      f.source.authorizeRetained({
+        source: original,
+        audience: { workspaceId: workspace.workspaceId, personIds: ["person_jakob"] }
+      })
+    ).resolves.toBe(true);
+    expect(original.evidence[0]?.text).toBe(
+      "Wir könnten RevenueCat verwenden; das ist noch nicht final."
+    );
+    expect(
+      (await database.query("SELECT * FROM observed_source_snapshots")).rows
+    ).toEqual(snapshots);
+    expect((await database.query("SELECT * FROM observed_sources")).rows).toEqual(heads);
+  });
+  it.each([
+    "deleted-message",
+    "erased-text",
+    "excluded-message",
+    "changed-author",
+    "identity-remap",
+    "ambiguous-identity",
+    "revoked-grant",
+    "changed-parent",
+    "missing-original",
+    "forged-history",
+    "expanded-audience"
+  ] as const)("withholds retained history after %s", async (scenario) => {
+    const f = fixture();
+    const original = await f.source.capture(f.request);
+    const message = f.current.snapshot.messages[0]!;
+    if (message.state !== "available") throw new Error("fixture");
+    switch (scenario) {
+      case "deleted-message":
+        f.current.snapshot.messages[0] = { ...message, state: "deleted", text: null };
+        break;
+      case "erased-text":
+        message.text = "";
+        break;
+      case "excluded-message":
+        f.current.snapshot.messages.shift();
+        f.current.snapshot.boundary.messageIds.shift();
+        f.current.snapshot.boundary.firstMessageId = f.current.snapshot.messages[0]!.id;
+        f.current.snapshot.messages.forEach((retained, index) => {
+          retained.ordinal = index;
+        });
+        break;
+      case "changed-author":
+        message.author.providerUserId = "726409024894926869";
+        break;
+      case "identity-remap":
+        f.switchIdentity();
+        break;
+      case "ambiguous-identity":
+        f.makeAmbiguous();
+        break;
+      case "revoked-grant":
+        f.capture.mockRejectedValue(new Error("private channel no longer admitted"));
+        break;
+      case "changed-parent":
+        f.current.snapshot.conversation.parentConversationObjectId = "another-parent";
+        break;
+      case "missing-original":
+        await database.query("DELETE FROM observed_source_snapshots");
+        break;
+      case "forged-history":
+        original.evidence[0]!.text = "A replacement story";
+        break;
+      case "expanded-audience":
+        original.audience.personIds.push("person_guest");
+        break;
+    }
+    await expect(
+      f.source.authorizeRetained({ source: original, audience: original.audience })
+    ).resolves.toBe(false);
+  });
+  it("does not infer a new recipient grant from an original source or accept a foreign workspace", async () => {
+    const f = fixture();
+    const source = await f.source.capture(f.request);
+    for (const audience of [
+      { workspaceId: workspace.workspaceId, personIds: ["person_guest"] },
+      { workspaceId: "another-workspace", personIds: ["person_jakob"] },
+      { workspaceId: workspace.workspaceId, personIds: [] },
+      { workspaceId: workspace.workspaceId, personIds: ["person_jakob", "person_jakob"] }
+    ])
+      await expect(f.source.authorizeRetained({ source, audience })).resolves.toBe(false);
   });
 });

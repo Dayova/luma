@@ -74,3 +74,20 @@ query so a known receipt is not hidden. If that proof fails, the old private res
 is withheld. A final query and current actor/channel check run again at the actual
 Discord delivery boundary; a correction cannot authorize delivery of old wording.
 Dynamic mentions are disabled in all replies.
+
+## Reading retained Decision history
+
+`ConversationDecisionEvidenceSource.authorizeRetained` is a read/projection check
+for a canonical record's original source. It reconstructs the exact original
+source from the immutable ledger revision and checks its admitted audience, then
+reads the complete current Conversation boundary and current author identities.
+The requested reader set must be a nonempty subset of the original recipients.
+
+Edited wording, edit timestamps, renamed labels and advisory poll changes do not
+erase the retained history. Deleted or excluded source messages, erased text,
+removed polls, changed authors, moved source boundaries, missing original captures
+or revoked access deny the read. The native instruction anchor must still belong
+to the admitted leading-mention surface. The read check never updates the ledger
+or authorizes another write; `requireCurrent` continues to demand the exact current
+execution source. Retained statements and poll counts keep their original meaning
+and standing.

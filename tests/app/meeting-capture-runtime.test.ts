@@ -228,10 +228,16 @@ describe("meeting capture application composition", () => {
       };
       const pending = ingestion.ingest({ workspace, source: changed });
       await entered.promise;
+      beforeIngest = () => Promise.reject(new Error("Admitted source failed"));
+      const failed = expect(
+        ingestion.ingest({ workspace, source: changed })
+      ).rejects.toThrow("Admitted source failed");
       let stopped = false;
-      const stopping = runtime.stop().then(() => {
+      const stopping = runtime.stop().finally(() => {
         stopped = true;
       });
+      const stoppedResult = expect(stopping).rejects.toThrow("Admitted source failed");
+      await failed;
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(stopped).toBe(false);
       await expect(ingestion.ingest({ workspace, source: changed })).rejects.toThrow(
@@ -239,7 +245,7 @@ describe("meeting capture application composition", () => {
       );
       release.resolve();
       expect(await pending).toMatchObject({ errors: [] });
-      await stopping;
+      await stoppedResult;
       expect(stopped).toBe(true);
       expect(f.requests.length).toBeGreaterThan(count);
     } finally {

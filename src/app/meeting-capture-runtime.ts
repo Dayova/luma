@@ -225,11 +225,13 @@ export async function createMeetingCaptureRuntime(input: {
     stop: async () => {
       stopped = true;
       activeRegistry = undefined;
-      await Promise.all([
+      const drains = await Promise.allSettled([
         registry?.runtime.stop(),
         changing.catch(() => undefined),
         ...notionRuns
       ]);
+      const failure = drains.find((drain) => drain.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
     },
     syncGranolaOnce: () => {
       if (!connected || !activeRegistry || stopped)

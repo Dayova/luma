@@ -194,3 +194,100 @@ describe("Discord SDK budget entry points", () => {
     await live.disconnect();
   });
 });
+
+describe("Discord SDK founder review entry points", () => {
+  it.each(["bind", "review", "owner", "reconcile", "refresh"])(
+    "registers and routes /meeting %s through the admitted handler",
+    async (command) => {
+      const live = transport();
+      const handler = vi.fn<(command: DiscordCommand) => Promise<DiscordCommandResponse>>(
+        () => Promise.resolve({ content: "Review command accepted" })
+      );
+      await live.connect(handler);
+      const fields: Record<string, string> = {
+        source_page: "3ae2e872-28bf-80c7-9ae0-e722e0edb032",
+        review_id: "review-current",
+        claim_id: "claim-current",
+        choice: command === "owner" ? "confirm-owner" : "link-existing",
+        target_id: "LUM-42",
+        reason: "Reviewed"
+      };
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "meeting",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "review-command",
+        channelId: "thread",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-11T07:00:00Z"),
+        options: {
+          getSubcommand: () => command,
+          getString: (name: string) => fields[name] ?? null,
+          getInteger: () => 2,
+          getUser: () => ({ id: "founder" }),
+          getBoolean: () => true
+        },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      sdk.emit(Events.InteractionCreate, interaction);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ type: command, actorDiscordUserId: "founder" })
+      );
+      if (command === "reconcile")
+        expect(handler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reviewId: "review-current",
+            externalId: "LUM-42",
+            execute: true,
+            choice: "link-existing"
+          })
+        );
+      if (command === "owner")
+        expect(handler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            claimId: "claim-current",
+            ownerDiscordUserId: "founder",
+            ownership: "confirm-owner"
+          })
+        );
+      expect(JSON.stringify(sdk.put.mock.calls[0]?.[1])).toContain(`"name":"${command}"`);
+      await live.disconnect();
+    }
+  );
+  it("withholds a source-derived command response when its final source proof is revoked", async () => {
+    const live = transport();
+    await live.connect(() =>
+      Promise.resolve({
+        content: "Private source wording",
+        requireCurrent: () => Promise.reject(new Error("revoked"))
+      })
+    );
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "meeting",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "revoked-review",
+      channelId: "thread",
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-11T07:00:00Z"),
+      options: {
+        getSubcommand: () => "review",
+        getString: () => null,
+        getInteger: () => 1
+      },
+      deferred: true,
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi.fn(() => Promise.resolve())
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+    expect(JSON.stringify(interaction.editReply.mock.calls)).not.toContain(
+      "Private source wording"
+    );
+    await live.disconnect();
+  });
+});

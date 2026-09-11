@@ -1,0 +1,7 @@
+{
+  "resticRepository": "s3:https://YOUR_STORAGE_ENDPOINT/YOUR_BUCKET/luma",
+  "resticPasswordFile": "/etc/luma/restic-password",
+  "s3CredentialsFile": "/etc/luma/backup-s3.json",
+  "alertWebhookUrl": "https://discord.com/api/webhooks/REPLACE_WITH_REVIEWED_FOUNDER_CHANNEL_WEBHOOK",
+  "healthyHeartbeatUrl": "https://YOUR_EXTERNAL_MONITOR/YOUR_PRIVATE_HEARTBEAT"
+}

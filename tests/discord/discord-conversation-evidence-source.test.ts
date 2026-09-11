@@ -2,6 +2,8 @@ import { createContextIntelligence } from "../../src/context-intelligence/contex
 import { createObservedSourceLedger } from "../../src/knowledge/observed-source-ledger.js";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { describe, expect, it } from "vitest";
+import { discordPollEvidence } from "../../src/discord/discord-poll-evidence.js";
+import type { ContextAnswerRequest } from "../../src/context-intelligence/context-answerer.js";
 import {
   createDiscordConversationEvidenceSource,
   type DiscordConversationMessage,
@@ -67,6 +69,152 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("refuses an anchor whose poll and original text exceed the evidence budget before scanning history", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    const poll = discordPollEvidence(
+      {
+        question: { text: "P".repeat(300) },
+        answers: Array.from({ length: 10 }, (_, index) => ({
+          answer_id: index + 1,
+          poll_media: { text: "O".repeat(55) }
+        })),
+        expiry: null,
+        allow_multiselect: false,
+        layout_type: 1
+      },
+      "human"
+    )!;
+    reader.anchor = {
+      ...reader.anchor!,
+      content: `<@bot_luma> ${"Q".repeat(1000)}`,
+      poll
+    };
+    await expect(
+      createSource(reader).capture({ ...captureInput(), question: "Q".repeat(1000) })
+    ).rejects.toThrow("evidence limit");
+    expect(reader.pageInputs).toHaveLength(0);
+  });
+  it.each(["human", "luma-generated"] as const)(
+    "uses %s polls as advisory Evidence with discussion, and invalidates changed results on replay",
+    async (origin) => {
+      const database = await createPgliteDatabase();
+      try {
+        const reader = new ProgrammableDiscordConversationReader();
+        const poll = discordPollEvidence(
+          {
+            question: { text: "Adopt the idea?" },
+            answers: [
+              { answer_id: 2, poll_media: { text: "Adopt" } },
+              { answer_id: 6, poll_media: { text: "Pause" } }
+            ],
+            expiry: "2026-08-09T12:00:00Z",
+            allow_multiselect: true,
+            layout_type: 1,
+            results: {
+              is_finalized: false,
+              answer_counts: [
+                { id: 2, count: 3 },
+                { id: 6, count: 1 }
+              ]
+            }
+          },
+          origin
+        )!;
+        const pollMessage: DiscordConversationMessage = {
+          ...humanMessage({
+            id: "poll",
+            content: "",
+            createdAt: "2026-08-08T08:00:00.000Z"
+          }),
+          poll,
+          authorKind: origin === "human" ? "human" : "bot",
+          author: {
+            providerUserId: origin === "human" ? "user_jakob" : "bot_luma",
+            displayName: origin === "human" ? "Jakob" : "Luma"
+          }
+        };
+        reader.pages.set("message_ask", {
+          hasMore: false,
+          messages: [
+            humanMessage({
+              id: "objection",
+              content: "Philipp objects: the cost is too high.",
+              createdAt: "2026-08-08T09:00:00.000Z"
+            }),
+            pollMessage
+          ]
+        });
+        const requests: ContextAnswerRequest[] = [];
+        const dependencies = {
+          database,
+          ledger: createObservedSourceLedger({ database }),
+          conversationEvidenceSource: createSource(reader),
+          answerer: {
+            answer: (request: ContextAnswerRequest) => {
+              requests.push(request);
+              const cited = request.evidence.filter(
+                (item) => item.poll || item.messageId === "objection"
+              );
+              return Promise.resolve({
+                answer: {
+                  text: "Adopt leads the provisional multi-select poll; Philipp objects. This is not a confirmed decision.",
+                  evidenceIds: cited.map((item) => item.evidenceId)
+                },
+                facts: [],
+                inferences: [],
+                unresolved: [
+                  "Counts do not establish who participated or decision authority."
+                ],
+                metadata: {
+                  provider: "synthetic",
+                  model: "programmable",
+                  promptVersion: request.promptVersion
+                }
+              });
+            }
+          }
+        };
+        const inquiry = {
+          type: "ask" as const,
+          inquiryId: "poll-ask",
+          question: "What did we decide?",
+          ...captureInput()
+        };
+        const first = await createContextIntelligence(dependencies).inquire(inquiry);
+        expect(first.boundary.completeness).toBe("complete");
+        expect(first.answer.evidence.map((item) => item.messageId)).toEqual([
+          "poll",
+          "objection"
+        ]);
+        expect(requests[0]?.evidence.find((item) => item.poll)?.poll).toEqual(poll);
+        expect(requests[0]?.evidence.find((item) => item.poll)?.text).toBe("");
+        expect(await createContextIntelligence(dependencies).inquire(inquiry)).toEqual(
+          first
+        );
+        expect(requests).toHaveLength(1);
+        pollMessage.poll = {
+          ...poll,
+          results: {
+            status: "finalized",
+            counts: [
+              { optionId: "2", votes: 3 },
+              { optionId: "6", votes: 2 }
+            ]
+          }
+        };
+        await expect(
+          createContextIntelligence(dependencies).inquire(inquiry)
+        ).rejects.toThrow();
+        expect(requests).toHaveLength(1);
+        const rows = await database.query<{ raw_payload_json: string }>(
+          "SELECT raw_payload_json FROM observed_source_snapshots"
+        );
+        expect(JSON.stringify(rows.rows)).toContain("provisional");
+      } finally {
+        await database.close();
+      }
+    }
+  );
   it("answers repeated questions in one thread while retaining only Human Evidence and explicit Luma exclusions", async () => {
     const database = await createPgliteDatabase();
     try {

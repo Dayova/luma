@@ -906,6 +906,8 @@ export type MeetingState = {
   humanJudgmentItemIds: MeetingItemId[];
   followUpIntentions: FollowUpIntent[];
   importedSources: ImportedMeetingSource[];
+  /** Immutable original recipient grants for governed imported source material. */
+  importedSourceAnalysisReceiptIds?: string[];
   importedActionItemCandidates: ImportedActionItemCandidate[];
   currentImportedActionItemCandidateIds: string[];
   actionItemReconciliationReviews: ActionItemReconciliationReview[];

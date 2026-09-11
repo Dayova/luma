@@ -16,6 +16,10 @@ util-linux at `/usr/bin/flock`. Pin the exact application commit for each releas
 The application opens outbound Discord/OpenAI connections; this service needs
 no inbound listener, public domain, or TLS endpoint. It has no HTTP readiness
 endpoint. Do not configure a hosting HTTP health check against an invented port.
+The optional operations profile uses a private local Gateway-health receipt and
+an independent systemd timer instead; see
+[unattended operations](unattended-operations.md) for daily encrypted off-host
+backup verification, failure alerts, and external host-loss monitoring.
 
 `/opt/luma/releases/<commit>` holds immutable application releases;
 `/opt/luma/current` selects one release. `/var/lib/luma/pglite` holds the durable

@@ -173,6 +173,7 @@ function harness(scope = "dayova-reader") {
     readScope: { credentialScopeId: scope, repositories: [repo] },
     getCommit: unused,
     getPullRequest: unused,
+    searchPullRequests: unused,
     getRecentActivity: unused,
     searchCode: search,
     getCurrentCodeExcerpt: current

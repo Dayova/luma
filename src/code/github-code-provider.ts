@@ -12,6 +12,7 @@ import type {
   CodeSearchResponse,
   Commit,
   CurrentCodeExcerpt,
+  PullRequestSearchResponse,
   RepositoryActivityQuery
 } from "./interface.js";
 
@@ -425,6 +426,58 @@ class GitHubCodeReader implements CodeProvider {
       return {
         results,
         commitSha: head.sha,
+        coverage: coverage(warnings),
+        observedAt: this.now().toISOString()
+      };
+    });
+  }
+
+  async searchPullRequests(query: CodeSearchQuery): Promise<PullRequestSearchResponse> {
+    const repo = this.allowed(query.repository);
+    const text = query.text.trim();
+    if (
+      !text ||
+      text.length > 200 ||
+      /[:"\\]/u.test(text) ||
+      hasControlCharacters(text) ||
+      !Number.isInteger(query.limit) ||
+      query.limit < 1 ||
+      query.limit > 20
+    )
+      fail("query-invalid");
+    return this.read(async (context) => {
+      const q = `repo:${repo} is:pr in:title,body "${text}"`;
+      const response = await this.get(
+        `/search/issues?q=${encodeURIComponent(q)}&per_page=${query.limit}&page=1`,
+        context
+      );
+      const result = parse(
+        z.object({
+          total_count: z.number().int().nonnegative(),
+          incomplete_results: z.boolean(),
+          items: z.array(
+            z.object({
+              number: z.number().int().positive(),
+              html_url: z.string(),
+              pull_request: z.object({ html_url: z.string() })
+            })
+          )
+        }),
+        response.value
+      );
+      const numbers = new Set<number>();
+      for (const item of result.items.slice(0, query.limit)) {
+        this.checkWeb(item.html_url, `${repo}/pull/${item.number}`);
+        this.checkWeb(item.pull_request.html_url, `${repo}/pull/${item.number}`);
+        numbers.add(item.number);
+      }
+      const warnings = [
+        "GitHub PR discovery is a bounded search index; absence is not proof of absence."
+      ];
+      if (result.incomplete_results || response.next || result.total_count > query.limit)
+        warnings.push("More or incomplete PR search results exist beyond this read.");
+      return {
+        results: [...numbers].map((number) => ({ repository: repo, number })),
         coverage: coverage(warnings),
         observedAt: this.now().toISOString()
       };

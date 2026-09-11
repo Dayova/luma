@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  conversationPollSchema,
+  type ConversationPoll
+} from "../domain/conversation-poll.js";
 import type { LumaDatabase } from "../persistence/db.js";
 
 export type SourcePartialReason = {
@@ -105,6 +109,7 @@ export type RawConversationMessage =
       url: string;
       state: "available";
       text: string;
+      poll?: ConversationPoll;
     }
   | {
       id: string;
@@ -1765,8 +1770,13 @@ function isRawConversationMessage(value: unknown): value is RawConversationMessa
   }
 
   return (
-    (value["state"] === "available" && typeof value["text"] === "string") ||
-    (value["state"] === "deleted" && value["text"] === null)
+    (value["state"] === "available" &&
+      typeof value["text"] === "string" &&
+      (value["poll"] === undefined ||
+        conversationPollSchema.safeParse(value["poll"]).success)) ||
+    (value["state"] === "deleted" &&
+      value["text"] === null &&
+      value["poll"] === undefined)
   );
 }
 

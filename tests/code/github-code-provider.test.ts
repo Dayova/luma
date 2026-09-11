@@ -16,6 +16,62 @@ const headPath = `${prefix}/commits/heads%2Fmain`;
 const user = { id: 1, login: "founder" };
 
 describe("GitHub read-only CodeProvider", () => {
+  it("discovers scoped PR identities without trusting search snippets as evidence", async () => {
+    const h = harness();
+    h.on("/search/issues", (url) => {
+      expect(url.searchParams.get("q")).toBe(
+        'repo:dayova/luma is:pr in:title,body "history"'
+      );
+      expect(url.searchParams.get("per_page")).toBe("2");
+      return json({
+        total_count: 3,
+        incomplete_results: true,
+        items: [
+          {
+            number: 7,
+            html_url: `https://github.com/${repo}/pull/7`,
+            pull_request: { html_url: `https://github.com/${repo}/pull/7` }
+          }
+        ]
+      });
+    });
+    const found = await h.provider.searchPullRequests({
+      repository: repo,
+      text: "history",
+      limit: 2
+    });
+    expect(found.results).toEqual([{ repository: repo, number: 7 }]);
+    expect(found.coverage.complete).toBe(false);
+    expect(found.coverage.warnings.join(" ")).toContain("incomplete");
+    expect(h.requests).toHaveLength(1);
+  });
+
+  it("refuses foreign PR search results and injected queries", async () => {
+    const h = harness();
+    await expect(
+      h.provider.searchPullRequests({
+        repository: repo,
+        text: "history repo:private/other",
+        limit: 2
+      })
+    ).rejects.toMatchObject({ code: "query-invalid" });
+    expect(h.requests).toEqual([]);
+    h.json("/search/issues", {
+      total_count: 1,
+      incomplete_results: false,
+      items: [
+        {
+          number: 7,
+          html_url: "https://github.com/other/private/pull/7",
+          pull_request: { html_url: "https://github.com/other/private/pull/7" }
+        }
+      ]
+    });
+    await expect(
+      h.provider.searchPullRequests({ repository: repo, text: "history", limit: 2 })
+    ).rejects.toMatchObject({ code: "response-invalid" });
+  });
+
   it("reads a full immutable commit with honest unlinked author identity", async () => {
     const h = harness();
     h.json(`${prefix}/commits/${head}`, commit(head));

@@ -67,8 +67,17 @@ capability and currently **must fail**. The report's `productReadiness` remains
 `not-demonstrated` while gaps exist; a green deterministic CI run is not a
 production-readiness claim.
 
-Three checks remain explicitly missing: actual GitHub CodeProvider linkage,
-recall from another actual Meeting, and real Notion/Linear/GitHub source mapping
+The version-four corpus adds a real GitHub CodeProvider/catalog/Context Ask
+scenario, using deterministic HTTP responses and original literal code bytes.
+The transport honors the actual search phrase instead of returning every fixture.
+It verifies pinned citations, unchanged questions, persisted replay, head-change
+refusal without another model call, source grant revocation and retained snapshots.
+Mutation tests remove matching code, the head change and revocation and require
+the corresponding checks to fail. This runs actual adapters but no live network;
+its source/evidence selection is reported separately from normalized catalogs.
+
+Two checks remain explicitly missing: recall from another actual Meeting, and
+real Notion/Linear/GitHub source mapping
 for standing/authority and current-versus-superseded selection. Programmable
 normalized catalogs prove the core's selection policy, but cannot prove those
 external adapters. The original historical/current Meeting fixtures remain

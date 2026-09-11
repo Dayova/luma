@@ -21,7 +21,9 @@ describe("versioned Meeting product evaluation", () => {
     const { corpus, samples } = await load();
     const report = await evaluateCorpus(corpus, samples);
     expect(report.fixtures.map((fixture) => fixture.id)).toEqual(
-      [...corpus.fixtures, ...corpus.retrievalFixtures].map((fixture) => fixture.id)
+      [...corpus.fixtures, ...corpus.retrievalFixtures, ...corpus.githubFixtures].map(
+        (fixture) => fixture.id
+      )
     );
     expect(report.summary.failed).toBe(0);
     expect(report.summary.passed).toBeGreaterThan(40);
@@ -29,7 +31,6 @@ describe("versioned Meeting product evaluation", () => {
       .flatMap((fixture) => fixture.checks)
       .filter((check) => check.status === "missing");
     expect(missing.map((check) => check.id)).toEqual([
-      "code-context-can-be-linked",
       "cross-meeting-current-recall",
       "cross-provider-stale-inclusion"
     ]);
@@ -79,6 +80,28 @@ describe("versioned Meeting product evaluation", () => {
     const checks = report.fixtures.flatMap((fixture) => fixture.checks);
     expect(reportExitCode(checks)).toBe(0);
     expect(reportExitCode(checks, true)).toBe(1);
+  }, 20_000);
+
+  it("detects missing real code, head-change enforcement and grant revocation in the adapter evaluation", async () => {
+    const { corpus, samples } = await load();
+    const fixture = corpus.githubFixtures[0]!;
+    fixture.content = "export const unrelated = 0;";
+    const absent = await evaluateCorpus(corpus, samples);
+    expect(
+      absent.fixtures
+        .flatMap((entry) => entry.checks)
+        .find((check) => check.id === "code-context-can-be-linked")?.status
+    ).toBe("failed");
+    const loaded = await load();
+    loaded.corpus.githubFixtures[0]!.changeHeadBeforeReplay = false;
+    loaded.corpus.githubFixtures[0]!.revokeBeforeFresh = false;
+    const unrevoked = await evaluateCorpus(loaded.corpus, loaded.samples);
+    const failed = unrevoked.fixtures
+      .flatMap((entry) => entry.checks)
+      .filter((check) => check.status === "failed")
+      .map((check) => check.id);
+    expect(failed).toContain("code-changed-head-denies-replay");
+    expect(failed).toContain("code-revocation-withholds-fresh");
   }, 20_000);
 
   it("detects wrong ownership, erased modality, invented claims and stale current answers rather than trusting fixture output", async () => {

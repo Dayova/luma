@@ -4,6 +4,9 @@ Luma's organizational retrieval is independent of Discord conversation capture.
 It uses separately configured read-only Notion, Linear and GitHub connections,
 retains versions in the full store, and records a receipt for each selected
 bundle. It never uses a writer credential as a read-credential fallback.
+The GitHub group includes pinned code, current PR metadata and a bounded recent
+activity feed, all under the same explicit repository sharing grant. None of
+these sources implies that merged code has been deployed.
 
 Set `LUMA_ORGANIZATIONAL_CONTEXT_ENABLED=1` and
 `LUMA_CONTEXT_SHARING_POLICY_PATH=/etc/luma/context-sharing.json`. At least one
@@ -78,3 +81,10 @@ receipts. Provider failures do not cause cached private text to be substituted.
 These controls preserve evidence; they do not delete history or change the USD
 30 shared AI allowance. More retrieved text can increase model cost, and the
 same durable AI budget still controls admission.
+
+The Notion provider configuration also enables [governed imported Meeting
+understanding](../imported-meeting-understanding.md) in the main runtime. Existing
+and new accepted Meeting Note imports use the same exact-page founder grants and
+dedicated reader, with a fresh capture comparison and durable original-audience
+receipt before model analysis. Source-only observation proof hosts do not gain a
+second AI budget.

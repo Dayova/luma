@@ -184,6 +184,58 @@ describe.each<Capability>(["meeting", "context"])(
       expect(client.create).toHaveBeenCalledTimes(1);
     });
 
+    it("does not leave a later accounting write after a provider timeout returned", async () => {
+      let complete: (value: AiResponse) => void = () => undefined;
+      const client = {
+        create: () =>
+          new Promise<AiResponse>((resolve) => {
+            complete = resolve;
+          })
+      };
+      const budget = createAiUsageBudget({ database });
+      await expect(
+        caller(capability, { budget, client, limits: { timeoutMs: 5 } })()
+      ).rejects.toMatchObject({ code: "timeout" });
+      const before = await database.query(
+        "SELECT state, response_facts_json FROM ai_usage_requests"
+      );
+      expect(before.rows[0]).toHaveProperty("state", "unknown");
+      complete(response(capability));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(
+        (await database.query("SELECT state, response_facts_json FROM ai_usage_requests"))
+          .rows
+      ).toEqual(before.rows);
+    });
+
+    it("keeps a timely response owned until its accounting completes", async () => {
+      let finishAccounting: () => void = () => undefined;
+      const accounting = new Promise<void>((resolve) => {
+        finishAccounting = resolve;
+      });
+      const budget = createAiUsageBudget({ database });
+      const settle = budget.settle.bind(budget);
+      let accountingEntered = false;
+      budget.settle = async (id, usage) => {
+        accountingEntered = true;
+        await accounting;
+        await settle(id, usage);
+      };
+      let completed = false;
+      const pending = caller(capability, {
+        budget,
+        client: { create: () => Promise.resolve(response(capability)) },
+        limits: { timeoutMs: 5 }
+      })().then(() => {
+        completed = true;
+      });
+      await vi.waitFor(() => expect(accountingEntered).toBe(true));
+      expect(completed).toBe(false);
+      finishAccounting();
+      await pending;
+      expect((await budget.getStatus("dayova")).unknownUsd).toBe(0);
+    });
+
     it("charges incomplete provider output but never accepts it as a completed answer", async () => {
       const client = {
         create: vi.fn(() =>

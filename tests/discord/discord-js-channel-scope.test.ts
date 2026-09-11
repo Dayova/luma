@@ -83,6 +83,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function transport() {
@@ -124,6 +125,216 @@ function mention() {
 }
 
 describe("Discord production channel resolution and delivery", () => {
+  it.each(["command", "context-ask"] as const)(
+    "drains final source proof and delivery for an admitted %s before disconnecting",
+    async (entrypoint) => {
+      const live = transport();
+      let finishProof: () => void = () => undefined;
+      const proof = new Promise<void>((resolve) => {
+        finishProof = resolve;
+      });
+      const requireCurrent = vi.fn(() => proof);
+      const command = vi.fn(() =>
+        Promise.resolve({ content: "Reviewed result", requireCurrent })
+      );
+      const ask = vi.fn(() =>
+        Promise.resolve({
+          content: "Reviewed result",
+          idempotencyKey: "shutdown-proof",
+          requireCurrent
+        })
+      );
+      await live.connect(command, ask);
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "meeting",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "interaction",
+        channelId: "parent",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-08T12:00:00Z"),
+        options: { getSubcommand: () => "usage" },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      const message = mention();
+      if (entrypoint === "command") sdk.emit(Events.InteractionCreate, interaction);
+      else sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(requireCurrent).toHaveBeenCalledOnce());
+      let stopped = false;
+      const stopping = live.disconnect().then(() => {
+        stopped = true;
+      });
+      sdk.emit(Events.InteractionCreate, interaction);
+      sdk.emit(Events.MessageCreate, message);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(command).toHaveBeenCalledTimes(entrypoint === "command" ? 1 : 0);
+      expect(ask).toHaveBeenCalledTimes(entrypoint === "context-ask" ? 1 : 0);
+      expect(stopped).toBe(false);
+      expect(interaction.editReply).not.toHaveBeenCalled();
+      expect(message.reply).not.toHaveBeenCalled();
+      finishProof();
+      await stopping;
+      expect(
+        entrypoint === "command" ? interaction.editReply : message.reply
+      ).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    "human",
+    "luma",
+    "missing-results",
+    "foreign-count",
+    "other-bot",
+    "past-guest",
+    "revised",
+    "unreadable",
+    "stalled"
+  ])(
+    "captures fresh native poll Evidence through the SDK transport: %s",
+    async (variant) => {
+      const live = transport();
+      const anchor = {
+        ...mention(),
+        content: "<@bot> What did we decide?",
+        type: MessageType.Default,
+        author: { id: "founder", bot: false, username: "Founder" },
+        url: "https://discord.com/channels/guild/thread/message",
+        attachments: new Map(),
+        embeds: [],
+        stickers: new Map(),
+        components: [],
+        poll: null,
+        messageSnapshots: new Map(),
+        flags: { has: () => false },
+        editedAt: null,
+        reference: null
+      };
+      const bot = variant === "luma" || variant === "other-bot";
+      const creator =
+        variant === "luma"
+          ? "bot"
+          : variant === "other-bot"
+            ? "other-bot"
+            : variant === "past-guest"
+              ? "guest"
+              : "founder";
+      const historical = {
+        ...anchor,
+        id: "poll",
+        content: "",
+        mentions: { users: new Map() },
+        author: { id: creator, bot, username: creator },
+        createdAt: new Date("2026-09-08T11:00:00Z"),
+        url: "https://discord.com/channels/guild/thread/poll",
+        // SDK defaults are deliberately misleading: raw results are authoritative.
+        poll: { resultsFinalized: false, answers: new Map([[2, { voteCount: 0 }]]) }
+      };
+      const rawPoll = {
+        question: { text: "Ship?" },
+        answers: [
+          { answer_id: 2, poll_media: { text: "Yes" } },
+          { answer_id: 8, poll_media: { text: "Pause" } }
+        ],
+        expiry: "2026-09-07T12:00:00Z",
+        allow_multiselect: true,
+        layout_type: 1,
+        ...(variant === "missing-results"
+          ? {}
+          : {
+              results: {
+                is_finalized: false,
+                answer_counts: [{ id: variant === "foreign-count" ? 99 : 2, count: 3 }]
+              }
+            })
+      };
+      const raw = {
+        id: "poll",
+        channel_id: "thread",
+        author: historical.author,
+        content: variant === "revised" ? "Changed" : "",
+        edited_timestamp: null,
+        poll: rawPoll
+      };
+      sdk.get.mockImplementation(
+        (
+          route: Parameters<typeof audience.read>[0],
+          options: Parameters<typeof audience.read>[1]
+        ) => {
+          if (route === Routes.channelMessage("thread", "poll")) {
+            if (variant === "unreadable")
+              return Promise.reject(new Error("Unknown message"));
+            if (variant === "stalled") return new Promise(() => undefined);
+            return Promise.resolve(raw);
+          }
+          return audience.read(route, options);
+        }
+      );
+      sdk.channels.set("thread", {
+        ...channel("thread", ChannelType.PublicThread, "parent"),
+        isThread: () => true,
+        url: "https://discord.com/channels/guild/thread",
+        messages: {
+          fetch: (input: object) =>
+            Promise.resolve(
+              "message" in input ? anchor : new Collection([[historical.id, historical]])
+            )
+        }
+      });
+      if (variant === "stalled") vi.useFakeTimers();
+      const pending = live.capture({
+        workspaceId: "workspace",
+        subject: {
+          type: "conversation-thread",
+          providerId: "discord",
+          conversationObjectId: "thread",
+          anchorMessageId: "message"
+        },
+        question: "What did we decide?"
+      });
+      if (variant === "stalled") await vi.advanceTimersByTimeAsync(5_001);
+      const captured = await pending;
+      const evidence = captured.snapshot.messages.find(
+        (message) => message.id === "poll"
+      );
+      if (
+        ["other-bot", "past-guest", "revised", "unreadable", "stalled"].includes(variant)
+      ) {
+        expect(captured.snapshot.completeness.state).toBe("partial");
+        expect(evidence).toBeUndefined();
+      } else {
+        expect(captured.snapshot.completeness.state).toBe("complete");
+        expect(evidence).toMatchObject({
+          state: "available",
+          text: "",
+          poll: {
+            wordingOrigin: variant === "luma" ? "luma-generated" : "human",
+            results:
+              variant === "missing-results"
+                ? { status: "unknown", reason: "missing" }
+                : variant === "foreign-count"
+                  ? { status: "unknown", reason: "malformed" }
+                  : {
+                      status: "provisional",
+                      counts: [
+                        { optionId: "2", votes: 3 },
+                        { optionId: "8", votes: 0 }
+                      ]
+                    }
+          }
+        });
+      }
+      if (["other-bot", "past-guest"].includes(variant))
+        expect(
+          sdk.get.mock.calls.some(
+            ([route]) => route === Routes.channelMessage("thread", "poll")
+          )
+        ).toBe(false);
+      await live.disconnect();
+    }
+  );
   it.each([true, false])(
     "fences organizational context at final delivery without invoking the handler twice: %s",
     async (current) => {
@@ -477,7 +688,8 @@ describe("Discord production channel resolution and delivery", () => {
     sdk.emit(Events.InteractionCreate, interaction);
     await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
     expect(interaction.editReply).toHaveBeenCalledWith({
-      content: "Luma is not enabled in this Discord channel."
+      content: "Luma is not enabled in this Discord channel.",
+      allowedMentions: { parse: [] }
     });
     expect(handler).toHaveBeenCalledOnce();
     await live.disconnect();

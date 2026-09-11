@@ -1,3 +1,4 @@
+import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
   organizationalContextCatalogsFromEnv
@@ -22,6 +23,7 @@ import { aiRequestLimitsFromEnv } from "../ai/ai-request.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import { createDiscordJsTransportFromEnv } from "../discord/discord-js-adapter.js";
 import { createDiscordMeetingBot } from "../discord/discord-meeting-bot.js";
+import { createDiscordImportedMeetingAccess } from "../discord/discord-imported-meeting-access.js";
 import { discordContextAskConfigFromEnv } from "../discord/discord-context-ask-runtime.js";
 import { createOpenAIContextAnswerer } from "../context-intelligence/openai-context-answerer.js";
 import { createContextIntelligence } from "../context-intelligence/context-intelligence.js";
@@ -47,6 +49,7 @@ import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.j
 
 export type RunningLumaApp = {
   stop(): Promise<void>;
+  gatewayConnected(): boolean;
 };
 
 /** Deliberate startup cancellation after all acquired resources were released. */
@@ -178,6 +181,12 @@ export async function startServer(
     const operationalOutcomeMarkerVerifier = createOperationalOutcomeMarkerVerifier({
       database
     });
+    const importedSourceAnalysis = importedSourceAnalysisFromEnv({
+      workspaceId,
+      env,
+      ledger: observedSourceLedger,
+      operationalOutcomeMarkerVerifier
+    });
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
@@ -190,6 +199,7 @@ export async function startServer(
     const meetingIntelligence = createMeetingIntelligence({
       database,
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
+      ...(importedSourceAnalysis ? { importedSourceAnalysis } : {}),
       reasoningModel: reasoningModelFromEnv(
         env,
         openAIReasoningModelName,
@@ -238,7 +248,8 @@ export async function startServer(
       database,
       organizationalContextGuard: createMeetingContextGuard({
         database,
-        ...(organizationalContext ? { organizationalContext, contextAudience } : {})
+        ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
+        ...(importedSourceAnalysis ? { importedSourceAnalysis } : {})
       }),
       meetingIntelligence,
       identityDirectory,
@@ -287,6 +298,18 @@ export async function startServer(
       guildId,
       allowedParentChannelIds,
       aiUsage,
+      ...(meetingNotesSource && importedSourceAnalysis
+        ? {
+            importedMeetingAccess: createDiscordImportedMeetingAccess({
+              workspace,
+              authorizedPersonIds: dayovaFounderPersonIds,
+              ledger: observedSourceLedger,
+              sourceAccess: importedSourceAnalysis.access,
+              providerId: env["LUMA_NOTION_PROVIDER_ID"]?.trim() || "notion",
+              workItemProviderId
+            })
+          }
+        : {}),
       ...(discordContextAskConfig && contextIntelligence
         ? {
             contextAsk: {
@@ -302,17 +325,18 @@ export async function startServer(
     meetingNotesSync?.start();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
+    let stopping: Promise<void> | undefined;
     return {
-      async stop() {
-        try {
-          await meetingNotesSync?.stop();
-        } finally {
-          try {
-            await bot.stop();
-          } finally {
-            await database.close();
-          }
-        }
+      gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
+      stop() {
+        stopping ??= (async () => {
+          // Stop admission and scheduled ingestion immediately, then drain both.
+          // A failed/timed-out drain never closes the store later in a detached
+          // continuation: its lease must survive process termination for recovery.
+          await drainBeforeClose(Promise.all([bot.stop(), meetingNotesSync?.stop()]));
+          await database.close();
+        })();
+        return stopping;
       }
     };
   } catch (error) {
@@ -339,13 +363,34 @@ export async function startServer(
   }
 }
 
+async function drainBeforeClose(operation: Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        // Leave time for the entrypoint to report an unclean stop before
+        // systemd's 120-second hard-stop deadline.
+        timer = setTimeout(
+          () => reject(new Error("Luma shutdown did not drain admitted work")),
+          90_000
+        );
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const unavailableReasoningModel: ReasoningModel = {
   generateStructured<T>(
     _request: StructuredReasoningRequest<T>
   ): Promise<StructuredReasoningResult<T>> {
     void _request;
     return Promise.reject(
-      new AiServiceError("not-configured", "Meeting analysis is not configured")
+      new AiServiceError("not-configured", "Meeting analysis is not configured", {
+        requestDispatched: false
+      })
     );
   }
 };

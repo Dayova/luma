@@ -22,6 +22,10 @@ async function shutdown({
   try {
     await writeFile(join(directory, "package.json"), '{"type":"module"}');
     await writeFile(
+      join(directory, "runtime-health.js"),
+      "export function startRuntimeHealthReporter() { return () => Promise.resolve(); }"
+    );
+    await writeFile(
       join(directory, "main.ts"),
       await readFile(new URL("../../src/app/main.ts", import.meta.url), "utf8")
     );

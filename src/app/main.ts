@@ -13,11 +13,10 @@ function stopForSignal(): void {
       if (error instanceof LumaStartupCancelledError) return undefined;
       throw error;
     });
-    try {
-      await stopHealth?.();
-    } finally {
-      await app?.stop();
-    }
+    // Stop admission before waiting on health-file I/O. The app owns draining
+    // already admitted operations and refuses a clean close if they stall.
+    const stopApplication = app?.stop();
+    await Promise.all([stopHealth?.(), stopApplication]);
   })().then(
     () => process.exit(0),
     () => {

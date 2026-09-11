@@ -129,19 +129,31 @@ export function createDiscordJsTransport(
     | null = null;
   let disconnected = false;
   let disconnecting: Promise<void> | undefined;
+  const admittedDeliveries = new Set<Promise<void>>();
+  function trackDelivery(operation: Promise<void>): void {
+    admittedDeliveries.add(operation);
+    const finished = () => admittedDeliveries.delete(operation);
+    void operation.then(finished, finished);
+  }
   function assertConnectedLifetime(): void {
     lifetime.signal.throwIfAborted();
   }
   function disconnect(): Promise<void> {
     if (!disconnected) {
       disconnected = true;
-      // Remove admission before aborting any asynchronous initialization. All
-      // client REST, including gateway discovery inside login, shares this
-      // signal, so a stopped client cannot later discover/spawn a new Gateway.
+      // Remove admission first. Already admitted deliveries still need the
+      // transport for final source/audience proofs and their replies.
       commandHandler = null;
       contextAskHandler = null;
-      lifetime.abort();
-      disconnecting = client.destroy();
+      const pending = [...admittedDeliveries];
+      if (!pending.length) lifetime.abort();
+      disconnecting = (async () => {
+        await Promise.allSettled(pending);
+        // Startup and every REST request share this signal. In the absence of
+        // admitted work it is aborted synchronously to cancel startup promptly.
+        lifetime.abort();
+        await client.destroy();
+      })();
     }
     return disconnecting ?? Promise.resolve();
   }
@@ -179,28 +191,30 @@ export function createDiscordJsTransport(
       return;
     }
 
-    void handleInteraction(interaction, config.guildId, commandHandler, channelScope)
-      .catch(async () => {
-        const content =
-          "Luma could not process the command right now. Please try again later.";
+    trackDelivery(
+      handleInteraction(interaction, config.guildId, commandHandler, channelScope)
+        .catch(async () => {
+          const content =
+            "Luma could not process the command right now. Please try again later.";
 
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content });
-          return;
-        }
+          if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content });
+            return;
+          }
 
-        await interaction.reply({
-          content,
-          flags: MessageFlags.Ephemeral
-        });
-      })
-      .catch(() => {
-        reportDiscordDeliveryFailure({
-          code: "discord-command-reply-failed",
-          channelId: interaction.channelId,
-          sourceId: interaction.id
-        });
-      });
+          await interaction.reply({
+            content,
+            flags: MessageFlags.Ephemeral
+          });
+        })
+        .catch(() => {
+          reportDiscordDeliveryFailure({
+            code: "discord-command-reply-failed",
+            channelId: interaction.channelId,
+            sourceId: interaction.id
+          });
+        })
+    );
   });
 
   client.on(Events.MessageCreate, (message) => {
@@ -223,19 +237,21 @@ export function createDiscordJsTransport(
       return;
     }
 
-    void handleContextAskMention({
-      message,
-      handler,
-      ask,
-      channelScope,
-      conversationEvidenceSource
-    }).catch(() => {
-      reportDiscordDeliveryFailure({
-        code: "discord-context-ask-reply-failed",
-        channelId: message.channelId,
-        sourceId: message.id
-      });
-    });
+    trackDelivery(
+      handleContextAskMention({
+        message,
+        handler,
+        ask,
+        channelScope,
+        conversationEvidenceSource
+      }).catch(() => {
+        reportDiscordDeliveryFailure({
+          code: "discord-context-ask-reply-failed",
+          channelId: message.channelId,
+          sourceId: message.id
+        });
+      })
+    );
   });
 
   return {

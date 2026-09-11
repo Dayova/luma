@@ -104,62 +104,11 @@ export async function runBudgetedAiRequest(input: {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const pending = input.invoke(controller.signal).then(async (response) => {
-      if (reservation && input.budget) {
-        await input.budget.recordResponseFacts(reservation.reservationId, {
-          ...(response.providerResponseId
-            ? { providerResponseId: response.providerResponseId }
-            : {}),
-          ...(response.providerRequestId
-            ? { providerRequestId: response.providerRequestId }
-            : {}),
-          ...(response.model ? { returnedModel: response.model } : {}),
-          ...(response.serviceTier ? { serviceTier: response.serviceTier } : {}),
-          ...(response.status ? { responseStatus: response.status } : {}),
-          ...(response.incompleteReason
-            ? { incompleteReason: response.incompleteReason }
-            : {}),
-          ...(response.usage ? { reportedUsage: response.usage } : {})
-        });
-        const known =
-          response.model === input.model && response.serviceTier === "default";
-        if (!known) {
-          await input.budget.markUnknown(reservation.reservationId, {
-            blockWorkspace: true
-          });
-          throw new AiServiceError(
-            "not-configured",
-            "The AI provider returned an unverified model or pricing tier; accounting needs reconciliation."
-          );
-        }
-        // Settle before parsing application output, even when output is invalid.
-        await input.budget.settle(
-          reservation.reservationId,
-          known ? response.usage : undefined
-        );
-      }
-      if (
-        (input.budget || response.status !== undefined) &&
-        response.status !== "completed"
-      ) {
-        if (
-          response.status === "incomplete" &&
-          response.incompleteReason === "max_output_tokens"
-        ) {
-          throw new AiServiceError(
-            "request-too-large",
-            "The AI answer reached its output limit. Narrow the question or source before retrying; reported usage has been accounted for."
-          );
-        }
-        throw new AiServiceError(
-          "unavailable",
-          "The AI provider did not complete its answer. Reported usage has still been accounted for."
-        );
-      }
-      return response;
-    });
-    return await Promise.race([
-      pending,
+    // Race only the provider read. Accounting stays inside this request's owned
+    // lifetime; a response arriving after timeout cannot write into a closed
+    // store from a detached continuation. Its held charge requires reconciliation.
+    const response = await Promise.race([
+      input.invoke(controller.signal),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
           controller.abort();
@@ -172,6 +121,59 @@ export async function runBudgetedAiRequest(input: {
         }, input.limits.timeoutMs);
       })
     ]);
+    clearTimeout(timeout);
+    timeout = undefined;
+    if (reservation && input.budget) {
+      await input.budget.recordResponseFacts(reservation.reservationId, {
+        ...(response.providerResponseId
+          ? { providerResponseId: response.providerResponseId }
+          : {}),
+        ...(response.providerRequestId
+          ? { providerRequestId: response.providerRequestId }
+          : {}),
+        ...(response.model ? { returnedModel: response.model } : {}),
+        ...(response.serviceTier ? { serviceTier: response.serviceTier } : {}),
+        ...(response.status ? { responseStatus: response.status } : {}),
+        ...(response.incompleteReason
+          ? { incompleteReason: response.incompleteReason }
+          : {}),
+        ...(response.usage ? { reportedUsage: response.usage } : {})
+      });
+      const known = response.model === input.model && response.serviceTier === "default";
+      if (!known) {
+        await input.budget.markUnknown(reservation.reservationId, {
+          blockWorkspace: true
+        });
+        throw new AiServiceError(
+          "not-configured",
+          "The AI provider returned an unverified model or pricing tier; accounting needs reconciliation."
+        );
+      }
+      // Settle before parsing application output, even when output is invalid.
+      await input.budget.settle(
+        reservation.reservationId,
+        known ? response.usage : undefined
+      );
+    }
+    if (
+      (input.budget || response.status !== undefined) &&
+      response.status !== "completed"
+    ) {
+      if (
+        response.status === "incomplete" &&
+        response.incompleteReason === "max_output_tokens"
+      ) {
+        throw new AiServiceError(
+          "request-too-large",
+          "The AI answer reached its output limit. Narrow the question or source before retrying; reported usage has been accounted for."
+        );
+      }
+      throw new AiServiceError(
+        "unavailable",
+        "The AI provider did not complete its answer. Reported usage has still been accounted for."
+      );
+    }
+    return response;
   } catch (error) {
     const safe = normalizeAiServiceError(error);
     if (reservation && input.budget) {

@@ -325,18 +325,18 @@ export async function startServer(
     meetingNotesSync?.start();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
+    let stopping: Promise<void> | undefined;
     return {
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
-      async stop() {
-        try {
-          await meetingNotesSync?.stop();
-        } finally {
-          try {
-            await bot.stop();
-          } finally {
-            await database.close();
-          }
-        }
+      stop() {
+        stopping ??= (async () => {
+          // Stop admission and scheduled ingestion immediately, then drain both.
+          // A failed/timed-out drain never closes the store later in a detached
+          // continuation: its lease must survive process termination for recovery.
+          await drainBeforeClose(Promise.all([bot.stop(), meetingNotesSync?.stop()]));
+          await database.close();
+        })();
+        return stopping;
       }
     };
   } catch (error) {
@@ -360,6 +360,25 @@ export async function startServer(
       throw new LumaStartupCancelledError();
     }
     throw error;
+  }
+}
+
+async function drainBeforeClose(operation: Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        // Leave time for the entrypoint to report an unclean stop before
+        // systemd's 120-second hard-stop deadline.
+        timer = setTimeout(
+          () => reject(new Error("Luma shutdown did not drain admitted work")),
+          90_000
+        );
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

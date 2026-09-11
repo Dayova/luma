@@ -148,6 +148,7 @@ export interface DiscordTransport {
     ) => Promise<DiscordContextAskResponse | null>,
     startupSignal?: AbortSignal
   ): Promise<void>;
+  /** Stop admission and wait for admitted handlers and final deliveries before closing. */
   disconnect(): Promise<void>;
   resolveChannel(input: { channelId: string }): Promise<DiscordChannelSurface | null>;
   createThread(input: { parentChannelId: string; name: string }): Promise<DiscordThread>;
@@ -240,6 +241,16 @@ export function createDiscordMeetingBot(
     identityDirectory: input.identityDirectory
   });
   const startLocks = new Map<string, Promise<void>>();
+  const admitted = new Set<Promise<unknown>>();
+  let stopping = false;
+  let stopped: Promise<void> | undefined;
+  const track = <T>(operation: () => Promise<T>): Promise<T> => {
+    const pending = Promise.resolve().then(operation);
+    admitted.add(pending);
+    const finished = () => admitted.delete(pending);
+    void pending.then(finished, finished);
+    return pending;
+  };
   const contextRateLimiter = input.contextAsk
     ? createDiscordContextAskRateLimiter({
         minIntervalMs: input.contextAsk.config.minIntervalMs,
@@ -253,32 +264,54 @@ export function createDiscordMeetingBot(
     start: (startupSignal) =>
       input.transport.connect(
         (command) => {
-          if (command.type !== "start" && command.type !== "bind") {
-            return handleCommand(input, command, now, accessPolicy, channelScope);
-          }
-
-          return withStartLock(
-            startLocks,
-            `${command.guildId}:${command.channelId}`,
-            () => handleCommand(input, command, now, accessPolicy, channelScope)
+          if (stopping)
+            return Promise.resolve({
+              content: "Luma is shutting down. Please try again after it restarts."
+            });
+          return track(() =>
+            command.type !== "start" && command.type !== "bind"
+              ? handleCommand(input, command, now, accessPolicy, channelScope)
+              : withStartLock(startLocks, `${command.guildId}:${command.channelId}`, () =>
+                  handleCommand(input, command, now, accessPolicy, channelScope)
+                )
           );
         },
         input.contextAsk
           ? (ask) =>
-              answerConversationThread(
-                input,
-                ask,
-                accessPolicy,
-                channelScope,
-                contextRateLimiter,
-                seenContextMessages,
-                now
-              )
+              stopping
+                ? Promise.resolve(null)
+                : track(() =>
+                    answerConversationThread(
+                      input,
+                      ask,
+                      accessPolicy,
+                      channelScope,
+                      contextRateLimiter,
+                      seenContextMessages,
+                      now
+                    )
+                  )
           : undefined,
         startupSignal
       ),
-    stop: () => input.transport.disconnect(),
-    publishMeetingEvents: (publishInput) => publishMeetingEvents(input, publishInput)
+    stop() {
+      stopping = true;
+      stopped ??= (async () => {
+        // The transport owns final delivery/source checks after a handler returns;
+        // the bot also owns admitted work when using any other transport adapter.
+        const results = await Promise.allSettled([
+          input.transport.disconnect(),
+          ...admitted
+        ]);
+        const failure = results.find((result) => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+      })();
+      return stopped;
+    },
+    publishMeetingEvents: (publishInput) =>
+      stopping
+        ? Promise.reject(new Error("Luma is shutting down"))
+        : track(() => publishMeetingEvents(input, publishInput))
   };
 }
 

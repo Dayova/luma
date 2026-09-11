@@ -1,5 +1,15 @@
 # Unattended single-VPS operations
 
+On stop, Luma immediately refuses new Discord work and cancels scheduled source
+ingestion. It waits for admitted commands, Context Ask requests, final source and
+audience checks, replies, and active ingestion before closing the store. A
+90-second drain failure exits unsuccessfully without a clean-close receipt or
+lease removal; the 120-second systemd hard stop remains the final bound. Do not
+clear the lease to make a scheduled backup proceed. Follow the crash-recovery
+procedure instead. An AI provider response received after its request timeout
+does not perform detached accounting writes; its possible charge stays held for
+explicit reconciliation.
+
 The repository includes a daily cold-backup job and an independent health timer.
 They are deployment artifacts; adding them to Git does not install or activate
 them. This profile uses the documented Linux systemd layout, one PGlite owner,

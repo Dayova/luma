@@ -125,6 +125,63 @@ function mention() {
 }
 
 describe("Discord production channel resolution and delivery", () => {
+  it.each(["command", "context-ask"] as const)(
+    "drains final source proof and delivery for an admitted %s before disconnecting",
+    async (entrypoint) => {
+      const live = transport();
+      let finishProof: () => void = () => undefined;
+      const proof = new Promise<void>((resolve) => {
+        finishProof = resolve;
+      });
+      const requireCurrent = vi.fn(() => proof);
+      const command = vi.fn(() =>
+        Promise.resolve({ content: "Reviewed result", requireCurrent })
+      );
+      const ask = vi.fn(() =>
+        Promise.resolve({
+          content: "Reviewed result",
+          idempotencyKey: "shutdown-proof",
+          requireCurrent
+        })
+      );
+      await live.connect(command, ask);
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "meeting",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "interaction",
+        channelId: "parent",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-08T12:00:00Z"),
+        options: { getSubcommand: () => "usage" },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      const message = mention();
+      if (entrypoint === "command") sdk.emit(Events.InteractionCreate, interaction);
+      else sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(requireCurrent).toHaveBeenCalledOnce());
+      let stopped = false;
+      const stopping = live.disconnect().then(() => {
+        stopped = true;
+      });
+      sdk.emit(Events.InteractionCreate, interaction);
+      sdk.emit(Events.MessageCreate, message);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(command).toHaveBeenCalledTimes(entrypoint === "command" ? 1 : 0);
+      expect(ask).toHaveBeenCalledTimes(entrypoint === "context-ask" ? 1 : 0);
+      expect(stopped).toBe(false);
+      expect(interaction.editReply).not.toHaveBeenCalled();
+      expect(message.reply).not.toHaveBeenCalled();
+      finishProof();
+      await stopping;
+      expect(
+        entrypoint === "command" ? interaction.editReply : message.reply
+      ).toHaveBeenCalledOnce();
+    }
+  );
+
   it.each([
     "human",
     "luma",

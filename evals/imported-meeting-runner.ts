@@ -1,4 +1,7 @@
-import { createContextIntelligence } from "../src/context-intelligence/context-intelligence.js";
+import {
+  ContextIntelligenceError,
+  createContextIntelligence
+} from "../src/context-intelligence/context-intelligence.js";
 import type { ContextAnswerRequest } from "../src/context-intelligence/context-answerer.js";
 import type { ContextInquiry } from "../src/context-intelligence/interface.js";
 import type { RawConversationSnapshot } from "../src/knowledge/observed-source-ledger.js";
@@ -170,9 +173,13 @@ export async function runImportedMeetingFixture(
         : "unavailable";
   }
   let finalDelivery = "delivered";
+  const deliveryContext = context();
+  if (!deliveryContext.requireCurrent)
+    throw new Error("Context Intelligence must expose requireCurrent");
   try {
-    await context().requireCurrent!(inquiry);
-  } catch {
+    await deliveryContext.requireCurrent(inquiry);
+  } catch (error) {
+    if (!(error instanceof ContextIntelligenceError)) throw error;
     finalDelivery = "blocked";
   }
   const afterReplayCalls = requests.length;

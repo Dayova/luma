@@ -56,6 +56,22 @@ function externalFixture() {
 }
 
 describe("source-bound prior Meeting recall", () => {
+  it("returns receipt time as a UTC instant when source timestamps carry offsets", async () => {
+    const database = await createPgliteDatabase();
+    const f = importedMeetingFixture(database);
+    try {
+      await f.ingest(
+        "offset",
+        "Luma has an offset source timestamp.",
+        "2026-09-11T10:00:00+02:00"
+      );
+      const result = await f.organizationalContext().retrieve(f.request());
+      expect(result.sources).toHaveLength(1);
+      expect(result.sources[0]?.updatedAt).toBe("2026-09-11T08:00:00.000Z");
+    } finally {
+      await database.close();
+    }
+  });
   for (const change of ["revoke", "change", "discover"] as const)
     it(`recalls normal externally grounded imports and invalidates recall after external ${change}`, async () => {
       const database = await createPgliteDatabase();

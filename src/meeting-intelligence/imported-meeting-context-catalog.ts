@@ -286,12 +286,12 @@ export function createImportedMeetingContextCatalog(input: {
       } catch {
         throw unavailable();
       }
-      const updatedAt =
-        judgmentRevision?.rows[0]?.created_at ??
-        supportingReceipts
-          .map((receipt) => receipt.source.capturedAt)
-          .sort()
-          .at(-1)!;
+      const instants = judgmentRevision?.rows[0]
+        ? [Date.parse(judgmentRevision.rows[0].created_at)]
+        : supportingReceipts.map((receipt) => Date.parse(receipt.source.capturedAt));
+      if (!instants.length || instants.some((instant) => !Number.isFinite(instant)))
+        return null;
+      const updatedAt = new Date(Math.max(...instants)).toISOString();
       const content = JSON.stringify({
         kind: leaf.item.kind,
         statement: leaf.item.text,

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Luma operational health every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=luma-health.service
+
+[Install]
+WantedBy=timers.target

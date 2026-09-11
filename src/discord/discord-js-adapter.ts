@@ -65,7 +65,10 @@ export type DiscordJsTransportConfig = {
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
-export type DiscordJsTransport = DiscordTransport & ConversationEvidenceSource;
+export type DiscordJsTransport = DiscordTransport &
+  ConversationEvidenceSource & {
+    gatewayConnected?(): boolean;
+  };
 
 export class DiscordJsAdapterError extends Error {
   readonly code: string;
@@ -235,6 +238,7 @@ export function createDiscordJsTransport(
   });
 
   return {
+    gatewayConnected: () => !disconnected && client.isReady(),
     async connect(handler, contextHandler, startupSignal) {
       startupSignal?.throwIfAborted();
       assertConnectedLifetime();

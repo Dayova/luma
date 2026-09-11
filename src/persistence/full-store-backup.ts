@@ -267,3 +267,77 @@ export async function verifyIsolatedRestoredStore(restoreDir: string): Promise<{
     await database.close();
   }
 }
+
+/**
+ * Rehearse Postgres recovery only on a fresh quarantined copy of an operator's
+ * fenced crash image. This never acquires, clears, or modifies the source lease,
+ * and never manufactures a clean-close receipt for the image or original store.
+ * Fencing is an external operator fact; a PID or lease age cannot prove it.
+ */
+export async function createCrashRecoveryRehearsal(input: {
+  fencedImageDir: string;
+  restoreDir: string;
+  applicationRevision: string;
+  fencing: {
+    recordId: string;
+    originalOwnerFenced: true;
+    automaticRestartsDisabled: true;
+  };
+}): Promise<{ imageSha256: string; tables: { table: string; rows: string }[] }> {
+  z.string()
+    .regex(/^[a-f0-9]{40}$/u)
+    .parse(input.applicationRevision);
+  z.object({
+    recordId: z.string().min(1).max(200),
+    originalOwnerFenced: z.literal(true),
+    automaticRestartsDisabled: z.literal(true)
+  })
+    .strict()
+    .parse(input.fencing);
+  const source = await canonicalStorePath(input.fencedImageDir);
+  const destination = await canonicalStorePath(input.restoreDir);
+  assertSeparate(source, destination);
+  if (
+    (await pathExists(join(source, RESTORE_QUARANTINE_FILE))) ||
+    !(await pathExists(join(source, "PG_VERSION")))
+  ) {
+    throw new Error("Crash rehearsal requires an original non-quarantined PGlite image");
+  }
+  const entries = await inventory(source);
+  const imageSha256 = createHash("sha256").update(JSON.stringify(entries)).digest("hex");
+  const lease = await acquireStoreOwnership(destination);
+  try {
+    await mkdir(destination, { mode: 0o700 });
+    await writeFile(
+      join(destination, RESTORE_QUARANTINE_FILE),
+      JSON.stringify({
+        format: "luma-isolated-crash-rehearsal-v1",
+        imageSha256,
+        applicationRevision: input.applicationRevision,
+        fencing: input.fencing
+      }),
+      { flag: "wx", mode: 0o600 }
+    );
+    await copyInventory(source, destination, entries);
+    const copied = await inventory(destination);
+    copied.files = copied.files.filter((file) => file.path !== RESTORE_QUARANTINE_FILE);
+    if (
+      JSON.stringify(entries) !== JSON.stringify(copied) ||
+      JSON.stringify(entries) !== JSON.stringify(await inventory(source))
+    ) {
+      throw new Error(
+        "Crash image changed during copying or failed integrity verification"
+      );
+    }
+  } finally {
+    await lease.release();
+  }
+  // Opening embedded Postgres replays its own durable recovery state, then the
+  // existing isolated verifier reads every table and closes the copy cleanly.
+  // No migrations, live providers, Follow-ups, accounting resets, or promotion.
+  const result = await verifyIsolatedRestoredStore(destination);
+  if (JSON.stringify(entries) !== JSON.stringify(await inventory(source))) {
+    throw new Error("The fenced image changed during recovery rehearsal");
+  }
+  return { imageSha256, ...result };
+}

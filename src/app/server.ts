@@ -47,6 +47,7 @@ import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.j
 
 export type RunningLumaApp = {
   stop(): Promise<void>;
+  gatewayConnected(): boolean;
 };
 
 /** Deliberate startup cancellation after all acquired resources were released. */
@@ -303,6 +304,7 @@ export async function startServer(
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
     return {
+      gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
       async stop() {
         try {
           await meetingNotesSync?.stop();

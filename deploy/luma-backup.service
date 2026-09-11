@@ -1,0 +1,31 @@
+[Unit]
+Description=Luma verified encrypted off-host cold backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/luma/current
+UnsetEnvironment=NODE_OPTIONS NODE_PATH
+StateDirectory=luma-operations
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/flock --nonblock --no-fork /var/lib/luma-operations/backup.lock /usr/bin/node /opt/luma/current/dist/src/app/operations-main.js backup
+# systemd runs cleanup after failed starts, timeouts, and interruption too. The
+# durable marker resumes only a service this maintenance run previously stopped.
+ExecStopPost=/usr/bin/node /opt/luma/current/dist/src/app/operations-main.js resume
+TimeoutStartSec=3600
+TimeoutStopSec=180
+KillMode=control-group
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/luma /var/lib/luma-operations /var/backups/luma-operations
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=true
+LimitCORE=0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=luma-backup

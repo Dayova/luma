@@ -1,7 +1,9 @@
 import { LumaStartupCancelledError, startServer } from "./server.js";
+import { startRuntimeHealthReporter } from "./runtime-health.js";
 
 const startupCancellation = new AbortController();
 let stopping: Promise<void> | undefined;
+let stopHealth: (() => Promise<void>) | undefined;
 
 function stopForSignal(): void {
   if (stopping) return;
@@ -11,7 +13,11 @@ function stopForSignal(): void {
       if (error instanceof LumaStartupCancelledError) return undefined;
       throw error;
     });
-    await app?.stop();
+    try {
+      await stopHealth?.();
+    } finally {
+      await app?.stop();
+    }
   })().then(
     () => process.exit(0),
     () => {
@@ -30,7 +36,14 @@ process.on("SIGTERM", stopForSignal);
 
 const startup = startServer(process.env, {}, startupCancellation.signal);
 try {
-  await startup;
+  const app = await startup;
+  const healthPath = process.env["LUMA_RUNTIME_HEALTH_PATH"];
+  if (healthPath && !startupCancellation.signal.aborted) {
+    stopHealth = startRuntimeHealthReporter({
+      path: healthPath,
+      gatewayConnected: () => app.gatewayConnected()
+    });
+  }
 } catch {
   if (stopping) {
     await stopping;

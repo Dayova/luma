@@ -6,6 +6,7 @@ import { createDiscordJsTransport } from "../../src/discord/discord-js-adapter.j
 type MakeRequest = typeof Discord.DefaultRestOptions.makeRequest;
 
 const sdk = vi.hoisted(() => ({
+  ready: false,
   emit: (_event: string, ..._values: unknown[]): boolean => {
     void _event;
     void _values;
@@ -34,6 +35,9 @@ vi.mock("discord.js", async (importOriginal) => {
       login(): Promise<void> {
         return sdk.login(this.request);
       }
+      isReady(): boolean {
+        return sdk.ready;
+      }
       destroy(): Promise<void> {
         return sdk.destroy();
       }
@@ -51,9 +55,13 @@ vi.mock("discord.js", async (importOriginal) => {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  sdk.ready = false;
   sdk.register.mockResolvedValue();
   sdk.login.mockImplementation(() => {
-    queueMicrotask(() => sdk.emit(Events.ClientReady));
+    queueMicrotask(() => {
+      sdk.ready = true;
+      sdk.emit(Events.ClientReady);
+    });
     return Promise.resolve();
   });
   sdk.destroy.mockResolvedValue();
@@ -61,6 +69,18 @@ beforeEach(() => {
 });
 
 describe("Discord transport startup cancellation", () => {
+  it("reports actual Gateway readiness and never stays healthy after disconnect", async () => {
+    const live = transport();
+    expect(live.gatewayConnected?.()).toBe(false);
+    await live.connect(command);
+    expect(live.gatewayConnected?.()).toBe(true);
+    sdk.ready = false;
+    expect(live.gatewayConnected?.()).toBe(false);
+    sdk.ready = true;
+    expect(live.gatewayConnected?.()).toBe(true);
+    await live.disconnect();
+    expect(live.gatewayConnected?.()).toBe(false);
+  });
   it("stops a stalled registration and fences its late completion from login", async () => {
     const registration = deferred<void>();
     // Model a REST rate-limit wait which does not immediately reject on abort.

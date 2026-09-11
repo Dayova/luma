@@ -6459,4 +6459,99 @@ describe("Human-approved canonical knowledge patches", () => {
       await h.database.close();
     }
   });
+
+  it("retains the canonical receipt when the subsequent Outcome claim fails in persistence", async () => {
+    const h = await canonicalPatchHarness("outcome-claim-failure");
+    try {
+      await h.approve();
+      // The real stage transaction cannot claim its Outcome stage. Earlier
+      // canonical preparation and its positive result still commit normally.
+      await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+        ADD CONSTRAINT test_refuse_outcome_claim
+        CHECK (stage <> 'outcome' OR status <> 'executing')`);
+      const failed = await h.execution.execute(h.executeInput);
+      expect(failed.observation.outcome).toMatchObject({
+        status: "failed",
+        retryable: false,
+        requiresManualRecovery: true,
+        externalReferences: [
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]
+      });
+      expect(JSON.stringify(failed)).not.toContain("test_refuse_outcome_claim");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toEqual([]);
+      expect(await h.stages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: "knowledge", status: "succeeded" }),
+          expect.objectContaining({ stage: "outcome", status: "pending" })
+        ])
+      );
+      await expect(h.execution.execute(h.executeInput)).rejects.toThrow(
+        "explicit recovery"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+        DROP CONSTRAINT test_refuse_outcome_claim`);
+      const recovered = await h.execution.recover(h.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toHaveLength(1);
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({ externalId: "canonical-handbook" })
+      ]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("retains a newly proven canonical receipt when the recovery Meeting snapshot is unavailable", async () => {
+    const h = await canonicalPatchHarness("recovery-snapshot-failure");
+    try {
+      await h.approve();
+      h.writer.afterWrite = () =>
+        Promise.reject(new Error("Connection lost after commit"));
+      expect(
+        (await h.execution.execute(h.executeInput)).observation.outcome
+      ).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+      const query = h.meetingIntelligence.query.bind(h.meetingIntelligence);
+      let refuseSnapshot = true;
+      h.meetingIntelligence.query = (request) => {
+        if (refuseSnapshot && request.query.type === "snapshot") {
+          refuseSnapshot = false;
+          return Promise.reject(new Error("private snapshot diagnostic"));
+        }
+        return query(request);
+      };
+      const interrupted = await h.execution.recover(h.executeInput);
+      expect(interrupted.observation.outcome).toMatchObject({
+        status: "failed",
+        retryable: false,
+        requiresManualRecovery: true,
+        externalReferences: [
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]
+      });
+      expect(JSON.stringify(interrupted)).not.toContain("private snapshot diagnostic");
+      expect(await h.stages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: "knowledge", status: "succeeded" }),
+          expect.objectContaining({ stage: "outcome", status: "pending" })
+        ])
+      );
+      expect(h.outcome.writes).toEqual([]);
+      const recovered = await h.execution.recover(h.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toHaveLength(1);
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({ externalId: "canonical-handbook" })
+      ]);
+    } finally {
+      await h.database.close();
+    }
+  });
 });

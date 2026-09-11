@@ -924,13 +924,20 @@ async function settleOperationalOutcome(
     ...knowledgeReferences
   ]);
 
-  const receipt = await settleOperationalOutcomeWriteStage(
-    dependencies,
-    input,
-    durable,
-    writer,
-    settledReferences
-  );
+  let receipt: OperationalOutcomeReceipt;
+  try {
+    receipt = await settleOperationalOutcomeWriteStage(
+      dependencies,
+      input,
+      durable,
+      writer,
+      settledReferences
+    );
+  } catch (error) {
+    // Claiming the next stage can fail before its own provider-error handler.
+    // Keep already proven effects even if no further store read is possible.
+    throw failureWithEstablishedSettlementReferences(error, settledReferences);
+  }
 
   const externalReferences = uniqueExternalReferences([
     ...work.externalReferences,
@@ -948,6 +955,43 @@ async function settleOperationalOutcome(
   }
 
   return externalReferences;
+}
+
+function failureWithEstablishedSettlementReferences(
+  error: unknown,
+  establishedReferences: ExternalReference[]
+): unknown {
+  if (!establishedReferences.length) return error;
+  if (error instanceof PartialOperationalOutcomeSettlementError) {
+    return new PartialOperationalOutcomeSettlementError(
+      uniqueExternalReferences([...establishedReferences, ...error.externalReferences]),
+      error.code,
+      error.message,
+      error.disposition
+    );
+  }
+  if (error instanceof NonRetryableExecutionError) {
+    return new PartialOperationalOutcomeSettlementError(
+      establishedReferences,
+      error.code,
+      error.message,
+      "failed"
+    );
+  }
+  if (error instanceof IndeterminateProviderMutationError) {
+    return new PartialOperationalOutcomeSettlementError(
+      establishedReferences,
+      "provider-outcome-unknown",
+      `${error.message} Luma cannot prove whether the provider applied this mutation; inspect the provider before creating a fresh Intent.`,
+      "manual"
+    );
+  }
+  return new PartialOperationalOutcomeSettlementError(
+    establishedReferences,
+    "operational-outcome-progress-unavailable",
+    "Luma retained completed provider references but could not establish the remaining settlement progress. Run recovery before creating a fresh Intent.",
+    "manual"
+  );
 }
 
 async function settleKnowledgeStage(
@@ -1133,6 +1177,7 @@ async function recoverOperationalOutcomeSettlement(
   now: () => Date
 ): Promise<FollowUpExecutionRecorded> {
   const occurredAt = now().toISOString();
+  let establishedReferences: ExternalReference[] = [];
 
   try {
     if (input.intent.type !== "settle-operational-outcome") {
@@ -1145,8 +1190,18 @@ async function recoverOperationalOutcomeSettlement(
       meetingId: input.meetingId,
       intentId: input.intent.id
     });
+    if (durable) establishedReferences = settlementDurableExternalReferences(durable);
     if (durable?.plan.canonicalKnowledgePatch) {
-      await settleKnowledgeStage(dependencies, input, durable, true);
+      const knowledgeReferences = await settleKnowledgeStage(
+        dependencies,
+        input,
+        durable,
+        true
+      );
+      establishedReferences = uniqueExternalReferences([
+        ...establishedReferences,
+        ...knowledgeReferences
+      ]);
       durable = await readOperationalOutcomeSettlement({
         database: dependencies.database,
         workspaceId: input.workspace.workspaceId,
@@ -1336,6 +1391,10 @@ async function recoverOperationalOutcomeSettlement(
         "Operational Outcome settlement disappeared during recovery"
       );
     }
+    establishedReferences = uniqueExternalReferences([
+      ...establishedReferences,
+      ...settlementDurableExternalReferences(afterWork)
+    ]);
 
     if (afterWork.outcome.status === "executing") {
       const executingKnownNotApplied =
@@ -1392,6 +1451,10 @@ async function recoverOperationalOutcomeSettlement(
         "Operational Outcome settlement disappeared after recovery"
       );
     }
+    establishedReferences = uniqueExternalReferences([
+      ...establishedReferences,
+      ...settlementDurableExternalReferences(afterOutput)
+    ]);
 
     const finalizedAfterRecovery = finalizedOperationalOutcomeSettlementObservation(
       input,
@@ -1500,15 +1563,19 @@ async function recoverOperationalOutcomeSettlement(
 
     return await executeIntent(dependencies, input, idempotencyKey, now);
   } catch (error) {
+    const failure = failureWithEstablishedSettlementReferences(
+      error,
+      establishedReferences
+    );
     return executionFailureObservation(
       input,
-      error instanceof PartialOperationalOutcomeSettlementError ||
-        error instanceof IndeterminateProviderMutationError ||
-        error instanceof NonRetryableExecutionError
-        ? error
+      failure instanceof PartialOperationalOutcomeSettlementError ||
+        failure instanceof IndeterminateProviderMutationError ||
+        failure instanceof NonRetryableExecutionError
+        ? failure
         : new IndeterminateProviderMutationError(
             `Luma could not safely inspect the durable Operational Outcome recovery state: ${
-              error instanceof Error ? error.message : "unknown error"
+              failure instanceof Error ? failure.message : "unknown error"
             }`
           ),
       occurredAt

@@ -1,0 +1,508 @@
+{
+  "version": 1,
+  "provenance": "agent-authored-calibration-not-human-gold",
+  "controls": [
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-041",
+          "language": "en",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_mira",
+              "text": "I will fix parser.ts by 18 September 2026."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-041",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "parser-fix",
+            "description": "Fix parser.ts.",
+            "ownerId": "person_mira",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-041:1"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-041",
+          "language": "en",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_mira",
+              "text": "I will fix parser.ts by 18 September 2026."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-041",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "parser-fix",
+            "description": "Repair the parser.ts implementation by the agreed date.",
+            "ownerId": "person_mira",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-041:1"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "language-dates-identifiers",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-041",
+          "language": "en",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_mira",
+              "text": "I will fix parser.ts by 18 September 2026."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-041",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "parser-fix",
+            "description": "Fix parser.ts.",
+            "ownerId": "person_sam",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-041:1"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-041",
+          "language": "en",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_mira",
+              "text": "I will fix parser.ts by 18 September 2026."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-041",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "parser-fix",
+            "description": "Fix parser.ts.",
+            "ownerId": "person_mira",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-041:1"],
+            "confidence": "high"
+          },
+          {
+            "stableKey": "parser-fix-again",
+            "description": "Fix parser.ts.",
+            "ownerId": "person_mira",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-041:1"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "duplicate-items",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-087",
+          "language": "en",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_jo",
+              "text": "The issue might be in cache.ts, or it might be elsewhere. We have not identified the cause yet."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-087",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "cause",
+            "question": "Why did the cache.ts bug cause the failure?",
+            "raisedBy": "person_jo",
+            "evidenceIds": ["evidence:meeting-087:1"],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail"
+        }
+      ]
+    }
+  ]
+}

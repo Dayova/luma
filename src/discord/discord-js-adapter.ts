@@ -5,6 +5,7 @@ import {
   DiscordDecisionPermissionUnavailableError
 } from "./discord-decision-standing-runtime.js";
 import {
+  DiscordDecisionAddressInputError,
   discordDecisionRecordConfigFromEnv,
   isExplicitDecisionRecordInstruction
 } from "./discord-decision-record-runtime.js";
@@ -284,6 +285,7 @@ export function createDiscordJsTransport(
       handleInteraction(interaction, config.guildId, commandHandler, channelScope)
         .catch(async (error: unknown) => {
           const content =
+            error instanceof DiscordDecisionAddressInputError ||
             error instanceof DiscordDecisionPermissionInputError ||
             error instanceof DiscordDecisionPermissionUnavailableError
               ? error.message
@@ -1160,6 +1162,12 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     };
   }
   if (interaction.commandName === "decision-record") {
+    const meetingId =
+      subcommand === "automatic" ? null : interaction.options.getString("meeting_id");
+    const selectedSource =
+      subcommand === "automatic" ? null : interaction.options.getString("source_message");
+    if (meetingId && selectedSource) throw new DiscordDecisionAddressInputError();
+    const meetingAddress = meetingId ? { meetingId } : {};
     if (subcommand === "candidates") {
       const sourceMessageId = interaction.options.getString("source_message"),
         candidate = interaction.options.getInteger("candidate"),
@@ -1167,6 +1175,7 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
       return {
         ...base,
         type: "decision-record-candidates",
+        ...meetingAddress,
         ...(sourceMessageId ? { sourceMessageId } : {}),
         ...(candidate ? { candidate } : {}),
         ...(page ? { page } : {})
@@ -1204,6 +1213,7 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
       return {
         ...base,
         type: "decision-record-meeting",
+        ...meetingAddress,
         instruction: interaction.options.getString("instruction", true),
         ...(targetRecordId ? { targetRecordId } : {})
       };
@@ -1211,6 +1221,7 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     const sourceMessageId = interaction.options.getString("source_message");
     const address = {
       ...base,
+      ...meetingAddress,
       ...(sourceMessageId ? { sourceMessageId } : {}),
       requestId: interaction.options.getString("request_id", true)
     };
@@ -2246,6 +2257,14 @@ const decisionRecordCommand = new SlashCommandBuilder()
           .setDescription("Original @Luma message ID; omit for this bound Meeting")
           .setMaxLength(22)
       )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
       .addIntegerOption((option) =>
         option
           .setName("candidate")
@@ -2310,7 +2329,7 @@ const decisionRecordCommand = new SlashCommandBuilder()
   .addSubcommand((command) =>
     command
       .setName("meeting")
-      .setDescription("Record a decision from the imported Meeting bound to this thread")
+      .setDescription("Record a decision from a LogicalMeeting or this imported Meeting")
       .addStringOption((option) =>
         option
           .setName("instruction")
@@ -2322,6 +2341,14 @@ const decisionRecordCommand = new SlashCommandBuilder()
         option
           .setName("target_record")
           .setDescription("Exact existing record ID when requesting an update")
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
           .setMaxLength(512)
       )
   )
@@ -2374,6 +2401,14 @@ const decisionRecordCommand = new SlashCommandBuilder()
           .setDescription("Original @Luma message ID; omit for this bound Meeting")
           .setMaxLength(22)
       )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
   );
 function decisionRecordAddress(
   command: SlashCommandSubcommandBuilder,
@@ -2388,12 +2423,21 @@ function decisionRecordAddress(
   );
   return omitSource
     ? addressed
-    : addressed.addStringOption((option) =>
-        option
-          .setName("source_message")
-          .setDescription("Original @Luma message ID; omit for this bound Meeting")
-          .setMaxLength(22)
-      );
+    : addressed
+        .addStringOption((option) =>
+          option
+            .setName("source_message")
+            .setDescription("Original @Luma message ID; omit for this bound Meeting")
+            .setMaxLength(22)
+        )
+        .addStringOption((option) =>
+          option
+            .setName("meeting_id")
+            .setDescription(
+              "Exact LogicalMeeting ID returned by Luma; excludes source_message"
+            )
+            .setMaxLength(512)
+        );
 }
 
 function granolaSharingOptions(command: SlashCommandSubcommandBuilder) {

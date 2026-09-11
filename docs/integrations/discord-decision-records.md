@@ -175,3 +175,24 @@ and standing.
 Use `/decision-record candidates source_message:<original-message-id>` in the original Conversation, or `/decision-record candidates` in the bound imported Meeting thread. Optional `candidate` and `page` selections expose the full retained review and exact acceptance token. Every delivery rechecks the source, original audience and current channel binding. Queue, interruption and budget failures produce deterministic status text without requiring an AI response.
 
 Enabling source review does not grant standing permission to create or amend records. Candidates require the ordinary exact Human acceptance unless a separate current Human standing policy authorizes the operation. An interrupted model attempt is retained and is not silently charged again at restart. The main app stops background admission immediately during shutdown and drains admitted work before closing persistence.
+
+## LogicalMeeting addresses
+
+`/decision-record meeting`, `candidates`, `status`, `accept`, and `recover`
+accept an optional `meeting_id` from `/meeting captures`. This directly addresses
+an already admitted LogicalMeeting, including Granola-only captures, from a
+configured founder-only parent channel or its eligible thread. No synthetic
+Meeting or thread binding is created. `meeting_id` and `source_message` are
+mutually exclusive.
+
+The main runtime resolves that exact ID through the owned current capture/source
+proof for all four founders. The bot rechecks the same resolved identity, original
+source access, founder audience and actual channel at response delivery. Replies
+include `Meeting ID (meeting_id)` alongside the original request ID; carry both
+into later status, acceptance or recovery commands.
+
+On an existing imported Meeting thread, `candidates` uses its current proven
+LogicalMeeting queue when available. Status, acceptance and recovery without an
+explicit `meeting_id` continue to address the original imported request subject.
+They never silently retarget old request IDs to a different LogicalMeeting.
+The imported binding and capture resolution are both checked again at delivery.

@@ -1,3 +1,4 @@
+import type { DiscordDecisionRecordRuntime } from "../../src/discord/discord-decision-record-runtime.js";
 import type { AutomaticDecisionDetector } from "../../src/decision-intelligence/ports.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
@@ -743,7 +744,10 @@ describe("Original Human review of imported Decision candidates", () => {
   });
 });
 
-async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
+async function importedDecisionBot(
+  f: Awaited<ReturnType<typeof fixture>>,
+  options: Pick<DiscordDecisionRecordRuntime, "logicalMeetings" | "automatic"> = {}
+) {
   let command: ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | undefined;
   const transport: DiscordTransport = {
     connect: (handler) => {
@@ -792,6 +796,7 @@ async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
       }
     },
     decisionRecords: {
+      ...options,
       meetingIntelligence: f.mi,
       execution: executor,
       config: {
@@ -826,6 +831,59 @@ async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Native imported Decision commands through the actual MI facade", () => {
+  it("maps only candidate discovery to the current LogicalMeeting and keeps prior imported request IDs on their original subject", async () => {
+    const f = await fixture();
+    let mapped = "logical-meeting:approved-capture";
+    const resolveMeeting = vi.fn(({ meetingId }: { meetingId: string }) =>
+      Promise.resolve(meetingId === f.imported.meetingId ? mapped : null)
+    );
+    const review = vi.fn<
+      NonNullable<DiscordDecisionRecordRuntime["automatic"]>["review"]
+    >(() =>
+      Promise.resolve({
+        batch: null,
+        status: "queued" as const
+      })
+    );
+    const live = await importedDecisionBot(f, {
+      logicalMeetings: {
+        resolveMeeting,
+        currentAudience: () =>
+          Promise.resolve({
+            workspaceId: workspace.workspaceId,
+            personIds: [...f.people]
+          })
+      },
+      automatic: { review }
+    });
+    await live.bind();
+    const response = await live.invoke({
+      ...live.base,
+      type: "decision-record-candidates",
+      interactionId: "candidates-logical"
+    });
+    expect(response.content).toContain(`Meeting ID (meeting_id): ${mapped}`);
+    expect(review).toHaveBeenCalledWith({ type: "meeting", meetingId: mapped });
+    await response.requireCurrent?.();
+    mapped = "logical-meeting:changed-binding";
+    await expect(response.requireCurrent?.()).rejects.toThrow();
+    resolveMeeting.mockClear();
+    const request = await live.invoke({
+      ...live.base,
+      type: "decision-record-meeting",
+      instruction: "Record this decision."
+    });
+    expect(request.content).toContain("Request ID:");
+    const status = await live.invoke({
+      ...live.base,
+      type: "decision-record-status",
+      requestId: `discord:${live.base.interactionId}:decision-record`
+    });
+    expect(status.content).toContain("Request ID:");
+    expect(resolveMeeting).not.toHaveBeenCalled();
+    expect(status.content).not.toContain("Meeting ID (meeting_id):");
+  });
+
   it("rechecks the imported thread binding after interpretation before executing an otherwise approved record", async () => {
     const f = await fixture();
     f.allowWrites();

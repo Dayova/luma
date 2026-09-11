@@ -694,7 +694,8 @@ async function handleCommand(
                     input.decisionRecords.config.parentChannelIds.includes(
                       surface.parentChannelId
                     )) ||
-                    (command.type === "decision-record-automatic" &&
+                    ((command.type === "decision-record-automatic" ||
+                      ("meetingId" in command && !!command.meetingId)) &&
                       surface.kind === "text-channel" &&
                       input.decisionRecords.config.parentChannelIds.includes(
                         surface.id
@@ -825,6 +826,33 @@ async function executeDecisionRecordCommand(
 ): Promise<DiscordCommandResponse> {
   if (!input.decisionRecords) throw new Error("Decision Records are not configured");
   if (
+    command.type !== "decision-record-automatic" &&
+    command.meetingId &&
+    "sourceMessageId" in command &&
+    command.sourceMessageId
+  )
+    return { content: "Choose either meeting_id or source_message, never both." };
+  if (command.type !== "decision-record-automatic" && command.meetingId) {
+    const logical = await resolveLogicalDecisionAddress(input, command.meetingId, true);
+    if (!logical) throw new ImportedMeetingReviewUnavailableError();
+    const response = await handleDiscordDecisionRecordCommand({
+      runtime: input.decisionRecords,
+      workspace: input.workspace,
+      command,
+      meetingId: logical.id,
+      logicalMeetingId: logical.id,
+      requireCurrent: () => logical.requireCurrent()
+    });
+    await logical.requireCurrent();
+    return {
+      content: response.content,
+      requireCurrent: async () => {
+        await logical.requireCurrent();
+        await response.requireCurrent?.();
+      }
+    };
+  }
+  if (
     command.type === "decision-record-automatic" ||
     ("sourceMessageId" in command && command.sourceMessageId)
   )
@@ -842,7 +870,7 @@ async function executeDecisionRecordCommand(
   if (!binding || binding.thread_id !== command.channelId)
     return {
       content:
-        "Attach this thread to its imported Meeting with /meeting bind first, or supply source_message for a Conversation request."
+        "Supply meeting_id from /meeting captures for a LogicalMeeting, attach this thread with /meeting bind, or supply source_message for a Conversation request."
     };
   const state = await queryMeetingSnapshot(input, binding);
   if (!state.importedSources.length)
@@ -867,19 +895,75 @@ async function executeDecisionRecordCommand(
     await requireImportedMeetingCurrent(input, state);
   };
   await requireBinding();
+  // Only candidate discovery may route to the capture queue. Existing imported
+  // request IDs keep their original subject unless an exact meeting_id is supplied.
+  const logical =
+    command.type === "decision-record-candidates"
+      ? await resolveLogicalDecisionAddress(input, binding.meeting_id, false)
+      : null;
+  const requireCurrent = async () => {
+    await requireBinding();
+    await logical?.requireCurrent();
+  };
   const response = await handleDiscordDecisionRecordCommand({
     runtime: input.decisionRecords,
     workspace: input.workspace,
     command,
-    meetingId: binding.meeting_id,
-    requireCurrent: requireBinding
+    meetingId: logical?.id ?? binding.meeting_id,
+    ...(logical ? { logicalMeetingId: logical.id } : {}),
+    requireCurrent
   });
-  await requireBinding();
+  await requireCurrent();
   return {
     content: response.content,
     requireCurrent: async () => {
-      await requireBinding();
+      await requireCurrent();
       await response.requireCurrent?.();
+    }
+  };
+}
+
+async function resolveLogicalDecisionAddress(
+  input: ScopedDiscordMeetingBotInput,
+  requestedId: string,
+  exact: boolean
+): Promise<{ id: string; requireCurrent(): Promise<void> } | null> {
+  const resolver = input.decisionRecords?.logicalMeetings;
+  if (!resolver) return null;
+  if (!requestedId || requestedId.length > 512 || /[\s<>`]/u.test(requestedId))
+    throw new ImportedMeetingReviewUnavailableError();
+  const readAudience = async () => {
+    const audience = await resolver.currentAudience(input.workspace.workspaceId);
+    if (
+      !audience ||
+      audience.workspaceId !== input.workspace.workspaceId ||
+      audience.personIds.length !== 4 ||
+      new Set(audience.personIds).size !== 4 ||
+      JSON.stringify([...audience.personIds].sort()) !==
+        JSON.stringify([...input.authorizedPersonIds].sort())
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    return { ...audience, personIds: [...audience.personIds].sort() };
+  };
+  const audience = await readAudience();
+  const resolve = () =>
+    resolver.resolveMeeting({
+      workspaceId: input.workspace.workspaceId,
+      meetingId: requestedId,
+      audience: structuredClone(audience)
+    });
+  const id = await resolve();
+  if (!id) return null;
+  if ((exact && id !== requestedId) || id.length > 512 || /[\s<>`]/u.test(id))
+    throw new ImportedMeetingReviewUnavailableError();
+  return {
+    id,
+    requireCurrent: async () => {
+      if (
+        JSON.stringify(await readAudience()) !== JSON.stringify(audience) ||
+        (await resolve()) !== id
+      )
+        throw new ImportedMeetingReviewUnavailableError();
     }
   };
 }

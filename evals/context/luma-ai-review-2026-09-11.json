@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "id": "luma-ai-review-context",
+  "revision": "2026-09-11",
+  "retrievedAt": "2026-09-11T18:36:44.653093Z",
+  "sources": [
+    {
+      "id": "overview",
+      "title": "✨ Luma — Organizational Context & Operations Agent",
+      "url": "https://www.notion.so/39f2e87228bf81bcbce2d45921dd4e18",
+      "observedEditedAt": "2026-09-08T18:32:21.403Z",
+      "verification": {
+        "state": "unverified"
+      },
+      "contentSha256": "3e275f66613b617990e3d7e0bdae3169e2f5c90c653f74c901321a735f5b2fc6",
+      "coverage": "Selected relevant sections read; Notion did not report truncation or unknown-block counts. Native verification state is unverified."
+    },
+    {
+      "id": "operating",
+      "title": "13 — Luma Operating Decisions & Pilot Gates — 8 September 2026",
+      "url": "https://www.notion.so/3d52e87228bf817c9c67e015df3ddf23",
+      "observedEditedAt": "2026-09-11T16:04:28.731Z",
+      "verification": {
+        "state": "unverified"
+      },
+      "contentSha256": "ce1267284c0cc002d89c48d01c97f6c2e6266b374c23c968be3cc72adaba769e",
+      "coverage": "Selected relevant sections read; Notion did not report truncation or unknown-block counts. Native verification state is unverified."
+    },
+    {
+      "id": "ownership",
+      "title": "🗣️ 08 — Speaker Attribution & Ownership Reliability (German-first)",
+      "url": "https://www.notion.so/3b62e87228bf8128ab4bf3ba6b0c5b40",
+      "observedEditedAt": "2026-08-30T09:57:35.038Z",
+      "verification": {
+        "state": "unverified"
+      },
+      "contentSha256": "70c8200b7becac069bdbd86c6a3233a7846d6fd27db879203b0757a7f39a38b5",
+      "coverage": "Selected relevant sections read; Notion did not report truncation or unknown-block counts. Native verification state is unverified."
+    },
+    {
+      "id": "decisions",
+      "title": "🧾 11 — Decision Intelligence & Decision Records",
+      "url": "https://www.notion.so/3d52e87228bf81f98d79c1233431c8bd",
+      "observedEditedAt": "2026-09-09T14:02:33.026Z",
+      "verification": {
+        "state": "unverified"
+      },
+      "contentSha256": "2daec08336c3b78ee9f27a9d71def8542501c192f22a3f96dcd61ded3360bc3b",
+      "coverage": "Selected relevant sections read; Notion did not report truncation or unknown-block counts. Native verification state is unverified."
+    }
+  ],
+  "principles": [
+    {
+      "id": "evidence",
+      "scope": "answer",
+      "statement": "Every factual assertion, including a question presupposition and a follow-up description, must be supported by supplied Evidence. An existing evidence ID alone does not establish entailment. Preserve original speech, uncertainty, conditions, negation, technical identifiers and source language.",
+      "sourceIds": ["overview"]
+    },
+    {
+      "id": "modality",
+      "scope": "answer",
+      "statement": "Possibilities, proposals, requests, accepted commitments, refusals, completed historical work, and decisions are different states. An explicitly conditional candidate can be retained as a proposal; it is not accepted work. Do not require empty arrays merely to avoid false commitments.",
+      "sourceIds": ["overview", "ownership", "decisions"]
+    },
+    {
+      "id": "ownership",
+      "scope": "answer",
+      "statement": "Who spoke and who owns the work are separate. A mentioned person, same display name, role/title, or tentative request does not establish ownership. A reliably identified self-commitment or evidenced accepted assignment can establish an owner proposal. Ambiguous speakers/owners require explicit uncertainty and targeted clarification.",
+      "sourceIds": ["ownership", "operating"]
+    },
+    {
+      "id": "corrections",
+      "scope": "answer",
+      "statement": "Respect explicit corrections and withdrawal of prior commitments. Keep earlier material distinguishable as historical/superseded; do not present it as current. A recent unaccepted proposal does not override an older valid decision merely through recency.",
+      "sourceIds": ["operating", "decisions"]
+    },
+    {
+      "id": "decisions",
+      "scope": "answer",
+      "statement": "Confirmed decisions require supporting authority/context or accepted team agreement. A proposal, preference, open question, rejected option, or earlier decision is not automatically a new adopted decision. Reversing a group decision does not by itself identify personal objectors. Supporting and objecting participants need Evidence.",
+      "sourceIds": ["decisions"]
+    },
+    {
+      "id": "recall",
+      "scope": "answer",
+      "statement": "Capture all material accepted work, decisions, and unresolved questions without duplication, merging different owners, or reopening a question explicitly resolved in the supplied source. Do not demand exhaustive filler items or boilerplate risks.",
+      "sourceIds": ["overview", "operating"]
+    },
+    {
+      "id": "dates",
+      "scope": "answer",
+      "statement": "Keep deadline meaning and uncertainty, distinguishing desired, rejected, conditional and accepted dates. Use the supplied workspace timezone and source instant for relative dates. The repository contract supplies Europe/Berlin; do not use the reviewer machine timezone.",
+      "sourceIds": ["ownership"]
+    },
+    {
+      "id": "authorization",
+      "scope": "pipeline",
+      "statement": "All output here is a structured proposal before deterministic reconciliation. A proposed create-work-item is not evidence of an unauthorized provider write. Actual new work requires reconciliation and confirmed or intentionally unassigned ownership; explicit authorized safe write intent may suffice without redundant approval. This component does not execute anything.",
+      "sourceIds": ["overview", "operating"]
+    },
+    {
+      "id": "systems",
+      "scope": "pipeline",
+      "statement": "Linear is canonical work; Notion is canonical knowledge and durable meeting destinations; GitHub supplies implementation Evidence. Search/reconcile before actual create. Candidate answers lack a Work Catalog, organizational retrieval results, permission state and execution receipts; do not penalize them for not performing unavailable tool operations.",
+      "sourceIds": ["overview"]
+    },
+    {
+      "id": "knowledge",
+      "scope": "pipeline",
+      "statement": "Retrieval must respect current access and destination audience, bounded relevance, Human Judgment, current versus historical status and source revisions. These cases supply no additional organizational context. Assess extraction fidelity; record missing retrieval/recall coverage as a benchmark limitation rather than inventing undisclosed context facts.",
+      "sourceIds": ["operating"]
+    },
+    {
+      "id": "human",
+      "scope": "pipeline",
+      "statement": "Human Judgment outranks AI inference. AI review is provisional and cannot establish consent, source permissions, production readiness, a genuinely unseen holdout, or human ground truth. The full product requires end-to-end validation beyond this proposal schema.",
+      "sourceIds": ["overview", "operating"]
+    },
+    {
+      "id": "clarification",
+      "scope": "answer",
+      "statement": "Ask targeted questions only when an uncertainty actually remains and matters. Do not create repetitive clarification about already settled ownership, dates, causes or decisions. Unknown ownership must not become a guessed or falsely certain assignee.",
+      "sourceIds": ["ownership", "operating"]
+    }
+  ],
+  "limitations": [
+    "This is a root-authored synthesis of selected product requirements, not independently authored human gold labels. Raw Notion snapshots stay private in the ignored work directory.",
+    "Notion is product context for review, not extra meeting Evidence. Do not import actual founder roles or real project facts into fictional scenarios.",
+    "The evaluated component uses the provider-comparison-v1 prompt/schema with an empty additional-context list. Later merged production capabilities are outside this historical evaluation.",
+    "Source pages contain dated implementation snapshots. This brief uses semantic product rules and makes no current deployment/completion claims.",
+    "Repository CONTEXT.md and ADRs 0002/0006/0007 corroborate Evidence, proposal/reconciliation separation, and speaker versus ownership rules. The original output schema cannot represent every newer domain state. Report representation gaps separately."
+  ]
+}

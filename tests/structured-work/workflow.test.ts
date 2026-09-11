@@ -33,6 +33,9 @@ describe("MI-owned compound structured knowledge and actual Linear work", () => 
     async (lost) => {
       const f = structuredWorkFixture(database);
       f.existingWork();
+      f.request.observations[0].instruction =
+        "Add this hypothesis to Hypotheses and update the Linear task DAY-1.";
+      f.source.evidence.at(-1)!.text = f.request.observations[0].instruction;
       f.override((plan) => {
         plan.work.reconciliation = { action: "update", targetId: "DAY-1" };
       });
@@ -321,13 +324,13 @@ describe("MI-owned compound structured knowledge and actual Linear work", () => 
         if (kind === "schema")
           plan.record.fields["invented"] = { type: "text", value: "invented field" };
         if (kind === "update") {
-          f.existingRecord();
           plan.record.reconciliation = {
             action: "update",
             targetId: "existing-hypothesis"
           };
         }
       });
+      if (kind === "update") f.existingRecord();
       if (kind === "poll") f.source.evidence[4]!.origin = "poll";
       const state = await f.make().mi.observe(f.request);
       expect(state.state).toBe("needs-clarification");

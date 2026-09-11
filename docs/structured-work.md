@@ -218,7 +218,7 @@ and be supplied to MI; enabling a token or channel alone does not grant access.
 
 Knowledge and work reconcile independently. Existing/new, new/existing, both
 existing and both new all retain exactly one pair of references. Complete discovery
-is bounded to 100 configured Notion rows and 100 non-archived Linear issues across
+is bounded to 100 configured Notion rows and 1,000 non-archived Linear issues across
 all workflow states. An incomplete/larger result withholds execution. Completed
 and canceled tasks remain reconciliation context; they cannot silently disappear
 and cause a replacement task. A command may explicitly select `workItemId`; that
@@ -226,7 +226,7 @@ identity is read directly even when outside ordinary discovery, including an
 archived task. It cannot be silently replaced by the interpreter. Ordinary discovery
 does not claim to enumerate archived Linear issues.
 
-The actual Linear adapter uses one explicit native GraphQL query for the exact
+The actual Linear adapter uses bounded native GraphQL pages for the exact
 team, its non-archived issues and the nested fields Luma needs. It verifies the
 selected team is actually readable, every returned issue belongs to it, and both
 issue and label connections are complete. The generic fuzzy search is not evidence of complete absence. This
@@ -242,14 +242,19 @@ unassigned work requires a literal Human instruction; it is not a null fallback.
 The original ownership evidence and unique provider mapping are rechecked before
 execution and replay. These deterministic forms are deliberately bounded; other
 wording returns a targeted ownership clarification rather than guessed assignment.
+This gate applies to new work and work updates. Linking an existing task makes no
+assignment and retains its current owner; unresolved ownership does not block that
+link or force an owner onto a separately created knowledge record.
 
 ## Linear discovery bounds
 
 Compound discovery does not use the SDK's lazy per-issue relationship fetches.
 A 100-issue native fixture produces one HTTP request per complete pass, including
 assignee, state, labels, project and parent. Labels have an explicit 51-result
-probe; more than 50 or a further page withholds completeness. This keeps the
-100-issue query below the documented 10,000-point single-query ceiling under
+probe; more than 50 labels or a further label page withholds completeness. Issue
+discovery follows at most ten 100-issue pages to the shared 1,000-issue bound;
+incomplete, repeated or inconsistent pages remain unavailable. This keeps each
+100-issue page below the documented 10,000-point single-query ceiling under
 Linear's published complexity formula. Exact named archived work continues through
 the provider's direct reference read; ordinary discovery includes all workflow
 states but excludes archived issues.
@@ -291,10 +296,32 @@ after queue waits and immediately before the single create dispatch.
 The native [data-source schema read](https://developers.notion.com/reference/retrieve-a-data-source)
 and [page property update](https://developers.notion.com/reference/patch-page)
 contracts were checked on 2026-09-11. Native property updates expose no conditional
-version argument. Existing records can be read/reused; a conflicting proposed
-property overwrite produces clarification. No fabricated compare-and-swap behavior
-is claimed. Linear updates likewise require its optional actual conditional-update
-capability; the current native Linear provider does not advertise one.
+version argument. Existing records can be read/reused. An explicit compound update
+produces `manual-application-required` with the existing record links, exact reviewed
+versions and labeled changed values (`before` / `after`). The request retains its
+original Evidence and interpretation, creates no approved write Intent, and executes
+neither half of the bundle. Replaying it neither writes nor pays for another model
+call. The caller applies the reviewed changes in the provider; Luma does not claim
+that this happened. Linear updates likewise require its optional actual conditional
+update capability; the current native Linear provider does not advertise one.
+
+Record updates contain only supplied, schema-validated fields. Omitted properties
+remain unchanged, and creation defaults are never injected into an update. Work
+updates need the same authenticated ownership proof as creation before Luma offers
+an applicable update proposal. A create-if-absent instruction cannot authorize an
+inferred overwrite; the two imperative clauses explicitly distinguish creating,
+updating and linking. Conceptual, quoted or negated examples stay outside Execute.
+
+Retained previews can contain any row supplied to the model, so they require the
+original knowledge credential/target scope, current original-audience access to
+every contributing knowledge row and continued membership of the original work
+catalog. A new credential scope cannot revive an older preview. Legacy requests
+without the original knowledge scope remain withheld. Before any provider stage
+has progressed, the complete original snapshots must also remain exact at final
+disclosure, including every manual proposal's selected version. Changed data needs
+a new reviewed request; no stored preview is silently rewritten. After actual
+execution, receipt reads preserve original input access while allowing Luma's own
+known changes. These checks apply to initial delivery, status, conclusion and replay.
 
 ## Durable execution and recovery
 

@@ -39,6 +39,8 @@ export type StoredStructuredWork = {
   requestHash: string;
   requesterPersonId: string;
   policyHash: string;
+  /** Original knowledge credential/target scope; absent legacy grants are never widened. */
+  recordsAuthorizationScopeId?: string;
   ownerProviderUserId: string | null;
   records: StructuredRecordSnapshot;
   work: WorkItem[];

@@ -1,6 +1,9 @@
 import { structuredWorkEvidence } from "../domain/structured-work.js";
 import { StructuredWorkClarification } from "./errors.js";
-import { isExplicitStructuredWorkInstruction } from "./explicit-instruction.js";
+import {
+  isExplicitStructuredWorkInstruction,
+  parseExplicitStructuredWorkInstruction
+} from "./explicit-instruction.js";
 import type { WorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import type { IdentityDirectory } from "../identity/interface.js";
@@ -31,6 +34,8 @@ import {
   structuredWorkSourceSchema
 } from "./schemas.js";
 import { requireStructuredWorkOwnership } from "./ownership.js";
+import { manualUpdateProposals } from "./update-proposals.js";
+import { STRUCTURED_WORK_CATALOG_LIMIT } from "./limits.js";
 
 export type StructuredWorkConfiguration = {
   evidenceSource: StructuredWorkEvidenceSource;
@@ -62,6 +67,7 @@ function policyHash(input: StructuredWorkDependencies): string {
     targets: input.targets,
     order: input.order ?? "record-first",
     records: input.records.providerId,
+    recordsScope: input.records.authorizationScopeId,
     work: input.work.providerId,
     workScope: input.workAuthorization.scopeId,
     workResource: input.workAuthorization.resource
@@ -80,7 +86,9 @@ export async function requireStructuredWorkCurrent(
         ...stored.state.source.audience,
         personIds: [...stored.state.source.audience.personIds].sort()
       }) ||
-    policyHash(input) !== stored.policyHash
+    policyHash(input) !== stored.policyHash ||
+    !stored.recordsAuthorizationScopeId ||
+    stored.recordsAuthorizationScopeId !== input.records.authorizationScopeId
   )
     throw new Error("Source recipients or structured execution policy changed");
   const actor = await input.accessPolicy.authorize({
@@ -98,11 +106,22 @@ export async function requireStructuredWorkCurrent(
   )
     throw new Error("The requester no longer has permission for this structured target");
   await input.evidenceSource.requireCurrent(stored.state.source);
+  // A preview may contain information from any supplied row, including unselected rows.
+  // Reading a positive execution receipt alone cannot prove access to those dependencies.
+  await input.records.requireReadable({
+    audience: stored.state.source.audience,
+    snapshot: stored.records,
+    authorizationScopeId: stored.recordsAuthorizationScopeId
+  });
   if (!(await input.workAuthorization.authorize(stored.state.source.audience)))
     throw new Error(
       "The original audience no longer has a sanctioned work destination grant"
     );
-  if (stored.intent && stored.state.preview) {
+  if (
+    (stored.intent || stored.state.updateProposals?.length) &&
+    stored.state.preview &&
+    stored.state.preview.work.reconciliation.action !== "link"
+  ) {
     const owner = requireStructuredWorkOwnership(
       stored.state.source,
       stored.state.preview.work.ownership
@@ -111,6 +130,9 @@ export async function requireStructuredWorkCurrent(
     if (mapping !== stored.ownerProviderUserId)
       throw new Error("The original owner mapping changed");
   }
+  await input.evidenceSource.requireCurrent(stored.state.source);
+  if (!(await input.workAuthorization.authorize(stored.state.source.audience)))
+    throw new Error("The original work destination grant changed during proof");
 }
 async function ownerMapping(
   input: StructuredWorkDependencies,
@@ -152,7 +174,10 @@ export async function searchStructuredWork(
     throw new Error("The work target is not sanctioned for this audience");
   if (!input.work.discoverWorkItems)
     throw new Error("This work provider cannot prove complete bounded reconciliation");
-  const result = await input.work.discoverWorkItems({ workspaceId, limit: 100 });
+  const result = await input.work.discoverWorkItems({
+    workspaceId,
+    limit: STRUCTURED_WORK_CATALOG_LIMIT
+  });
   const rows = [...result.items];
   if (text) {
     const selected = await input.work.getWorkItem(text);
@@ -160,7 +185,7 @@ export async function searchStructuredWork(
   }
   if (
     !result.complete ||
-    rows.length > 100 ||
+    rows.length > STRUCTURED_WORK_CATALOG_LIMIT ||
     new Set(rows.map((row) => row.id)).size !== rows.length ||
     rows.some((row) => row.providerId !== input.work.providerId)
   )
@@ -198,11 +223,7 @@ export function selectRecord(stored: StoredStructuredWork) {
     throw new Error("Select one unambiguous existing structured record");
   return matches[0]!;
 }
-function prepare(
-  stored: StoredStructuredWork,
-  plan: StructuredWorkInterpretation,
-  input: StructuredWorkDependencies
-): void {
+function prepare(stored: StoredStructuredWork, plan: StructuredWorkInterpretation): void {
   if (plan.targetKey !== stored.request.observations[0].targetKey)
     throw new StructuredWorkClarification(
       "The interpretation changed the explicitly selected target"
@@ -218,7 +239,10 @@ function prepare(
         "Every operation needs original source Evidence"
       );
   }
-  const fields = { ...stored.records.schema.defaults, ...plan.record.fields };
+  const fields =
+    plan.record.reconciliation.action === "create"
+      ? { ...stored.records.schema.defaults, ...plan.record.fields }
+      : { ...plan.record.fields };
   if (
     plan.record.reconciliation.action === "create" &&
     Object.entries(stored.records.schema.defaults).some(
@@ -241,7 +265,10 @@ function prepare(
         `The current structured target cannot accept field ${key}`
       );
   }
-  if (stored.records.schema.fields.some((field) => field.required && !fields[field.key]))
+  if (
+    plan.record.reconciliation.action === "create" &&
+    stored.records.schema.fields.some((field) => field.required && !fields[field.key])
+  )
     throw new StructuredWorkClarification("Required structured fields are missing");
   plan.record.fields = fields;
   stored.state.preview = plan;
@@ -263,14 +290,24 @@ function prepare(
     throw new StructuredWorkClarification(
       "The selected validation work is no longer active"
     );
-  if (plan.record.reconciliation.action === "update")
-    throw new StructuredWorkClarification(
-      "This target cannot safely compare and update structured properties; clarify the existing record change"
-    );
-  if (plan.work.reconciliation.action === "update" && !input.work.updateWorkItemIfCurrent)
-    throw new StructuredWorkClarification(
-      "This work provider does not support a conditional update; clarify the existing task change"
-    );
+  const command = parseExplicitStructuredWorkInstruction(
+    stored.request.observations[0].instruction
+  );
+  if (!command)
+    throw new StructuredWorkClarification("The original compound command is unavailable");
+  for (const [requested, selected] of [
+    [command.recordAction, plan.record.reconciliation.action],
+    [command.workAction, plan.work.reconciliation.action]
+  ]) {
+    if (
+      (selected === "update" && requested !== "update") ||
+      (requested === "update" && selected === "create") ||
+      (requested === "link" && selected !== "link")
+    )
+      throw new StructuredWorkClarification(
+        "The proposed operation differs from the explicit create, update or link instruction"
+      );
+  }
   if (plan.record.reconciliation.action === "create") {
     const titleKey = stored.records.schema.titleField;
     const title = fields[titleKey];
@@ -372,6 +409,24 @@ export async function readStructuredWorkState(
     throw new Error("Select the original structured request in this Conversation");
   const digest = operationDigest(stored);
   await requireStructuredWorkCurrent(input, stored);
+  const currentWork = await searchStructuredWork(
+    input,
+    request.workspaceId,
+    stored.workSearch
+  );
+  if (
+    stored.work.some(
+      (original) =>
+        !currentWork.some(
+          (current) =>
+            current.id === original.id &&
+            current.externalId === original.externalId &&
+            current.providerId === original.providerId &&
+            current.url === original.url
+        )
+    )
+  )
+    throw new Error("The original work catalog is no longer readable");
   for (const stage of stored.stages)
     if (stage.reference) {
       if (stage.target === "record")
@@ -391,6 +446,27 @@ export async function readStructuredWorkState(
       }
     }
   await requireStructuredWorkCurrent(input, stored);
+  if (stored.stages.every((stage) => stage.state === "pending")) {
+    // No provider change has happened. Finish with exact original material,
+    // including the selected version used for a manual before/after proposal.
+    await input.records.requireCurrent({
+      audience: stored.state.source.audience,
+      snapshot: stored.records
+    });
+    if (
+      operationDigest(
+        await searchStructuredWork(input, request.workspaceId, stored.workSearch)
+      ) !== operationDigest(stored.work)
+    )
+      throw new Error(
+        "The original structured preview targets changed; issue a new reviewed request"
+      );
+    await input.evidenceSource.requireCurrent(stored.state.source);
+    if (!(await input.workAuthorization.authorize(stored.state.source.audience)))
+      throw new Error(
+        "The original work destination grant changed during final delivery"
+      );
+  }
   if (
     operationDigest(
       await readStructuredWork(
@@ -530,6 +606,7 @@ export function createStructuredWorkIntelligence(
           requestHash: operationDigest(bound),
           requesterPersonId: person.personId,
           policyHash: policyHash(input),
+          recordsAuthorizationScopeId: input.records.authorizationScopeId,
           ownerProviderUserId: null,
           records,
           work,
@@ -592,8 +669,11 @@ export function createStructuredWorkIntelligence(
               }
             )
           );
-          prepare(stored, plan, input);
-          const owner = requireStructuredWorkOwnership(source, plan.work.ownership);
+          prepare(stored, plan);
+          const owner =
+            plan.work.reconciliation.action === "link"
+              ? null
+              : requireStructuredWorkOwnership(source, plan.work.ownership);
           stored.ownerProviderUserId = owner
             ? await ownerMapping(input, address.workspaceId, owner)
             : null;
@@ -607,36 +687,70 @@ export function createStructuredWorkIntelligence(
             throw new Error(
               "Canonical work changed during interpretation; review the current work"
             );
-          const intentId = `structured-work:${operationDigest({ requestHash: stored.requestHash, plan, schema: records.schema.revision, work, owner: stored.ownerProviderUserId })}`;
-          stored.intent = {
-            id: intentId,
-            type: "execute-structured-work",
-            status: "approved",
-            authorization: "explicit-instruction",
-            authorizedBy: person.personId,
-            planHash: operationDigest(plan)
-          };
-          stored.state.approvedIntentId = intentId;
-          stored.state.state = "validated";
-          stored.state.message =
-            "The explicit compound request is reconciled and approved for its two exact operations.";
-          const order =
-            input.order === "work-first"
-              ? (["work", "record"] as const)
-              : (["record", "work"] as const);
-          stored.stages = order.map((target) => {
-            const action = plan[target].reconciliation.action;
-            if (action !== "link" && action !== "create" && action !== "update")
-              throw new Error("A clarification cannot execute");
-            return {
-              target,
-              action,
-              state: "pending",
-              operationId: `${intentId}:${target}`,
-              reference: null,
-              message: "Awaiting execution"
-            };
+          stored.state.updateProposals = manualUpdateProposals({
+            plan,
+            records,
+            record: selectRecord(stored),
+            work: selectWork(stored),
+            workUpdatesSupported: !!input.work.updateWorkItemIfCurrent,
+            workIdentityProviderId:
+              input.work.identityProviderId ?? input.work.providerId,
+            owner:
+              owner && stored.ownerProviderUserId
+                ? {
+                    providerId: input.work.identityProviderId ?? input.work.providerId,
+                    providerUserId: stored.ownerProviderUserId,
+                    displayName: (await input.identityDirectory.getPerson({
+                      workspaceId: address.workspaceId,
+                      personId: owner
+                    }))!.displayName
+                  }
+                : null
           });
+          const unsupportedUpdate =
+            plan.record.reconciliation.action === "update" ||
+            (plan.work.reconciliation.action === "update" &&
+              !input.work.updateWorkItemIfCurrent);
+          if (unsupportedUpdate && !stored.state.updateProposals.length)
+            throw new StructuredWorkClarification(
+              "The selected existing records already match the proposed values. There are no changed fields to apply and no writes were made; request linking the existing records if that is intended."
+            );
+          if (stored.state.updateProposals.length) {
+            stored.state.state = "manual-application-required";
+            stored.state.message =
+              "No writes were made. The provider cannot condition an update on the reviewed version. Review the retained before/after changes and apply them manually in the linked existing records; omitted fields are preserved. This request will not retry a write or charge for another interpretation.";
+          } else {
+            const intentId = `structured-work:${operationDigest({ requestHash: stored.requestHash, plan, schema: records.schema.revision, work, owner: stored.ownerProviderUserId })}`;
+            stored.intent = {
+              id: intentId,
+              type: "execute-structured-work",
+              status: "approved",
+              authorization: "explicit-instruction",
+              authorizedBy: person.personId,
+              planHash: operationDigest(plan)
+            };
+            stored.state.approvedIntentId = intentId;
+            stored.state.state = "validated";
+            stored.state.message =
+              "The explicit compound request is reconciled and approved for its two exact operations.";
+            const order =
+              input.order === "work-first"
+                ? (["work", "record"] as const)
+                : (["record", "work"] as const);
+            stored.stages = order.map((target) => {
+              const action = plan[target].reconciliation.action;
+              if (action !== "link" && action !== "create" && action !== "update")
+                throw new Error("A clarification cannot execute");
+              return {
+                target,
+                action,
+                state: "pending",
+                operationId: `${intentId}:${target}`,
+                reference: null,
+                message: "Awaiting execution"
+              };
+            });
+          }
         } catch (error) {
           stored.intent = null;
           stored.stages = [];

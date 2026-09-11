@@ -210,10 +210,13 @@ export function createStructuredWorkExecution(
               schema: stored.records.schema,
               fields: stored.state.preview!.record.fields,
               source: stored.state.source,
-              ownerPersonId: requireStructuredWorkOwnership(
-                stored.state.source,
-                stored.state.preview!.work.ownership
-              ),
+              ownerPersonId:
+                stored.state.preview!.work.reconciliation.action === "link"
+                  ? null
+                  : requireStructuredWorkOwnership(
+                      stored.state.source,
+                      stored.state.preview!.work.ownership
+                    ),
               relatedWork:
                 stored.stages.find((stage) => stage.target === "work")?.reference ??
                 (selectWork(stored) ? workReference(selectWork(stored)!) : null)

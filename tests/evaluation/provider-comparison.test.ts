@@ -376,7 +376,7 @@ describe("comparison evaluation integrity", () => {
       modelFactory: factory
     });
     expect(factory).not.toHaveBeenCalled();
-    expect(report.rows).toHaveLength(48);
+    expect(report.rows).toHaveLength(corpus.fixtures.length * candidates.length);
     expect(
       report.rows.every((r) => r.status === "missing-credential" && r.checks === null)
     ).toBe(true);
@@ -425,7 +425,9 @@ describe("comparison evaluation integrity", () => {
       candidates.flatMap((c) => [`journal:${c.id}`, `request:${c.id}`])
     );
     expect(report.rows.filter((r) => r.status === "completed")).toHaveLength(4);
-    expect(report.rows.filter((r) => r.status === "request-limit")).toHaveLength(92);
+    expect(report.rows.filter((r) => r.status === "request-limit")).toHaveLength(
+      corpus.fixtures.length * candidates.length * 2 - 4
+    );
     expect(new Set(report.rows.slice(0, 4).map((r) => r.requestHash)).size).toBe(1);
   });
   it("rejects invalid limits without invoking providers", async () => {
@@ -516,5 +518,42 @@ describe("Google hosting configuration", () => {
         VERTEX_PROJECT_ID: "../another-project"
       })
     ).toThrow("invalid-vertex-project");
+  });
+});
+
+describe("Anthropic explicit prompt JSON mode", () => {
+  it("keeps the complete contract and validates output without a native grammar or retries", async () => {
+    const anthropic = candidates.find((c) => c.id === "anthropic")!;
+    let requests = 0;
+    const model = createComparisonReasoningModel({
+      candidate: anthropic,
+      apiKey: "test-key",
+      limits: defaultLimits,
+      anthropicOutputMode: "prompt-json",
+      onResponse: () => {},
+      transport: (_url, init) => {
+        requests++;
+        if (typeof init.body !== "string") throw new Error("expected JSON body");
+        const body = JSON.parse(init.body) as {
+          output_config: { format?: unknown; effort: string };
+          system: string;
+        };
+        expect(body.output_config.format).toBeUndefined();
+        expect(body.output_config.effort).toBe("medium");
+        expect(body.system).toBe(comparisonPayload(request).instructions);
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              wire(anthropic, requests === 1 ? proposal() : { actionItems: [] })
+            )
+          )
+        );
+      }
+    });
+    expect((await model.generateStructured(request)).value).toEqual(proposal());
+    await expect(model.generateStructured(request)).rejects.toThrow(
+      "invalid-json-or-schema"
+    );
+    expect(requests).toBe(2);
   });
 });

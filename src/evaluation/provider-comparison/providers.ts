@@ -79,6 +79,15 @@ export class ComparisonError extends Error {
   }
 }
 
+export type AnthropicOutputMode = "native-schema" | "prompt-json";
+
+export function anthropicOutputMode(env: NodeJS.ProcessEnv): AnthropicOutputMode {
+  const mode = env["LUMA_EVAL_ANTHROPIC_OUTPUT"]?.trim() || "native-schema";
+  if (mode !== "native-schema" && mode !== "prompt-json")
+    throw new ComparisonError("invalid-anthropic-output-mode");
+  return mode;
+}
+
 export type GoogleEndpoint =
   { backend: "developer" } | { backend: "vertex"; projectId?: string };
 
@@ -139,6 +148,7 @@ export function createComparisonReasoningModel(options: {
   limits: Limits;
   transport?: Transport;
   googleEndpoint?: GoogleEndpoint;
+  anthropicOutputMode?: AnthropicOutputMode;
   onResponse: (facts: ResponseFacts) => void;
 }): ReasoningModel {
   const { candidate, limits } = options;
@@ -160,7 +170,8 @@ export function createComparisonReasoningModel(options: {
         options.apiKey,
         payload,
         limits,
-        options.googleEndpoint ?? { backend: "developer" }
+        options.googleEndpoint ?? { backend: "developer" },
+        options.anthropicOutputMode ?? "native-schema"
       );
       if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxInputBytes)
         throw new ComparisonError("input-limit");
@@ -230,7 +241,8 @@ function outbound(
   key: string,
   payload: ReturnType<typeof comparisonPayload>,
   limits: Limits,
-  endpoint: GoogleEndpoint
+  endpoint: GoogleEndpoint,
+  anthropicMode: AnthropicOutputMode
 ) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   const messages = [{ role: "user", content: payload.input }];
@@ -272,10 +284,14 @@ function outbound(
           thinking: { type: "adaptive" },
           output_config: {
             effort: "medium",
-            format: {
-              type: "json_schema",
-              schema: compatibleSchema(meetingAnalysisJsonSchema)
-            }
+            ...(anthropicMode === "native-schema"
+              ? {
+                  format: {
+                    type: "json_schema",
+                    schema: compatibleSchema(meetingAnalysisJsonSchema)
+                  }
+                }
+              : {})
           }
         }
       };

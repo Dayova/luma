@@ -39,18 +39,18 @@ Start with a four-request smoke comparison: one case per configured provider.
 pnpm eval:providers --live --max-requests=4
 ```
 
-A full single repetition of the 12 cases across four providers takes at most 48
-requests. Three repetitions take at most 144:
+A full single repetition of the 16 cases across four providers takes at most 64
+requests. Three repetitions take at most 192:
 
 ```bash
-pnpm eval:providers --live --max-requests=48
-pnpm eval:providers --live --max-requests=144 --repeats=3
+pnpm eval:providers --live --max-requests=64
+pnpm eval:providers --live --max-requests=192 --repeats=3
 ```
 
 Select fewer providers if only some credentials are available:
 
 ```bash
-pnpm eval:providers --live --providers=anthropic,google --max-requests=24
+pnpm eval:providers --live --providers=anthropic,google --max-requests=32
 ```
 
 Requests are sequential, ordered by repetition, fixture, then provider. This
@@ -59,6 +59,24 @@ whole corpus first. A cap may still leave unequal coverage; compare matching
 fixture/repetition pairs. A live run exits 2 when any case is missing, unrun,
 limited, or failed; exit 0 means all requested cases produced validated output,
 **not** that semantic checks passed. Invalid setup exits 1.
+
+## Anthropic schema compilation compatibility
+
+The live Sonnet 5 API rejected this full contract with a compiled-grammar-size
+error. Reordering the discriminant, factoring references, and rewriting nullable
+unions did not resolve it. Removing the Follow-up Intent union did, but that
+changes the task and is unsuitable for evaluation.
+
+Set `LUMA_EVAL_ANTHROPIC_OUTPUT=prompt-json` to explicitly omit native output
+schema enforcement for Anthropic. The full original contract remains in the
+identical shared prompt and strict local validator; no fields, follow-up types,
+checks or reasoning settings are removed. Invalid JSON, schema violations and
+unknown citations remain failures; there is no automatic repair or fallback.
+The default remains `native-schema` for reproducibility. Reports record the mode.
+
+This compares deployable adapter configurations, not identical native decoding
+constraints across vendors. Report this difference alongside any quality/cost
+result. Diagnostic schema variants are never pooled into scored evaluation runs.
 
 ## Google through Vertex
 
@@ -136,11 +154,14 @@ a native schema with string/array minimum and format constraints omitted for
 compatibility; all original constraints remain in the shared prompt and local
 validator. Invalid output is an error, never silently repaired or retried.
 
-The 12 cases and their expected predicates are **agent-authored synthetic data,
+The 16 cases and their expected predicates are **agent-authored synthetic data,
 not human-labeled evaluation ground truth**. They cover commitments, explicit
 refusals, withdrawn offers, speculative proposals, corrected Decisions,
 relative/negated deadlines, unresolved ownership, code identifiers, open
 questions, quoted prompt injection, and mixed-language ownership separation.
+Four additional stress cases cover longer distracting conversations, late owner
+and decision corrections, a Berlin/UTC midnight boundary, and quoted attacks.
+There are 40 automated predicates per full repetition.
 
 Automated checks count matching fields, statuses and lexical alternatives. They
 can miss nuanced errors or reject valid paraphrases. Citation-ID validation

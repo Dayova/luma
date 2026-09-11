@@ -13,6 +13,8 @@ import {
   candidates,
   candidateKey,
   googleEndpoint,
+  anthropicOutputMode,
+  type AnthropicOutputMode,
   type GoogleEndpoint,
   comparisonPayload,
   createComparisonReasoningModel,
@@ -48,6 +50,7 @@ export type Report = {
   limits: Limits & { maxRequests: number; repeats: number };
   candidateConfig: readonly Candidate[];
   googleEndpoint: GoogleEndpoint;
+  anthropicOutputMode: AnthropicOutputMode;
   googlePricingSource: string;
   pricingVerifiedAt: string;
   pricingNotes: string;
@@ -97,6 +100,7 @@ export async function runComparison(options: RunnerOptions): Promise<Report> {
     limits: { ...limits, maxRequests: options.maxRequests, repeats: options.repeats },
     candidateConfig: options.selected,
     googleEndpoint: googleEndpoint(options.env),
+    anthropicOutputMode: anthropicOutputMode(options.env),
     googlePricingSource:
       googleEndpoint(options.env).backend === "vertex"
         ? "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
@@ -151,6 +155,7 @@ export async function runComparison(options: RunnerOptions): Promise<Report> {
           apiKey: candidateKey(candidate, options.env)!,
           limits,
           googleEndpoint: report.googleEndpoint,
+          anthropicOutputMode: report.anthropicOutputMode,
           onResponse
         });
       // Journal dispatch before the network call. Interrupted attempts may have been billed.
@@ -209,6 +214,7 @@ export function renderReport(report: Report): string {
     `- Git revision: ${report.gitRevision}`,
     `- Corpus SHA-256: ${report.corpusHash}`,
     `- Prompt version: ${report.promptVersion}`,
+    `- Anthropic output enforcement: ${report.anthropicOutputMode}; full prompt contract and local validation apply in both modes.`,
     `- Google backend: ${report.googleEndpoint.backend}${report.googleEndpoint.backend === "vertex" ? (report.googleEndpoint.projectId ? " (project-scoped, global)" : " (express, global)") : ""}; pricing: ${report.googlePricingSource}.`,
     `- Maximum requests: ${report.limits.maxRequests}; repetitions: ${report.limits.repeats}; output tokens/request: ${report.limits.maxOutputTokens}; timeout: ${report.limits.timeoutMs} ms.`,
     "",

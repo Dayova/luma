@@ -5,10 +5,19 @@ const table = `CREATE TABLE IF NOT EXISTS synthesis_action_execution_fences (
  workspace_id TEXT NOT NULL, meeting_id TEXT NOT NULL, intent_id TEXT NOT NULL,
  execution_lease_id TEXT NOT NULL, target_json TEXT NOT NULL,
  PRIMARY KEY(workspace_id,meeting_id))`;
-export async function ensureSynthesisActionFences(
-  database: Pick<LumaDatabase, "query">
-): Promise<void> {
-  await database.query(table);
+const initialized = new WeakMap<LumaDatabase, Promise<void>>();
+export function ensureSynthesisActionFences(database: LumaDatabase): Promise<void> {
+  const prior = initialized.get(database);
+  if (prior) return prior;
+  const operation = database
+    .query(table)
+    .then(() => {})
+    .catch((error: unknown) => {
+      initialized.delete(database);
+      throw error;
+    });
+  initialized.set(database, operation);
+  return operation;
 }
 export async function releaseSynthesisActionFence(input: {
   database: Pick<LumaDatabase, "query">;
@@ -16,7 +25,6 @@ export async function releaseSynthesisActionFence(input: {
   meetingId: string;
   intentId: string;
 }): Promise<void> {
-  await ensureSynthesisActionFences(input.database);
   await input.database.query(
     "DELETE FROM synthesis_action_execution_fences WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3",
     [input.workspaceId, input.meetingId, input.intentId]
@@ -42,7 +50,7 @@ export function projectCurrentSynthesisActions(state: MeetingState): MeetingStat
   if (!source) return state;
   const candidates = state.importedActionItemCandidates.filter(
     (candidate) =>
-      candidate.source.source.sourceKind === "capture-synthesis" &&
+      candidate.source.source.sourceKind !== "capture-synthesis" ||
       candidate.source.source.contentHash === source.sourceSetDigest
   );
   const ids = new Set(candidates.map((candidate) => candidate.id));

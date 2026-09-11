@@ -163,22 +163,40 @@ export function sameImportedSourceRevision(
 export async function projectImportedSourceMaterial(
   database: LumaDatabase,
   state: MeetingState,
-  eligibleIds: Set<string>
+  eligibleIds: Set<string>,
+  requireSynthesisCurrent?: (state: MeetingState) => Promise<void>
 ): Promise<MeetingState> {
-  if (state.importedSourceAnalysisReceiptIds === undefined) return state;
-  const ids = state.importedSourceAnalysisReceiptIds.filter((id) => eligibleIds.has(id));
+  const governedImports = state.importedSourceAnalysisReceiptIds !== undefined;
+  const ids = (state.importedSourceAnalysisReceiptIds ?? []).filter((id) =>
+    eligibleIds.has(id)
+  );
+  let synthesisCurrent = false;
+  if (state.captureSynthesisActionSource && requireSynthesisCurrent) {
+    try {
+      await requireSynthesisCurrent(state);
+      synthesisCurrent = true;
+    } catch {
+      /* A retained source-set digest is not current sharing authority. */
+    }
+  }
   const receipts = await Promise.all(
     ids.map((id) =>
       readImportedSourceAnalysisReceipt(database, state.workspaceId, state.meetingId, id)
     )
   );
   const allowedSource = (source: ImportedMeetingSource) =>
+    !governedImports ||
     receipts.some((receipt) => sameImportedSourceRevision(source, receipt.source));
   const sources = state.importedSources.filter(allowedSource);
-  const candidates = state.importedActionItemCandidates.filter(
-    (item) =>
-      item.source.source.sourceKind === "capture-synthesis" ||
-      allowedSource(item.source.source)
+  const candidates = state.importedActionItemCandidates.filter((item) =>
+    item.source.source.sourceKind === "capture-synthesis"
+      ? synthesisCurrent &&
+        item.source.source.sourceRevision ===
+          state.captureSynthesisActionSource?.revision &&
+        item.source.source.contentHash ===
+          state.captureSynthesisActionSource.sourceSetDigest &&
+        item.source.source.logicalMeetingId === state.meetingId
+      : allowedSource(item.source.source)
   );
   const candidateIds = new Set(candidates.map((item) => item.id));
   const reviews = state.actionItemReconciliationReviews.filter((item) =>
@@ -191,7 +209,7 @@ export async function projectImportedSourceMaterial(
       state.lifecycle === "imported"
         ? (sources[0]?.title ?? "Imported Meeting unavailable")
         : state.title,
-    importedSourceAnalysisReceiptIds: ids,
+    ...(governedImports ? { importedSourceAnalysisReceiptIds: ids } : {}),
     importedSources: sources,
     importedActionItemCandidates: candidates,
     currentImportedActionItemCandidateIds:
@@ -207,7 +225,13 @@ export async function projectImportedSourceMaterial(
     actionItemReconciliationCreatedWorkMappings:
       state.actionItemReconciliationCreatedWorkMappings.filter((item) =>
         candidateIds.has(item.candidateId)
-      )
+      ),
+    followUpIntentions: state.followUpIntentions.filter(
+      (intent) =>
+        !("reconciliation" in intent) ||
+        !intent.reconciliation ||
+        candidateIds.has(intent.reconciliation.candidateId)
+    )
   };
 }
 export async function filterImportedSourceEvidence(

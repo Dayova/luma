@@ -1,5 +1,8 @@
 import { synthesisSourceFence } from "./synthesis-source-fence.js";
-import { releaseSynthesisActionFence } from "../meeting-intelligence/synthesis-action-state.js";
+import {
+  releaseSynthesisActionFence,
+  ensureSynthesisActionFences
+} from "../meeting-intelligence/synthesis-action-state.js";
 import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
 import { structuredWorkModuleFor } from "../structured-work/module-binding.js";
 import { createStructuredWorkExecution } from "./structured-work-execution.js";
@@ -315,6 +318,7 @@ async function withCurrentExecutionContext(
   input: ExecuteFollowUpInput,
   operation: (guarded: CreateFollowUpExecutionInput) => Promise<ExecuteFollowUpResult>
 ): Promise<ExecuteFollowUpResult> {
+  await ensureSynthesisActionFences(dependencies.database);
   const requireCurrent = async () => {
     const rows = await dependencies.database.query<{ state_json: string }>(
       "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",

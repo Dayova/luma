@@ -273,6 +273,7 @@ export function createMeetingIntelligence(
       : Promise.resolve();
   const contextConfiguration: MeetingContextConfiguration = {
     database: input.database,
+    requireSynthesisCurrent: (state) => requireSynthesisCurrent(state),
     ...(input.importedSourceAnalysis
       ? { importedSourceAnalysis: input.importedSourceAnalysis }
       : {}),
@@ -392,9 +393,16 @@ export function createMeetingIntelligence(
                 state.importedActionItemCandidates,
                 candidates
               ),
-              currentImportedActionItemCandidateIds: candidates.map(
-                (candidate) => candidate.id
-              ),
+              currentImportedActionItemCandidateIds: [
+                ...state.currentImportedActionItemCandidateIds.filter((id) =>
+                  state.importedActionItemCandidates.some(
+                    (candidate) =>
+                      candidate.id === id &&
+                      candidate.source.source.sourceKind !== "capture-synthesis"
+                  )
+                ),
+                ...candidates.map((candidate) => candidate.id)
+              ],
               captureSynthesisActionSource: {
                 revision: synthesis.revision,
                 sourceSetDigest: synthesis.sourceSetDigest,
@@ -2680,7 +2688,12 @@ function filterSynthesisActionEvidence(
       ...state.followUpIntentions.flatMap((item) => item.provenance.evidence)
     ].map((item) => item.evidenceId)
   );
-  return evidence.filter((item) => allowed.has(item.evidenceId));
+  return evidence.filter(
+    (item) =>
+      (!item.evidenceId.startsWith("evidence:synthesis-action:") &&
+        !item.evidenceId.startsWith("evidence:human-action:")) ||
+      allowed.has(item.evidenceId)
+  );
 }
 
 async function queryProjectedMeeting(

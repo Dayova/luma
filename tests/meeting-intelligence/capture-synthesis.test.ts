@@ -246,6 +246,23 @@ async function setup() {
 }
 
 describe("Meeting Intelligence capture synthesis", () => {
+  it("does not disclose retained inferred conflicts through a replacement source grant", async () => {
+    const f = await setup();
+    try {
+      const meetingId = (await f.add(revision("notion"))).logicalMeeting.id;
+      await f.add(revision("granola"), "Private original conflicting source");
+      expect(await f.observe(meetingId)).toMatchObject({ analysisStatus: "completed" });
+      f.replaceGrant();
+      expect(await f.observe(meetingId)).toMatchObject({
+        analysisStatus: "deferred",
+        acceptedObservationIds: []
+      });
+      expect(f.calls()).toBe(1);
+      expect((await f.query(meetingId)).availability).toBe("unavailable");
+    } finally {
+      await f.database.close();
+    }
+  });
   it("rechecks source grants after durable paid admission and before disclosing evidence to the model", async () => {
     const f = await setup();
     try {

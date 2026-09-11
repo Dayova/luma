@@ -396,7 +396,7 @@ export function withCaptureSynthesis(input: {
       if (
         prior?.synthesis.claims.some(
           (claim) =>
-            claim.authority !== "inferred" &&
+            (claim.authority !== "inferred" || claim.conflictingClaimIds.length > 0) &&
             claim.citations.some(
               (citation) =>
                 !currentCaptureIds.has(citation.captureId) ||

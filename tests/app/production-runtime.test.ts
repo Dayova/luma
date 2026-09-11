@@ -106,6 +106,35 @@ describe("production deployment preflight", () => {
     ).rejects.toThrow("founder");
   });
 
+  it("requires the complete consultation configuration, four mapped founders and common parent scope", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_DISCORD_CONSULTATION_ENABLED: "1",
+      LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+      LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS: "779381502311137301" },
+      {
+        LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+          "779381502311137301,726409024894926869,1492911575806251219,777777777777777777"
+      },
+      { LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "777777777777777777" },
+      { LUMA_DISCORD_TEAM_ROLE_ID: "" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
+
   it("does not disclose malformed identity configuration", async () => {
     const secret = "sensitive-config-value";
     const error = await validateProductionEnvironment(
@@ -225,6 +254,31 @@ describe("production Discord application proof", () => {
       ).resolves.toBeUndefined();
     }
   );
+
+  it("requires Message Content for consultations even when Ask is disabled", async () => {
+    const env: NodeJS.ProcessEnv = {
+      ...configuration(),
+      LUMA_DISCORD_CONSULTATION_ENABLED: "1",
+      LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+      LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+    };
+    const read = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 15 }))
+      );
+    await expect(verifyProductionDiscordApplication(env, read)).rejects.toThrow(
+      "Message Content"
+    );
+    read.mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: (1 << 15) | (1 << 19) })
+      )
+    );
+    await expect(verifyProductionDiscordApplication(env, read)).resolves.toBeUndefined();
+  });
 
   it.each([undefined, "32768", -1, 32768.5])(
     "refuses an absent or malformed application intent proof (%s)",

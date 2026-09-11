@@ -5,7 +5,8 @@ import type {
   DecisionCatalogSnapshot,
   DecisionInterpretation,
   DecisionSource,
-  DecisionSubject
+  DecisionSubject,
+  DecisionEvidence
 } from "../domain/decision-records.js";
 import type { WorkspaceConfig } from "../domain/model.js";
 
@@ -36,6 +37,8 @@ export interface DecisionInterpreter {
     instruction: string;
     requesterPersonId: string;
     source: DecisionSource;
+    /** Literal authenticated review is separate from the imported original source. */
+    humanReviewEvidence?: DecisionEvidence[];
     authority: DecisionAuthoritySnapshot;
     catalog: DecisionCatalogSnapshot;
     targetRecordId?: string;

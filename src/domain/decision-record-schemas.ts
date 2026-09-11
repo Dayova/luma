@@ -6,6 +6,7 @@ import type {
   DecisionAuthoritySnapshot,
   DecisionCandidate,
   DecisionInterpretation,
+  DecisionHumanReview,
   DecisionRecordContent,
   DecisionSource,
   DecisionWriteStage
@@ -102,6 +103,46 @@ export const decisionAudienceSchema = z
   .object({ workspaceId: id, personIds: people.min(1) })
   .strict()
   .refine((value) => new Set(value.personIds).size === value.personIds.length);
+const decisionEvidenceSchema = z
+  .object({
+    id,
+    reference: decisionEvidenceReferenceSchema,
+    text: z.string().max(32_000),
+    authorPersonId: id.nullable(),
+    origin: z.enum(["human", "provider-derived", "poll"])
+  })
+  .strict();
+export const decisionHumanReviewSchema: z.ZodType<
+  DecisionHumanReview,
+  z.ZodTypeDef,
+  unknown
+> = z
+  .object({
+    id,
+    requestId: id,
+    observationId: id,
+    subject: decisionSubjectSchema,
+    actor: z.object({ providerId: id, providerUserId: id }).strict(),
+    personId: id,
+    audience: decisionAudienceSchema,
+    sourceContentHash: id,
+    sourceAuthorizationHash: id,
+    reviewToken: id.nullable(),
+    acceptedCandidateHash: id.nullable(),
+    evidence: decisionEvidenceSchema,
+    observedAt: instant
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.audience.personIds.includes(value.personId) &&
+      value.evidence.origin === "human" &&
+      value.evidence.authorPersonId === value.personId &&
+      value.evidence.reference.source === "human-judgment" &&
+      value.evidence.reference.participantId === value.personId &&
+      value.evidence.reference.evidenceId === value.evidence.id &&
+      value.evidence.text.trim().length > 0
+  );
 export const decisionSourceSchema: z.ZodType<DecisionSource, z.ZodTypeDef, unknown> = z
   .object({
     subject: decisionSubjectSchema,
@@ -109,20 +150,7 @@ export const decisionSourceSchema: z.ZodType<DecisionSource, z.ZodTypeDef, unkno
     contentHash: id,
     authorizationHash: id,
     audience: decisionAudienceSchema,
-    evidence: z
-      .array(
-        z
-          .object({
-            id,
-            reference: decisionEvidenceReferenceSchema,
-            text: z.string().max(32_000),
-            authorPersonId: id.nullable(),
-            origin: z.enum(["human", "provider-derived", "poll"])
-          })
-          .strict()
-      )
-      .min(1)
-      .max(100),
+    evidence: z.array(decisionEvidenceSchema).min(1).max(100),
     capturedAt: instant
   })
   .strict()
@@ -208,9 +236,14 @@ export const decisionAuthorityProofSchema: z.ZodType<
     snapshot: decisionAuthoritySnapshotSchema,
     grantIds: ids,
     decisionMakerPersonIds: people,
-    acceptanceEvidenceIds: ids
+    acceptanceEvidenceIds: ids,
+    humanReviews: z.array(decisionHumanReviewSchema).min(1).max(20).optional()
   })
-  .strict();
+  .strict()
+  .transform(({ humanReviews, ...value }): DecisionAuthorityProof => ({
+    ...value,
+    ...(humanReviews ? { humanReviews } : {})
+  }));
 export const decisionRecordContentSchema: z.ZodType<
   DecisionRecordContent,
   z.ZodTypeDef,

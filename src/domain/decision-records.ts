@@ -82,6 +82,25 @@ export type DecisionAuthorityProof = {
   grantIds: string[];
   decisionMakerPersonIds: PersonId[];
   acceptanceEvidenceIds: string[];
+  /** Original authenticated Human review, separate from imported speech and provider summaries. */
+  humanReviews?: DecisionHumanReview[];
+};
+export type DecisionHumanReview = {
+  id: string;
+  requestId: string;
+  observationId: string;
+  subject: DecisionSubject;
+  actor: DecisionActor;
+  personId: PersonId;
+  audience: DecisionAudience;
+  sourceContentHash: string;
+  sourceAuthorizationHash: string;
+  /** Null for an original recording instruction; later acceptance pins an exact review. */
+  reviewToken: string | null;
+  /** Exact accepted candidate content, excluding the new acceptance Evidence ID. */
+  acceptedCandidateHash: string | null;
+  evidence: DecisionEvidence;
+  observedAt: string;
 };
 export type DecisionRecordContent = {
   id: string;
@@ -200,6 +219,8 @@ export type DecisionRequestState = {
   approvedIntentId: string | null;
   execution: DecisionExecutionRecord | null;
   source: DecisionSource;
+  /** Pins the complete candidate and its source/recording plan for explicit Human review. */
+  reviewToken?: string;
 };
 export type ObserveDecision = {
   workspace: WorkspaceConfig;

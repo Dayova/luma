@@ -1,4 +1,5 @@
 import { createDiscordLiveAudience } from "./discord-live-audience.js";
+import { discordPollEvidence } from "./discord-poll-evidence.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
 import { dayovaFounderPersonIds } from "../app/founder-access.js";
@@ -146,7 +147,7 @@ export function createDiscordJsTransport(
   }
   const rawConversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
-        reader: createDiscordJsConversationReader(client),
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
         guildId: config.guildId,
         config: config.contextAsk,
         botUserId: () => client.user?.id ?? null
@@ -253,7 +254,7 @@ export function createDiscordJsTransport(
         // signal is aborted. Stop waiting at this already-owned boundary; the
         // shared request signal prevents a later HTTP attempt, and the lifetime
         // fence below prevents any late completion from continuing into login.
-        await waitForStartupOperation(
+        await waitForDiscordOperation(
           registerMeetingCommand(config, restOptions, lifetime.signal),
           lifetime.signal
         );
@@ -456,7 +457,7 @@ async function registerMeetingCommand(
   });
 }
 
-function waitForStartupOperation<T>(
+function waitForDiscordOperation<T>(
   operation: Promise<T>,
   signal: AbortSignal
 ): Promise<T> {
@@ -465,7 +466,7 @@ function waitForStartupOperation<T>(
       reject(
         signal.reason instanceof Error
           ? signal.reason
-          : new DOMException("Discord startup cancelled", "AbortError")
+          : new DOMException("Discord operation cancelled", "AbortError")
       );
     if (signal.aborted) aborted();
     else signal.addEventListener("abort", aborted, { once: true });
@@ -477,7 +478,7 @@ function waitForStartupOperation<T>(
       },
       (error: unknown) => {
         signal.removeEventListener("abort", aborted);
-        reject(error instanceof Error ? error : new Error("Discord startup failed"));
+        reject(error instanceof Error ? error : new Error("Discord operation failed"));
       }
     );
   });
@@ -646,7 +647,10 @@ async function replyToContextAskMessage(
   });
 }
 
-function createDiscordJsConversationReader(client: Client): DiscordConversationReader {
+function createDiscordJsConversationReader(
+  client: Client,
+  authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"]
+): DiscordConversationReader {
   return {
     async readThread({
       conversationObjectId
@@ -671,7 +675,11 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
 
       try {
         const message = await thread.messages.fetch({ message: messageId, force: true });
-        return discordConversationMessage(message);
+        return await discordConversationMessageWithPoll(
+          client,
+          message,
+          authorizeHumanReader
+        );
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
           return null;
@@ -695,8 +703,20 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
         limit
       });
 
+      let pollsRead = 0;
       return {
-        messages: [...messages.values()].map(discordConversationMessage),
+        messages: await Promise.all(
+          [...messages.values()].map((message) => {
+            if (message.poll) pollsRead += 1;
+            // Bound added poll reads to ten per already-bounded history page.
+            return discordConversationMessageWithPoll(
+              client,
+              message,
+              authorizeHumanReader,
+              pollsRead <= 10
+            );
+          })
+        ),
         hasMore: messages.size === limit
       };
     }
@@ -779,6 +799,93 @@ function discordConversationMessage(message: Message): DiscordConversationMessag
     replyToMessageId: message.reference?.messageId ?? null,
     url: message.url
   };
+}
+
+async function discordConversationMessageWithPoll(
+  client: Client,
+  message: Message,
+  authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"],
+  readPoll = true
+): Promise<DiscordConversationMessage> {
+  const mapped = discordConversationMessage(message);
+  if (
+    !message.poll ||
+    !readPoll ||
+    (mapped.authorKind !== "human" &&
+      !(mapped.authorKind === "bot" && message.author.id === client.user?.id))
+  )
+    return mapped;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    if (
+      mapped.authorKind === "human" &&
+      !(await waitForDiscordOperation(
+        authorizeHumanReader(message.author.id),
+        controller.signal
+      ))
+    )
+      return mapped;
+    const raw: unknown = await waitForDiscordOperation(
+      client.rest.get(Routes.channelMessage(message.channelId, message.id), {
+        signal: controller.signal
+      }),
+      controller.signal
+    );
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      !("id" in raw) ||
+      raw.id !== message.id ||
+      !("channel_id" in raw) ||
+      raw.channel_id !== message.channelId ||
+      !("author" in raw) ||
+      !raw.author ||
+      typeof raw.author !== "object" ||
+      !("id" in raw.author) ||
+      raw.author.id !== message.author.id ||
+      ("bot" in raw.author && raw.author.bot === true) !== message.author.bot ||
+      !("content" in raw) ||
+      raw.content !== message.content ||
+      !("edited_timestamp" in raw) ||
+      (raw.edited_timestamp !== null &&
+        (typeof raw.edited_timestamp !== "string" ||
+          Date.parse(raw.edited_timestamp) !== message.editedAt?.getTime())) ||
+      (raw.edited_timestamp === null && message.editedAt !== null) ||
+      ("webhook_id" in raw && !!raw.webhook_id) ||
+      !("poll" in raw)
+    )
+      return mapped;
+    const poll = discordPollEvidence(
+      raw.poll,
+      mapped.authorKind === "human" ? "human" : "luma-generated"
+    );
+    if (!poll) return mapped;
+    if (
+      mapped.authorKind === "human" &&
+      !(await waitForDiscordOperation(
+        authorizeHumanReader(message.author.id),
+        controller.signal
+      ))
+    )
+      return mapped;
+    return {
+      ...mapped,
+      poll,
+      hasUnsupportedContent:
+        message.attachments.size > 0 ||
+        message.embeds.length > 0 ||
+        message.stickers.size > 0 ||
+        message.components.length > 0 ||
+        message.messageSnapshots.size > 0 ||
+        message.flags.has(MessageFlags.IsVoiceMessage)
+    };
+  } catch {
+    return mapped;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
 }
 
 function discordApiErrorCode(error: unknown): number | null {

@@ -1,4 +1,5 @@
 import type { Confidence, WorkspaceId } from "../domain/model.js";
+import type { ConversationPoll } from "../domain/conversation-poll.js";
 import type {
   ContextAudience,
   OrganizationalContextBundle,
@@ -63,6 +64,7 @@ export type ContextEvidence = {
   state: "available" | "deleted";
   /** Original provider text. It is null only after explicit deletion evidence. */
   text: string | null;
+  poll?: ConversationPoll;
 };
 
 export type ContextEvidenceClaim = {

@@ -1,4 +1,5 @@
 import type { OrganizationalContext } from "../organizational-context/interface.js";
+import { conversationPollSchema } from "../domain/conversation-poll.js";
 import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
 import {
   contextRetrievalRequest,
@@ -36,7 +37,7 @@ import type {
   ConversationContextSubject
 } from "./interface.js";
 
-const CONTEXT_ASK_PROMPT_VERSION = "context-ask-v1";
+const CONTEXT_ASK_PROMPT_VERSION = "context-ask-v3";
 
 export type CreateContextIntelligenceInput = {
   database: LumaDatabase;
@@ -451,7 +452,7 @@ async function answerInquiry(
     );
   }
 
-  const promptVersion = retrieval ? "context-ask-v2" : CONTEXT_ASK_PROMPT_VERSION;
+  const promptVersion = CONTEXT_ASK_PROMPT_VERSION;
   return attempt(async () => {
     let answer: ContextAnswerResult;
 
@@ -1235,7 +1236,10 @@ function contextEvidenceFor(recorded: ConversationEvidenceRevision): ContextEvid
     replyToMessageId: message.replyToMessageId,
     url: message.url,
     state: message.state,
-    text: message.text
+    text: message.text,
+    ...(message.state === "available" && message.poll
+      ? { poll: structuredClone(message.poll) }
+      : {})
   }));
 }
 
@@ -1606,8 +1610,13 @@ function isContextEvidence(value: unknown): value is ContextEvidence {
     (value["editedAt"] === null || isNonBlankString(value["editedAt"])) &&
     (value["replyToMessageId"] === null || isNonBlankString(value["replyToMessageId"])) &&
     isNonBlankString(value["url"]) &&
-    ((value["state"] === "available" && typeof value["text"] === "string") ||
-      (value["state"] === "deleted" && value["text"] === null))
+    ((value["state"] === "available" &&
+      typeof value["text"] === "string" &&
+      (value["poll"] === undefined ||
+        conversationPollSchema.safeParse(value["poll"]).success)) ||
+      (value["state"] === "deleted" &&
+        value["text"] === null &&
+        value["poll"] === undefined))
   );
 }
 

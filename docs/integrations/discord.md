@@ -374,7 +374,8 @@ retained for history.
 Luma's own plain text replies are explicitly excluded from Human Evidence, so
 second and later questions work in the same thread. Their IDs remain in capture
 metadata, their exclusion is disclosed, and they still consume the scan budget.
-Unknown bots, webhooks, system messages, polls, unsupported content, and truncated
+Founder and verified Luma polls are retained as [bounded advisory Evidence](discord-polls.md),
+including unknown results and provisional counts. Unknown bots, webhooks, system messages, unsupported content, and truncated
 history still produce an insufficient-evidence answer. This scope answers the
 selected thread only and needs no Granola or cross-provider retrieval. It never
 creates a Meeting, proposal, Intent,

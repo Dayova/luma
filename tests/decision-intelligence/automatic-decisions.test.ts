@@ -1204,6 +1204,145 @@ describe("durable automatic source processing through public MI", () => {
     );
     expect(f.detect).toHaveBeenCalledTimes(2);
   });
+  it("recovers the exact unsent result when the queue receipt fails but its failure receipt commits", async () => {
+    const f = fixture(),
+      first = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    const query = database.query.bind(database);
+    let rejectedReceipt = false;
+    const spy = vi
+      .spyOn(database, "query")
+      .mockImplementation(<T>(...args: Parameters<LumaDatabase["query"]>) => {
+        if (
+          !rejectedReceipt &&
+          args[0].includes("UPDATE automatic_decision_jobs SET phase=$3,batch_id=$4")
+        ) {
+          rejectedReceipt = true;
+          return Promise.reject(new Error("Transient queue receipt failure"));
+        }
+        return query<T>(...args);
+      });
+    try {
+      await first.notify();
+      first.worker.start();
+      await expect.poll(async () => (await first.worker.status()).unavailable).toBe(1);
+      const original = (await first.worker.review(f.source.subject)).batch!;
+      expect(original.analysisRetry).toMatchObject({
+        disposition: "not-dispatched",
+        attempts: 1
+      });
+      await first.worker.stop();
+      spy.mockRestore();
+      f.setTime(original.analysisRetry!.nextAttemptAt!);
+      const second = await workerFor(f);
+      second.worker.start();
+      await expect.poll(async () => (await second.worker.status()).completed).toBe(1);
+      expect((await second.worker.review(f.source.subject)).batch?.batchId).toBe(
+        original.batchId
+      );
+      expect(f.detect).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it.each(["unsent", "completed"])(
+    "repairs a failed explicit retry receipt from its exact durable %s attempt",
+    async (outcome) => {
+      const f = fixture(),
+        { worker, notify } = await workerFor(f);
+      f.detect.mockRejectedValueOnce(
+        new AiServiceError("budget-exhausted", "Monthly cap reached", {
+          requestDispatched: false
+        })
+      );
+      await notify();
+      worker.start();
+      await expect.poll(async () => (await worker.status()).unavailable).toBe(1);
+      if (outcome === "unsent")
+        f.detect.mockRejectedValueOnce(
+          new AiServiceError("not-configured", "Configuration changed", {
+            requestDispatched: false
+          })
+        );
+      const query = database.query.bind(database);
+      let failed = false;
+      const spy = vi
+        .spyOn(database, "query")
+        .mockImplementation(<T>(...args: Parameters<LumaDatabase["query"]>) => {
+          if (
+            !failed &&
+            args[0].includes("UPDATE automatic_decision_jobs SET phase=$3,batch_id=$4")
+          ) {
+            failed = true;
+            return Promise.reject(new Error("Manual receipt unavailable"));
+          }
+          return query<T>(...args);
+        });
+      try {
+        await expect(worker.retry(f.source.subject, "explicit-repair")).rejects.toThrow(
+          "Manual receipt unavailable"
+        );
+        await expect
+          .poll(
+            async () =>
+              (await worker.status())[outcome === "unsent" ? "unavailable" : "completed"]
+          )
+          .toBe(1);
+        const batch = (await worker.review(f.source.subject)).batch!;
+        expect(batch.analysisRetry).toMatchObject({
+          attempts: 2,
+          lastObservationId: "explicit-repair",
+          disposition: outcome === "unsent" ? "not-dispatched" : "completed"
+        });
+        const rows = await database.query<{ retry_at: string | null }>(
+          "SELECT retry_at FROM automatic_decision_jobs"
+        );
+        expect(
+          rows.rows[0]?.retry_at === null ? null : Number(rows.rows[0]?.retry_at)
+        ).toBe(
+          batch.analysisRetry!.nextAttemptAt
+            ? Date.parse(batch.analysisRetry!.nextAttemptAt)
+            : null
+        );
+        await worker.stop();
+        spy.mockRestore();
+        f.setTime(batch.analysisRetry!.nextAttemptAt ?? "2027-01-01T00:00:00Z");
+        const next = await workerFor(f);
+        next.worker.start();
+        await expect.poll(async () => (await next.worker.status()).completed).toBe(1);
+        expect(f.detect).toHaveBeenCalledTimes(outcome === "unsent" ? 3 : 2);
+      } finally {
+        spy.mockRestore();
+      }
+    }
+  );
+  it("does not leave a manual attempt actively processing when owned source admission throws", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("budget-exhausted", "Monthly cap reached", {
+        requestDispatched: false
+      })
+    );
+    await notify();
+    worker.start();
+    await expect.poll(async () => (await worker.status()).unavailable).toBe(1);
+    f.captureProcessed.mockImplementationOnce(() => {
+      f.revokeSource();
+      return Promise.resolve(structuredClone(f.source));
+    });
+    await expect(worker.retry(f.source.subject, "revoked-repair")).rejects.toThrow(
+      "source revoked"
+    );
+    expect(await worker.status()).toMatchObject({ processing: 0, interrupted: 1 });
+    await worker.pause();
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    await expect(worker.review(f.source.subject)).rejects.toThrow("source revoked");
+  });
   it("does not schedule an interrupted job using an unrelated latest unsent batch", async () => {
     const f = fixture(),
       first = await workerFor(f);
@@ -1286,6 +1425,71 @@ describe("durable automatic source processing through public MI", () => {
     expect(f.provider.write).not.toHaveBeenCalled();
     f.revokeSource();
     await expect(repaired.requireCurrent!()).rejects.toThrow();
+  });
+  it("does not let a delayed older refusal overwrite a newer completed retry receipt", async () => {
+    const f = fixture(),
+      { worker, notify } = await workerFor(f);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("not-configured", "First refusal", { requestDispatched: false })
+    );
+    await notify();
+    worker.start();
+    await expect.poll(async () => (await worker.status()).unavailable).toBe(1);
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError("not-configured", "Second refusal", { requestDispatched: false })
+    );
+    let release = () => {},
+      signal = () => {},
+      held = false;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      signal = resolve;
+    });
+    const query = database.query.bind(database);
+    const spy = vi
+      .spyOn(database, "query")
+      .mockImplementation(async <T>(...args: Parameters<LumaDatabase["query"]>) => {
+        if (
+          !held &&
+          args[0].includes("UPDATE automatic_decision_jobs SET phase=$3,batch_id=$4")
+        ) {
+          held = true;
+          signal();
+          await gate;
+        }
+        return query<T>(...args);
+      });
+    try {
+      const older = worker.retry(f.source.subject, "first-repair");
+      await blocked;
+      let newerFinished = false;
+      const newer = worker.retry(f.source.subject, "second-repair").then(() => {
+        newerFinished = true;
+      });
+      // Hold the physical receipt while allowing the second public request to
+      // arrive. It must await the whole earlier settlement, then read its head.
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      expect(newerFinished).toBe(false);
+      expect(f.detect).toHaveBeenCalledTimes(2);
+      release();
+      await Promise.all([older, newer]);
+      expect(f.detect).toHaveBeenCalledTimes(3);
+      expect(await worker.status()).toMatchObject({
+        completed: 1,
+        unavailable: 0,
+        needsAttention: 0
+      });
+      expect((await worker.review(f.source.subject)).batch?.analysisRetry).toMatchObject({
+        attempts: 3,
+        disposition: "completed"
+      });
+    } finally {
+      release();
+      await worker.pause();
+      spy.mockRestore();
+    }
   });
   it("coalesces concurrent explicit requests and drains the admitted model before shutdown", async () => {
     const f = fixture(),
@@ -1441,13 +1645,16 @@ describe("durable automatic source processing through public MI", () => {
     );
     const second = await workerFor(f);
     second.worker.start();
-    expect(await second.worker.status()).toMatchObject({ interrupted: 1, queued: 0 });
+    await expect.poll(async () => (await second.worker.status()).completed).toBe(1);
+    expect(await second.worker.status()).toMatchObject({ interrupted: 0, queued: 0 });
     const recovered = await second.worker.review(f.source.subject);
-    expect(recovered.status).toBe("interrupted");
+    expect(recovered.status).toBe("completed");
     expect(recovered.batch?.candidates).toHaveLength(1);
     expect(f.detect).toHaveBeenCalledTimes(1);
     f.revokeSource();
-    expect((await second.worker.review(f.source.subject)).batch).toBeNull();
+    await expect(second.worker.review(f.source.subject)).rejects.toThrow(
+      "source revoked"
+    );
   });
   it("reports a blocked shared AI budget without losing its source notification or retrying the paid operation", async () => {
     const f = fixture(),

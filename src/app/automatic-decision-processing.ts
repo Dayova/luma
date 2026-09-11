@@ -51,7 +51,8 @@ export async function createAutomaticDecisionProcessing(input: {
     PRIMARY KEY(workspace_id,job_id)
   ); CREATE INDEX IF NOT EXISTS automatic_decision_jobs_queue
     ON automatic_decision_jobs(workspace_id,phase,created_at);
-    ALTER TABLE automatic_decision_jobs ADD COLUMN IF NOT EXISTS retry_at BIGINT;`);
+    ALTER TABLE automatic_decision_jobs ADD COLUMN IF NOT EXISTS retry_at BIGINT;
+    ALTER TABLE automatic_decision_jobs ADD COLUMN IF NOT EXISTS attempt_observation_id TEXT;`);
   await database.query(
     "UPDATE automatic_decision_jobs SET phase='interrupted' WHERE workspace_id=$1 AND phase='processing'",
     [workspace.workspaceId]
@@ -65,6 +66,22 @@ export async function createAutomaticDecisionProcessing(input: {
   // read-only MI proof, never extraction or a provider dispatch.
   let interruptedCursor: number | null = 0;
   const manual = new Set<Promise<unknown>>();
+  const settlements = new Map<string, Promise<void>>();
+  const settleJob = async (jobId: string, operation: () => Promise<void>) => {
+    const prior = settlements.get(jobId) ?? Promise.resolve();
+    let release = () => {};
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    settlements.set(jobId, current);
+    await prior;
+    try {
+      await operation();
+    } finally {
+      release();
+      if (settlements.get(jobId) === current) settlements.delete(jobId);
+    }
+  };
   const schedule = (delayMs = 0) => {
     if (!active || closed) return;
     if (delayMs === 0) {
@@ -95,41 +112,48 @@ export async function createAutomaticDecisionProcessing(input: {
           payload_hash: string;
           batch_id: string | null;
           created_at: number;
+          attempt_observation_id: string | null;
         }>(
-          "SELECT job_id,payload_json,payload_hash,batch_id,created_at::float8 AS created_at FROM automatic_decision_jobs WHERE workspace_id=$1 AND phase='interrupted' AND created_at>$2 ORDER BY created_at LIMIT 100",
+          "SELECT job_id,payload_json,payload_hash,batch_id,attempt_observation_id,created_at::float8 AS created_at FROM automatic_decision_jobs WHERE workspace_id=$1 AND phase='interrupted' AND created_at>$2 ORDER BY created_at LIMIT 100",
           [workspace.workspaceId, interruptedCursor]
         );
         for (const row of recovered.rows) {
           if (!active || closed) break;
           interruptedCursor = row.created_at;
-          try {
-            const payload: unknown = JSON.parse(row.payload_json);
-            const job = jobSchema.parse(payload);
-            if (
-              decisionDigest(payload) !== row.payload_hash ||
-              decisionDigest(job) !== row.job_id
-            )
-              throw new Error("Automatic source notification integrity failed");
-            const batch = await input.meetingIntelligence.query({
-              workspaceId: workspace.workspaceId,
-              subject: job.subject,
-              query: {
-                type: "automatic-decision-candidates",
-                ...(row.batch_id ? { batchId: row.batch_id } : {})
-              }
-            });
-            const retry = batch.analysisRetry;
-            if (
-              retry?.canRetry &&
-              retry.disposition === "not-dispatched" &&
-              (retry.lastObservationId === `source-job:${row.job_id}` ||
-                retry.lastObservationId ===
-                  `source-job:${row.job_id}:retry:${retry.attempts - 1}`)
-            )
-              await saveOutcome(row.job_id, batch, "interrupted");
-          } catch {
-            // Missing, changed or unknown original proof remains interrupted.
-          }
+          await settleJob(row.job_id, async () => {
+            try {
+              const payload: unknown = JSON.parse(row.payload_json);
+              const job = jobSchema.parse(payload);
+              if (
+                decisionDigest(payload) !== row.payload_hash ||
+                decisionDigest(job) !== row.job_id
+              )
+                throw new Error("Automatic source notification integrity failed");
+              const batch = await input.meetingIntelligence.query({
+                workspaceId: workspace.workspaceId,
+                subject: job.subject,
+                query: {
+                  type: "automatic-decision-candidates",
+                  ...(row.batch_id ? { batchId: row.batch_id } : {})
+                }
+              });
+              const retry = batch.analysisRetry;
+              const originalAttempt =
+                row.attempt_observation_id ??
+                (retry?.attempts === 1
+                  ? `source-job:${row.job_id}`
+                  : `source-job:${row.job_id}:retry:${(retry?.attempts ?? 0) - 1}`);
+              if (
+                retry &&
+                originalAttempt === retry.lastObservationId &&
+                ((retry.canRetry && retry.disposition === "not-dispatched") ||
+                  retry.disposition === "completed")
+              )
+                await saveOutcome(row.job_id, batch, "interrupted");
+            } catch {
+              // Missing, changed or unknown original proof remains interrupted.
+            }
+          });
         }
         if (active && !closed && recovered.rows.length < 100) interruptedCursor = null;
       }
@@ -148,44 +172,60 @@ export async function createAutomaticDecisionProcessing(input: {
         );
         const row = rows.rows[0];
         if (!row) break;
-        try {
-          const payload: unknown = JSON.parse(row.payload_json);
-          const job = jobSchema.parse(payload);
-          if (
-            decisionDigest(payload) !== row.payload_hash ||
-            decisionDigest(job) !== row.job_id
-          )
-            throw new Error("Automatic source notification integrity failed");
-          // Notifications signal fresh work for a subject. MI captures its current
-          // accepted original source, and coalesces overlapping notifications by
-          // that exact source revision, audience and authorization proof.
-          const retained = row.batch_id
-            ? await input.meetingIntelligence.query({
-                workspaceId: workspace.workspaceId,
-                subject: job.subject,
-                query: { type: "automatic-decision-candidates", batchId: row.batch_id }
-              })
-            : null;
-          const batch = await input.meetingIntelligence.observe({
-            workspace,
-            subject: job.subject,
-            observations: [
-              {
-                type: "decision-source-processed",
-                observationId: retained
-                  ? `source-job:${row.job_id}:retry:${retained.analysisRetry?.attempts ?? 0}`
-                  : `source-job:${row.job_id}`,
-                ...(row.batch_id ? { retryBatchId: row.batch_id } : {})
-              }
-            ]
-          });
-          await saveOutcome(row.job_id, batch);
-        } catch {
-          await database.query(
-            "UPDATE automatic_decision_jobs SET phase='unavailable',retry_at=NULL WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
-            [workspace.workspaceId, row.job_id]
-          );
-        }
+        await settleJob(row.job_id, async () => {
+          let observed = false;
+          try {
+            const payload: unknown = JSON.parse(row.payload_json);
+            const job = jobSchema.parse(payload);
+            if (
+              decisionDigest(payload) !== row.payload_hash ||
+              decisionDigest(job) !== row.job_id
+            )
+              throw new Error("Automatic source notification integrity failed");
+            // Notifications signal fresh work for a subject. MI captures its current
+            // accepted original source, and coalesces overlapping notifications by
+            // that exact source revision, audience and authorization proof.
+            const retained = row.batch_id
+              ? await input.meetingIntelligence.query({
+                  workspaceId: workspace.workspaceId,
+                  subject: job.subject,
+                  query: { type: "automatic-decision-candidates", batchId: row.batch_id }
+                })
+              : null;
+            const observationId = retained
+              ? `source-job:${row.job_id}:retry:${retained.analysisRetry?.attempts ?? 0}`
+              : `source-job:${row.job_id}`;
+            await markAttempt(row.job_id, observationId);
+            const batch = await input.meetingIntelligence.observe({
+              workspace,
+              subject: job.subject,
+              observations: [
+                {
+                  type: "decision-source-processed",
+                  observationId,
+                  ...(row.batch_id ? { retryBatchId: row.batch_id } : {})
+                }
+              ]
+            });
+            observed = true;
+            await saveAttemptOutcome(row.job_id, batch);
+          } catch {
+            await database.query(
+              "UPDATE automatic_decision_jobs SET phase=$3,retry_at=NULL WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
+              [
+                workspace.workspaceId,
+                row.job_id,
+                observed ? "interrupted" : "unavailable"
+              ]
+            );
+            if (observed) {
+              // Reconcile the retained proof after a transient receipt fault
+              // even if this process stays alive. A failed reproof is not looped.
+              interruptedCursor = 0;
+              wakePending = true;
+            }
+          }
+        });
       }
       if (active && !closed) {
         const due = await database.query<{ retry_at: number | null }>(
@@ -228,6 +268,27 @@ export async function createAutomaticDecisionProcessing(input: {
         expectedPhase ?? null
       ]
     );
+  };
+  const markAttempt = (jobId: string, observationId: string) =>
+    database.query(
+      "UPDATE automatic_decision_jobs SET phase='processing',retry_at=NULL,attempt_observation_id=$3 WHERE workspace_id=$1 AND job_id=$2",
+      [workspace.workspaceId, jobId, observationId]
+    );
+  const interruptAttempt = async (jobId: string) => {
+    await database.query(
+      "UPDATE automatic_decision_jobs SET phase='interrupted',retry_at=NULL WHERE workspace_id=$1 AND job_id=$2 AND phase='processing'",
+      [workspace.workspaceId, jobId]
+    );
+    interruptedCursor = 0;
+    schedule();
+  };
+  const saveAttemptOutcome = async (jobId: string, batch: AutomaticDecisionBatch) => {
+    try {
+      await saveOutcome(jobId, batch);
+    } catch (error) {
+      await interruptAttempt(jobId);
+      throw error;
+    }
   };
   const enqueue = async (workspaceId: string, raw: Job) => {
     if (closed) throw new Error("Automatic Decision processing is closed");
@@ -307,29 +368,51 @@ export async function createAutomaticDecisionProcessing(input: {
         return Promise.reject(new Error("A stable retry instruction is required"));
       subject = decisionSubjectSchema.parse(structuredClone(subject));
       const task = (async () => {
-        const before = await api.review(subject);
-        if (!before.batch?.analysisRetry?.canRetry) return;
-        const rows = await database.query<{ job_id: string; batch_id: string | null }>(
-          "SELECT job_id,batch_id FROM automatic_decision_jobs WHERE workspace_id=$1 AND subject_hash=$2 ORDER BY created_at DESC LIMIT 1",
+        const rows = await database.query<{ job_id: string }>(
+          "SELECT job_id FROM automatic_decision_jobs WHERE workspace_id=$1 AND subject_hash=$2 ORDER BY created_at DESC LIMIT 1",
           [workspace.workspaceId, decisionDigest(subject)]
         );
         const row = rows.rows[0];
-        if (!row || (row.batch_id && row.batch_id !== before.batch.batchId))
-          throw new Error("The retry notification changed");
-        const batch = await input.meetingIntelligence.observe({
-          workspace,
-          subject,
-          observations: [
-            {
-              type: "decision-source-processed",
-              observationId,
-              retryBatchId: before.batch.batchId,
-              retryBeforeScheduled: true
-            }
-          ]
+        if (!row) return;
+        await settleJob(row.job_id, async () => {
+          const before = await api.review(subject);
+          if (!before.batch?.analysisRetry?.canRetry) return;
+          const current = await database.query<{
+            job_id: string;
+            batch_id: string | null;
+          }>(
+            "SELECT job_id,batch_id FROM automatic_decision_jobs WHERE workspace_id=$1 AND subject_hash=$2 ORDER BY created_at DESC LIMIT 1",
+            [workspace.workspaceId, decisionDigest(subject)]
+          );
+          const head = current.rows[0];
+          if (
+            !head ||
+            head.job_id !== row.job_id ||
+            (head.batch_id && head.batch_id !== before.batch.batchId)
+          )
+            throw new Error("The retry notification changed");
+          await markAttempt(row.job_id, observationId);
+          let batch: AutomaticDecisionBatch;
+          try {
+            batch = await input.meetingIntelligence.observe({
+              workspace,
+              subject,
+              observations: [
+                {
+                  type: "decision-source-processed",
+                  observationId,
+                  retryBatchId: before.batch.batchId,
+                  retryBeforeScheduled: true
+                }
+              ]
+            });
+          } catch (error) {
+            await interruptAttempt(row.job_id);
+            throw error;
+          }
+          await saveAttemptOutcome(row.job_id, batch);
+          schedule();
         });
-        await saveOutcome(row.job_id, batch);
-        schedule();
       })().finally(() => manual.delete(task));
       manual.add(task);
       return task;

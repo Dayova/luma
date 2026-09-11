@@ -75,4 +75,6 @@ export interface DecisionFollowUpExecution {
   recover(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
 }
 /** Overloaded execution preserves existing Meeting callers and admits typed Conversations. */
-export type ScopedFollowUpExecution = FollowUpExecution & ConversationFollowUpExecution;
+export type ScopedFollowUpExecution = FollowUpExecution &
+  ConversationFollowUpExecution &
+  DecisionFollowUpExecution;

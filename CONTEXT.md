@@ -37,6 +37,14 @@ _Avoid_: Meeting, transcript dump, chat log
 A source-bound request for Human input on a choice. A Conversation consultation retains its exact authorized plan, original recipients, approved Follow-up Intent and execution history without becoming a Meeting. Poll results are advisory Evidence; explicit Human choices and rationales are retained separately and do not themselves authorize external work.
 _Avoid_: Decision Record, winning decision, automatic approval
 
+**Decision Candidate**:
+An evidence-linked interpretation of a possible Human choice, retaining its modality, accountable scope, objections and unresolved facts. A proposal, preference or advisory tally cannot establish a confirmed decision.
+_Avoid_: Binding vote, inferred authority, final decision
+
+**Decision Record**:
+A canonical knowledge artifact documenting an evidenced Human decision and its source-backed authority. Recording permission is separate from decision authority. Exact Follow-up Intents govern creation or amendments; supersession/reversal preserves the predecessor and links a pending successor before activation.
+_Avoid_: Poll result, Meeting summary, executable work item
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row

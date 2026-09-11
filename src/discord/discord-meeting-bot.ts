@@ -903,8 +903,19 @@ async function handleCaptureReview(
     command.channelId,
     "include-ended-thread"
   );
+  const owner =
+    "ownerDiscordUserId" in command && command.ownerDiscordUserId
+      ? await accessPolicy.authorize({
+          workspaceId: input.workspace.workspaceId,
+          providerId: "discord",
+          providerUserId: command.ownerDiscordUserId
+        })
+      : null;
+  if ("ownerDiscordUserId" in command && command.ownerDiscordUserId && !owner)
+    throw new DiscordChannelAccessError();
   return input.captureReview.handle({
     command,
+    ...(owner ? { ownerPersonId: owner.personId } : {}),
     actorPersonId: actor.personId,
     ...(thread ? { boundMeetingId: thread.meeting_id } : {})
   });

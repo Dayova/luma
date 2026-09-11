@@ -13,7 +13,13 @@ import {
   DecisionWriteNotAppliedError,
   type DecisionRecords
 } from "../../src/knowledge/decision-records.js";
-import { decisionDigest } from "../../src/decision-intelligence/persistence.js";
+import {
+  decisionDigest,
+  readDecisionRequest,
+  readDecisionStages,
+  saveDecisionRequest,
+  saveDecisionStage
+} from "../../src/decision-intelligence/persistence.js";
 import { decisionRecord } from "../knowledge/decision-record-fixture.js";
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
@@ -232,6 +238,182 @@ function fixture() {
   };
 }
 describe("MI-owned first-class Decision Records", () => {
+  it("rejects a conditional subject mismatch without retaining a phantom request revision", async () => {
+    const f = fixture();
+    await f.make().mi.observe(f.request);
+    const stored = await readDecisionRequest(
+      database,
+      "dayova",
+      "request-1",
+      f.request.subject
+    );
+    const before = await database.query(
+      "SELECT payload_hash FROM decision_request_revisions ORDER BY payload_hash"
+    );
+    const wrongSubject = structuredClone(stored);
+    wrongSubject.state.subject = { type: "meeting", meetingId: "another-meeting" };
+    await expect(saveDecisionRequest(database, "dayova", wrongSubject)).rejects.toThrow();
+    expect(
+      await readDecisionRequest(database, "dayova", "request-1", f.request.subject)
+    ).toEqual(stored);
+    expect(
+      (
+        await database.query(
+          "SELECT payload_hash FROM decision_request_revisions ORDER BY payload_hash"
+        )
+      ).rows
+    ).toEqual(before.rows);
+    expect(
+      (
+        await f.make().mi.query({
+          workspaceId: "dayova",
+          subject: f.request.subject,
+          query: { type: "decision-request", requestId: "request-1" }
+        })
+      ).state
+    ).toBe("confirmed");
+  });
+  it("keeps the current request and retained revision atomic if history persistence refuses the new revision", async () => {
+    const f = fixture();
+    await f.make().mi.observe(f.request);
+    const stored = await readDecisionRequest(
+      database,
+      "dayova",
+      "request-1",
+      f.request.subject
+    );
+    const changed = structuredClone(stored);
+    changed.state.message = "A state that must not outlive a failed revision save";
+    const hash = decisionDigest(changed);
+    await database.exec(
+      `ALTER TABLE decision_request_revisions ADD CONSTRAINT refuse_test_revision CHECK (payload_hash <> '${hash}')`
+    );
+    await expect(saveDecisionRequest(database, "dayova", changed)).rejects.toThrow();
+    expect(
+      await readDecisionRequest(database, "dayova", "request-1", f.request.subject)
+    ).toEqual(stored);
+    expect(
+      (
+        await database.query(
+          "SELECT payload_hash FROM decision_request_revisions WHERE payload_hash=$1",
+          [hash]
+        )
+      ).rows
+    ).toEqual([]);
+  });
+  it("rejects a conditional stage operation mismatch and preserves the original uncertain operation", async () => {
+    const f = fixture(),
+      e = await f.executable();
+    f.setWrite("unknown-before");
+    await e.current.execution.execute(e.input);
+    const [original] = await readDecisionStages(database, "dayova", e.input.intentId);
+    if (!original) throw new Error("Expected original durable stage");
+    await expect(
+      saveDecisionStage(database, "dayova", e.input.intentId, {
+        ...original,
+        operationId: "another-operation",
+        state: "succeeded"
+      })
+    ).rejects.toThrow();
+    expect(await readDecisionStages(database, "dayova", e.input.intentId)).toEqual([
+      original
+    ]);
+    expect((await f.make().execution.recover(e.input)).record.outcome).toMatchObject({
+      status: "failed",
+      requiresManualRecovery: true,
+      references: []
+    });
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+  });
+  it.each(["write", "recovery"] as const)(
+    "withholds a non-document %s receipt and recovers only the exact document proof",
+    async (boundary) => {
+      const f = fixture(),
+        e = await f.executable();
+      if (boundary === "write") {
+        const write = vi.mocked(f.provider.write).getMockImplementation()!;
+        vi.mocked(f.provider.write).mockImplementationOnce(async (request) => {
+          const receipt = await write(request);
+          receipt.record.reference.objectType = "work-item";
+          return receipt;
+        });
+      } else f.setWrite("unknown-after");
+      const first = await e.current.execution.execute(e.input);
+      expect(first.record.outcome).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true,
+        references: []
+      });
+      if (boundary === "recovery") {
+        const find = vi.mocked(f.provider.findWritten).getMockImplementation()!;
+        vi.mocked(f.provider.findWritten).mockImplementationOnce(async (request) => {
+          const receipt = await find(request);
+          if (!receipt) throw new Error("Expected original positive receipt");
+          receipt.record.reference.objectType = "work-item";
+          return receipt;
+        });
+        expect((await f.make().execution.recover(e.input)).record.outcome).toMatchObject({
+          status: "failed",
+          requiresManualRecovery: true,
+          references: []
+        });
+      }
+      const query = await f.make().mi.query({
+        workspaceId: "dayova",
+        subject: f.request.subject,
+        query: { type: "decision-request", requestId: "request-1" }
+      });
+      expect(query.state).toBe("unknown");
+      expect(query.execution?.outcome.references).toEqual([]);
+      const recovered = await f.make().execution.recover(e.input);
+      expect(recovered.record.outcome.status).toBe("succeeded");
+      expect(recovered.record.outcome.references).toEqual([
+        expect.objectContaining({ objectType: "document" })
+      ]);
+      expect(f.provider.write).toHaveBeenCalledTimes(1);
+    }
+  );
+  it.each([
+    ["supersede", "create-record"],
+    ["supersede", "retire-record"],
+    ["supersede", "activate-record"],
+    ["reverse", "create-record"],
+    ["reverse", "retire-record"],
+    ["reverse", "activate-record"]
+  ] as const)(
+    "completes %s recovery after a lost %s response in one call without repeating a stage",
+    async (action, lostStage) => {
+      const f = fixture();
+      f.addRecord();
+      f.setInterpretation({
+        candidate: {
+          ...f.candidate(),
+          statement: { text: "A replacement decision", evidenceIds: ["source-1"] },
+          ...(action === "reverse" ? { modality: "reversal" as const } : {})
+        },
+        reconciliation: { action, targetRecordId: "previous" }
+      });
+      const e = await f.executable();
+      f.setWrite("unknown-after", lostStage);
+      expect((await e.current.execution.execute(e.input)).record.outcome.status).toBe(
+        "failed"
+      );
+      const recovered = await f.make().execution.recover(e.input);
+      expect(recovered.record.outcome.status).toBe("succeeded");
+      expect(
+        vi.mocked(f.provider.write).mock.calls.map(([request]) => request.stage.type)
+      ).toEqual(["create-record", "retire-record", "activate-record"]);
+      expect(f.records.get("previous")?.content.status).toBe(
+        action === "reverse" ? "reversed" : "superseded"
+      );
+      const conclusion = await f.make().mi.conclude({
+        workspaceId: "dayova",
+        subject: f.request.subject,
+        requestId: "request-1"
+      });
+      expect(conclusion.request.state).toBe("recorded");
+    }
+  );
   it.each(["external-page", "canonical-record"])(
     "amends the explicitly selected %s identity through the production interpreter and owned execution",
     async (identity) => {
@@ -716,7 +898,7 @@ describe("MI-owned first-class Decision Records", () => {
         .mockImplementation(async (sql, params, options) => {
           const result = await realQuery(sql, params, options);
           if (
-            sql.startsWith("INSERT INTO decision_requests") &&
+            sql.includes("INSERT INTO decision_requests") &&
             JSON.stringify(params).includes("decision-write-in-progress")
           )
             f[revoke]();

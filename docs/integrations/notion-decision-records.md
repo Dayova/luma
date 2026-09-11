@@ -38,6 +38,17 @@ characters. Only plain empty lines are normalized when verifying the readable
 region; the complete signed archive and all nonempty text still have to match.
 The exact reread section remains the old region used for a subsequent update.
 
+Plain statement/context text and text inside owned bullets escape leading `-`,
+`+` and ordered-list markers. Inline punctuation remains ordinary prose, so a
+provider round trip cannot reinterpret a claim as a nested list.
+
+The prelaunch v1 format defines canonical object-key order by UTF-16 code units,
+independent of locale or ICU. This replaces the earlier locale-dependent local
+prototype before any live canonical writes; synthetic fixtures are regenerated.
+The reader does not guess legacy collation or silently re-sign an incompatible
+archive. Future signed-format changes need explicit versioning and retained-history
+migration rather than changing this byte contract in place.
+
 The signed archive binds the workspace, data source and complete revision history.
 Tampering inside the owned region, moving a record, duplicate record identities,
 incomplete discovery, unknown pages or revoked grants withhold the catalog and

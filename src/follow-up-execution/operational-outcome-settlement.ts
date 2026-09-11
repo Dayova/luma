@@ -4,7 +4,7 @@ import type {
   ActionItemReconciliationHumanResolution,
   ActionItemReconciliationIntentBinding,
   ExternalReference,
-  ImportedActionItemCandidate
+  ActionItemCandidate
 } from "../domain/model.js";
 import { sameActionItemOwnership } from "../domain/action-item-ownership.js";
 import type {
@@ -24,7 +24,7 @@ export type OperationalOutcomeSettlementPlan = {
   intentId: string;
   binding: ActionItemReconciliationIntentBinding;
   target: OperationalOutcomeTarget;
-  candidate: ImportedActionItemCandidate;
+  candidate: ActionItemCandidate;
   /** Effective reviewed ownership; source candidate wording stays immutable. */
   ownership: ActionItemOwnershipAttribution;
   resolution: ActionItemReconciliationHumanResolution;

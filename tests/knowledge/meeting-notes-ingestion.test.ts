@@ -1821,7 +1821,7 @@ describe("Meeting Notes ingestion", () => {
 
       expect(legacyCandidate?.completion).toBe("completed");
       expect(legacyCandidate?.modality).toEqual({ kind: "unknown", sourceForm: "will" });
-      expect(legacyCandidate?.source.source.completenessReasons).toEqual([]);
+      expect(legacyCandidate?.source.source).toMatchObject({ completenessReasons: [] });
       expect(legacyCandidate?.source.source.actionItemsAvailability).toBe("available");
       expect(legacySource).toMatchObject({
         completenessReasons: [],

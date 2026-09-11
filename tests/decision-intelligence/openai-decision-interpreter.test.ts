@@ -72,6 +72,39 @@ function fixture() {
   return { request, value, response, calls, client, budget, interpreter };
 }
 describe("budgeted production DecisionInterpreter", () => {
+  it.each(["decision-release", "provider-page-id"])(
+    "resolves an explicit %s target to its logical Decision identity",
+    async (targetRecordId) => {
+      const f = fixture();
+      const record = decisionRecord();
+      f.request.targetRecordId = targetRecordId;
+      f.request.catalog.records = [
+        {
+          content: record,
+          version: "revision-1",
+          reference: {
+            providerId: "notion",
+            objectType: "document",
+            externalId: "provider-page-id",
+            url: "https://notion.so/provider-page-id"
+          }
+        }
+      ];
+      f.client.create.mockImplementation(() =>
+        Promise.resolve({
+          ...f.response(),
+          outputText: JSON.stringify({
+            ...f.value,
+            reconciliation: { action: "amend", targetRecordId: record.id }
+          })
+        })
+      );
+      expect((await f.interpreter.interpret(f.request)).reconciliation).toEqual({
+        action: "amend",
+        targetRecordId: record.id
+      });
+    }
+  );
   it("returns grounded German proposal modality unchanged and accounts this capability in the shared budget", async () => {
     const f = fixture();
     f.request.source.evidence[0]!.text =

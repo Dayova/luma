@@ -1,3 +1,8 @@
+import {
+  ensureSynthesisActionFences,
+  requireUnfencedSynthesis
+} from "./synthesis-action-state.js";
+import { synthesisActionCandidates } from "./synthesis-action-candidates.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { AiServiceError } from "../ai/ai-service-error.js";
@@ -17,7 +22,9 @@ import type {
 import type {
   EvidenceReference,
   MeetingObservation,
-  WorkspaceConfig
+  WorkspaceConfig,
+  SynthesisActionItemCandidate,
+  MeetingState
 } from "../domain/model.js";
 import type { LogicalMeeting } from "../logical-meetings/interface.js";
 import type { ContextAudience } from "../organizational-context/interface.js";
@@ -95,6 +102,23 @@ const observationSchema = z.discriminatedUnion("type", [
         z.object({ kind: z.literal("confirm") }).strict(),
         z.object({ kind: z.literal("reject") }).strict(),
         z
+          .object({
+            kind: z.literal("resolve-action"),
+            modality: z.enum(["commitment", "request"]),
+            dueDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/u)
+              .refine((value) => {
+                const date = new Date(`${value}T00:00:00Z`);
+                return (
+                  Number.isFinite(date.getTime()) && date.toISOString().startsWith(value)
+                );
+              })
+              .nullable(),
+            ownerPersonId: z.string().min(1).nullable()
+          })
+          .strict(),
+        z
           .object({ kind: z.literal("correct"), text: z.string().min(1).max(4000) })
           .strict()
       ])
@@ -114,6 +138,15 @@ export function withCaptureSynthesis(input: {
   reasoningModel: ReasoningModel;
   configuration?: CaptureSynthesisConfiguration;
   now: () => Date;
+  workProviderId: string;
+  actions: {
+    bindCurrent(verify: (state: MeetingState) => Promise<void>): void;
+    accept(input: {
+      synthesis: LumaSynthesis;
+      candidates: SynthesisActionItemCandidate[];
+      requireCurrent: () => Promise<void>;
+    }): Promise<void>;
+  };
 }): MeetingIntelligence {
   let migration: Promise<void> | undefined;
   const flights = new Map<string, Promise<MeetingUpdate>>();
@@ -139,7 +172,7 @@ export function withCaptureSynthesis(input: {
     );
   `
       )
-      .then(() => undefined));
+      .then(() => ensureSynthesisActionFences(input.database)));
   const load = async (workspaceId: string, meetingId: string): Promise<Stored | null> => {
     const result = await input.database.query<{ state_json: string }>(
       "SELECT state_json FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
@@ -315,6 +348,15 @@ export function withCaptureSynthesis(input: {
     priorRevision: number
   ) =>
     input.database.transaction(async (transaction) => {
+      await transaction.query(
+        "SELECT revision FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2 FOR UPDATE",
+        [observation.workspaceId, observation.meetingId]
+      );
+      await requireUnfencedSynthesis(
+        transaction,
+        observation.workspaceId,
+        observation.meetingId
+      );
       const existing = await transaction.query<{ revision: number }>(
         "SELECT revision FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
         [observation.workspaceId, observation.meetingId]
@@ -345,6 +387,41 @@ export function withCaptureSynthesis(input: {
         values
       );
     });
+  const acceptActions = async (
+    state: Stored,
+    prepared: Prepared,
+    workspace: WorkspaceConfig
+  ) => {
+    const canonicalWorkspace = await claimWorkspace(workspace);
+    const requireCurrent = async () => {
+      await requireSame(
+        state.synthesis.workspaceId,
+        state.synthesis.logicalMeetingId,
+        prepared,
+        state.audience
+      );
+      if (
+        (await load(state.synthesis.workspaceId, state.synthesis.logicalMeetingId))
+          ?.synthesis.revision !== state.synthesis.revision
+      )
+        throw new Unavailable();
+    };
+    await requireCurrent();
+    await input.actions.accept({
+      synthesis: state.synthesis,
+      candidates: synthesisActionCandidates({
+        synthesis: state.synthesis,
+        workspace: canonicalWorkspace,
+        workProviderId: input.workProviderId,
+        materials: prepared.materials,
+        deadlineReferenceAt:
+          prepared.meeting.captureRefs[0]?.latestRevision.identityFacts.interval
+            ?.startedAt ?? null
+      }),
+      requireCurrent
+    });
+    await requireCurrent();
+  };
   const observe = async (request: ObserveMeeting): Promise<MeetingUpdate> => {
     const parsed = observationSchema.safeParse(request.observations[0]);
     if (
@@ -359,6 +436,8 @@ export function withCaptureSynthesis(input: {
     let prior: Stored | null = null;
     let attemptKey: string | undefined;
     let dispatched = false;
+    let acceptedRevision: number | undefined;
+    let duplicateRevision: number | undefined;
     try {
       new Intl.DateTimeFormat("en", { timeZone: request.workspace.timezone });
       await migrate();
@@ -391,6 +470,8 @@ export function withCaptureSynthesis(input: {
           current,
           prior?.audience ?? current.audience
         );
+        duplicateRevision = prior?.synthesis.revision ?? 0;
+        if (prior) await acceptActions(prior, current, request.workspace);
         return update(
           observation,
           "not-needed",
@@ -432,6 +513,13 @@ export function withCaptureSynthesis(input: {
           (item) => item.id === observation.claimId
         );
         if (!claim) throw new Unavailable();
+        if (
+          observation.judgment.kind === "resolve-action" &&
+          (!["action-item", "commitment"].includes(claim.kind) ||
+            (observation.judgment.ownerPersonId !== null &&
+              !prepared.audience.personIds.includes(observation.judgment.ownerPersonId)))
+        )
+          throw new Unavailable();
         state = structuredClone(prior);
         state.judgments.push(observation);
         state.synthesis.claims = applyJudgments(state.synthesis.claims, [observation]);
@@ -463,8 +551,11 @@ export function withCaptureSynthesis(input: {
               JSON.stringify(observation)
             ]
           );
+          acceptedRevision = prior.synthesis.revision;
+          await acceptActions(prior, prepared, workspace);
           return update(observation, "not-needed", prior.synthesis.revision, true);
         }
+        await requireUnfencedSynthesis(input.database, workspaceId, meetingId);
         attemptKey = digest([
           sourceSetDigest,
           digest(prior?.judgments ?? []),
@@ -598,6 +689,8 @@ export function withCaptureSynthesis(input: {
       }
       await requireSame(workspaceId, meetingId, prepared, audience);
       await save(observation, state, prior?.synthesis.revision ?? 0);
+      acceptedRevision = state.synthesis.revision;
+      await acceptActions(state, prepared, request.workspace);
       await requireSame(workspaceId, meetingId, prepared, audience);
       return update(
         observation,
@@ -616,7 +709,13 @@ export function withCaptureSynthesis(input: {
           [workspaceId, meetingId, attemptKey]
         );
       return {
-        ...update(observation, "deferred", prior?.synthesis.revision ?? 0),
+        ...update(
+          observation,
+          "deferred",
+          acceptedRevision ?? duplicateRevision ?? prior?.synthesis.revision ?? 0,
+          acceptedRevision !== undefined,
+          duplicateRevision !== undefined
+        ),
         errors: [
           error instanceof AiServiceError
             ? {
@@ -634,7 +733,7 @@ export function withCaptureSynthesis(input: {
             : {
                 code: "context-unavailable",
                 retryable: true,
-                partialResultAvailable: Boolean(prior)
+                partialResultAvailable: Boolean(prior) || acceptedRevision !== undefined
               }
         ]
       };
@@ -688,6 +787,21 @@ export function withCaptureSynthesis(input: {
       return { type: "capture-synthesis", availability: "unavailable", synthesis: null };
     }
   };
+  input.actions.bindCurrent(async (state) => {
+    if (!state.captureSynthesisActionSource) return;
+    const current = await query({
+      workspaceId: state.workspaceId,
+      meetingId: state.meetingId,
+      query: { type: "capture-synthesis" }
+    });
+    if (
+      !current.synthesis ||
+      current.synthesis.revision !== state.captureSynthesisActionSource.revision ||
+      current.synthesis.sourceSetDigest !==
+        state.captureSynthesisActionSource.sourceSetDigest
+    )
+      throw new Unavailable();
+  });
   return {
     ...input.base,
     conclude: async (scope) => {
@@ -703,6 +817,19 @@ export function withCaptureSynthesis(input: {
         throw new Unavailable();
       const synthesis = result.synthesis,
         intent = result.followUpIntentions[0];
+      const actions = await input.base.query({ ...scope, query: { type: "snapshot" } });
+      const actionIntents =
+        actions.type === "snapshot" &&
+        actions.state.captureSynthesisActionSource?.revision === synthesis.revision &&
+        actions.state.captureSynthesisActionSource.sourceSetDigest ===
+          synthesis.sourceSetDigest
+          ? actions.state.followUpIntentions.filter(
+              (item) => item.type === "settle-operational-outcome"
+            )
+          : [];
+      const final = await query({ ...scope, query: { type: "capture-synthesis" } });
+      if (!final.synthesis || digest(final.synthesis) !== digest(synthesis))
+        throw new Unavailable();
       return {
         workspaceId: scope.workspaceId,
         meetingId: scope.meetingId,
@@ -718,7 +845,7 @@ export function withCaptureSynthesis(input: {
         actionItems: [],
         openQuestions: [],
         risks: [],
-        followUpIntentions: [intent],
+        followUpIntentions: [intent, ...actionIntents],
         participantBriefs: [],
         outputLanguage: scope.outputLanguage ?? "de",
         provenance: intent.provenance,
@@ -726,10 +853,35 @@ export function withCaptureSynthesis(input: {
         captureSynthesis: synthesis
       };
     },
-    query: (scope) =>
-      scope.query.type === "capture-synthesis"
-        ? query(structuredClone(scope))
-        : input.base.query(scope),
+    query: async (scope) => {
+      if (scope.query.type === "capture-synthesis") return query(structuredClone(scope));
+      await migrate();
+      if (!(await load(scope.workspaceId, scope.meetingId)))
+        return input.base.query(scope);
+      const before = await query({ ...scope, query: { type: "capture-synthesis" } });
+      if (!before.synthesis) throw new Unavailable();
+      const snapshot = await input.base.query({ ...scope, query: { type: "snapshot" } });
+      if (
+        snapshot.type !== "snapshot" ||
+        snapshot.state.captureSynthesisActionSource?.revision !==
+          before.synthesis.revision ||
+        snapshot.state.captureSynthesisActionSource.sourceSetDigest !==
+          before.synthesis.sourceSetDigest
+      )
+        throw new Unavailable();
+      const result =
+        scope.query.type === "snapshot" ? snapshot : await input.base.query(scope);
+      const after = await query({ ...scope, query: { type: "capture-synthesis" } });
+      if (!after.synthesis || digest(before.synthesis) !== digest(after.synthesis))
+        throw new Unavailable();
+      if (result.type === "snapshot")
+        result.state.captureSynthesisActionSource = {
+          revision: after.synthesis.revision,
+          sourceSetDigest: after.synthesis.sourceSetDigest,
+          canonicalAnchorRef: after.synthesis.canonicalAnchorRef
+        };
+      return result;
+    },
     observe: (request) => {
       if (request.observations.some(isSynthesisPublicationObservation)) {
         const bound = structuredClone(request);
@@ -752,8 +904,43 @@ export function withCaptureSynthesis(input: {
           }
         });
       }
-      if (!request.observations.some(isCaptureObservation))
-        return input.base.observe(request);
+      if (!request.observations.some(isCaptureObservation)) {
+        return (async () => {
+          await migrate();
+          const ids = [
+            ...new Set(
+              request.observations
+                .filter((item) => item.type !== "follow-up-execution-recorded")
+                .map((item) => item.meetingId)
+            )
+          ];
+          const proofs: Array<{ meetingId: string; synthesis: LumaSynthesis }> = [];
+          for (const meetingId of ids) {
+            if (!(await load(request.workspace.workspaceId, meetingId))) continue;
+            const current = await query({
+              workspaceId: request.workspace.workspaceId,
+              meetingId,
+              query: { type: "capture-synthesis" }
+            });
+            if (!current.synthesis) throw new Unavailable();
+            proofs.push({ meetingId, synthesis: current.synthesis });
+          }
+          const result = await input.base.observe(request);
+          for (const proof of proofs) {
+            const current = await query({
+              workspaceId: request.workspace.workspaceId,
+              meetingId: proof.meetingId,
+              query: { type: "capture-synthesis" }
+            });
+            if (
+              !current.synthesis ||
+              digest(current.synthesis) !== digest(proof.synthesis)
+            )
+              throw new Unavailable();
+          }
+          return result;
+        })();
+      }
       const bound = structuredClone(request);
       const key = digest([bound.workspace.workspaceId, bound.observations[0]?.meetingId]);
       const previous = flights.get(key);
@@ -846,7 +1033,17 @@ function applyJudgments(
         : judgment.judgment.kind === "reject"
           ? "human-rejected"
           : "human-corrected";
+    if (judgment.judgment.kind === "resolve-action") {
+      claim.actionReview = {
+        modality: judgment.judgment.modality,
+        dueDate: judgment.judgment.dueDate,
+        ownerPersonId: judgment.judgment.ownerPersonId,
+        participantId: judgment.participantId,
+        judgedAt: judgment.observedAt
+      };
+    }
     if (judgment.judgment.kind === "correct") {
+      delete claim.actionReview;
       claim.text = judgment.judgment.text;
       claim.quotations = [];
     }

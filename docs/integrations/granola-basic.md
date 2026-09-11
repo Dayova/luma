@@ -119,7 +119,11 @@ without making a network request. Startup configuration is:
 
 The key must be a regular single-link file owned by root or the runtime user,
 without symlinks or group/other permissions (for example mode `0600`). It must be
-backed up separately and restored with the database. Wrong keys and corrupted
+retained separately from the database and restored with it. The
+[unattended backup](../operations/unattended-operations.md) includes its exact
+bytes in the encrypted runtime recovery bundle and proves decryption on an
+isolated restore before reporting success. Keep the independently held repository
+password recovery material as well. Wrong keys and corrupted
 credential rows fail startup. Never print it, put it in source control, or replace
 it casually: it decrypts retained credentials. The existing owned Luma database
 stores AES-256-GCM ciphertext with workspace and founder identities authenticated
@@ -253,3 +257,37 @@ Discord command; shutdown waits for that command. Exact owner, account fingerpri
 connection and policy are checked again at the actual native reply boundary.
 No account consent, source activation or real external write is performed by the
 native test suite, which programs HTTP provider responses and uses a local callback.
+
+### Derived actions and canonical outcomes
+
+Capture synthesis action claims enter the existing Meeting Intelligence review
+workflow with an explicit `capture-synthesis` source identity. They are not imported
+Notion Meeting Notes. Source material, binding, original recipients and synthesis
+revision remain independently verifiable; historical candidates remain stored.
+Read projections withhold candidates from capture sets whose original source proof
+is no longer current.
+
+`/meeting actions meeting_id:<logical ID>` shows canonical work reconciliation,
+including Granola-only meetings. When details are missing, a founder uses
+`/meeting judge choice:resolve-action` with the exact synthesis revision and claim,
+`modality:commitment` or `request`, a `due_date` in YYYY-MM-DD form (or `none`), and
+either a founder `owner` or `intentionally_unassigned:true`. These details are
+retained as Human evidence and shown in the synthesis publication. A claim
+correction clears its prior action details; unresolved contradictions continue to
+block settlement. Partial Basic coverage stays visible.
+
+The action review's `accept` choice records a Human reconciliation resolution and
+creates a suggested Follow-up Intent. `choice:execute` with its exact intent and
+synthesis revision explicitly approves execution. Luma first requires an existing
+positive canonical synthesis publication and rechecks its native signed region and
+current sharing grant. Work creation/update and the compact Operational Outcome use
+that same canonical Notion record. `choice:recover` preserves the existing positive
+or unknown provider-result rules; it never grants permission to blindly recreate
+work. Source changes or revoked access before dispatch block writes; a positive
+work receipt is retained even when the final Notion outcome must wait for recovery.
+
+Before any live publication, the v1 synthesis wire format now fixes JSON object-key
+ordering by UTF-16 code units and escapes prose list markers. This replaces local
+prototype locale-dependent bytes; it does not guess legacy collations or silently
+re-sign incompatible historical archives. Later signed-format changes require an
+explicit version and retained-history migration.

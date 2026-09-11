@@ -130,20 +130,32 @@ export async function saveDecisionRequest(
   workspaceId: string,
   value: StoredDecisionRequest
 ): Promise<void> {
-  await database.query(
-    `INSERT INTO decision_request_revisions(workspace_id,request_id,payload_hash,payload_json) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-    [workspaceId, value.state.requestId, decisionDigest(value), JSON.stringify(value)]
-  );
-  await database.query(
-    `INSERT INTO decision_requests (workspace_id,request_id,subject_key,payload_json,payload_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(workspace_id,request_id) DO UPDATE SET payload_json=excluded.payload_json,payload_hash=excluded.payload_hash WHERE decision_requests.subject_key=excluded.subject_key`,
+  const hash = decisionDigest(value);
+  // Retain history only from an accepted head update, atomically with that update.
+  // A different subject must neither advance the head nor invent a revision.
+  const saved = await database.query<{ payload_hash: string }>(
+    `WITH saved AS (
+      INSERT INTO decision_requests (workspace_id,request_id,subject_key,payload_json,payload_hash)
+      VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT(workspace_id,request_id) DO UPDATE
+      SET payload_json=excluded.payload_json,payload_hash=excluded.payload_hash
+      WHERE decision_requests.subject_key=excluded.subject_key
+      RETURNING workspace_id,request_id,payload_json,payload_hash
+    ), retained AS (
+      INSERT INTO decision_request_revisions(workspace_id,request_id,payload_hash,payload_json)
+      SELECT workspace_id,request_id,payload_hash,payload_json FROM saved
+      ON CONFLICT DO NOTHING
+    ) SELECT payload_hash FROM saved`,
     [
       workspaceId,
       value.state.requestId,
       decisionSubjectKey(value.state.subject),
       JSON.stringify(value),
-      decisionDigest(value)
+      hash
     ]
   );
+  if (saved.rows.length !== 1 || saved.rows[0]?.payload_hash !== hash)
+    throw new Error("Decision request subject binding refused the current-state update");
 }
 export async function saveDecisionObservation(
   database: Pick<LumaDatabase, "query">,
@@ -187,8 +199,8 @@ export async function saveDecisionStage(
   intentId: string,
   value: StoredDecisionStage
 ): Promise<void> {
-  await database.query(
-    `INSERT INTO decision_write_stages(workspace_id,intent_id,stage_index,operation_id,payload_json,payload_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,intent_id,stage_index) DO UPDATE SET payload_json=excluded.payload_json,payload_hash=excluded.payload_hash WHERE decision_write_stages.operation_id=excluded.operation_id`,
+  const saved = await database.query<{ operation_id: string }>(
+    `INSERT INTO decision_write_stages(workspace_id,intent_id,stage_index,operation_id,payload_json,payload_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,intent_id,stage_index) DO UPDATE SET payload_json=excluded.payload_json,payload_hash=excluded.payload_hash WHERE decision_write_stages.operation_id=excluded.operation_id RETURNING operation_id`,
     [
       workspaceId,
       intentId,
@@ -198,6 +210,8 @@ export async function saveDecisionStage(
       decisionDigest(value)
     ]
   );
+  if (saved.rows.length !== 1 || saved.rows[0]?.operation_id !== value.operationId)
+    throw new Error("Decision stage operation binding refused the current-state update");
 }
 export async function acquireDecisionFence(
   database: Pick<LumaDatabase, "query">,

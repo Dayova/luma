@@ -1,3 +1,5 @@
+import { synthesisSourceFence } from "./synthesis-source-fence.js";
+import { releaseSynthesisActionFence } from "../meeting-intelligence/synthesis-action-state.js";
 import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
 import { structuredWorkModuleFor } from "../structured-work/module-binding.js";
 import { createStructuredWorkExecution } from "./structured-work-execution.js";
@@ -1189,7 +1191,9 @@ async function assertOperationalOutcomeSourceCurrentness(
   dependencies: CreateFollowUpExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const verifier = dependencies.operationalOutcomeSourceCurrentnessVerifier;
+  const verifier = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceCurrentnessVerifier;
 
   if (!verifier) {
     return;
@@ -1216,7 +1220,9 @@ async function acquireOperationalOutcomeSourceExecutionFence(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -1262,7 +1268,9 @@ async function assertOperationalOutcomeSourceExecutionFenceHeldCurrent(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -2494,11 +2502,16 @@ function settlementFromCanonicalState(
   }
 
   const source = review.candidate.source.source;
-  const page = source.externalReference;
+  const page =
+    source.sourceKind === "capture-synthesis"
+      ? state.captureSynthesisActionSource?.canonicalAnchorRef
+      : source.externalReference;
 
   if (
-    source.completeness !== "complete" ||
+    (source.completeness !== "complete" &&
+      !(source.sourceKind === "capture-synthesis" && source.humanActionReviewed)) ||
     source.actionItemsAvailability !== "available" ||
+    !page ||
     !isDocumentReference(page)
   ) {
     return null;
@@ -2507,7 +2520,10 @@ function settlementFromCanonicalState(
   return {
     target: {
       workspaceId: state.workspaceId,
-      providerId: source.providerId,
+      providerId: page.providerId,
+      ...(source.sourceKind === "capture-synthesis"
+        ? { synthesis: { claimId: source.claimId, claimDigest: source.claimDigest } }
+        : {}),
       page,
       sourceObjectId: source.sourceObjectId,
       sourceRevision: source.sourceRevision,
@@ -4272,6 +4288,12 @@ async function claimCanonicalExecution(
             `Execution receipt ${idempotencyKey} no longer owns its active reservation`
           );
         }
+        await releaseSynthesisActionFence({
+          database: transaction,
+          workspaceId: recovered.observation.workspaceId,
+          meetingId: recovered.observation.meetingId,
+          intentId: recovered.observation.intentId
+        });
         await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
           database: transaction,
           workspaceId: recovered.observation.workspaceId,
@@ -4829,6 +4851,12 @@ async function completeExecution(
       );
     }
 
+    await releaseSynthesisActionFence({
+      database: transaction,
+      workspaceId: result.observation.workspaceId,
+      meetingId: result.observation.meetingId,
+      intentId: result.observation.intentId
+    });
     await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
       database: transaction,
       workspaceId: result.observation.workspaceId,

@@ -859,6 +859,73 @@ describe("Native imported Decision commands through the actual MI facade", () =>
       await live.bot.stop();
     }
   });
+  it("preserves English and German decision negation and quoted wording through public observation", async () => {
+    const f = await fixture();
+    const original = f.request.observations[0];
+    if (original?.type !== "decision-record-requested") throw new Error("fixture");
+    const instructions = [
+      "Record Jakob's decision that Luma will not yet launch.",
+      'Record the decision: "Do not update the production service yet."',
+      "Record the decision: 'Do not create public accounts yet.'",
+      "Dokumentiere die Entscheidung, dass Luma noch nicht startet.",
+      "Dokumentiere die Entscheidung: „Bitte dokumentiere diese Entscheidung nicht.“",
+      "Dokumentiere die Entscheidung: Wir starten heute, aber nicht öffentlich."
+    ];
+    for (const [index, instruction] of instructions.entries()) {
+      await f.mi.observe({
+        ...f.request,
+        observations: [
+          { ...original, observationId: `content-negation-${index}`, instruction }
+        ]
+      });
+      expect(f.interpret).toHaveBeenCalledTimes(index + 1);
+      expect(f.interpret.mock.calls[index]![0].instruction).toBe(instruction);
+      expect(f.write).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not analyze or record a bound Meeting when the original command refuses recording", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const live = await importedDecisionBot(f);
+    try {
+      await live.bind();
+      const original = f.request.observations[0];
+      if (original?.type !== "decision-record-requested") {
+        throw new Error("Expected the fixture's decision recording request");
+      }
+      const refusals = [
+        "Create a decision record, but not yet.",
+        "Record this decision, but not now.",
+        'Record the decision: "Luma will not yet launch.", but not now.',
+        "Do not record this decision.",
+        "Please don't update the existing decision.",
+        "Bitte dokumentiere diese Entscheidung nicht.",
+        "Dokumentiere die Entscheidung: „Luma bleibt intern.“, aber noch nicht.",
+        "Aktualisiere den bestehenden Decision Record bitte noch nicht."
+      ];
+      for (const [index, instruction] of refusals.entries()) {
+        await live.invoke({
+          ...live.base,
+          interactionId: `refusal-${index}`,
+          type: "decision-record-meeting",
+          instruction
+        });
+        expect(f.interpret).not.toHaveBeenCalled();
+        expect(f.write).not.toHaveBeenCalled();
+        await expect(
+          f.mi.observe({
+            ...f.request,
+            observations: [{ ...original, instruction }]
+          })
+        ).rejects.toThrow("refusal");
+        expect(f.interpret).not.toHaveBeenCalled();
+      }
+    } finally {
+      await live.bot.stop();
+    }
+  });
+
   it("binds the actual import, reviews and accepts its candidate, then records once without another model call", async () => {
     const f = await fixture();
     f.allowWrites();

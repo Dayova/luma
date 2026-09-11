@@ -1,3 +1,6 @@
+import type { ExternalReference } from "../../src/domain/model.js";
+import type { WorkProvider } from "../../src/work/interface.js";
+import { createNotionOperationalOutcomeWriter } from "../../src/knowledge/notion-operational-outcome-writer.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
 import { Events } from "discord.js";
@@ -156,7 +159,7 @@ function capture(id: string): MeetingCaptureRevision {
     externalReference: ref
   };
 }
-async function setup() {
+async function setup(actionMode = false) {
   const database = await createPgliteDatabase();
   const ledger = createObservedSourceLedger({ database });
   const denied = new Set<string>();
@@ -198,7 +201,7 @@ async function setup() {
         claims: [
           {
             key: "start",
-            kind: "decision",
+            kind: actionMode ? "action-item" : "decision",
             text: longText
               ? "A".repeat(1700) +
                 "Middle of the complete review " +
@@ -222,9 +225,55 @@ async function setup() {
       });
     }
   };
+  const created = new Map<string, ExternalReference>();
+  const work = {
+    providerId: "linear",
+    searchWorkItems: () => Promise.resolve([]),
+    getWorkItem: () => Promise.reject(new Error("Unexpected work lookup")),
+    createWorkItem: vi.fn<WorkProvider["createWorkItem"]>((request) => {
+      const reference = {
+        providerId: "linear",
+        objectType: "work-item" as const,
+        externalId: "LUM-102",
+        url: "https://linear.app/dayova/issue/LUM-102"
+      };
+      created.set(request.idempotencyKey, reference);
+      return Promise.resolve(reference);
+    }),
+    findCreatedWorkItemByIdempotencyKey: (key) => {
+      const stored = created.get(key);
+      return Promise.resolve(stored ?? null);
+    },
+    updateWorkItem: () => Promise.reject(new Error("Unexpected update")),
+    addComment: () => Promise.reject(new Error("Unexpected comment"))
+  } satisfies WorkProvider;
+  let outcomeMarkdown = "Original canonical synthesis record";
+  const outcomeWriter = createNotionOperationalOutcomeWriter({
+    api: {
+      retrievePageMarkdown: ({ pageId }) => {
+        expect(pageId).toBe(canonical.externalId);
+        return Promise.resolve({
+          content: outcomeMarkdown,
+          truncated: false,
+          unknownBlockIds: []
+        });
+      },
+      insertPageMarkdown: ({ pageId, content }) => {
+        expect(pageId).toBe(canonical.externalId);
+        outcomeMarkdown += content;
+        return Promise.resolve();
+      },
+      updatePageMarkdown: ({ pageId, oldContent, newContent }) => {
+        expect(pageId).toBe(canonical.externalId);
+        outcomeMarkdown = outcomeMarkdown.replace(oldContent, newContent);
+        return Promise.resolve();
+      }
+    }
+  });
   const mi = createMeetingIntelligence({
     database,
     reasoningModel,
+    ...(actionMode ? { workCatalogs: [work] } : {}),
     importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
       ledger,
       workItemProviderId: "linear"
@@ -266,6 +315,9 @@ async function setup() {
     database,
     meetingIntelligence: mi,
     meetingSynthesisWriter: writer,
+    workProvider: work,
+    operationalOutcomeWriter: outcomeWriter,
+    identityDirectory: createLumaTeamIdentityDirectory(),
     now: () => new Date(at)
   });
   const review = createDiscordCaptureReviewRuntime({
@@ -335,7 +387,9 @@ async function setup() {
         getSubcommand: () => name,
         getString: (key: string) => values[key] ?? null,
         getInteger: (key: string) => values[key] ?? null,
-        getBoolean: (key: string) => values[key] ?? null
+        getBoolean: (key: string) => values[key] ?? null,
+        getUser: (key: string) =>
+          typeof values[key] === "string" ? { id: values[key] } : null
       },
       deferReply: vi.fn(() => Promise.resolve()),
       editReply: vi.fn<(value: { content: string }) => Promise<void>>(() =>
@@ -377,6 +431,8 @@ async function setup() {
     scopes,
     publications: () => publications,
     calls: () => calls,
+    work,
+    outcomeMarkdown: () => outcomeMarkdown,
     unavailableModel: () => {
       modelUnavailable = true;
     },
@@ -763,4 +819,122 @@ describe("Native founder capture and synthesis commands", () => {
       (await f.database.query("SELECT logical_meeting_id FROM logical_meetings")).rows
     ).toHaveLength(1);
   });
+});
+
+describe("Native derived action review", () => {
+  it("reaches Granola-only action review, records exact founder details and explicitly publishes and executes once without paid re-analysis", async () => {
+    const f = await setup(true),
+      added = await f.add("granola-actions"),
+      id = added.logicalMeeting.id;
+    const initial = await f.query(id);
+    if (initial.type !== "capture-synthesis" || !initial.synthesis)
+      throw new Error("Missing synthesis");
+    const claimId = initial.synthesis.claims[0]!.id;
+    expect(await f.command("actions", { meeting_id: id })).toContain(
+      "needs-clarification"
+    );
+    expect(
+      await f.command("judge", {
+        meeting_id: id,
+        revision: 1,
+        claim_id: claimId,
+        choice: "resolve-action",
+        modality: "commitment",
+        due_date: "none",
+        owner: founder
+      })
+    ).toContain("Human resolve-action recorded");
+    const reviewed = await f.mi.query({
+      workspaceId: workspace.workspaceId,
+      meetingId: id,
+      query: { type: "action-item-reconciliation-review" }
+    });
+    if (reviewed.type !== "action-item-reconciliation-review")
+      throw new Error("Wrong query");
+    expect(reviewed.reviews[0]).toMatchObject({
+      ownership: { status: "confirmed", ownerPersonId: "person_jakob" },
+      effectiveOutcome: { type: "create-new" }
+    });
+    const accepted = await f.command("actions", {
+      meeting_id: id,
+      revision: 2,
+      choice: "accept",
+      review_id: reviewed.reviews[0]!.proposal.id,
+      page: 2
+    });
+    const snapshot = await f.mi.query({
+      workspaceId: workspace.workspaceId,
+      meetingId: id,
+      query: { type: "snapshot" }
+    });
+    expect(snapshot.type === "snapshot" && snapshot.state.followUpIntentions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "settle-operational-outcome",
+          status: "suggested"
+        })
+      ])
+    );
+    expect(accepted).not.toContain("not accepted");
+    expect(f.publications()).toBe(0);
+    expect(f.calls()).toBe(1);
+    if (snapshot.type !== "snapshot") throw new Error("Wrong snapshot");
+    const intent = snapshot.state.followUpIntentions.find(
+      (item) => item.type === "settle-operational-outcome"
+    )!;
+    expect(await f.command("publish", { meeting_id: id, revision: 2 })).toContain(
+      canonical.url
+    );
+    const executed = await f.command("actions", {
+      meeting_id: id,
+      revision: 2,
+      choice: "execute",
+      intent_id: intent.id
+    });
+    expect(executed).toContain("Action completed");
+    expect(executed).toContain("LUM-102");
+    expect(f.work.createWorkItem).toHaveBeenCalledTimes(1);
+    expect(f.outcomeMarkdown()).toContain("LUM-102");
+    expect(f.outcomeMarkdown()).toContain("Luma — Operational Outcome");
+    expect(
+      await f.command("actions", {
+        meeting_id: id,
+        revision: 2,
+        choice: "recover",
+        intent_id: intent.id
+      })
+    ).toContain("Action completed");
+    expect(f.work.createWorkItem).toHaveBeenCalledTimes(1);
+    expect(f.publications()).toBe(1);
+    expect(f.calls()).toBe(1);
+  }, 30_000);
+  it("rejects stale details and a guest owner without changing the synthesis", async () => {
+    const f = await setup(true),
+      added = await f.add("granola-stale-action"),
+      id = added.logicalMeeting.id;
+    const initial = await f.query(id);
+    if (initial.type !== "capture-synthesis" || !initial.synthesis)
+      throw new Error("Missing synthesis");
+    const values = {
+      meeting_id: id,
+      revision: 1,
+      claim_id: initial.synthesis.claims[0]!.id,
+      choice: "resolve-action",
+      modality: "commitment",
+      due_date: "2026-09-15",
+      owner: "guest"
+    };
+    expect(await f.command("judge", values)).not.toContain(
+      "Human resolve-action recorded"
+    );
+    expect(
+      await f.command("judge", { ...values, revision: 2, owner: founder })
+    ).toContain("changed");
+    const after = await f.query(id);
+    expect(after.type === "capture-synthesis" && after.synthesis?.revision).toBe(1);
+    expect(await f.command("actions", { meeting_id: id }, "guest")).not.toContain(
+      "Wir könnten"
+    );
+    expect(f.calls()).toBe(1);
+  }, 30_000);
 });

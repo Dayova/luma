@@ -1,3 +1,4 @@
+import { hasDecisionRecordingRefusal } from "../decision-intelligence/recording-instruction.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import type { AutomaticDecisionProcessing } from "../app/automatic-decision-processing.js";
 import { decisionDigest } from "../decision-intelligence/persistence.js";
@@ -55,6 +56,7 @@ export function discordDecisionRecordConfigFromEnv(
 export function isExplicitDecisionRecordInstruction(text: string): boolean {
   const instruction = text.trim();
   if (instruction.length === 0 || instruction.length > 2_000) return false;
+  if (hasDecisionRecordingRefusal(instruction)) return false;
   const english = instruction.replace(
     /^(?:(?:please\s+)|(?:(?:can|could|would)\s+you\s+(?:please\s+)?))/iu,
     ""
@@ -185,6 +187,13 @@ export async function handleDiscordDecisionRecordCommand(input: {
   requireCurrent?: () => Promise<void>;
 }): Promise<DiscordCommandResponse> {
   const { runtime, workspace, command } = input;
+  if (
+    command.type === "decision-record-meeting" &&
+    hasDecisionRecordingRefusal(command.instruction)
+  )
+    throw new Error(
+      "The recording instruction includes an explicit refusal; no recording was started."
+    );
   await input.requireCurrent?.();
   const subject: DecisionSubject =
     "sourceMessageId" in command && command.sourceMessageId

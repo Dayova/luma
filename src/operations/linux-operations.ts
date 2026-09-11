@@ -18,6 +18,10 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { verifyFullStoreBackup } from "../persistence/full-store-backup.js";
 import { archiveAndVerifyBackup } from "./restic-archive.js";
+import {
+  captureRuntimeRecoveryMaterial,
+  validateRuntimeRecoveryInputs
+} from "./runtime-recovery-material.js";
 import { assessOperationalHealth, deliverHealthStatus } from "./health-monitor.js";
 import { runScheduledBackup, type BackupReceipt } from "./maintenance.js";
 import { parseProductionEnvironmentFile } from "../app/production-runtime.js";
@@ -71,7 +75,7 @@ export const operationsConfigSchema = z
   .strict();
 type OperationsConfig = z.infer<typeof operationsConfigSchema>;
 
-async function readPrivateFile(path: string): Promise<string> {
+async function readPrivateBytes(path: string): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await file.stat();
@@ -85,9 +89,18 @@ async function readPrivateFile(path: string): Promise<string> {
     ) {
       throw new Error("Operations inputs must be private root-owned regular files");
     }
-    return await file.readFile("utf8");
+    return await file.readFile();
   } finally {
     await file.close();
+  }
+}
+
+async function readPrivateFile(path: string): Promise<string> {
+  const bytes = await readPrivateBytes(path);
+  try {
+    return bytes.toString("utf8");
+  } finally {
+    bytes.fill(0);
   }
 }
 
@@ -186,9 +199,14 @@ async function resumeService(): Promise<void> {
   await rm(resumePath);
 }
 
-async function backup(config: OperationsConfig): Promise<BackupReceipt> {
+async function backup(
+  config: OperationsConfig,
+  authenticationSecret: Uint8Array,
+  sourceOwnerUid: number
+): Promise<BackupReceipt> {
   // Validate every protected input and release before stopping the runtime.
   const env = await resticEnvironment(config);
+  await validateRuntimeRecoveryInputs("/etc/luma/production.env", sourceOwnerUid);
   const release = await realpath("/opt/luma/current");
   const revision = (await readFile(join(release, "REVISION"), "utf8")).trim();
   z.string()
@@ -236,6 +254,13 @@ async function backup(config: OperationsConfig): Promise<BackupReceipt> {
         { timeout: 10 * 60_000 }
       );
       const manifest = await verifyFullStoreBackup(directory);
+      await captureRuntimeRecoveryMaterial({
+        directory,
+        backupId: manifest.backupId,
+        productionEnvPath: "/etc/luma/production.env",
+        sourceOwnerUid,
+        authenticationSecret
+      });
       return { ...manifest, directory };
     },
     uploadAndVerify: async (directory, backupId) => {
@@ -243,6 +268,7 @@ async function backup(config: OperationsConfig): Promise<BackupReceipt> {
         directory,
         backupId,
         scratchParent: backupDirectory,
+        authenticationSecret,
         restic: (args, options = {}) =>
           command("/usr/bin/restic", args, { ...options, env })
       });
@@ -341,10 +367,28 @@ export async function runLinuxOperations(commandName: string): Promise<void> {
       "This operations profile requires the documented runtime data and health paths"
     );
   }
+  // The runtime account owns private keys that root reads only for recovery.
+  // Resolve the fixed unit account, never an identity supplied by policy content.
+  const sourceOwnerUid =
+    commandName === "check" || commandName === "backup"
+      ? z.coerce
+          .number()
+          .int()
+          .positive()
+          .safe()
+          .parse((await command("/usr/bin/id", ["-u", "luma"])).trim())
+      : 0;
   if (commandName === "check") {
     await resticEnvironment(config);
+    await validateRuntimeRecoveryInputs("/etc/luma/production.env", sourceOwnerUid);
     return;
   }
-  if (commandName === "backup") await backup(config);
-  else await monitor(config, runtimeEnv);
+  if (commandName === "backup") {
+    const secret = await readPrivateBytes(config.resticPasswordFile);
+    try {
+      await backup(config, secret, sourceOwnerUid);
+    } finally {
+      secret.fill(0);
+    }
+  } else await monitor(config, runtimeEnv);
 }

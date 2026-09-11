@@ -663,6 +663,95 @@ describe("Notion Meeting Notes observation host", () => {
     }
   });
 
+  it.each([false, true])(
+    "cancels recurring scan admission while retaining accepted canonical work: %s",
+    async (queuedCanonical) => {
+      const scheduler = new ManualRecurringScheduler();
+      const refresher = new HeldRefresher();
+      const ingestion = new RecordingIngestion();
+      const finishCanonical = deferred<void>();
+      let scans = 0;
+      const sync = createMeetingNotesSync({
+        workspace: lumaWorkspace,
+        source: {
+          scan: async () => {
+            scans += 1;
+            if (scans > 1 && queuedCanonical) await finishCanonical.promise;
+            return {
+              records: [],
+              nextCursor: null,
+              completeness: "complete",
+              partialReasons: []
+            };
+          }
+        },
+        ingestion,
+        scheduleRecurring: scheduler.schedule,
+        logger: quietLogger
+      });
+      const host = createNotionMeetingNotesObservationHost({
+        lumaWorkspace,
+        notionSubscription: {
+          notionWorkspaceId,
+          canonicalMeetingsDataSourceId,
+          verificationToken,
+          subscriptionId,
+          integrationId
+        },
+        refresher,
+        ingestion,
+        canonicalReconciliation: sync
+      });
+      let stopped = false;
+      let stopping: Promise<void> | undefined;
+      try {
+        host.start();
+        await eventually(() => !sync.status().active, "initial scan did not finish");
+        expect(scans).toBe(1);
+        expect(host.receive(signedDelivery())).toEqual({ status: "accepted" });
+        await refresher.started.promise;
+        if (queuedCanonical) {
+          expect(
+            host.receive(
+              signedDelivery({
+                id: "eeeeeeee-ffff-0000-1111-333333333333",
+                type: "data_source.content_updated",
+                entity: { id: canonicalMeetingsDataSourceId, type: "data_source" }
+              })
+            )
+          ).toEqual({ status: "accepted" });
+        }
+        stopping = host.stop().then(() => {
+          stopped = true;
+        });
+        expect(host.status().acceptingDeliveries).toBe(false);
+        scheduler.run();
+        await Promise.resolve();
+        expect(scans).toBe(1);
+        expect(sync.status().scheduled).toBe(false);
+        expect(stopped).toBe(false);
+        expect(ingestion.records).toHaveLength(0);
+        refresher.release.resolve();
+        if (queuedCanonical) {
+          await eventually(
+            () => scans === 2,
+            "accepted canonical recovery did not start"
+          );
+          expect(stopped).toBe(false);
+          expect(sync.status().active).toBe(true);
+          finishCanonical.resolve();
+        }
+        await stopping;
+        expect(ingestion.records).toHaveLength(1);
+        expect(host.status().runtime.drainActive).toBe(false);
+      } finally {
+        refresher.release.resolve();
+        finishCanonical.resolve();
+        await (stopping ?? host.stop());
+      }
+    }
+  );
+
   it("preserves a listener startup failure when host cleanup also fails", async () => {
     let stopCalls = 0;
     const failingStopHost: NotionMeetingNotesObservationHost = {

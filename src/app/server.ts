@@ -1,3 +1,4 @@
+import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
@@ -277,7 +278,15 @@ export async function startServer(
       identityDirectory,
       ...(workProvider ? { workProvider } : {}),
       ...(knowledgeProvider ? { knowledgeProvider } : {}),
-      ...(operationalOutcomeWriter ? { operationalOutcomeWriter } : {}),
+      ...(operationalOutcomeWriter
+        ? {
+            operationalOutcomeWriter,
+            canonicalKnowledgePatchWriter: createNotionCanonicalKnowledgePatchWriter({
+              token: requireEnv(env, "NOTION_API_TOKEN"),
+              providerId: operationalOutcomeWriter.providerId
+            })
+          }
+        : {}),
       ...(meetingNotesSource
         ? {
             operationalOutcomeSourceExecutionFence:

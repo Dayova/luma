@@ -160,7 +160,14 @@ async function privateFile(
     await file.close();
   }
 }
-function selected(env: NodeJS.ProcessEnv, productionEnvPath: string) {
+function selected(rawEnvironment: NodeJS.ProcessEnv, productionEnvPath: string) {
+  // Empty optional entries in the shipped environment template mean unconfigured.
+  // Preserve its original bytes in the bundle; only capability selection omits them.
+  // Nonempty keys/policies remain required even when ingress is disabled, because
+  // retained requests can still depend on them during recovery.
+  const env = Object.fromEntries(
+    Object.entries(rawEnvironment).filter(([, value]) => value !== "")
+  );
   const workspaceId = env["LUMA_WORKSPACE_ID"];
   if (!workspaceId?.trim()) throw unavailable();
   const enabled = (name: string) => {

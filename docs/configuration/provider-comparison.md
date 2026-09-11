@@ -1,5 +1,9 @@
 # Comparing meeting reasoning providers
 
+For new model decisions, use [evaluation v2](provider-quality.md), which adds
+calibrated checks, exact-answer human review, and versioned comparisons. The v1
+command and historical artifacts below remain available for regression.
+
 LUM-51 provides a bounded **component evaluation** of the `ReasoningModel`
 Interface. It compares proposed Meeting Items before deterministic Meeting
 Intelligence reconciliation. It is separate from LUM-46's end-to-end product,

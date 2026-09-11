@@ -124,6 +124,8 @@ export type ObserveStructuredWork = {
       instruction: string;
       /** A caller may select a configured alias, never a provider object ID. */
       targetKey: string;
+      /** An explicitly named work identity may be read even when outside ordinary discovery. */
+      workItemId?: string;
     }
   ];
 };

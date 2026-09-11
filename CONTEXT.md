@@ -137,6 +137,14 @@ _Avoid_: Generic document update, whole-page replacement, automatic merge
 A compact Luma-owned record of authorized reconciliation and execution against canonical organizational surfaces, distinct from raw Meeting Captures and a Luma Synthesis.
 _Avoid_: Meeting Notes, source evidence, synthesis
 
+**Structured Record**:
+A canonical knowledge entry in a configured structured collection, with named fields and traceable source Evidence. A hypothesis remains a hypothesis until Human Evidence establishes a decision.
+_Avoid_: Ad-hoc page, Decision Record, task
+
+**Compound Operation**:
+One explicit, source-bound request for coordinated changes to structured knowledge and canonical work. Each output retains its own reconciliation and execution outcome while sharing the original Evidence and authorization.
+_Avoid_: Distributed transaction, independent automation, implicit approval
+
 **External Activity**:
 A provider-normalized event connected to a Meeting Item, external object, or Follow-up.
 _Avoid_: Webhook payload, provider event

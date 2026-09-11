@@ -30,6 +30,8 @@ export type CreateWorkItemInput = {
   dueDate: string | null;
   labels: string[];
   idempotencyKey: string;
+  /** Final source/owner proof after provider reads and immediately before create. */
+  requireCurrent?(this: void): Promise<void>;
 };
 
 export type UpdateWorkItemInput = {
@@ -60,6 +62,11 @@ export interface WorkCatalog {
    */
   readonly supportsConditionalUpdates?: boolean;
   searchWorkItems(query: WorkQuery): Promise<WorkItem[]>;
+  /** Complete bounded team catalog for compound reconcile-before-create. */
+  discoverWorkItems?(input: {
+    workspaceId: string;
+    limit: number;
+  }): Promise<{ items: WorkItem[]; complete: boolean }>;
   getWorkItem(id: string): Promise<WorkItem>;
 }
 

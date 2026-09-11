@@ -16,6 +16,7 @@ export type LinearCreateIssueInput = {
   subscriberIds: string[];
   dueDate: string | null;
   labelNames: string[];
+  requireCurrent?(this: void): Promise<void>;
 };
 
 export type LinearUpdateIssueInput = {
@@ -28,6 +29,10 @@ export type LinearUpdateIssueInput = {
 };
 
 export interface LinearApi {
+  listIssues?(input: {
+    teamId: string;
+    limit: number;
+  }): Promise<{ items: LinearApiIssue[]; complete: boolean }>;
   searchIssues(input: {
     teamId: string;
     text: string;
@@ -68,6 +73,20 @@ export function createLinearWorkProvider(config: LinearWorkProviderConfig): Work
   return {
     providerId,
     identityProviderId: "linear",
+    ...(api.listIssues
+      ? {
+          discoverWorkItems: async (input: { workspaceId: string; limit: number }) => {
+            const result = await api.listIssues!({
+              teamId: config.teamId,
+              limit: input.limit
+            });
+            return {
+              items: result.items.map((issue) => toLinearWorkItem(issue, providerId)),
+              complete: result.complete
+            };
+          }
+        }
+      : {}),
     searchWorkItems: async (query) =>
       (
         await api.searchIssues({
@@ -87,6 +106,8 @@ export function createLinearWorkProvider(config: LinearWorkProviderConfig): Work
         return toExternalReference(existing, providerId);
       }
 
+      await input.requireCurrent?.();
+
       const issue = await api.createIssue({
         teamId: config.teamId,
         title: input.title,
@@ -94,7 +115,8 @@ export function createLinearWorkProvider(config: LinearWorkProviderConfig): Work
         assigneeId: input.assigneeProviderUserId,
         subscriberIds: unique(input.mentionProviderUserIds),
         dueDate: input.dueDate,
-        labelNames: input.labels
+        labelNames: input.labels,
+        ...(input.requireCurrent ? { requireCurrent: input.requireCurrent } : {})
       });
       return toExternalReference(issue, providerId);
     },
@@ -152,6 +174,21 @@ function createLinearSdkApi(config: LinearWorkProviderConfig): LinearApi {
 class LinearSdkApi implements LinearApi {
   constructor(private readonly client: LinearClient) {}
 
+  async listIssues(input: {
+    teamId: string;
+    limit: number;
+  }): Promise<{ items: LinearApiIssue[]; complete: boolean }> {
+    const result = await this.client.issues({
+      first: input.limit,
+      includeArchived: false,
+      filter: { team: { id: { eq: input.teamId } } }
+    });
+    return {
+      items: await Promise.all(result.nodes.map((issue) => this.toApiIssue(issue))),
+      complete: !result.pageInfo.hasNextPage
+    };
+  }
+
   async searchIssues(input: {
     teamId: string;
     text: string;
@@ -192,6 +229,7 @@ class LinearSdkApi implements LinearApi {
 
   async createIssue(input: LinearCreateIssueInput): Promise<LinearApiIssue> {
     const labelIds = await this.resolveLabelIds(input.labelNames);
+    await input.requireCurrent?.();
     const payload = await this.client.createIssue({
       teamId: input.teamId,
       title: input.title,

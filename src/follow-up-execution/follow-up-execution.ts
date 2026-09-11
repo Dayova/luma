@@ -1,4 +1,8 @@
 import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
+import { structuredWorkModuleFor } from "../structured-work/module-binding.js";
+import { createStructuredWorkExecution } from "./structured-work-execution.js";
+import type { ExecuteStructuredWork } from "../structured-work/interface.js";
+import type { StructuredWorkState } from "../domain/structured-work.js";
 import { createDecisionFollowUpExecution } from "./decision-execution.js";
 import type {
   ExecuteDecisionFollowUpInput,
@@ -203,9 +207,14 @@ export function createFollowUpExecution(
         })
       : undefined;
   const decisionDependencies = decisionModuleFor(input.meetingIntelligence);
+  const structuredDependencies = structuredWorkModuleFor(input.meetingIntelligence);
+  const structuredExecution = structuredDependencies
+    ? createStructuredWorkExecution(structuredDependencies)
+    : undefined;
   const decisionExecution = decisionDependencies
     ? createDecisionFollowUpExecution(decisionDependencies)
     : undefined;
+  function execute(request: ExecuteStructuredWork): Promise<StructuredWorkState>;
   function execute(
     request: ExecuteDecisionFollowUpInput
   ): Promise<ExecuteDecisionFollowUpResult>;
@@ -217,12 +226,19 @@ export function createFollowUpExecution(
     request:
       | ExecuteFollowUpInput
       | ExecuteConversationFollowUpInput
+      | ExecuteStructuredWork
       | ExecuteDecisionFollowUpInput
   ): Promise<
     | ExecuteFollowUpResult
     | ExecuteConversationFollowUpResult
+    | StructuredWorkState
     | ExecuteDecisionFollowUpResult
   > {
+    if ("structuredWorkRequestId" in request) {
+      if (!structuredExecution)
+        return Promise.reject(new Error("Structured work execution is not configured"));
+      return structuredExecution.execute(request);
+    }
     if ("decisionRequestId" in request) {
       if (!decisionExecution)
         return Promise.reject(new Error("Decision execution is not configured"));
@@ -237,6 +253,7 @@ export function createFollowUpExecution(
     }
     return meetingExecution.execute(request);
   }
+  function recover(request: ExecuteStructuredWork): Promise<StructuredWorkState>;
   function recover(
     request: ExecuteDecisionFollowUpInput
   ): Promise<ExecuteDecisionFollowUpResult>;
@@ -248,12 +265,19 @@ export function createFollowUpExecution(
     request:
       | ExecuteFollowUpInput
       | ExecuteConversationFollowUpInput
+      | ExecuteStructuredWork
       | ExecuteDecisionFollowUpInput
   ): Promise<
     | ExecuteFollowUpResult
     | ExecuteConversationFollowUpResult
+    | StructuredWorkState
     | ExecuteDecisionFollowUpResult
   > {
+    if ("structuredWorkRequestId" in request) {
+      if (!structuredExecution)
+        return Promise.reject(new Error("Structured work execution is not configured"));
+      return structuredExecution.recover(request);
+    }
     if ("decisionRequestId" in request) {
       if (!decisionExecution)
         return Promise.reject(new Error("Decision execution is not configured"));

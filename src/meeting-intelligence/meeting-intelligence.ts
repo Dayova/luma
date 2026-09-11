@@ -10,6 +10,11 @@ import {
 } from "../decision-intelligence/meeting-evidence-source.js";
 import { bindDecisionModule } from "../decision-intelligence/module-binding.js";
 import {
+  createStructuredWorkIntelligence,
+  type StructuredWorkConfiguration
+} from "../structured-work/structured-work.js";
+import { bindStructuredWorkModule } from "../structured-work/module-binding.js";
+import {
   scopeMeetingIntelligence,
   type ScopedMeetingIntelligence
 } from "../decision-intelligence/scoped-meeting-intelligence.js";
@@ -136,6 +141,7 @@ const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v
 export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
   reasoningModel: ReasoningModel;
+  structuredWork?: StructuredWorkConfiguration;
   decisionIntelligence?: DecisionIntelligenceConfiguration & {
     meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
     meetingSourceAudience?: MeetingDecisionSourceAudience;
@@ -244,6 +250,9 @@ export function createMeetingIntelligence(
   }
 ): ScopedMeetingIntelligence;
 export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput & { structuredWork: StructuredWorkConfiguration }
+): ScopedMeetingIntelligence;
+export function createMeetingIntelligence(
   input: CreateMeetingIntelligenceInput
 ): MeetingIntelligence;
 export function createMeetingIntelligence(
@@ -333,7 +342,17 @@ export function createMeetingIntelligence(
     ...(input.captureSynthesis ? { configuration: input.captureSynthesis } : {}),
     now
   });
-  if (!input.decisionIntelligence) return scopeMeetingIntelligence(meeting);
+  const structuredDependencies = input.structuredWork
+    ? { ...input.structuredWork, database: input.database }
+    : undefined;
+  const structured = structuredDependencies
+    ? createStructuredWorkIntelligence(structuredDependencies)
+    : undefined;
+  if (!input.decisionIntelligence) {
+    const facade = scopeMeetingIntelligence(meeting, undefined, structured);
+    if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
+    return facade;
+  }
   const configuration = input.decisionIntelligence;
   const meetingSource =
     configuration.meetingEvidenceSource ??
@@ -379,9 +398,11 @@ export function createMeetingIntelligence(
   };
   const facade = scopeMeetingIntelligence(
     meeting,
-    createDecisionIntelligence(dependencies)
+    createDecisionIntelligence(dependencies),
+    structured
   );
   bindDecisionModule(facade, dependencies);
+  if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
   return facade;
 }
 

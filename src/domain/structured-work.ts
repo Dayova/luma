@@ -109,6 +109,25 @@ export type StructuredWorkStageResult = {
   reference: ExternalReference | null;
   message: string;
 };
+export type StructuredWorkUpdateValue =
+  | StructuredFieldValue
+  | {
+      type: "people";
+      value: Array<{ providerId: string; providerUserId: string; displayName: string }>;
+    };
+/** A retained proposal for manual application, never an approved external write. */
+export type StructuredWorkUpdateProposal = {
+  target: "record" | "work";
+  reference: ExternalReference;
+  expectedVersion: string;
+  changes: Array<{
+    key: string;
+    label: string;
+    before: StructuredWorkUpdateValue | null;
+    after: StructuredWorkUpdateValue | null;
+  }>;
+  reason: "provider-conditional-update-unavailable";
+};
 /** User-facing projection; durable execution stages and provider snapshots remain private. */
 export type StructuredWorkState = {
   requestId: string;
@@ -118,11 +137,14 @@ export type StructuredWorkState = {
     | "validated"
     | "partially-executed"
     | "completed"
+    | "manual-application-required"
     | "needs-clarification"
     | "failed-recoverable";
   message: string;
   source: StructuredWorkSource;
   preview: StructuredWorkInterpretation | null;
+  /** Absent on requests retained before manual update proposals were supported. */
+  updateProposals?: StructuredWorkUpdateProposal[];
   approvedIntentId: string | null;
   outcomes: StructuredWorkStageResult[];
 };

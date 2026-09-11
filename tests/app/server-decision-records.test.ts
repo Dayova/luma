@@ -104,7 +104,7 @@ async function fixture(monthlyLimit = "30", automatic = false) {
       : {}),
     DISCORD_TOKEN: "test-only",
     DISCORD_CLIENT_ID: "application",
-    DISCORD_GUILD_ID: "guild",
+    DISCORD_GUILD_ID: "500000000000000001",
     LUMA_WORKSPACE_ID: workspace.workspaceId,
     LUMA_REASONING_MODEL_PROVIDER: "disabled",
     OPENAI_API_KEY: "test-only",
@@ -124,6 +124,9 @@ async function fixture(monthlyLimit = "30", automatic = false) {
     LUMA_CONTEXT_NOTION_PAGE_IDS: authorityId
   };
   const raw = captureFixture();
+  raw.source.url = raw.source.url.replace("/guild/", "/500000000000000001/");
+  raw.snapshot.conversation.url = raw.source.url;
+  for (const message of raw.snapshot.messages) message.url = raw.source.url;
   const anchor = raw.snapshot.messages[0]!;
   if (anchor.state !== "available") throw new Error("fixture");
   anchor.text = "<@luma> record this decision";
@@ -165,7 +168,7 @@ async function fixture(monthlyLimit = "30", automatic = false) {
         channelCurrent
           ? {
               id: channelId,
-              guildId: "guild",
+              guildId: "500000000000000001",
               kind: "public-thread",
               parentChannelId: "100000000000000001",
               botCanRead: true,
@@ -343,7 +346,7 @@ async function fixture(monthlyLimit = "30", automatic = false) {
     }
   });
   const mention: DiscordContextAskMention = {
-    guildId: "guild",
+    guildId: "500000000000000001",
     channelId: subject.conversationObjectId,
     parentChannelId: "100000000000000001",
     actorDiscordUserId: "779381502311137301",
@@ -363,11 +366,25 @@ async function fixture(monthlyLimit = "30", automatic = false) {
       commandHandler({
         type: "decision-record-candidates",
         interactionId: "candidates-1",
-        guildId: "guild",
+        guildId: "500000000000000001",
         channelId: subject.conversationObjectId,
         actorDiscordUserId: mention.actorDiscordUserId,
         sourceMessageId: mention.messageId,
         occurredAt: mention.occurredAt
+      }),
+    permission: (action: "enable" | "status" | "disable", sequence = 1) =>
+      commandHandler({
+        type: "decision-record-automatic",
+        interactionId: `60000000000000000${sequence}`,
+        guildId: "500000000000000001",
+        channelId: subject.conversationObjectId,
+        actorDiscordUserId: mention.actorDiscordUserId,
+        occurredAt: mention.occurredAt,
+        scopeId: "luma",
+        choice:
+          action === "enable"
+            ? { action, permissionClass: "new-decisions", sharing: "four-founders" }
+            : { action }
       }),
     writes,
     pages,
@@ -411,7 +428,7 @@ async function fixture(monthlyLimit = "30", automatic = false) {
       commandHandler({
         type: "decision-record-recover",
         interactionId: "recover-1",
-        guildId: "guild",
+        guildId: "500000000000000001",
         channelId: subject.conversationObjectId,
         actorDiscordUserId: mention.actorDiscordUserId,
         sourceMessageId: mention.messageId,
@@ -558,5 +575,33 @@ describe("automatic Decision processing in the actual main runtime", () => {
     expect(response.content).toMatch(/budget/iu);
     expect(f.model).not.toHaveBeenCalled();
     expect(f.writes).toEqual([]);
+  });
+});
+
+describe("standing founder permission in the actual main runtime", () => {
+  it("uses the native owner's retained grant for one automatic write and disables it without another paid request", async () => {
+    const f = await fixture("30", true);
+    const enabled = await f.permission("enable");
+    expect(enabled.content).toContain("recording: active");
+    await enabled.requireCurrent?.();
+    await f.ask();
+    await vi.waitFor(
+      async () =>
+        expect(await app!.automaticDecisionStatus!()).toMatchObject({
+          completed: 1,
+          processing: 0
+        }),
+      { timeout: 3000 }
+    );
+    expect(f.writes).toEqual(["create"]);
+    expect(f.model).toHaveBeenCalledTimes(1);
+    const review = await f.candidates();
+    expect(review.content).toContain("recorded");
+    const disabled = await f.permission("disable", 2);
+    expect(disabled.content).toContain("recording: disabled");
+    await disabled.requireCurrent?.();
+    await expect(enabled.requireCurrent?.()).rejects.toThrow();
+    expect(f.model).toHaveBeenCalledTimes(1);
+    expect(f.writes).toEqual(["create"]);
   });
 });

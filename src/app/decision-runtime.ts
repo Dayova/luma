@@ -1,6 +1,15 @@
 import { isAbsolute } from "node:path";
 import { createConversationDecisionEvidenceSource } from "../decision-intelligence/conversation-evidence-source.js";
 import { createImportedMeetingDecisionEvidenceSource } from "../decision-intelligence/imported-meeting-evidence-source.js";
+import {
+  LOGICAL_CAPTURE_DECISION_REVISION_PREFIX,
+  type LogicalMeetingDecisionEvidenceSource
+} from "../decision-intelligence/logical-meeting-evidence-source.js";
+import {
+  createDecisionStandingPolicy,
+  type DecisionPermissionSourceAccess,
+  type ManagedDecisionStandingPolicy
+} from "../decision-intelligence/standing-permission.js";
 import type { ImportedSourceHistoryAccess } from "../meeting-intelligence/imported-source-analysis.js";
 import { createNotionDecisionAuthority } from "../decision-intelligence/notion-decision-authority.js";
 import { createDecisionHumanReviewAccess } from "../decision-intelligence/human-review.js";
@@ -108,6 +117,8 @@ export async function createDecisionRuntime(
     ledger: ObservedSourceLedger;
     conversationEvidenceSource: ConversationEvidenceSource;
     importedSourceAccess?: ImportedSourceHistoryAccess;
+    logicalMeetingEvidenceSource?: LogicalMeetingDecisionEvidenceSource;
+    standingPermissionSourceAccess?: DecisionPermissionSourceAccess;
     accessPolicy: WorkspaceAccessPolicy;
     budget: AiUsageBudget;
     limits: AiRequestLimits;
@@ -117,6 +128,7 @@ export async function createDecisionRuntime(
 ): Promise<
   DecisionIntelligenceConfiguration & {
     recall: Awaited<ReturnType<typeof createDecisionRecallRuntime>>;
+    standingPolicy?: ManagedDecisionStandingPolicy;
   }
 > {
   const { workspaceId } = input;
@@ -168,13 +180,73 @@ export async function createDecisionRuntime(
     }),
     recipientPersonIds: dayovaFounderPersonIds
   });
-  const meetingEvidenceSource = input.importedSourceAccess
+  const importedMeetingEvidenceSource = input.importedSourceAccess
     ? createImportedMeetingDecisionEvidenceSource({
         database: input.database,
         ledger: input.ledger,
         sourceAccess: input.importedSourceAccess
       })
     : undefined;
+  const logical = input.logicalMeetingEvidenceSource;
+  const meetingEvidenceSource =
+    importedMeetingEvidenceSource || logical
+      ? {
+          async capture(request: Parameters<typeof evidenceSource.capture>[0]) {
+            // An imported request keeps its original identity. Only an actual
+            // LogicalMeeting ID can select the capture-backed source capability.
+            if (
+              logical &&
+              request.subject.type === "meeting" &&
+              (await logical.resolveMeeting({
+                workspaceId,
+                meetingId: request.subject.meetingId,
+                audience: request.audience
+              })) === request.subject.meetingId
+            )
+              return logical.capture(request);
+            if (!importedMeetingEvidenceSource)
+              throw new Error("The Decision Meeting source is unavailable");
+            return importedMeetingEvidenceSource.capture(request);
+          },
+          async captureProcessed(
+            request: Parameters<typeof evidenceSource.captureProcessed>[0]
+          ) {
+            if (
+              logical &&
+              request.subject.type === "meeting" &&
+              (await logical.resolveMeeting({
+                workspaceId,
+                meetingId: request.subject.meetingId,
+                audience: request.audience
+              })) === request.subject.meetingId
+            )
+              return logical.captureProcessed(request);
+            if (!importedMeetingEvidenceSource)
+              throw new Error("The processed Decision Meeting source is unavailable");
+            return importedMeetingEvidenceSource.captureProcessed(request);
+          },
+          requireCurrent(source: Parameters<typeof evidenceSource.requireCurrent>[0]) {
+            const provider = source.revision.startsWith(
+              LOGICAL_CAPTURE_DECISION_REVISION_PREFIX
+            )
+              ? logical
+              : importedMeetingEvidenceSource;
+            if (!provider)
+              return Promise.reject(new Error("The Decision source is unavailable"));
+            return provider.requireCurrent(source);
+          },
+          authorizeRetained(
+            request: Parameters<typeof evidenceSource.authorizeRetained>[0]
+          ) {
+            const provider = request.source.revision.startsWith(
+              LOGICAL_CAPTURE_DECISION_REVISION_PREFIX
+            )
+              ? logical
+              : importedMeetingEvidenceSource;
+            return provider?.authorizeRetained(request) ?? Promise.resolve(false);
+          }
+        }
+      : undefined;
   const humanReviewAccess = createDecisionHumanReviewAccess({
     database: input.database,
     accessPolicy: input.accessPolicy,
@@ -240,6 +312,17 @@ export async function createDecisionRuntime(
     records: catalog,
     audience: () => audience(workspaceId)
   });
+  const standingPolicy =
+    config.automatic && input.standingPermissionSourceAccess
+      ? await createDecisionStandingPolicy({
+          database: input.database,
+          workspaceId,
+          audience: { workspaceId, personIds: [...dayovaFounderPersonIds] },
+          accessPolicy: input.accessPolicy,
+          authority,
+          sourceAccess: input.standingPermissionSourceAccess
+        })
+      : undefined;
   const beforeInvoke: NonNullable<
     Parameters<typeof createOpenAIDecisionInterpreter>[0]["beforeInvoke"]
   > = async (request, signal) => {
@@ -283,6 +366,7 @@ export async function createDecisionRuntime(
     ...(config.automatic
       ? {
           automatic: {
+            ...(standingPolicy ? { policy: standingPolicy } : {}),
             evidenceSource: {
               captureProcessed: (
                 request: Parameters<typeof evidenceSource.captureProcessed>[0]
@@ -323,6 +407,7 @@ export async function createDecisionRuntime(
       }
     },
     authority,
+    ...(standingPolicy ? { standingPolicy } : {}),
     records,
     evidenceSource,
     ...(meetingEvidenceSource ? { meetingEvidenceSource } : {}),

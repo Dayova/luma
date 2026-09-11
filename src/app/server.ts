@@ -17,6 +17,8 @@ import { createDiscordCaptureReviewRuntime } from "../discord/discord-capture-re
 import { createDiscordGranolaRuntime } from "../discord/discord-granola-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
+import { createLogicalMeetingDecisionEvidenceSource } from "../decision-intelligence/logical-meeting-evidence-source.js";
+import { createDiscordDecisionPermissionSourceAccess } from "../discord/discord-decision-standing-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
@@ -402,6 +404,12 @@ export async function startServer(
           dependencies.createMeetingSynthesisWriter ?? createMeetingSynthesisRuntime
         )({ workspaceId, config: captureConfig, env })
       : undefined;
+    const logicalDecisionEvidence = captureRuntime
+      ? createLogicalMeetingDecisionEvidenceSource({
+          database,
+          configuration: captureRuntime.configuration
+        })
+      : undefined;
     const decisionIntelligence = decisionConfig
       ? await (dependencies.createDecisionRuntime ?? createDecisionRuntime)({
           config: decisionConfig,
@@ -410,6 +418,23 @@ export async function startServer(
           database,
           ledger: observedSourceLedger,
           conversationEvidenceSource: discordTransport,
+          ...(logicalDecisionEvidence
+            ? { logicalMeetingEvidenceSource: logicalDecisionEvidence }
+            : {}),
+          ...(decisionConfig.automatic && decisionRecordConfig
+            ? {
+                standingPermissionSourceAccess:
+                  createDiscordDecisionPermissionSourceAccess({
+                    workspaceId,
+                    guildId: env["DISCORD_GUILD_ID"]!,
+                    parentChannelIds: decisionRecordConfig.parentChannelIds,
+                    founderPersonIds: dayovaFounderPersonIds,
+                    identityDirectory,
+                    accessPolicy,
+                    resolveChannel: (request) => discordTransport.resolveChannel(request)
+                  })
+              }
+            : {}),
           ...(importedSourceAnalysis
             ? { importedSourceAccess: importedSourceAnalysis.access }
             : {}),
@@ -420,6 +445,8 @@ export async function startServer(
         })
       : undefined;
     if (decisionIntelligence) {
+      if (decisionIntelligence.standingPolicy)
+        startupCleanup.push(() => decisionIntelligence.standingPolicy!.stop());
       startupAdmissionStops.push(() => decisionIntelligence.recall.stop());
       startupCleanup.push(() => decisionIntelligence.recall.stop());
     }
@@ -519,6 +546,7 @@ export async function startServer(
     if (automaticDecisions) {
       startupAdmissionStops.push(() => automaticDecisions.pause());
       startupCleanup.push(() => automaticDecisions.stop());
+      captureRuntime?.connectProcessedSource(automaticDecisions.meeting);
     }
     const knowledgeProvider = optionalNotionKnowledgeProvider(env);
     const meetingNotesSource = optionalNotionMeetingNotesSource(
@@ -533,7 +561,9 @@ export async function startServer(
     const meetingNotesSyncIntervalMs = meetingNotesSyncIntervalFromEnv(env);
     const baseMeetingNotesIngestion = createMeetingNotesIngestion({
       meetingIntelligence,
-      ...(automaticDecisions ? { onProcessedSource: automaticDecisions.meeting } : {}),
+      ...(automaticDecisions && !captureRuntime
+        ? { onProcessedSource: automaticDecisions.meeting }
+        : {}),
       workItemProviderId
     });
     const meetingNotesIngestion = captureRuntime
@@ -694,6 +724,22 @@ export async function startServer(
       ...(decisionRecordConfig && decisionMeetingIntelligence
         ? {
             decisionRecords: {
+              ...(logicalDecisionEvidence && decisionIntelligence
+                ? {
+                    logicalMeetings: {
+                      resolveMeeting: (
+                        request: Parameters<
+                          typeof logicalDecisionEvidence.resolveMeeting
+                        >[0]
+                      ) => logicalDecisionEvidence.resolveMeeting(request),
+                      currentAudience: (requestedWorkspaceId: string) =>
+                        decisionIntelligence.audience(requestedWorkspaceId)
+                    }
+                  }
+                : {}),
+              ...(decisionIntelligence?.standingPolicy
+                ? { standingPolicy: decisionIntelligence.standingPolicy }
+                : {}),
               ...(automaticDecisions ? { automatic: automaticDecisions } : {}),
               meetingIntelligence: decisionMeetingIntelligence,
               execution: followUpExecution,
@@ -835,6 +881,7 @@ export async function startServer(
               await Promise.allSettled([...healthReads]);
               await captureRuntime?.stop();
               await automaticDecisions?.stop();
+              await decisionIntelligence?.standingPolicy?.stop();
               await granolaConnections?.stop();
             })()
           );

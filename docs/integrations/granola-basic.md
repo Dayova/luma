@@ -196,3 +196,52 @@ PKCE and owner/state binding, explicit account attestation, encryption/recreatio
 per-founder isolation, refresh rotation, unknown outcomes, stopped/revoked access
 and ingestion that archives an included work capture while withholding a private
 capture. They use only synthetic provider responses and tokens.
+
+## Founder onboarding in Discord
+
+When the main runtime composes `createDiscordGranolaRuntime` and Granola OAuth
+is enabled, `/granola` is registered alongside the existing native Meeting
+commands. All replies are ephemeral and every command requires the unique
+founder identity and current founder-only Discord channel audience.
+
+1. `/granola connect` starts the authenticated founder's browser login and returns
+   a personal authorization link. The fixed browser callback completes the
+   exchange and binds it to that original actor. No code needs to be pasted back
+   into Discord. Login alone never admits a meeting.
+2. `/granola inspect` reads the actual connected account and workspace from the
+   provider. Long account information remains available with `page:<N>`. It is
+   shown only to the initiating owner. Account text is untrusted information, not
+   a permission instruction. The local review receipt stores only the account
+   fingerprint, connection, actor and timestamp, never account text or tokens.
+3. `/granola attest confirm_account:true sharing:four-founders` explicitly confirms
+   the inspected account/workspace and permits eligible captures to be shared
+   with Jakob, Fabius, Philipp and Julius. The account review expires after ten
+   minutes, and the manager rechecks its exact fingerprint before accepting it.
+   With no source choices, nothing is selected. The optional choices are:
+   - `include_urls`: comma-separated exact `https://notes.granola.ai/d/<ID>` links.
+   - `exclude_urls`: exact links that must remain excluded; exclusions take priority.
+   - `internal_meetings:true`: opt in to automatic captures with only explicitly
+     mapped founders. Unknown attendees remain excluded. This needs explicit
+     `founder_emails`, for example
+     `Jakob=jakob@example.com,Fabius=fabius@example.com`, including the owner and at
+     least one other founder. Provider names never create identity mappings.
+4. `/granola status` shows the owner's connection, current source choices and
+   Basic capability limitation. Long lists are available through `page`.
+   `/granola configure sharing:four-founders` changes only supplied choices and
+   preserves omitted included/excluded lists, founder mappings and the automatic
+   capture setting. A concurrent policy change rejects the command instead of
+   restoring older private exclusions. The literal `none` clears a supplied list. Inspect the account
+   again if the ten-minute review has expired.
+5. `/granola disconnect` disables the local connection, clears credentials and
+   refreshes the active source registry. Existing shared captures remain retained;
+   a previously initialized client can no longer read through the old grant.
+   Granola's own authorization can be revoked separately in its account settings.
+
+The owned app-facing factory receives the shared database/workspace, real OAuth
+manager, callback host's `begin`, and the shared registry refresh callback. It
+never chooses an actor from provider text or HTTP query parameters. Attestation,
+configuration and disconnect complete their registry refresh within the admitted
+Discord command; shutdown waits for that command. Exact owner, account fingerprint,
+connection and policy are checked again at the actual native reply boundary.
+No account consent, source activation or real external write is performed by the
+native test suite, which programs HTTP provider responses and uses a local callback.

@@ -81,6 +81,7 @@ export type DiscordJsTransportConfig = {
   contextAsk?: DiscordContextAskConfig;
   consultations?: DiscordConsultationConfig;
   decisionRecords?: DiscordContextAskConfig;
+  granola?: boolean;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
@@ -244,7 +245,9 @@ export function createDiscordJsTransport(
     if (disconnected) return;
     if (
       !interaction.isChatInputCommand() ||
-      !["meeting", "consultation", "decision-record"].includes(interaction.commandName)
+      !["meeting", "consultation", "decision-record", "granola"].includes(
+        interaction.commandName
+      )
     ) {
       return;
     }
@@ -536,6 +539,7 @@ export function createDiscordJsTransportFromEnv(
     authorizedPersonIds: dayovaFounderPersonIds
   });
   return createDiscordJsTransport({
+    granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
     authorizeHumanReader: async (providerUserId) =>
       Boolean(
         await accessPolicy.authorize({
@@ -581,6 +585,7 @@ async function registerMeetingCommand(
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
     body: [
       meetingCommand.toJSON(),
+      ...(config.granola ? [granolaCommand.toJSON()] : []),
       ...(config.consultations ? [consultationCommand.toJSON()] : []),
       ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : [])
     ],
@@ -1041,6 +1046,45 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "granola") {
+    if (subcommand === "connect" || subcommand === "disconnect")
+      return { ...base, type: `granola-${subcommand}` };
+    if (subcommand === "status")
+      return {
+        ...base,
+        type: "granola-status",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand === "inspect")
+      return {
+        ...base,
+        type: "granola-inspect",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand !== "attest" && subcommand !== "configure")
+      throw new Error("Unknown Granola command");
+    const sharing = interaction.options.getString("sharing", true);
+    if (sharing !== "four-founders") throw new Error("Unknown Granola sharing choice");
+    const automaticInternalMeetings = interaction.options.getBoolean("internal_meetings"),
+      includeUrls = interaction.options.getString("include_urls"),
+      excludeUrls = interaction.options.getString("exclude_urls"),
+      founderEmails = interaction.options.getString("founder_emails");
+    const choice = {
+      ...base,
+      sharing: "four-founders" as const,
+      ...(automaticInternalMeetings === null ? {} : { automaticInternalMeetings }),
+      ...(includeUrls === null ? {} : { includeUrls }),
+      ...(excludeUrls === null ? {} : { excludeUrls }),
+      ...(founderEmails === null ? {} : { founderEmails })
+    };
+    return subcommand === "attest"
+      ? {
+          ...choice,
+          type: "granola-attest",
+          confirmAccount: interaction.options.getBoolean("confirm_account", true)
+        }
+      : { ...choice, type: "granola-configure" };
+  }
   if (interaction.commandName === "decision-record") {
     if (subcommand === "meeting") {
       const targetRecordId = interaction.options.getString("target_record");
@@ -2054,3 +2098,111 @@ function decisionRecordAddress(
           .setMaxLength(22)
       );
 }
+
+function granolaSharingOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("sharing")
+        .setDescription("Explicit recipients for eligible meetings")
+        .setRequired(true)
+        .addChoices({
+          name: "Share with all four Dayova founders",
+          value: "four-founders"
+        })
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("internal_meetings")
+        .setDescription(
+          "Opt in to internal meetings with only explicitly mapped founders; default off"
+        )
+    )
+    .addStringOption((option) =>
+      option
+        .setName("include_urls")
+        .setDescription(
+          "Exact Granola /d/ meeting URLs, comma separated; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("exclude_urls")
+        .setDescription(
+          "Exact private/excluded Granola meeting URLs; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("founder_emails")
+        .setDescription(
+          "Explicit founder mappings, e.g. Jakob=jakob@example.com,Fabius=fabius@example.com"
+        )
+        .setMaxLength(2000)
+    );
+}
+const granolaCommand = new SlashCommandBuilder()
+  .setName("granola")
+  .setDescription("Manage your own Granola connection and founder sharing")
+  .addSubcommand((command) =>
+    command
+      .setName("connect")
+      .setDescription("Start a private browser login for your own Granola account")
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("status")
+      .setDescription("Show your connection state and sharing scope without any AI call")
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Sharing status page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("inspect")
+      .setDescription(
+        "Privately review your actual account and workspace before attesting"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Account review page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("attest")
+        .setDescription(
+          "Confirm your reviewed account and explicitly choose founder sharing"
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("confirm_account")
+            .setDescription("I confirm the inspected account and workspace are mine")
+            .setRequired(true)
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("configure")
+        .setDescription(
+          "Change your own sharing choices; omitted lists and exclusions are preserved"
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("disconnect")
+      .setDescription(
+        "Disable your Granola connection in Luma; retain original shared captures"
+      )
+  );

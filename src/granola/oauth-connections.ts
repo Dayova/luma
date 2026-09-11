@@ -501,17 +501,25 @@ export async function createGranolaOAuthConnections(input: {
     configure: ({
       actor,
       connectionId,
-      choices
+      choices,
+      expectedPolicy
     }: {
       actor: GranolaOwnerActor;
       connectionId: string;
       choices: GranolaOwnerChoices;
+      expectedPolicy?: NonNullable<GranolaOAuthState["policy"]>;
     }) =>
       run(async () => {
         actor = structuredClone(actor);
+        const expected =
+          expectedPolicy === undefined ? undefined : JSON.stringify(expectedPolicy);
         const person = await owner(actor),
           state = exact(await store.read(person), connectionId);
-        if (!state.policy?.enabled || state.phase !== "connected")
+        if (
+          !state.policy?.enabled ||
+          state.phase !== "connected" ||
+          (expected !== undefined && JSON.stringify(state.policy) !== expected)
+        )
           throw new GranolaOAuthError("attestation-required");
         const selected = granolaPolicySchema.shape.connections.element
           .pick({

@@ -90,6 +90,7 @@ export function createNativeReviewSourceAccess(input: {
   database: LumaDatabase;
   workspaceId: string;
   pageId: string;
+  workItemProviderId?: string;
   ledger: ObservedSourceLedger;
   access: NativeReviewAccess;
   evidenceSource: MeetingNoteEvidenceSource;
@@ -98,6 +99,9 @@ export function createNativeReviewSourceAccess(input: {
     pageId: string;
   }): Promise<boolean>;
 }) {
+  const workItemProviderId = (input.workItemProviderId ?? "linear").trim();
+  if (!workItemProviderId)
+    throw new Error("Native source access requires a WorkProvider identity");
   let stopped = false;
   const active = new Set<Promise<unknown>>();
   const track = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -147,7 +151,7 @@ export function createNativeReviewSourceAccess(input: {
           workspace: { workspaceId: input.workspaceId, timezone: "UTC" },
           source: { ...original, change: "unchanged" }
         },
-        "linear"
+        workItemProviderId
       ).source;
       if (canonical(expected) !== canonical(request.source)) return false;
       const found = (await rows(request.source)).rows;

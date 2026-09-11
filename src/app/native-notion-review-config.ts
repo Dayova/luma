@@ -26,6 +26,7 @@ const configSchema = z.object({
   pageCredentialScopeId: z.string().min(1),
   linearReadToken: z.string().min(1),
   linearTeamId: z.string().min(1),
+  workItemProviderId: z.string().min(1),
   linearCredentialScopeId: z.string().min(1),
   sharingPolicyPath: z.string().min(1),
   bearerToken: z.string().min(32),
@@ -52,6 +53,7 @@ export function nativeNotionReviewConfig(
     pageCredentialScopeId: get("LUMA_NATIVE_NOTION_CREDENTIAL_SCOPE_ID"),
     linearReadToken: get("LINEAR_READONLY_API_KEY"),
     linearTeamId: get("LINEAR_TEAM_ID"),
+    workItemProviderId: get("LUMA_LINEAR_PROVIDER_ID") || "linear",
     linearCredentialScopeId: get("LUMA_NATIVE_LINEAR_CREDENTIAL_SCOPE_ID"),
     sharingPolicyPath: get("LUMA_CONTEXT_SHARING_POLICY_PATH"),
     bearerToken: get("LUMA_NATIVE_REVIEW_MCP_BEARER_TOKEN"),
@@ -115,7 +117,8 @@ export function createNativeNotionReviewResources(
   });
   const catalog = (dependencies.createWorkCatalog ?? createLinearReadOnlyWorkCatalog)({
     teamId: config.linearTeamId,
-    readOnlyApiKey: config.linearReadToken
+    readOnlyApiKey: config.linearReadToken,
+    providerId: config.workItemProviderId
   });
   const workCatalog = createWorkspaceBoundWorkCatalog({
     workspaceId: input.workspace.workspaceId,
@@ -163,6 +166,7 @@ export function createNativeNotionReviewResources(
     database: input.database,
     workspaceId: input.workspace.workspaceId,
     pageId: config.pageId,
+    workItemProviderId: config.workItemProviderId,
     ledger: input.ledger,
     access,
     evidenceSource,
@@ -179,6 +183,7 @@ export function createNativeNotionReviewResources(
       const runtime = createNativeNotionReviewRuntime({
         ...input,
         ...shared,
+        workItemProviderId: config.workItemProviderId,
         access,
         evidenceSource,
         authorizeSources

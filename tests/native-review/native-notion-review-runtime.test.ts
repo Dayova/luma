@@ -29,7 +29,7 @@ import {
 } from "./native-notion-review-fixtures.js";
 
 const bearer = "test-native-mcp-unique-bearer-value-0123456789";
-async function harness(analyze = false) {
+async function harness(analyze = false, workItemProviderId = "linear") {
   const h = providerHarness();
   const database = await createPgliteDatabase(),
     ledger = createObservedSourceLedger({ database });
@@ -60,6 +60,7 @@ async function harness(analyze = false) {
       database,
       workspaceId: workspace.workspaceId,
       pageId,
+      workItemProviderId,
       ledger,
       access: h.createAccess(),
       evidenceSource: source,
@@ -68,6 +69,7 @@ async function harness(analyze = false) {
   const history = createHistory();
   const catalog = createLinearReadOnlyWorkCatalogForTest({
     teamId: "team-dayova",
+    providerId: workItemProviderId,
     api: createLinearReadOnlyApiForTest({
       searchIssues: () => {
         searches++;
@@ -90,7 +92,7 @@ async function harness(analyze = false) {
     ],
     importedSourceObservationVerifier: createLedgerBackedImportedSourceVerifier({
       ledger,
-      workItemProviderId: "linear"
+      workItemProviderId
     }),
     ...(analyze
       ? {
@@ -115,6 +117,7 @@ async function harness(analyze = false) {
       database,
       workspace,
       ledger,
+      workItemProviderId,
       meetingIntelligence: mi,
       identityDirectory: h.directory,
       accessPolicy: h.accessPolicy,
@@ -144,7 +147,7 @@ async function harness(analyze = false) {
       if (!original) throw new Error("Missing original");
       return observedMeetingNoteToObservation(
         { workspace, source: { ...original, change: "unchanged" } },
-        "linear"
+        workItemProviderId
       ).source;
     },
     async refresh() {
@@ -182,6 +185,75 @@ async function harness(analyze = false) {
 }
 
 describe("shared native Notion review", () => {
+  it("retains an opaque Linear provider alias through import, catalog reconciliation, replay and source proof", async () => {
+    const alias = "linear_dayova";
+    const h = await harness(true, alias);
+    h.setModel(
+      createOpenAIReasoningModel({
+        model: "gpt-5.6-luna",
+        client: {
+          create: () =>
+            Promise.resolve({
+              outputText: JSON.stringify({
+                actionItems: [],
+                decisions: [],
+                openQuestions: [],
+                risks: [],
+                followUpIntentions: []
+              })
+            })
+        }
+      })
+    );
+    try {
+      const first = await h.runtime.review(locator);
+      expect(first.receipt.outcome.type).toBe("reviewed");
+      expect(first.analysis.status).toBe("completed");
+      expect(first.reviews).toHaveLength(1);
+      expect(first.reviews[0]!.proposal).toMatchObject({
+        catalogProviderId: alias,
+        candidate: { source: { source: { workItemProviderId: alias } } }
+      });
+      expect(first.reviews[0]!.proposal.searches.length).toBeGreaterThan(0);
+      expect(
+        first.reviews[0]!.proposal.searches.every(
+          (search) => search.providerId === alias && search.status === "completed"
+        )
+      ).toBe(true);
+      const searches = h.searches();
+      expect(searches).toBeGreaterThan(0);
+      const recreated = h.createRuntime();
+      try {
+        expect(await recreated.review(locator)).toEqual(first);
+        expect(h.searches()).toBe(searches);
+        await recreated.requireCurrent(locator, first);
+      } finally {
+        await recreated.stop();
+      }
+      const source = await h.source();
+      const audience = {
+        workspaceId: workspace.workspaceId,
+        personIds: ["person_jakob"]
+      };
+      expect(source.workItemProviderId).toBe(alias);
+      await h.history.sourceHistoryAccess.requireCurrent({ source, audience });
+      await h.history.sourceHistoryAccess.requireRetained({ source, audience });
+      await expect(
+        h.history.sourceHistoryAccess.requireCurrent({
+          source: { ...source, workItemProviderId: "linear" },
+          audience
+        })
+      ).rejects.toThrow();
+      h.permissions.permissions.pop();
+      await expect(
+        h.history.sourceHistoryAccess.requireRetained({ source, audience })
+      ).rejects.toThrow();
+    } finally {
+      await h.runtime.stop();
+      await h.history.stop();
+      await h.database.close();
+    }
+  });
   it("retains native provenance when disabled or repointed instead of allowing a broader source grant", async () => {
     const h = await harness();
     const repointed = h.createHistory("10000000-0000-4000-8000-000000000001");

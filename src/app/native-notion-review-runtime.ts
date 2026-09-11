@@ -58,6 +58,8 @@ export type NativeNotionReviewRuntimeInput = {
   database: LumaDatabase;
   workspace: WorkspaceConfig;
   ledger: ObservedSourceLedger;
+  /** The main runtime's opaque WorkProvider namespace; identities remain Linear. */
+  workItemProviderId?: string;
   /** The main runtime's sole MI, with its guarded Work Catalog and shared AI accounting. */
   meetingIntelligence: MeetingIntelligence;
   identityDirectory: IdentityDirectory;
@@ -75,9 +77,11 @@ export type NativeNotionReviewRuntimeInput = {
 export function createNativeNotionReviewRuntime(
   input: NativeNotionReviewRuntimeInput
 ): NativeNotionReviewRuntime {
+  const workItemProviderId = (input.workItemProviderId ?? "linear").trim();
   // Deliberately has no onProcessedSource hook: native read-only review cannot schedule automatic writes.
   const ingestion = createMeetingNotesIngestion({
-    meetingIntelligence: input.meetingIntelligence
+    meetingIntelligence: input.meetingIntelligence,
+    workItemProviderId
   });
   let stopped = false;
   const active = new Set<Promise<unknown>>();
@@ -198,7 +202,7 @@ export function createNativeNotionReviewRuntime(
       throw new NativeReviewUnavailable("review-unavailable");
     const observation = observedMeetingNoteToObservation(
       { workspace: input.workspace, source: { ...original, change: "unchanged" } },
-      "linear"
+      workItemProviderId
     );
     const result = await input.meetingIntelligence.query({
       workspaceId: input.workspace.workspaceId,

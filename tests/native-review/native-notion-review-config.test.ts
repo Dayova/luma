@@ -27,8 +27,17 @@ describe("native Notion configuration and listener lifecycle", () => {
     expect(nativeNotionReviewConfig(env())).toMatchObject({
       agentId: ids.agent,
       pageId: ids.page,
+      workItemProviderId: "linear",
       hostname: "127.0.0.1",
       port: 3003
+    });
+  });
+  it("uses the main opaque Linear provider alias without changing credential scopes", () => {
+    expect(
+      nativeNotionReviewConfig({ ...env(), LUMA_LINEAR_PROVIDER_ID: " linear_dayova " })
+    ).toMatchObject({
+      workItemProviderId: "linear_dayova",
+      linearCredentialScopeId: "native-linear-reader"
     });
   });
   it.each([

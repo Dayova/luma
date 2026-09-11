@@ -1967,6 +1967,7 @@ function relevantPeople(intent: FollowUpIntent, actorId: PersonId): PersonId[] {
 
 function followUpIntentLabel(intent: FollowUpIntent): string {
   switch (intent.type) {
+    case "publish-meeting-synthesis":
     case "record-meeting":
     case "update-knowledge":
     case "create-work-item":

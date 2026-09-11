@@ -5,3 +5,12 @@ Meeting Intelligence accepts a capture-set Observation containing only exact Log
 We considered generalizing the existing Notion-specific imported-source Observation and introducing a separate caller-facing synthesis Module. The former would make Basic derived notes resemble native transcript material and couple synthesis revisions to source-specific Meeting state; the latter would make callers coordinate source retrieval, fusion and currentness. The chosen private implementation retains source-set idempotency, Human Judgment and source/grant fences in one place while permitting the existing live and imported Notion paths to continue unchanged.
 
 Synthesis is derived understanding, distinct from canonical Decisions and Operational Outcome. Publication must use an approved Follow-up Intent bound to its exact synthesis and source set; selecting a canonical anchor never itself authorizes writing that page.
+
+The canonical writer is a provider-neutral sibling capability invoked only by
+Follow-up Execution. An immutable approved plan and positive provider receipt
+precede the private projection of its canonical reference into LogicalMeetings.
+That projection preserves an existing conflicting anchor; it never becomes a
+public caller-controlled setter. Publication metadata is excluded from capture
+material/binding identity, while separate currentness checks detect an in-flight
+anchor change. This permits a restarted consumer to reuse the same canonical page
+without treating publication as a new paid synthesis source.

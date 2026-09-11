@@ -40,8 +40,7 @@ conflicts between inferred claims. Missing counterpart evidence withholds that
 new synthesis and preserves the prior revision; model omission is not treated as
 resolution. Existing counterpart claims retain reciprocal edges even if the
 model forgets the flags.
-Every
-model-derived claim is labelled inferred; it cannot confirm an owner, create work
+Every model-derived claim is labelled inferred; it cannot confirm an owner, create work
 or authorize an external mutation. Exact quotations are a separate field and
 must be exact substrings of material explicitly marked verbatim/original speech.
 Basic enhanced notes cannot satisfy that condition. Ordinary model claim text
@@ -77,18 +76,52 @@ The source proof is repeated after the durable paid-attempt claim and before any
 source text reaches the model. Revocation during database admission therefore
 prevents disclosure and safely releases the undispatched attempt.
 
-## Remaining LUM-35 delivery work
+## Approved canonical publication
 
-This commit establishes and tests the MI/source path. The same issue still needs
-the approved `publish-meeting-synthesis` Follow-up Intent and provider writer,
-bound to the exact synthesis revision, source set and recipient audience. A
-verified existing Notion Meeting Note is the original canonical anchor. Without
-one, the writer must upsert a single configured Imported Meeting Record with a
-deterministic external marker; it must not create a native Meeting Notes block.
-The writer owns only Luma Synthesis, with Operational Outcome retained separately.
+`conclude` and the guarded capture-synthesis query expose a suggested
+`publish-meeting-synthesis` Follow-up Intent for the exact derived revision, source
+set and recipient audience. An existing `follow-up-intent-approved` Observation
+from an admitted founder authorizes that revision. Callers cannot supply a body or
+destination. A stale revision, wider audience, revoked source or conflicting
+physical-page lease prevents dispatch.
 
-The main runtime still needs Granola scheduling, source/MI composition and a
-founder-facing synthesis/review projection on the unified runtime branch. Live
-individual OAuth/account attestation and real MCP output-shape compatibility
-validation remain separate activation prerequisites. No personal connection,
-provider write, canonical page or production deployment is activated by these tests.
+`createFollowUpExecution({ meetingSynthesisWriter, ... })` executes and recovers
+these Intents through the same public MI facade. The production
+`createNotionMeetingSynthesisWriter` requires a protected stable signing key,
+Notion token, workspace ID, Imported Meetings data-source ID, and an authorization
+capability for both exact pages and that data source. The data source needs its
+title property (default `Name`) and a rich-text key property (default
+`Luma Meeting ID`). Main-runtime composition supplies this writer and the current
+founder sharing policy; the writer creates no schema or sharing grants itself.
+
+A verified existing Notion Meeting Note is reused. Without one, the writer queries
+a deterministic Logical Meeting key and creates one ordinary Imported Meeting
+Record. It never creates a native Meeting Notes block or modifies source captures.
+Only the signed `Luma Synthesis` region is appended or exactly replaced. Existing
+Human text, original notes and separately owned Operational Outcome content stay
+outside that region. Contradictions, Human authority, source links and raw/derived
+capabilities remain visible; publication itself does not approve canonical
+Decisions or execute work. Previous derived revisions remain in local history.
+
+The durable operation plan precedes dispatch. A lost response leaves an uncertain
+operation; recovery only accepts an exact signed positive receipt and never
+resends an unproven mutation. A positive provider response is retained before
+local bookkeeping. The resulting reference is then projected into LogicalMeetings'
+canonical anchor, so a new facade instance and downstream consumers use that same
+page. A conflicting existing anchor is preserved for manual review. A local
+anchor failure can recover from the saved positive receipt without another write.
+Publication metadata changes do not trigger paid analysis of unchanged captures.
+
+The Notion Adapter uses the actual SDK without retries, bounded HTTP reads that
+abort the actual request, and the shared physical-page lease used by Operational
+Outcome publication. Signed Markdown uses native toggle indentation and tolerates
+Notion's removal of empty lines. Literal source markers cannot be interpreted as
+owned-region boundaries. Unknown provider outcomes remain visible for recovery.
+
+## Remaining runtime delivery
+
+The unified main runtime still needs Granola scheduling, source/MI and publication
+composition, and a founder-facing synthesis/review projection. Live individual
+OAuth/account attestation and real MCP output-shape compatibility validation remain
+activation prerequisites. No personal connection, provider write, canonical page
+or production deployment is activated by these tests.

@@ -1,6 +1,8 @@
 import type {
   MeetingCaptureSetObserved,
-  CaptureSynthesisJudgmentRecorded
+  CaptureSynthesisJudgmentRecorded,
+  PublishMeetingSynthesisIntent,
+  LumaSynthesis
 } from "./meeting-capture-synthesis.js";
 
 export type WorkspaceId = string;
@@ -902,6 +904,7 @@ export type CommentOnCodeChangeIntent = {
 };
 
 export type FollowUpIntent =
+  | PublishMeetingSynthesisIntent
   | RecordMeetingIntent
   | UpdateKnowledgeIntent
   | SettleOperationalOutcomeIntent
@@ -1054,6 +1057,8 @@ export type ParticipantBrief = {
 };
 
 export type MeetingConclusion = {
+  /** Separately derived capture understanding, never disguised as raw speech or canonical Decisions. */
+  captureSynthesis?: LumaSynthesis;
   workspaceId: WorkspaceId;
   meetingId: MeetingId;
   revision: number;

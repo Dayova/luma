@@ -19,6 +19,8 @@ import type {
   ScopedFollowUpExecution
 } from "./interface.js";
 import { randomUUID } from "node:crypto";
+import { withSynthesisPublicationExecution } from "./synthesis-publication-execution.js";
+import type { MeetingSynthesisWriter } from "../knowledge/meeting-synthesis-writer.js";
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { OperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
 import type { OperationalOutcomeSourceExecutionFence } from "../knowledge/ledger-backed-operational-outcome-source-execution-fence.js";
@@ -82,6 +84,7 @@ import {
 } from "./operational-outcome-settlement.js";
 
 export type CreateFollowUpExecutionInput = {
+  meetingSynthesisWriter?: MeetingSynthesisWriter;
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
   conversationConsultations?: ConversationConsultations;
@@ -165,7 +168,7 @@ export function createFollowUpExecution(
 ): ScopedFollowUpExecution {
   const now = input.now ?? (() => new Date());
 
-  const meetingExecution: FollowUpExecution = {
+  const base: FollowUpExecution = {
     execute: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
       return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
@@ -183,6 +186,13 @@ export function createFollowUpExecution(
       );
     }
   };
+  const meetingExecution = withSynthesisPublicationExecution({
+    base,
+    database: input.database,
+    meetingIntelligence: input.meetingIntelligence,
+    ...(input.meetingSynthesisWriter ? { writer: input.meetingSynthesisWriter } : {}),
+    now
+  });
   const conversationExecution =
     input.conversationConsultations && input.consultationProvider
       ? createConversationFollowUpExecution({
@@ -763,6 +773,10 @@ async function runProviderMutation(
   const { intent } = input;
 
   switch (intent.type) {
+    case "publish-meeting-synthesis":
+      throw new Error(
+        "Synthesis publication requires its canonical capture execution route"
+      );
     case "settle-operational-outcome": {
       return settleOperationalOutcome(dependencies, input, idempotencyKey);
     }
@@ -3877,6 +3891,8 @@ async function recoverCreatedReferences(
 ): Promise<ExternalReference[] | null> {
   try {
     switch (input.intent.type) {
+      case "publish-meeting-synthesis":
+        return null;
       case "settle-operational-outcome":
         return null;
       case "record-meeting":

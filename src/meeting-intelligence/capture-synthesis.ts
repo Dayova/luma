@@ -32,6 +32,11 @@ import type {
   CaptureSynthesisConfiguration,
   CurrentMeetingCaptureMaterial
 } from "./meeting-capture-access.js";
+import {
+  isSynthesisPublicationObservation,
+  observeSynthesisPublication,
+  projectSynthesisPublication
+} from "./synthesis-publication-state.js";
 
 type CaptureObservation = MeetingCaptureSetObserved | CaptureSynthesisJudgmentRecorded;
 type Stored = {
@@ -197,7 +202,8 @@ export function withCaptureSynthesis(input: {
     });
     if (!meeting || !meeting.captureRefs.length || meeting.captureRefs.length > 8)
       throw new Unavailable();
-    const bindingDigest = digest(meeting);
+    // Publication metadata is not new source material or a new capture binding.
+    const bindingDigest = captureBindingDigest(meeting);
     const materials: Material[] = [];
     const authorizationScopes: Record<string, string> = {};
     const anchors: NonNullable<LumaSynthesis["canonicalAnchorRef"]>[] = [];
@@ -237,10 +243,13 @@ export function withCaptureSynthesis(input: {
       new Set(materials.map((item) => item.evidenceId)).size !== materials.length
     )
       throw new Unavailable();
+    const finalMeeting = await config.logicalMeetings.get({
+      workspaceId,
+      logicalMeetingId: meetingId
+    });
     if (
-      digest(
-        await config.logicalMeetings.get({ workspaceId, logicalMeetingId: meetingId })
-      ) !== bindingDigest ||
+      captureBindingDigest(finalMeeting) !== bindingDigest ||
+      digest(finalMeeting?.canonicalAnchorRef) !== digest(meeting.canonicalAnchorRef) ||
       digest(
         await config
           .audience(workspaceId)
@@ -277,6 +286,7 @@ export function withCaptureSynthesis(input: {
     if (
       latest.bindingDigest !== prepared.bindingDigest ||
       latest.materialDigest !== prepared.materialDigest ||
+      digest(latest.anchor) !== digest(prepared.anchor) ||
       digest(latest.authorizationScopes) !== digest(prepared.authorizationScopes) ||
       digest(latest.audience) !== digest(prepared.audience)
     )
@@ -654,6 +664,12 @@ export function withCaptureSynthesis(input: {
       )
         throw new Unavailable();
       await requireSame(scope.workspaceId, scope.meetingId, current, state.audience);
+      const publicationIntent = await projectSynthesisPublication(
+        input.database,
+        state.synthesis,
+        current.audience
+      );
+      await requireSame(scope.workspaceId, scope.meetingId, current, state.audience);
       if (
         (await load(scope.workspaceId, scope.meetingId))?.synthesis.revision !==
         state.synthesis.revision
@@ -662,7 +678,11 @@ export function withCaptureSynthesis(input: {
       return {
         type: "capture-synthesis",
         availability: "available",
-        synthesis: structuredClone(state.synthesis)
+        synthesis: {
+          ...structuredClone(state.synthesis),
+          canonicalAnchorRef: current.anchor
+        },
+        followUpIntentions: [publicationIntent]
       };
     } catch {
       return { type: "capture-synthesis", availability: "unavailable", synthesis: null };
@@ -670,11 +690,68 @@ export function withCaptureSynthesis(input: {
   };
   return {
     ...input.base,
+    conclude: async (scope) => {
+      await migrate();
+      if (!(await load(scope.workspaceId, scope.meetingId)))
+        return input.base.conclude(scope);
+      const result = await query({ ...scope, query: { type: "capture-synthesis" } });
+      if (
+        result.availability !== "available" ||
+        !result.synthesis ||
+        !result.followUpIntentions?.[0]
+      )
+        throw new Unavailable();
+      const synthesis = result.synthesis,
+        intent = result.followUpIntentions[0];
+      return {
+        workspaceId: scope.workspaceId,
+        meetingId: scope.meetingId,
+        revision: synthesis.revision,
+        summary: {
+          brief: `Luma Synthesis revision ${synthesis.revision} (${synthesis.coverage} coverage).`,
+          detailed: synthesis.claims
+            .map((claim) => `${claim.kind} (${claim.authority}): ${claim.text}`)
+            .join("\n\n")
+        },
+        topics: [],
+        decisions: [],
+        actionItems: [],
+        openQuestions: [],
+        risks: [],
+        followUpIntentions: [intent],
+        participantBriefs: [],
+        outputLanguage: scope.outputLanguage ?? "de",
+        provenance: intent.provenance,
+        createdAt: synthesis.producedAt,
+        captureSynthesis: synthesis
+      };
+    },
     query: (scope) =>
       scope.query.type === "capture-synthesis"
         ? query(structuredClone(scope))
         : input.base.query(scope),
     observe: (request) => {
+      if (request.observations.some(isSynthesisPublicationObservation)) {
+        const bound = structuredClone(request);
+        return observeSynthesisPublication({
+          database: input.database,
+          request: bound,
+          current: async () => {
+            const result = await query({
+              workspaceId: bound.workspace.workspaceId,
+              meetingId: bound.observations[0]!.meetingId,
+              query: { type: "capture-synthesis" }
+            });
+            if (
+              result.availability !== "available" ||
+              !result.synthesis ||
+              !result.followUpIntentions?.[0]
+            )
+              throw new Unavailable();
+            return { synthesis: result.synthesis, intent: result.followUpIntentions[0] };
+          }
+        });
+      }
       if (!request.observations.some(isCaptureObservation))
         return input.base.observe(request);
       const bound = structuredClone(request);
@@ -780,6 +857,9 @@ function sorted<T>(values: readonly T[]): T[] {
   return [...values].sort((left, right) =>
     canonical(left).localeCompare(canonical(right))
   );
+}
+function captureBindingDigest(meeting: LogicalMeeting | null): string {
+  return digest(meeting ? { ...meeting, canonicalAnchorRef: null } : null);
 }
 function digest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");

@@ -1,8 +1,10 @@
 import type {
   Confidence,
   ExternalReference,
+  FollowUpIntentStatus,
   ObservationBase,
-  PersonId
+  PersonId,
+  Provenance
 } from "./model.js";
 import type { MeetingCaptureCapabilities } from "../logical-meetings/interface.js";
 
@@ -64,4 +66,17 @@ export type CaptureSynthesisQueryResult = {
   type: "capture-synthesis";
   availability: "available" | "unavailable" | "not-configured" | "not-produced";
   synthesis: LumaSynthesis | null;
+  followUpIntentions?: PublishMeetingSynthesisIntent[];
+};
+
+/** Exact derived revision approval; a target or body supplied by the caller is never accepted. */
+export type PublishMeetingSynthesisIntent = {
+  type: "publish-meeting-synthesis";
+  id: string;
+  title: string;
+  synthesisRevision: number;
+  sourceSetDigest: string;
+  status: FollowUpIntentStatus;
+  relatedMeetingItemIds: string[];
+  provenance: Provenance;
 };

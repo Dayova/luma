@@ -165,6 +165,7 @@ function hasRecordedHumanAcceptance({ content }: CanonicalDecisionRecord): boole
         (evidence) =>
           evidence.id === id &&
           evidence.origin === "human" &&
+          evidence.purpose !== "capture-synthesis-review" &&
           evidence.authorPersonId === owner
       )
     )

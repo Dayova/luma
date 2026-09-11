@@ -26,6 +26,7 @@ import { createDecisionFollowUpExecution } from "../follow-up-execution/decision
 import { AiServiceError } from "../ai/ai-service-error.js";
 import {
   authorityFor,
+  captureReviewConflict,
   reconcileDecision,
   requireDecisionRequestCurrent,
   type DecisionIntelligenceDependencies
@@ -534,6 +535,13 @@ export function createAutomaticDecisionIntelligence(
                 stored.state.approvedIntentId = null;
                 stored.state.message =
                   "Candidate detection was incomplete. Review the retained candidates; no automatic recording is approved.";
+              }
+              const captureConflict = captureReviewConflict(candidate, stored);
+              if (captureConflict) {
+                stored.intent = null;
+                stored.state.approvedIntentId = null;
+                stored.state.state = "needs-clarification";
+                stored.state.message = captureConflict;
               }
               pending.push(stored);
               batch.requestIds.push(requestId);

@@ -128,6 +128,8 @@ export function authorityFor(
   candidate: DecisionCandidate,
   stored: StoredDecisionRequest
 ): DecisionAuthorityProof | string {
+  const reviewConflict = captureReviewConflict(candidate, stored);
+  if (reviewConflict) return reviewConflict;
   const evidence = new Map(
     [
       ...stored.state.source.evidence,
@@ -177,7 +179,12 @@ export function authorityFor(
     !candidate.acceptanceEvidenceIds.length ||
     candidate.acceptanceEvidenceIds.some((id) => {
       const item = evidence.get(id);
-      return !item || item.origin !== "human" || item.authorPersonId !== owners[0];
+      return (
+        !item ||
+        item.origin !== "human" ||
+        item.purpose === "capture-synthesis-review" ||
+        item.authorPersonId !== owners[0]
+      );
     })
   )
     return "A poll, summary, or another speaker cannot establish the owner's acceptance.";
@@ -213,6 +220,7 @@ export function authorityFor(
         ![...evidence.values()].some(
           (item) =>
             item.origin === "human" &&
+            item.purpose !== "capture-synthesis-review" &&
             item.authorPersonId === personId &&
             claims.some((claim) => claim.evidenceIds.includes(item.id))
         )
@@ -228,6 +236,61 @@ export function authorityFor(
       ? { humanReviews: structuredClone(stored.humanReviews) }
       : {})
   };
+}
+
+/** A model cannot silently undo accuracy corrections by paraphrasing the same source. */
+export function captureReviewConflict(
+  candidate: DecisionCandidate,
+  stored: StoredDecisionRequest
+): string | null {
+  // A later business acceptance is a separate exact original Human judgment.
+  // Generic recording instructions and synthesis accuracy reviews cannot override.
+  if (
+    (stored.humanReviews ?? []).some(
+      (review) =>
+        review.reviewToken !== null &&
+        review.acceptedCandidateHash === acceptedDecisionCandidateHash(candidate) &&
+        candidate.acceptanceEvidenceIds.includes(review.evidence.id) &&
+        review.evidence.purpose !== "capture-synthesis-review"
+    )
+  )
+    return null;
+  const latest = new Map<string, (typeof stored.state.source.evidence)[number]>();
+  for (const evidence of stored.state.source.evidence) {
+    const review = evidence.captureReview;
+    if (
+      review &&
+      review.revision > (latest.get(review.claimId)?.captureReview?.revision ?? 0)
+    )
+      latest.set(review.claimId, evidence);
+  }
+  const claims = [
+    candidate.statement,
+    ...(candidate.context ? [candidate.context] : []),
+    ...candidate.rationale,
+    ...candidate.alternatives,
+    ...candidate.consequences,
+    ...candidate.objections
+  ];
+  for (const evidence of latest.values()) {
+    const review = evidence.captureReview!;
+    if (review.action !== "reject" && review.action !== "correct") continue;
+    for (const claim of claims) {
+      if (
+        !claim.evidenceIds.some((id) => review.evidenceIds.includes(id)) &&
+        claim.text !== review.reviewedText
+      )
+        continue;
+      if (
+        review.action === "correct" &&
+        claim.evidenceIds.includes(evidence.id) &&
+        claim.text === review.correctedText
+      )
+        continue;
+      return "A Human rejected or corrected a synthesis claim grounded in this material. Review the candidate against that exact current feedback; the original source and inference remain retained, but recording is not approved.";
+    }
+  }
+  return null;
 }
 
 /** Inference selects a candidate; deterministic reconciliation alone grants a write plan. */
@@ -287,6 +350,8 @@ export function reconcileDecision(
     return clarify(
       "Related work or implementation evidence must name a verified existing source reference."
     );
+  const captureConflict = captureReviewConflict(candidate, stored);
+  if (captureConflict) return clarify(captureConflict);
   const authority = authorityFor(candidate, stored);
   if (typeof authority === "string") return clarify(authority);
   if (result.state.automatic) result.state.automatic.authority = "verified";

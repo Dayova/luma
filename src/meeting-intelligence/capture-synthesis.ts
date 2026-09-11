@@ -3,7 +3,14 @@ import {
   requireUnfencedSynthesis
 } from "./synthesis-action-state.js";
 import { synthesisActionCandidates } from "./synthesis-action-candidates.js";
-import { createHash } from "node:crypto";
+import { readProcessedCaptureEvidence } from "./processed-capture-evidence.js";
+import {
+  prepareCaptureSynthesisSources,
+  digest,
+  sorted,
+  type Material,
+  type Prepared
+} from "./capture-synthesis-sources.js";
 import { z } from "zod";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import {
@@ -26,7 +33,6 @@ import type {
   SynthesisActionItemCandidate,
   MeetingState
 } from "../domain/model.js";
-import type { LogicalMeeting } from "../logical-meetings/interface.js";
 import type { ContextAudience } from "../organizational-context/interface.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type {
@@ -35,10 +41,7 @@ import type {
   ObserveMeeting,
   QueryMeeting
 } from "./interface.js";
-import type {
-  CaptureSynthesisConfiguration,
-  CurrentMeetingCaptureMaterial
-} from "./meeting-capture-access.js";
+import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
 import {
   isSynthesisPublicationObservation,
   observeSynthesisPublication,
@@ -53,20 +56,6 @@ type Stored = {
   materialDigest: string;
   bindingDigest: string;
   judgments: CaptureSynthesisJudgmentRecorded[];
-};
-type Material = CurrentMeetingCaptureMaterial & {
-  captureId: string;
-  sourceRevision: number;
-  evidenceId: string;
-};
-type Prepared = {
-  authorizationScopes: Record<string, string>;
-  meeting: LogicalMeeting;
-  audience: ContextAudience;
-  materials: Material[];
-  bindingDigest: string;
-  materialDigest: string;
-  anchor: LumaSynthesis["canonicalAnchorRef"];
 };
 const scopeSchema = z.object({
   observationId: z.string().min(1).max(1024),
@@ -210,105 +199,8 @@ export function withCaptureSynthesis(input: {
       new Intl.DateTimeFormat("en", { timeZone: config.timezone });
       return config;
     });
-  const prepare = async (
-    workspaceId: string,
-    meetingId: string,
-    original?: ContextAudience
-  ): Promise<Prepared> => {
-    const config = input.configuration;
-    if (!config) throw new Unavailable();
-    const audience = await config.audience(workspaceId);
-    if (
-      !audience ||
-      audience.workspaceId !== workspaceId ||
-      !audience.personIds.length ||
-      new Set(audience.personIds).size !== audience.personIds.length ||
-      (original &&
-        (original.workspaceId !== workspaceId ||
-          audience.personIds.some((id) => !original.personIds.includes(id))))
-    )
-      throw new Unavailable();
-    const boundAudience = { workspaceId, personIds: [...audience.personIds].sort() };
-    const meeting = await config.logicalMeetings.get({
-      workspaceId,
-      logicalMeetingId: meetingId
-    });
-    if (!meeting || !meeting.captureRefs.length || meeting.captureRefs.length > 8)
-      throw new Unavailable();
-    // Publication metadata is not new source material or a new capture binding.
-    const bindingDigest = captureBindingDigest(meeting);
-    const materials: Material[] = [];
-    const authorizationScopes: Record<string, string> = {};
-    const anchors: NonNullable<LumaSynthesis["canonicalAnchorRef"]>[] = [];
-    for (const capture of meeting.captureRefs) {
-      const revision = capture.latestRevision;
-      if (
-        !["complete", "partial"].includes(revision.availability) ||
-        !revision.materials.length
-      )
-        throw new Unavailable();
-      const material = await config.access.readCurrent({
-        workspaceId,
-        capture: structuredClone(capture),
-        audience: structuredClone(boundAudience)
-      });
-      if (!material.authorizationScopeId.trim()) throw new Unavailable();
-      authorizationScopes[capture.id] = material.authorizationScopeId;
-      if (material.canonicalAnchorRef) anchors.push(material.canonicalAnchorRef);
-      if (
-        digest(sorted(material.materials.map((item) => item.descriptor))) !==
-        digest(sorted(revision.materials))
-      )
-        throw new Unavailable();
-      for (const item of material.materials) {
-        if (!item.text.trim() || item.text.length > 100_000) throw new Unavailable();
-        materials.push({
-          ...item,
-          captureId: capture.id,
-          sourceRevision: revision.sourceRevision,
-          evidenceId: `capture-evidence:${digest([capture.id, revision.sourceRevision, item.descriptor])}`
-        });
-      }
-    }
-    if (
-      materials.length > 64 ||
-      materials.reduce((count, item) => count + item.text.length, 0) > 250_000 ||
-      new Set(materials.map((item) => item.evidenceId)).size !== materials.length
-    )
-      throw new Unavailable();
-    const finalMeeting = await config.logicalMeetings.get({
-      workspaceId,
-      logicalMeetingId: meetingId
-    });
-    if (
-      captureBindingDigest(finalMeeting) !== bindingDigest ||
-      digest(finalMeeting?.canonicalAnchorRef) !== digest(meeting.canonicalAnchorRef) ||
-      digest(
-        await config
-          .audience(workspaceId)
-          .then((value) =>
-            value ? { ...value, personIds: [...value.personIds].sort() } : null
-          )
-      ) !== digest(boundAudience)
-    )
-      throw new Unavailable();
-    const uniqueAnchors = new Map(
-      anchors.map((anchor) => [digest([anchor.providerId, anchor.externalId]), anchor])
-    );
-    const anchor =
-      meeting.canonicalAnchorRef ??
-      (uniqueAnchors.size === 1 ? [...uniqueAnchors.values()][0]! : null);
-    if (!anchor && uniqueAnchors.size > 1) throw new Unavailable();
-    return {
-      meeting,
-      audience: boundAudience,
-      materials,
-      bindingDigest,
-      materialDigest: digest(sorted(materials)),
-      authorizationScopes,
-      anchor
-    };
-  };
+  const prepare = (workspaceId: string, meetingId: string, original?: ContextAudience) =>
+    prepareCaptureSynthesisSources(input.configuration, workspaceId, meetingId, original);
   const requireSame = async (
     workspaceId: string,
     meetingId: string,
@@ -944,9 +836,60 @@ export function withCaptureSynthesis(input: {
       const bound = structuredClone(request);
       const key = digest([bound.workspace.workspaceId, bound.observations[0]?.meetingId]);
       const previous = flights.get(key);
-      const next = previous
-        ? previous.catch(() => undefined).then(() => observe(bound))
-        : observe(bound);
+      const process = async (): Promise<MeetingUpdate> => {
+        const result = await observe(bound);
+        const callback = input.configuration?.onProcessedSource;
+        const observation = bound.observations[0];
+        if (
+          callback &&
+          input.configuration &&
+          observation &&
+          (result.acceptedObservationIds.includes(observation.observationId) ||
+            result.duplicateObservationIds.includes(observation.observationId))
+        ) {
+          try {
+            const audience = await input.configuration.audience(
+              bound.workspace.workspaceId
+            );
+            if (!audience) throw new Unavailable();
+            const current = await readProcessedCaptureEvidence({
+              database: input.database,
+              configuration: input.configuration,
+              workspaceId: bound.workspace.workspaceId,
+              meetingId: observation.meetingId,
+              audience
+            });
+            await callback({
+              workspaceId: bound.workspace.workspaceId,
+              meetingId: observation.meetingId,
+              observationId: observation.observationId,
+              sourceRevision: current.revision,
+              contentHash: digest([
+                current.bindingDigest,
+                current.materialDigest,
+                current.authorizationScopes,
+                current.audience,
+                current.reviews
+              ])
+            });
+          } catch {
+            return {
+              ...result,
+              analysisStatus: "deferred" as const,
+              errors: [
+                ...result.errors,
+                {
+                  code: "context-unavailable" as const,
+                  retryable: true,
+                  partialResultAvailable: true
+                }
+              ]
+            };
+          }
+        }
+        return result;
+      };
+      const next = previous ? previous.catch(() => undefined).then(process) : process();
       flights.set(key, next);
       void next
         .finally(() => {
@@ -1049,25 +992,4 @@ function applyJudgments(
     }
   }
   return result;
-}
-function sorted<T>(values: readonly T[]): T[] {
-  return [...values].sort((left, right) =>
-    canonical(left).localeCompare(canonical(right))
-  );
-}
-function captureBindingDigest(meeting: LogicalMeeting | null): string {
-  return digest(meeting ? { ...meeting, canonicalAnchorRef: null } : null);
-}
-function digest(value: unknown): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
-}
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object)
-    .sort()
-    .filter((key) => object[key] !== undefined)
-    .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
-    .join(",")}}`;
 }

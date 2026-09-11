@@ -22,6 +22,18 @@ export type DecisionEvidence = {
   text: string;
   authorPersonId: PersonId | null;
   origin: "human" | "provider-derived" | "poll";
+  /** Accuracy/attribution review is Human context, never business decision acceptance. */
+  purpose?: "capture-synthesis-review" | undefined;
+  captureReview?:
+    | {
+        action: "confirm" | "reject" | "correct" | "resolve-action";
+        claimId: string;
+        revision: number;
+        reviewedText: string;
+        evidenceIds: string[];
+        correctedText?: string | undefined;
+      }
+    | undefined;
 };
 export type DecisionSource = {
   subject: DecisionSubject;

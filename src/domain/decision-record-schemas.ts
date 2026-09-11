@@ -109,9 +109,29 @@ const decisionEvidenceSchema = z
     reference: decisionEvidenceReferenceSchema,
     text: z.string().max(32_000),
     authorPersonId: id.nullable(),
-    origin: z.enum(["human", "provider-derived", "poll"])
+    origin: z.enum(["human", "provider-derived", "poll"]),
+    purpose: z.literal("capture-synthesis-review").optional(),
+    captureReview: z
+      .object({
+        action: z.enum(["confirm", "reject", "correct", "resolve-action"]),
+        claimId: id,
+        revision: z.number().int().positive(),
+        reviewedText: z.string().min(1).max(32_000),
+        evidenceIds: z.array(id).min(1).max(64),
+        correctedText: z.string().min(1).max(4000).optional()
+      })
+      .strict()
+      .optional()
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !value.captureReview ||
+      (value.purpose === "capture-synthesis-review" &&
+        value.origin === "human" &&
+        value.authorPersonId !== null &&
+        (value.captureReview.action !== "correct" || !!value.captureReview.correctedText))
+  );
 export const decisionHumanReviewSchema: z.ZodType<
   DecisionHumanReview,
   z.ZodTypeDef,

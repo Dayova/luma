@@ -1,0 +1,147 @@
+import type { EvidenceReference, ExternalReference, WorkspaceConfig } from "./model.js";
+import type { WorkItem } from "../work/interface.js";
+
+/** A bounded original Conversation is never represented as a synthetic Meeting. */
+export type StructuredWorkSubject = {
+  type: "conversation-thread";
+  providerId: string;
+  conversationObjectId: string;
+  anchorMessageId: string;
+};
+export type StructuredWorkAudience = { workspaceId: string; personIds: string[] };
+export type StructuredWorkActor = { providerId: string; providerUserId: string };
+export type StructuredWorkSource = {
+  subject: StructuredWorkSubject;
+  revision: string;
+  contentHash: string;
+  authorizationHash: string;
+  audience: StructuredWorkAudience;
+  capturedAt: string;
+  evidence: Array<{
+    id: string;
+    reference: EvidenceReference;
+    text: string;
+    authorPersonId: string | null;
+    origin: "human" | "provider-derived" | "poll";
+  }>;
+};
+export type StructuredFieldValue =
+  | { type: "text"; value: string }
+  | { type: "choice"; value: string }
+  | { type: "number"; value: number }
+  | { type: "boolean"; value: boolean }
+  | { type: "url"; value: string }
+  | { type: "date"; value: string };
+export type StructuredRecordField = {
+  key: string;
+  label: string;
+  type: StructuredFieldValue["type"];
+  required: boolean;
+  choices: string[];
+};
+/** Provider-specific property IDs, native status IDs and table IDs stay in the adapter. */
+export type StructuredRecordSchema = {
+  targetKey: string;
+  label: string;
+  revision: string;
+  titleField: string;
+  fields: StructuredRecordField[];
+  defaults: Record<string, StructuredFieldValue>;
+};
+export type StructuredRecord = {
+  reference: ExternalReference;
+  version: string;
+  fields: Record<string, StructuredFieldValue>;
+  active: boolean;
+};
+export type StructuredRecordSnapshot = {
+  schema: StructuredRecordSchema;
+  records: StructuredRecord[];
+  complete: boolean;
+  revision: string;
+};
+export type StructuredWorkOwnership =
+  | { status: "confirmed"; personId: string; evidenceIds: string[] }
+  | { status: "intentionally-unassigned"; evidenceIds: string[] }
+  | { status: "unresolved"; reason: string };
+export type StructuredWorkReconciliation =
+  | { action: "create" }
+  | { action: "link" | "update"; targetId: string }
+  | { action: "clarify" | "reject"; reason: string };
+export type StructuredWorkInterpretation = {
+  targetKey: string;
+  record: {
+    fields: Record<string, StructuredFieldValue>;
+    evidenceIds: string[];
+    reconciliation: StructuredWorkReconciliation;
+  };
+  work: {
+    title: string;
+    description: string;
+    evidenceIds: string[];
+    ownership: StructuredWorkOwnership;
+    reconciliation: StructuredWorkReconciliation;
+  };
+};
+export type StructuredRecordCreate = {
+  schema: StructuredRecordSchema;
+  fields: Record<string, StructuredFieldValue>;
+  source: StructuredWorkSource;
+  ownerPersonId: string | null;
+  relatedWork: ExternalReference | null;
+};
+export type StructuredWorkStageResult = {
+  target: "record" | "work";
+  disposition: "created" | "linked" | "updated" | "not-applied" | "unknown";
+  reference: ExternalReference | null;
+  message: string;
+};
+/** User-facing projection; durable execution stages and provider snapshots remain private. */
+export type StructuredWorkState = {
+  requestId: string;
+  subject: StructuredWorkSubject;
+  state:
+    | "planned"
+    | "validated"
+    | "partially-executed"
+    | "completed"
+    | "needs-clarification"
+    | "failed-recoverable";
+  message: string;
+  source: StructuredWorkSource;
+  preview: StructuredWorkInterpretation | null;
+  approvedIntentId: string | null;
+  outcomes: StructuredWorkStageResult[];
+};
+export type ObserveStructuredWork = {
+  workspace: WorkspaceConfig;
+  subject: StructuredWorkSubject;
+  observations: [
+    {
+      type: "structured-work-requested";
+      observationId: string;
+      actor: StructuredWorkActor;
+      instruction: string;
+      /** A caller may select a configured alias, never a provider object ID. */
+      targetKey: string;
+    }
+  ];
+};
+export type QueryStructuredWork = {
+  workspaceId: string;
+  subject: StructuredWorkSubject;
+  query: { type: "structured-work-request"; requestId: string };
+};
+export type ConcludeStructuredWork = {
+  workspaceId: string;
+  subject: StructuredWorkSubject;
+  structuredWorkRequestId: string;
+};
+export type StructuredWorkModelInput = {
+  workspace: WorkspaceConfig;
+  instruction: string;
+  requesterPersonId: string;
+  source: StructuredWorkSource;
+  records: StructuredRecordSnapshot;
+  work: WorkItem[];
+};

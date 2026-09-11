@@ -167,7 +167,11 @@ function renderCurrent(record: DecisionRecordContent): string[] {
   return lines;
 }
 function plain(text: string): string {
-  return text.replace(/[\r\n]+/gu, " ").replace(/[\\`*_[\]{}()#!|~$^<>]/gu, "\\$&");
+  return text
+    .replace(/[\r\n]+/gu, " ")
+    .replace(/[\\`*_[\]{}()#!|~$^<>]/gu, "\\$&")
+    .replace(/^( {0,3})([-+])(?=\s)/u, "$1\\$2")
+    .replace(/^( {0,3})(\d+)\.(?=\s)/u, "$1$2\\.");
 }
 /** Notion strips plain empty lines. Code payload is one nonempty literal JSON line. */
 function normalizeEmptyLines(markdown: string): string {
@@ -193,7 +197,7 @@ export function canonicalDecisionJson(value: unknown): string {
   }
   if (Array.isArray(value)) return `[${value.map(canonicalDecisionJson).join(",")}]`;
   return `{${Object.entries(value)
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalDecisionJson(nested)}`)
     .join(",")}}`;
 }

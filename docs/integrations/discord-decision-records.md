@@ -122,7 +122,9 @@ without another paid call. Live source access, native Notion round-trip, product
 secrets and host recovery still need deployment verification.
 
 This path handles explicit Conversation and imported-Meeting recording instructions.
-Automatic candidate recognition remains separate required work.
+The same main runtime also implements [automatic source review](#automatic-source-review)
+when explicitly configured, including admitted LogicalMeeting captures. Candidate
+recognition alone grants no permission to record a decision.
 
 The same runtime includes [background Decision recall](../decision-record-recall.md).
 Discovery uses the dedicated read-only credential and never invokes the writer.

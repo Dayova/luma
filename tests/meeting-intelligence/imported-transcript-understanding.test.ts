@@ -15,6 +15,8 @@ import { createLedgerBackedImportedSourceVerifier } from "../../src/knowledge/le
 import { observedMeetingNoteToObservation } from "../../src/knowledge/meeting-notes-ingestion.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
 import { createMeetingContextGuard } from "../../src/meeting-intelligence/context-guard.js";
+import type { MeetingState } from "../../src/domain/model.js";
+import type { OrganizationalContextRequest } from "../../src/organizational-context/interface.js";
 
 const workspace = { workspaceId: "dayova", timezone: "Europe/Berlin" };
 const time = "2026-09-11T09:00:00.000Z";
@@ -307,6 +309,198 @@ async function fixture() {
 }
 
 describe("governed imported transcript understanding", () => {
+  it("preserves original-source access and recent usable context when more than twenty organizational receipts are retained", async () => {
+    const f = await fixture();
+    try {
+      await f.ingest();
+      const state = await f.snapshot();
+      const sourceReceipt = state.importedSourceAnalysisReceiptIds![0]!;
+      const question = state.openQuestions[0]!;
+      state.openQuestions = Array.from({ length: 24 }, (_, index) => ({
+        ...question,
+        id: `question:${index}`,
+        provenance: {
+          ...question.provenance,
+          contextReceiptIds: [sourceReceipt, `org:${index}`]
+        }
+      }));
+      const audience = await f.importedSourceAnalysis.audience();
+      const request: OrganizationalContextRequest = {
+        audience,
+        subject: { type: "meeting", id: state.meetingId },
+        purpose: "understand-discussion",
+        concepts: ["launch"],
+        time: { mode: "current" },
+        limit: 8,
+        maxCharacters: 12_000
+      };
+      for (let index = 0; index < 24; index++) {
+        await f.database.query(
+          "INSERT INTO meeting_context_receipts(workspace_id,meeting_id,receipt_id,request_json) VALUES($1,$2,$3,$4)",
+          [state.workspaceId, state.meetingId, `org:${index}`, JSON.stringify(request)]
+        );
+      }
+      await f.database.query(
+        "UPDATE meetings SET state_json=$1 WHERE workspace_id=$2 AND meeting_id=$3",
+        [JSON.stringify(state), state.workspaceId, state.meetingId]
+      );
+      const mi = createMeetingIntelligence({
+        database: f.database,
+        reasoningModel: {
+          generateStructured: () => Promise.reject(new Error("Read-only query"))
+        },
+        importedSourceAnalysis: f.importedSourceAnalysis,
+        contextAudience: () => Promise.resolve(audience),
+        organizationalContext: {
+          retrieve: () => Promise.reject(new Error("Read-only query")),
+          requireCurrent: () => Promise.resolve()
+        }
+      });
+      const snapshot = await mi.query({
+        workspaceId: state.workspaceId,
+        meetingId: state.meetingId,
+        query: { type: "snapshot" }
+      });
+      if (snapshot.type !== "snapshot") throw new Error("wrong query");
+      expect(snapshot.state.title).toBe(raw.title);
+      expect(snapshot.state.importedSources).toHaveLength(1);
+      expect(snapshot.state.importedActionItemCandidates).not.toEqual([]);
+      expect(snapshot.state.openQuestions.map((item) => item.id)).toContain(
+        "question:23"
+      );
+      expect(snapshot.state.openQuestions).toHaveLength(19);
+      expect(snapshot.state.contextAvailability).toMatchObject({
+        status: "partial",
+        withheldItemCount: 5
+      });
+      const review = await mi.query({
+        workspaceId: state.workspaceId,
+        meetingId: state.meetingId,
+        query: { type: "action-item-reconciliation-review" }
+      });
+      expect(JSON.stringify(review)).toContain("Export prüfen");
+      f.revoke();
+      const denied = await mi.query({
+        workspaceId: state.workspaceId,
+        meetingId: state.meetingId,
+        query: { type: "snapshot" }
+      });
+      expect(JSON.stringify(denied)).not.toContain("Wir pausieren");
+    } finally {
+      await f.database.close();
+    }
+  });
+
+  it("counts unavailable current sources and items without subtracting retained historical revisions", async () => {
+    const f = await fixture();
+    try {
+      await f.ingest();
+      await f.revise();
+      await f.ingest();
+      const rows = await f.database.query<{ state_json: string }>(
+        "SELECT state_json FROM meetings"
+      );
+      const state = JSON.parse(rows.rows[0]!.state_json) as MeetingState;
+      expect(state.importedSources).toHaveLength(2);
+      state.openQuestions = state.openQuestions.map((item) => ({
+        ...item,
+        provenance: { ...item.provenance, contextReceiptIds: ["unavailable-org"] }
+      }));
+      await f.database.query(
+        "UPDATE meetings SET state_json=$1 WHERE workspace_id=$2 AND meeting_id=$3",
+        [JSON.stringify(state), state.workspaceId, state.meetingId]
+      );
+      const mi = createMeetingIntelligence({
+        database: f.database,
+        reasoningModel: {
+          generateStructured: () => Promise.reject(new Error("Read-only query"))
+        },
+        importedSourceAnalysis: {
+          ...f.importedSourceAnalysis,
+          access: { requireCurrent: () => Promise.resolve() }
+        }
+      });
+      const result = await mi.query({
+        workspaceId: state.workspaceId,
+        meetingId: state.meetingId,
+        query: { type: "snapshot" }
+      });
+      if (result.type !== "snapshot") throw new Error("wrong query");
+      expect(result.state.importedSources).toHaveLength(2);
+      expect(result.state.openQuestions).toEqual([]);
+      expect(result.state.contextAvailability).toMatchObject({
+        status: "partial",
+        withheldItemCount: 1
+      });
+      expect(result.state.contextAvailability?.warnings.length).toBeGreaterThan(0);
+    } finally {
+      await f.database.close();
+    }
+  });
+
+  it.each(["missing", "invalid-json"])(
+    "returns an accepted partial update when a prior source receipt is %s",
+    async (failure) => {
+      const f = await fixture();
+      try {
+        await f.ingest();
+        const original = await f.database.query<{
+          receipt_id: string;
+          receipt_json: string;
+        }>("SELECT receipt_id,receipt_json FROM meeting_imported_source_receipts");
+        const receipt = original.rows[0]!;
+        if (failure === "missing")
+          await f.database.query(
+            "DELETE FROM meeting_imported_source_receipts WHERE receipt_id=$1",
+            [receipt.receipt_id]
+          );
+        else
+          await f.database.query(
+            "UPDATE meeting_imported_source_receipts SET receipt_json='{' WHERE receipt_id=$1",
+            [receipt.receipt_id]
+          );
+        await f.revise();
+        const observation = f.observation();
+        const result = await f.ingest();
+        expect(result.acceptedObservationIds).toEqual([observation.observationId]);
+        expect(result.analysisStatus).toBe("deferred");
+        expect(result.errors).toContainEqual({
+          code: "context-unavailable",
+          retryable: true,
+          partialResultAvailable: true
+        });
+        expect(f.requests).toHaveLength(1);
+        expect(
+          (
+            await f.ledger.get({
+              workspaceId: workspace.workspaceId,
+              source: identity,
+              revision: 2
+            })
+          )?.revision
+        ).toBe(2);
+        const retry = await f.ingest();
+        expect(retry.duplicateObservationIds).toEqual([observation.observationId]);
+        expect(f.requests).toHaveLength(1);
+        await f.database.query(
+          "INSERT INTO meeting_imported_source_receipts(workspace_id,meeting_id,receipt_id,receipt_json) VALUES($1,$2,$3,$4) ON CONFLICT(workspace_id,meeting_id,receipt_id) DO UPDATE SET receipt_json=EXCLUDED.receipt_json",
+          [
+            workspace.workspaceId,
+            observation.meetingId,
+            receipt.receipt_id,
+            receipt.receipt_json
+          ]
+        );
+        expect((await f.ingest()).analysisStatus).toBe("completed");
+        expect(f.requests).toHaveLength(2);
+        await f.ingest();
+        expect(f.requests).toHaveLength(2);
+      } finally {
+        await f.database.close();
+      }
+    }
+  );
+
   it("analyzes accepted original speech into grounded Meeting understanding exactly once and keeps provider notes distinct", async () => {
     const f = await fixture();
     try {

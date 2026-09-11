@@ -3,6 +3,7 @@ import {
   readImportedSourceAnalysisReceipt,
   sameImportedSourceRevision,
   retainImportedSourceAnalysisReceipt,
+  ImportedSourceUnavailableError,
   type ImportedSourceAnalysisConfiguration,
   type ImportedSourceAnalysisReceipt
 } from "./imported-source-analysis.js";
@@ -606,84 +607,98 @@ async function observeMeeting(
     evidenceForAnalysis
   } = acceptance;
   const importedAnalysisObservations: MeetingImportedFromSource[] = [];
+  let sourceAdmissionUnavailable = false;
   if (contextConfiguration.importedSourceAnalysis) {
-    const admitted = await database.transaction(async (transaction) => {
-      let latest = await loadMeetingStateForMutation(transaction, workspaceId, meetingId);
-      let changed = false;
-      for (const observation of input.observations) {
-        if (
-          observation.type !== "meeting-imported-from-source" ||
-          ![...acceptedObservationIds, ...duplicateObservationIds].includes(
-            observation.observationId
-          )
-        )
-          continue;
-        const receipt = sourceAnalysisReceipts.get(observation.observationId);
-        if (!receipt) continue;
-        const attempts = await transaction.query(
-          `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
-          [workspaceId, meetingId, observation.observationId]
-        );
-        if (attempts.rows.length) continue;
-        const priorReceipts = await Promise.all(
-          (latest.importedSourceAnalysisReceiptIds ?? []).map((id) =>
-            readImportedSourceAnalysisReceipt(transaction, workspaceId, meetingId, id)
-          )
-        );
-        const priorGrant = priorReceipts.find((item) =>
-          sameImportedSourceRevision(item.source, receipt.source)
-        );
-        if (priorGrant && priorGrant.id !== receipt.id) continue;
-        if (!priorGrant) {
-          await retainImportedSourceAnalysisReceipt(transaction, receipt);
-          latest = {
-            ...latest,
-            importedSourceAnalysisReceiptIds: [
-              ...(latest.importedSourceAnalysisReceiptIds ?? []),
-              receipt.id
-            ]
-          };
-          changed = true;
-        }
-        if (
-          observation.sourceSections.some(
-            (section) => section.section === "transcript" && section.excerpt.trim()
-          )
-        )
-          importedAnalysisObservations.push(observation);
-      }
-      if (changed) {
-        latest = advanceRevision(latest, now().toISOString());
-        await saveMeetingState(
+    try {
+      const admitted = await database.transaction(async (transaction) => {
+        let latest = await loadMeetingStateForMutation(
           transaction,
-          latest,
-          "imported-source-analysis-admitted",
-          now
+          workspaceId,
+          meetingId
         );
-      }
-      return latest;
-    });
-    state = admitted;
-    evidenceForAnalysis.push(
-      ...importedAnalysisObservations.flatMap((observation) =>
-        observation.sourceSections.map((section) =>
-          importedSourceSectionEvidence(observation.source, section)
+        let changed = false;
+        for (const observation of input.observations) {
+          if (
+            observation.type !== "meeting-imported-from-source" ||
+            ![...acceptedObservationIds, ...duplicateObservationIds].includes(
+              observation.observationId
+            )
+          )
+            continue;
+          const receipt = sourceAnalysisReceipts.get(observation.observationId);
+          if (!receipt) continue;
+          const attempts = await transaction.query(
+            `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+            [workspaceId, meetingId, observation.observationId]
+          );
+          if (attempts.rows.length) continue;
+          const priorReceipts = await Promise.all(
+            (latest.importedSourceAnalysisReceiptIds ?? []).map((id) =>
+              readImportedSourceAnalysisReceipt(transaction, workspaceId, meetingId, id)
+            )
+          );
+          const priorGrant = priorReceipts.find((item) =>
+            sameImportedSourceRevision(item.source, receipt.source)
+          );
+          if (priorGrant && priorGrant.id !== receipt.id) continue;
+          if (!priorGrant) {
+            await retainImportedSourceAnalysisReceipt(transaction, receipt);
+            latest = {
+              ...latest,
+              importedSourceAnalysisReceiptIds: [
+                ...(latest.importedSourceAnalysisReceiptIds ?? []),
+                receipt.id
+              ]
+            };
+            changed = true;
+          }
+          if (
+            observation.sourceSections.some(
+              (section) => section.section === "transcript" && section.excerpt.trim()
+            )
+          )
+            importedAnalysisObservations.push(observation);
+        }
+        if (changed) {
+          latest = advanceRevision(latest, now().toISOString());
+          await saveMeetingState(
+            transaction,
+            latest,
+            "imported-source-analysis-admitted",
+            now
+          );
+        }
+        return latest;
+      });
+      state = admitted;
+      evidenceForAnalysis.push(
+        ...importedAnalysisObservations.flatMap((observation) =>
+          observation.sourceSections.map((section) =>
+            importedSourceSectionEvidence(observation.source, section)
+          )
         )
-      )
-    );
+      );
+    } catch (error) {
+      if (!(error instanceof ImportedSourceUnavailableError)) throw error;
+      // Acceptance already committed the original Evidence. A later receipt
+      // refusal rolls admission back, with no model dispatch or paid retry claim.
+      importedAnalysisObservations.length = 0;
+      sourceAdmissionUnavailable = true;
+    }
   }
   const interventions: MeetingIntervention[] = [];
   const deniedSourceAnalysis =
-    Boolean(contextConfiguration.importedSourceAnalysis) &&
-    input.observations.some(
-      (observation) =>
-        observation.type === "meeting-imported-from-source" &&
-        acceptedObservationIds.includes(observation.observationId) &&
-        !sourceAnalysisReceipts.has(observation.observationId) &&
-        observation.sourceSections.some(
-          (section) => section.section === "transcript" && section.excerpt.trim()
-        )
-    );
+    sourceAdmissionUnavailable ||
+    (Boolean(contextConfiguration.importedSourceAnalysis) &&
+      input.observations.some(
+        (observation) =>
+          observation.type === "meeting-imported-from-source" &&
+          acceptedObservationIds.includes(observation.observationId) &&
+          !sourceAnalysisReceipts.has(observation.observationId) &&
+          observation.sourceSections.some(
+            (section) => section.section === "transcript" && section.excerpt.trim()
+          )
+      ));
   let analysisStatus: MeetingUpdate["analysisStatus"] = deniedSourceAnalysis
     ? "deferred"
     : "not-needed";
@@ -694,7 +709,7 @@ async function observeMeeting(
       partialResultAvailable: true
     });
 
-  if (evidenceForAnalysis.length > 0) {
+  if (evidenceForAnalysis.length > 0 && !sourceAdmissionUnavailable) {
     let claimedImportedAnalysis = false;
     let modelDispatched = false;
     try {

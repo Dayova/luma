@@ -4,6 +4,7 @@ import {
   requireImportedSourceAnalysisReceiptCurrent,
   projectImportedSourceMaterial,
   filterImportedSourceEvidence,
+  sameImportedSourceRevision,
   type ImportedSourceAnalysisConfiguration
 } from "./imported-source-analysis.js";
 import type {
@@ -145,20 +146,33 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
   };
   const eligibleReceipts = async (state: MeetingState): Promise<Set<string>> => {
     const eligible = new Set<string>();
-    // Independent items remain usable if older derived dependencies exceed this
-    // read bound. No unverified receipt is silently considered current.
-    const ids = contextReceiptIds(state).slice(-20);
     const deadlineAt = Date.now() + 15_000;
-    await Promise.all(
-      ids.map(async (id) => {
-        try {
-          await withinDeadline(check(state.workspaceId, state.meetingId, id), deadlineAt);
-          eligible.add(id);
-        } catch {
-          /* A read projection withholds only the dependent items. */
-        }
-      })
-    );
+    const ids = contextReceiptIds(state);
+    const checkCandidates = (ids: string[]) =>
+      Promise.all(
+        ids.map(async (id) => {
+          if (Date.now() >= deadlineAt) return;
+          try {
+            await withinDeadline(
+              check(state.workspaceId, state.meetingId, id),
+              deadlineAt
+            );
+            eligible.add(id);
+          } catch {
+            /* A read projection withholds only the dependent items. */
+          }
+        })
+      );
+    // Reserve the final 20-receipt allowance for current original grants first.
+    // At most 20 imported candidates and the remaining organizational allowance
+    // are checked under one deadline; stale imports do not consume usable slots.
+    await checkCandidates(ids.filter(isImportedSourceAnalysisReceipt).slice(-20));
+    const remaining = 20 - eligible.size;
+    if (remaining > 0) {
+      await checkCandidates(
+        ids.filter((id) => !isImportedSourceAnalysisReceipt(id)).slice(-remaining)
+      );
+    }
     return eligible;
   };
   const project = async (state: MeetingState): Promise<MeetingState> => {
@@ -210,7 +224,12 @@ export function createMeetingContextGuard(config: MeetingContextConfiguration) {
     );
     const withheldSources = !governedSources
       ? 0
-      : latestSources.length - projectedSources.importedSources.length;
+      : latestSources.filter(
+          (source) =>
+            !projectedSources.importedSources.some((projected) =>
+              sameImportedSourceRevision(source, projected)
+            )
+        ).length;
     const count = blocked.size + withheldSources;
     const partial = items.some(
       (item) =>

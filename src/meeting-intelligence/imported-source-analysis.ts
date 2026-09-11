@@ -87,12 +87,29 @@ export async function readImportedSourceAnalysisReceipt(
   meetingId: string,
   id: string
 ): Promise<ImportedSourceAnalysisReceipt> {
-  const rows = await database.query<{ receipt_json: string }>(
-    `SELECT receipt_json FROM meeting_imported_source_receipts WHERE workspace_id=$1 AND meeting_id=$2 AND receipt_id=$3`,
-    [workspaceId, meetingId, id]
-  );
-  if (!rows.rows[0]) throw new ImportedSourceUnavailableError();
-  return JSON.parse(rows.rows[0].receipt_json) as ImportedSourceAnalysisReceipt;
+  try {
+    const rows = await database.query<{ receipt_json: string }>(
+      `SELECT receipt_json FROM meeting_imported_source_receipts WHERE workspace_id=$1 AND meeting_id=$2 AND receipt_id=$3`,
+      [workspaceId, meetingId, id]
+    );
+    if (!rows.rows[0]) throw new ImportedSourceUnavailableError();
+    const receipt = JSON.parse(
+      rows.rows[0].receipt_json
+    ) as ImportedSourceAnalysisReceipt;
+    const { id: retainedId, ...value } = receipt;
+    if (
+      retainedId !== id ||
+      receipt.meetingId !== meetingId ||
+      receipt.audience.workspaceId !== workspaceId ||
+      `${PREFIX}${createHash("sha256").update(canonicalJson(value)).digest("hex")}` !== id
+    )
+      throw new ImportedSourceUnavailableError();
+    return receipt;
+  } catch {
+    // Missing, corrupted or unreadable proof is an expected availability refusal,
+    // never a new audience grant or a raw persistence diagnostic for callers.
+    throw new ImportedSourceUnavailableError();
+  }
 }
 export async function requireImportedSourceAnalysisReceiptCurrent(
   database: LumaDatabase,

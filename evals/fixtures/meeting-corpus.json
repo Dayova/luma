@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "annotationProvenance": "The original four fixtures and their named expectations are retained. New structured samples and scenario assertions are agent-authored synthetic annotations and require human review; they are not a human-labeled benchmark.",
   "referenceAt": "2026-09-10T08:00:00.000Z",
   "timezone": "Europe/Berlin",
@@ -497,14 +497,7 @@
           "expected": 24
         }
       ],
-      "missing": [
-        {
-          "id": "cross-provider-stale-inclusion",
-          "metric": "stale-claim-inclusion",
-          "reason": "Normalized multi-catalog ranking is measured separately. Actual Notion/Linear/GitHub source adapters and their standing/authority mapping are not demonstrated.",
-          "acceptance": "Prefer current accepted knowledge over superseded documents and newer unaccepted proposals from Notion/Linear/GitHub."
-        }
-      ],
+      "missing": [],
       "coveredBy": [
         {
           "id": "duplicate-context",
@@ -525,6 +518,10 @@
         {
           "id": "cross-meeting-current-recall",
           "fixtureId": "actual-imported-meeting-recall"
+        },
+        {
+          "id": "cross-provider-stale-inclusion",
+          "fixtureId": "actual-provider-current-standing"
         }
       ]
     },
@@ -2575,6 +2572,252 @@
           "path": ["externalEvidenceUsed"],
           "operation": "equals",
           "expected": true
+        }
+      ]
+    }
+  ],
+  "crossProviderFixtures": [
+    {
+      "id": "actual-provider-current-standing",
+      "question": "What is the current Luma access policy?",
+      "canonicalRecord": {
+        "id": "decision-release",
+        "candidate": {
+          "statement": {
+            "text": "Luma remains internal to the four founders.",
+            "evidenceIds": ["source-1"]
+          },
+          "modality": "final-decision",
+          "scopeId": "luma",
+          "decisionMakerPersonIds": ["jakob"],
+          "acceptanceEvidenceIds": ["source-1"],
+          "context": null,
+          "rationale": [],
+          "alternatives": [],
+          "consequences": [],
+          "effectiveAt": null,
+          "disposition": "adopt",
+          "objections": [],
+          "unresolved": [],
+          "relatedWork": [],
+          "implementationEvidence": []
+        },
+        "authority": {
+          "snapshot": {
+            "id": "ownership",
+            "revision": "ownership-v1",
+            "contentHash": "authority-hash",
+            "source": {
+              "providerId": "notion",
+              "objectType": "document",
+              "externalId": "ownership",
+              "url": "https://notion.so/ownership"
+            },
+            "grants": [
+              {
+                "id": "ownership-luma",
+                "personId": "jakob",
+                "scopeId": "luma",
+                "kind": "project-ownership",
+                "standing": "current",
+                "evidence": [
+                  {
+                    "evidenceId": "source-1",
+                    "source": "human-judgment",
+                    "sourceObjectId": "message-1",
+                    "participantId": "jakob",
+                    "sourceVersion": "revision-1",
+                    "excerpt": "Luma remains internal to the four founders.",
+                    "externalReference": {
+                      "providerId": "discord",
+                      "objectType": "comment",
+                      "externalId": "message-1",
+                      "url": "https://discord.com/channels/1/2/3"
+                    }
+                  }
+                ],
+                "delegatedBy": null,
+                "consultedPersonIds": []
+              }
+            ]
+          },
+          "grantIds": ["ownership-luma"],
+          "decisionMakerPersonIds": ["jakob"],
+          "acceptanceEvidenceIds": ["source-1"]
+        },
+        "source": {
+          "subject": {
+            "type": "conversation-thread",
+            "providerId": "discord",
+            "conversationObjectId": "thread-1",
+            "anchorMessageId": "message-1"
+          },
+          "revision": "revision-1",
+          "contentHash": "source-hash",
+          "authorizationHash": "source-authority",
+          "audience": {
+            "workspaceId": "dayova",
+            "personIds": ["jakob", "fabius", "philipp", "julius"]
+          },
+          "evidence": [
+            {
+              "id": "source-1",
+              "reference": {
+                "evidenceId": "source-1",
+                "source": "human-judgment",
+                "sourceObjectId": "message-1",
+                "participantId": "jakob",
+                "sourceVersion": "revision-1",
+                "excerpt": "Luma remains internal to the four founders.",
+                "externalReference": {
+                  "providerId": "discord",
+                  "objectType": "comment",
+                  "externalId": "message-1",
+                  "url": "https://discord.com/channels/1/2/3"
+                }
+              },
+              "text": "Luma remains internal to the four founders.",
+              "authorPersonId": "jakob",
+              "origin": "human"
+            }
+          ],
+          "capturedAt": "2026-08-01T10:00:00Z"
+        },
+        "status": "active",
+        "recordedAt": "2026-08-01T10:01:00Z",
+        "supersedes": [],
+        "supersededBy": null
+      },
+      "notion": {
+        "content": "Luma is available to all Discord guests.",
+        "standing": "superseded"
+      },
+      "linear": {
+        "content": "Luma could allow support customers next month.",
+        "standing": "proposed"
+      },
+      "github": {
+        "content": "Luma might become public after this PR.",
+        "state": "draft"
+      },
+      "revokeBeforeReplay": true,
+      "expected": {
+        "checks": [
+          "cross-provider-stale-inclusion",
+          "cross-provider-accepted-decision-recall",
+          "cross-provider-completed-task-not-policy",
+          "cross-provider-draft-pr-not-policy",
+          "cross-provider-only-human-current",
+          "cross-provider-all-adapters-exercised",
+          "cross-provider-notion-standing",
+          "cross-provider-linear-standing",
+          "cross-provider-github-standing",
+          "cross-provider-no-false-complete",
+          "cross-provider-revocation-denies-replay",
+          "cross-provider-revocation-denies-delivery",
+          "cross-provider-revocation-denies-fresh",
+          "cross-provider-history-preserved"
+        ]
+      },
+      "assertions": [
+        {
+          "id": "cross-provider-stale-inclusion",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "text"],
+          "operation": "excludes",
+          "expected": "Luma is available to all Discord guests."
+        },
+        {
+          "id": "cross-provider-accepted-decision-recall",
+          "metric": "relevant-current-recall",
+          "path": ["current", "primaryText"],
+          "operation": "includes",
+          "expected": "Luma remains internal to the four founders."
+        },
+        {
+          "id": "cross-provider-completed-task-not-policy",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "primaryText"],
+          "operation": "excludes",
+          "expected": "Luma could allow support customers next month."
+        },
+        {
+          "id": "cross-provider-draft-pr-not-policy",
+          "metric": "stale-claim-inclusion",
+          "path": ["current", "primaryText"],
+          "operation": "excludes",
+          "expected": "Luma might become public after this PR."
+        },
+        {
+          "id": "cross-provider-only-human-current",
+          "metric": "ownership",
+          "path": ["current", "authority", 0],
+          "operation": "equals",
+          "expected": "human-confirmed",
+          "note": "First selected current source must be the accepted Human decision. Lower-ranked proposals remain explicitly labeled context, never measured as accepted policy."
+        },
+        {
+          "id": "cross-provider-all-adapters-exercised",
+          "metric": "coverage",
+          "path": ["providerReads"],
+          "operation": "set-equals",
+          "expected": ["decision", "github", "linear", "notion"]
+        },
+        {
+          "id": "cross-provider-notion-standing",
+          "metric": "coverage",
+          "path": ["mappings", "notion", 0, "standing"],
+          "operation": "equals",
+          "expected": "superseded"
+        },
+        {
+          "id": "cross-provider-linear-standing",
+          "metric": "coverage",
+          "path": ["mappings", "linear", 0, "standing"],
+          "operation": "equals",
+          "expected": "proposed"
+        },
+        {
+          "id": "cross-provider-github-standing",
+          "metric": "coverage",
+          "path": ["mappings", "github", 0, "standing"],
+          "operation": "equals",
+          "expected": "proposed"
+        },
+        {
+          "id": "cross-provider-no-false-complete",
+          "metric": "coverage",
+          "path": ["current", "coverage", "complete"],
+          "operation": "equals",
+          "expected": false
+        },
+        {
+          "id": "cross-provider-revocation-denies-replay",
+          "metric": "retention",
+          "path": ["replay"],
+          "operation": "equals",
+          "expected": "blocked"
+        },
+        {
+          "id": "cross-provider-revocation-denies-delivery",
+          "metric": "retention",
+          "path": ["delivery"],
+          "operation": "equals",
+          "expected": "blocked"
+        },
+        {
+          "id": "cross-provider-revocation-denies-fresh",
+          "metric": "retention",
+          "path": ["fresh", "text"],
+          "operation": "excludes",
+          "expected": "Luma remains internal to the four founders."
+        },
+        {
+          "id": "cross-provider-history-preserved",
+          "metric": "retention",
+          "path": ["after"],
+          "operation": "same-as",
+          "expected": ["before"]
         }
       ]
     }

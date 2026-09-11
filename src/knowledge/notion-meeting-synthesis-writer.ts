@@ -106,13 +106,18 @@ export function createNotionMeetingSynthesisWriter(config: {
     await grant(p, current, pageId);
     const before = page(await api.readPage(pageId), pageId);
     await grant(p, current, pageId);
-    const markdown = z
+    const body = z
       .object({
+        object: z.literal("page_markdown"),
+        id: z.string(),
         markdown: z.string().max(1_000_000),
         truncated: z.literal(false),
         unknown_block_ids: z.array(z.string()).length(0)
       })
-      .parse(await api.readMarkdown(pageId)).markdown;
+      .parse(await api.readMarkdown(pageId));
+    if (requiredId(body.id) !== pageId)
+      throw new Error("Notion returned another page's Markdown");
+    const markdown = body.markdown;
     await grant(p, current, pageId);
     const after = page(await api.readPage(pageId), pageId);
     await grant(p, current, pageId);

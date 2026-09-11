@@ -36,6 +36,7 @@ async function setup(nativeAnchor = false, useSdk = false) {
     mutations = 0,
     loseResponse = false,
     applyUnknown = true;
+  let markdownIdentity: string | undefined;
   let afterMutation: (() => Promise<void> | void) | undefined;
   const pages = new Map<
     string,
@@ -77,7 +78,7 @@ async function setup(nativeAnchor = false, useSdk = false) {
     readMarkdown: (id) =>
       Promise.resolve({
         object: "page_markdown",
-        id,
+        id: markdownIdentity ?? id,
         markdown: pages.get(id)!.markdown,
         truncated: false,
         unknown_block_ids: []
@@ -335,6 +336,9 @@ async function setup(nativeAnchor = false, useSdk = false) {
     approve,
     meetingId,
     writer,
+    setMarkdownIdentity: (id: string) => {
+      markdownIdentity = id;
+    },
     mutations: () => mutations,
     modelCalls: () => modelCalls,
     setSourceAllowed: (value: boolean) => {
@@ -746,6 +750,31 @@ describe("Capture synthesis approved canonical publication", () => {
       expect(
         (await f.database.query("SELECT * FROM meeting_synthesis_publication_locks")).rows
       ).toHaveLength(1);
+    } finally {
+      await f.database.close();
+    }
+  });
+  it("does not recover a signed body returned for another page as positive evidence for the expected page", async () => {
+    const f = await setup();
+    try {
+      const { intentId } = await f.approve(),
+        request = { workspace, meetingId: f.meetingId, intentId };
+      f.setLostResponse(true);
+      await f.executor.execute(request);
+      f.setMarkdownIdentity(native);
+      await expect(f.executor.recover(request)).rejects.toThrow(/another page/u);
+      expect(
+        (
+          await readSynthesisPublication(
+            f.database,
+            workspace.workspaceId,
+            f.meetingId,
+            intentId
+          )
+        )?.applied
+      ).toBeNull();
+      expect((await f.conclude()).captureSynthesis?.canonicalAnchorRef).toBeNull();
+      expect(f.mutations()).toBe(1);
     } finally {
       await f.database.close();
     }

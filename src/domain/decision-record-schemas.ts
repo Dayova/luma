@@ -170,6 +170,8 @@ export const decisionCandidateSchema: z.ZodType<
       "final-decision",
       "accepted-proposal",
       "proposal",
+      "tentative-direction",
+      "rejected-option",
       "preference",
       "open-question",
       "historical",

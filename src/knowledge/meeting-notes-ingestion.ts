@@ -48,8 +48,17 @@ export interface MeetingNotesIngestion {
   ingest(input: IngestObservedMeetingNoteInput): Promise<MeetingUpdate>;
 }
 
+export type ProcessedMeetingSourceEvent = {
+  workspaceId: string;
+  meetingId: string;
+  observationId: string;
+  sourceRevision: number;
+  contentHash: string;
+};
 export type CreateMeetingNotesIngestionInput = {
   meetingIntelligence: MeetingIntelligence;
+  /** Runtime queues further owned processing after original Evidence is accepted; this grants no write approval. */
+  onProcessedSource?(event: ProcessedMeetingSourceEvent): Promise<void>;
   /** Dayova's canonical work tracker unless a different WorkProvider is configured. */
   workItemProviderId?: string;
   /** Provider namespace for exact GitHub implementation locators. */
@@ -75,16 +84,45 @@ export function createMeetingNotesIngestion(
   }
 
   return {
-    ingest: (ingestInput) => {
+    ingest: async (ingestInput) => {
       const observation = observedMeetingNoteToObservation(
         ingestInput,
         workItemProviderId,
         implementationReferenceProviderId
       );
-      return input.meetingIntelligence.observe({
+      const update = await input.meetingIntelligence.observe({
         workspace: ingestInput.workspace,
         observations: [observation]
       });
+      if (
+        input.onProcessedSource &&
+        [...update.acceptedObservationIds, ...update.duplicateObservationIds].includes(
+          observation.observationId
+        )
+      ) {
+        try {
+          await input.onProcessedSource({
+            workspaceId: ingestInput.workspace.workspaceId,
+            meetingId: observation.meetingId,
+            observationId: observation.observationId,
+            sourceRevision: ingestInput.source.revision,
+            contentHash: ingestInput.source.contentHash
+          });
+        } catch {
+          return {
+            ...update,
+            errors: [
+              ...update.errors,
+              {
+                code: "context-unavailable",
+                retryable: true,
+                partialResultAvailable: true
+              }
+            ]
+          };
+        }
+      }
+      return update;
     }
   };
 }

@@ -1,0 +1,872 @@
+import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
+import { createOpenAIAutomaticDecisionDetector } from "../../src/decision-intelligence/openai-decision-interpreter.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/db.js";
+import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
+import { createFollowUpExecution } from "../../src/follow-up-execution/follow-up-execution.js";
+import type {
+  AutomaticDecisionDetection,
+  DecisionStandingGrant,
+  ObserveProcessedDecisionSource
+} from "../../src/domain/automatic-decisions.js";
+import type {
+  CanonicalDecisionRecord,
+  DecisionWriteReceipt
+} from "../../src/domain/decision-records.js";
+import type { DecisionIntelligenceConfiguration } from "../../src/decision-intelligence/decision-intelligence.js";
+import type { DecisionRecords } from "../../src/knowledge/decision-records.js";
+import { decisionDigest } from "../../src/decision-intelligence/persistence.js";
+import { decisionRecord } from "../knowledge/decision-record-fixture.js";
+import { AiServiceError } from "../../src/ai/ai-service-error.js";
+let database: LumaDatabase;
+beforeEach(async () => {
+  database = await createPgliteDatabase();
+});
+afterEach(async () => {
+  await database.close();
+});
+function fixture() {
+  const original = decisionRecord(),
+    source = structuredClone(original.source),
+    authority = structuredClone(original.authority.snapshot);
+  const records = new Map<string, CanonicalDecisionRecord>(),
+    receipts = new Map<string, DecisionWriteReceipt>();
+  let detection: AutomaticDecisionDetection = {
+    complete: true,
+    candidates: [
+      {
+        confidence: "high",
+        interpretation: {
+          candidate: structuredClone(original.candidate),
+          reconciliation: { action: "create" }
+        }
+      }
+    ]
+  };
+  let enabled = false,
+    policyCurrent = true,
+    sourceCurrent = true,
+    authorityCurrent = true,
+    authorityAvailable = true,
+    catalogAvailable = true,
+    complete = true,
+    mode: "ok" | "unknown-before" | "unknown-after" = "ok";
+  const audience = structuredClone(source.audience);
+  const grant: DecisionStandingGrant = {
+    id: "record-luma",
+    revision: "policy-v1",
+    contentHash: "policy-hash",
+    source: {
+      providerId: "discord",
+      objectType: "comment",
+      externalId: "standing-instruction",
+      url: "https://discord.com/channels/1/2/4"
+    },
+    audience: structuredClone(audience),
+    purpose: "automatic-decision-recording",
+    authorizedBy: "jakob",
+    actor: { providerId: "discord", providerUserId: "jakob-user" },
+    instruction: "Luma may automatically record my clear final Luma decisions.",
+    evidence: {
+      evidenceId: "standing-instruction",
+      source: "human-judgment",
+      sourceObjectId: "standing-instruction",
+      participantId: "jakob",
+      sourceVersion: "policy-v1",
+      excerpt: "Luma may automatically record my clear final Luma decisions.",
+      externalReference: {
+        providerId: "discord",
+        objectType: "comment",
+        externalId: "standing-instruction",
+        url: "https://discord.com/channels/1/2/4"
+      }
+    },
+    scopeId: "luma",
+    actions: ["create", "link", "amend", "supersede", "reverse"],
+    modalities: ["final-decision", "accepted-proposal", "reversal"],
+    dispositions: ["adopt", "pause", "discard"],
+    validFrom: "2026-09-11T00:00:00Z",
+    validUntil: null
+  };
+  const catalog = () => ({
+    id: "decisions",
+    revision: decisionDigest([...records.values()]),
+    complete,
+    records: structuredClone([...records.values()])
+  });
+  const provider: DecisionRecords = {
+    providerId: "notion",
+    discover: vi.fn(() => {
+      if (!catalogAvailable) throw new Error("private outage");
+      return Promise.resolve(catalog());
+    }),
+    requireCurrent: ({ snapshot }) => {
+      if (snapshot.revision !== catalog().revision) throw new Error("catalog changed");
+      return Promise.resolve();
+    },
+    read: ({ recordId }) => Promise.resolve(records.get(recordId) ?? null),
+    readReference: ({ reference }) =>
+      Promise.resolve(records.get(reference.externalId) ?? null),
+    findWritten: vi.fn<DecisionRecords["findWritten"]>(({ operationId }) =>
+      Promise.resolve(receipts.get(operationId) ?? null)
+    ),
+    write: vi.fn<DecisionRecords["write"]>(({ stage, operationId }) => {
+      if (mode === "unknown-before") throw new Error("timeout");
+      const content =
+        stage.type === "create-record" || stage.type === "amend-record"
+          ? stage.record
+          : stage.type === "retire-record"
+            ? {
+                ...stage.target.content,
+                status: stage.status,
+                supersededBy: stage.successor
+              }
+            : { ...stage.target.content, status: "active" as const };
+      const externalId =
+        "target" in stage ? stage.target.reference.externalId : content.id;
+      const record: CanonicalDecisionRecord = {
+        content: structuredClone(content),
+        reference: {
+          providerId: "notion",
+          objectType: "document",
+          externalId,
+          url: `https://notion.so/${externalId}`,
+          version: operationId
+        },
+        version: operationId
+      };
+      records.set(externalId, record);
+      const receipt = { record, operationId, observedAt: "2026-09-11T10:00:00Z" };
+      receipts.set(operationId, receipt);
+      if (mode === "unknown-after") throw new Error("timeout");
+      return Promise.resolve(receipt);
+    })
+  };
+  const captureProcessed = vi.fn(() => Promise.resolve(structuredClone(source)));
+  const requireSource = vi.fn(() => {
+    if (!sourceCurrent) throw new Error("source revoked");
+    return Promise.resolve();
+  });
+  const detect = vi.fn(() => Promise.resolve(structuredClone(detection)));
+  const configuration: DecisionIntelligenceConfiguration = {
+    evidenceSource: {
+      capture: () => {
+        throw new Error(
+          "Explicit source capture must not be used for automatic processing"
+        );
+      },
+      requireCurrent: requireSource
+    },
+    authority: {
+      read: () => {
+        if (!authorityAvailable) throw new Error("authority unavailable");
+        return Promise.resolve(structuredClone(authority));
+      },
+      requireCurrent: () => {
+        if (!authorityCurrent) throw new Error("authority revoked");
+        return Promise.resolve();
+      }
+    },
+    interpreter: {
+      interpret: () => {
+        throw new Error("Explicit interpretation must not rerun");
+      }
+    },
+    records: provider,
+    accessPolicy: {
+      authorize: ({ providerUserId }) =>
+        Promise.resolve(
+          providerUserId === "jakob-user"
+            ? {
+                personId: "jakob",
+                displayName: "Jakob",
+                discordUserId: "jakob-user",
+                discordUsername: null,
+                githubLogin: null,
+                githubUserId: null,
+                atlassianAccountId: null,
+                notionUserId: null,
+                linearUserId: null,
+                languagePreference: "auto"
+              }
+            : null
+        )
+    },
+    audience: () => Promise.resolve(structuredClone(audience)),
+    automatic: {
+      evidenceSource: { captureProcessed, requireCurrent: requireSource },
+      detector: { detect },
+      policy: {
+        read: () => Promise.resolve(enabled ? [structuredClone(grant)] : []),
+        requireCurrent: () => {
+          if (!policyCurrent) throw new Error("standing grant revoked");
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+  const request: ObserveProcessedDecisionSource = {
+    workspace: { workspaceId: "dayova", timezone: "Europe/Berlin" },
+    subject: source.subject,
+    observations: [{ type: "decision-source-processed", observationId: "processed-1" }]
+  };
+  const make = () =>
+    createMeetingIntelligence({
+      database,
+      reasoningModel: {
+        generateStructured: () => Promise.reject(new Error("No Meeting model call"))
+      },
+      decisionIntelligence: configuration,
+      now: () => new Date("2026-09-11T10:00:00Z")
+    });
+  const addRecord = () => {
+    const content = decisionRecord("prior");
+    const value: CanonicalDecisionRecord = {
+      content,
+      reference: {
+        providerId: "notion",
+        objectType: "document",
+        externalId: "prior",
+        url: "https://notion.so/prior",
+        version: "v1"
+      },
+      version: "v1"
+    };
+    records.set("prior", value);
+    return value;
+  };
+  return {
+    source,
+    authority,
+    audience,
+    grant,
+    configuration,
+    request,
+    make,
+    detect,
+    captureProcessed,
+    requireSource,
+    records,
+    provider,
+    receipts,
+    addRecord,
+    get detection() {
+      return detection;
+    },
+    setDetection: (value: AutomaticDecisionDetection) => {
+      detection = value;
+    },
+    enable: () => {
+      enabled = true;
+    },
+    revokePolicy: () => {
+      policyCurrent = false;
+    },
+    revokeSource: () => {
+      sourceCurrent = false;
+    },
+    revokeAuthority: () => {
+      authorityCurrent = false;
+    },
+    missingAuthority: () => {
+      authorityAvailable = false;
+    },
+    missingCatalog: () => {
+      catalogAvailable = false;
+    },
+    incompleteCatalog: () => {
+      complete = false;
+    },
+    setMode: (value: typeof mode) => {
+      mode = value;
+    }
+  };
+}
+describe("automatic Decision candidates through Meeting Intelligence", () => {
+  it("retains a high-confidence clear candidate, independent authority and review-only default across restart", async () => {
+    const f = fixture(),
+      first = await f.make().observe(f.request);
+    expect(first).toMatchObject({
+      status: "completed",
+      complete: true,
+      candidates: [
+        {
+          state: "candidate",
+          approvedIntentId: null,
+          automatic: {
+            confidence: "high",
+            authority: "verified",
+            recording: "review-only"
+          }
+        }
+      ]
+    });
+    expect(first.candidates[0]!.source).toEqual(f.source);
+    expect(f.provider.write).not.toHaveBeenCalled();
+    expect(
+      await f.make().conclude({
+        workspaceId: "dayova",
+        subject: f.request.subject,
+        batchId: first.batchId
+      })
+    ).toMatchObject({ batch: { batchId: first.batchId } });
+    expect((await f.make().observe(f.request)).duplicate).toBe(true);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    "proposal",
+    "preference",
+    "open-question",
+    "tentative-direction",
+    "rejected-option",
+    "historical"
+  ] as const)("does not promote %s even with a standing policy", async (modality) => {
+    const f = fixture();
+    f.enable();
+    f.detection.candidates[0]!.interpretation.candidate.modality = modality;
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]!.approvedIntentId).toBeNull();
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("blocks tentative source wording even if the model incorrectly labels it final", async () => {
+    const f = fixture();
+    f.enable();
+    f.source.evidence[0]!.text = "We should probably use Luma for customers.";
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]!.message).toContain("Tentative");
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("records a permitted clear owner decision once and duplicate processing does not rerun AI or resend", async () => {
+    const f = fixture();
+    f.enable();
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]).toMatchObject({
+      state: "recorded",
+      automatic: { recording: "standing-policy" },
+      execution: { outcome: { status: "succeeded" } }
+    });
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await f.make().observe({
+          ...f.request,
+          observations: [
+            { type: "decision-source-processed", observationId: "processed-again" }
+          ]
+        })
+      ).duplicate
+    ).toBe(true);
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it("links an equivalent existing record without a duplicate provider mutation", async () => {
+    const f = fixture();
+    f.enable();
+    f.addRecord();
+    f.detection.candidates[0]!.interpretation.reconciliation = {
+      action: "link",
+      targetRecordId: "prior"
+    };
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]).toMatchObject({
+      state: "recorded",
+      execution: {
+        outcome: { status: "succeeded", references: [{ externalId: "prior" }] }
+      }
+    });
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("retains an explicit successor proposal and active contradiction as separate review needs", async () => {
+    const f = fixture();
+    f.addRecord();
+    f.detection.candidates[0]!.interpretation.candidate.statement.text =
+      "Luma should now be available to selected partners.";
+    f.detection.candidates[0]!.interpretation.reconciliation = {
+      action: "supersede",
+      targetRecordId: "prior"
+    };
+    let result = await f.make().observe(f.request);
+    expect(result.candidates[0]!.automatic?.reconciliation).toEqual({
+      action: "supersede",
+      targetRecordId: "prior"
+    });
+    expect(f.provider.write).not.toHaveBeenCalled();
+    f.source.contentHash = "new";
+    f.source.authorizationHash = "new";
+    f.detection.candidates[0]!.interpretation.reconciliation = {
+      action: "clarify",
+      reason:
+        "This contradicts the active internal-only decision without explicit supersession."
+    };
+    result = await f.make().observe({
+      ...f.request,
+      observations: [
+        { type: "decision-source-processed", observationId: "processed-correction" }
+      ]
+    });
+    expect(result.candidates[0]).toMatchObject({
+      state: "needs-clarification",
+      approvedIntentId: null
+    });
+  });
+  it.each(["authority", "catalog", "partial"])(
+    "keeps candidates reviewable with unavailable %s",
+    async (kind) => {
+      const f = fixture();
+      f.enable();
+      if (kind === "authority") f.missingAuthority();
+      else if (kind === "catalog") f.missingCatalog();
+      else f.incompleteCatalog();
+      const result = await f.make().observe(f.request);
+      expect(result.complete).toBe(false);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]!.approvedIntentId).toBeNull();
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it("withholds every write for incomplete candidate detection", async () => {
+    const f = fixture();
+    f.enable();
+    f.detection.complete = false;
+    const result = await f.make().observe(f.request);
+    expect(result.complete).toBe(false);
+    expect(result.candidates[0]!.message).toContain("incomplete");
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it.each(["poll", "provider-derived"] as const)(
+    "never treats %s acceptance as Human authority",
+    async (origin) => {
+      const f = fixture();
+      f.enable();
+      f.source.evidence[0]!.origin = origin;
+      const result = await f.make().observe(f.request);
+      expect(result.candidates[0]!.automatic?.authority).toBe("unresolved");
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it.each(["provisional-role", "confirmed-scope"] as const)(
+    "does not let a %s title or conflicting owner grant supply authority",
+    async (kind) => {
+      const f = fixture();
+      f.enable();
+      f.authority.grants[0]!.kind = kind;
+      f.authority.grants[0]!.personId = "fabius";
+      const result = await f.make().observe(f.request);
+      expect(result.candidates[0]!.approvedIntentId).toBeNull();
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it.each(["scope", "actor", "expired", "audience", "evidence", "action"])(
+    "denies a standing policy with an invalid %s proof",
+    async (kind) => {
+      const f = fixture();
+      f.enable();
+      if (kind === "scope") f.grant.scopeId = "finance";
+      if (kind === "actor") f.grant.actor.providerUserId = "outsider";
+      if (kind === "expired") f.grant.validUntil = "2026-09-11T09:00:00Z";
+      if (kind === "audience") f.grant.audience.personIds.push("guest");
+      if (kind === "evidence") f.grant.evidence.source = "external-activity";
+      if (kind === "action") f.grant.actions = ["amend"];
+      await f.make().observe(f.request);
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it("does not automatically retry an unknown write across restart; explicit recovery uses positive receipts", async () => {
+    const f = fixture();
+    f.enable();
+    f.setMode("unknown-after");
+    const first = await f.make().observe(f.request);
+    const candidate = first.candidates[0]!;
+    expect(candidate.state).toBe("unknown");
+    await f.make().observe(f.request);
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    const mi = f.make(),
+      execution = createFollowUpExecution({ database, meetingIntelligence: mi });
+    f.setMode("ok");
+    await execution.recover({
+      workspace: f.request.workspace,
+      subject: f.request.subject,
+      decisionRequestId: candidate.requestId,
+      intentId: candidate.approvedIntentId!
+    });
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    expect(f.provider.findWritten).toHaveBeenCalledTimes(1);
+  });
+  it("checks standing policy again after stage claim and before dispatch", async () => {
+    const f = fixture();
+    f.enable();
+    const query = database.query.bind(database);
+    database.query = async <T>(...args: Parameters<LumaDatabase["query"]>) => {
+      const [statement, parameters] = args;
+      const result = await query<T>(...args);
+      if (
+        statement.includes("INSERT INTO decision_write_stages") &&
+        parameters?.some(
+          (value) => typeof value === "string" && value.includes('"state":"executing"')
+        )
+      )
+        f.revokePolicy();
+      return result;
+    };
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]).toMatchObject({
+      candidate: null,
+      approvedIntentId: null,
+      state: "needs-clarification"
+    });
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("source or audience revocation after detection prevents any external write and disclosure", async () => {
+    const f = fixture();
+    f.enable();
+    f.detect.mockImplementationOnce(() => {
+      f.revokeSource();
+      return Promise.resolve(structuredClone(f.detection));
+    });
+    await expect(f.make().observe(f.request)).rejects.toThrow("source revoked");
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("retains a visible budget refusal and never spends again on duplicate processed Evidence", async () => {
+    const f = fixture();
+    f.detect.mockRejectedValueOnce(
+      new AiServiceError(
+        "budget-exhausted",
+        "The monthly AI usage limit has been reached.",
+        { requestDispatched: false }
+      )
+    );
+    const first = await f.make().observe(f.request);
+    expect(first).toMatchObject({ status: "needs-clarification", candidates: [] });
+    expect(first.message).toContain("limit");
+    await f.make().observe(f.request);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it("preserves Human correction on replay and keeps later inference from overriding it", async () => {
+    const f = fixture(),
+      mi = f.make(),
+      first = await mi.observe(f.request),
+      candidate = first.candidates[0]!;
+    const correction = structuredClone(candidate.candidate!);
+    correction.modality = "proposal";
+    correction.acceptanceEvidenceIds = [];
+    await mi.observe({
+      workspace: f.request.workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-candidate-corrected",
+          observationId: "human-correction",
+          requestId: candidate.requestId,
+          actor: { providerId: "discord", providerUserId: "jakob-user" },
+          candidate: correction,
+          reason: "This is still a proposal; do not record it."
+        }
+      ]
+    });
+    expect((await mi.observe(f.request)).candidates[0]!.candidate?.modality).toBe(
+      "proposal"
+    );
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    f.enable();
+    f.source.contentHash = "later";
+    f.source.authorizationHash = "later";
+    const later = await mi.observe({
+      ...f.request,
+      observations: [{ type: "decision-source-processed", observationId: "later" }]
+    });
+    expect(later.candidates[0]!.message).toContain("Human judgment");
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+});
+
+function wireDetection(f: ReturnType<typeof fixture>) {
+  return {
+    complete: f.detection.complete,
+    candidates: f.detection.candidates.map((entry) => {
+      const {
+        relatedWork: _work,
+        implementationEvidence: _code,
+        ...candidate
+      } = entry.interpretation.candidate;
+      void _work;
+      void _code;
+      return {
+        confidence: entry.confidence,
+        interpretation: {
+          candidate: {
+            ...candidate,
+            relatedWorkReferenceIds: [],
+            implementationReferenceIds: []
+          },
+          reconciliation: entry.interpretation.reconciliation
+        }
+      };
+    })
+  };
+}
+describe("actual automatic model composition and batches", () => {
+  it("runs the actual native Responses request with shared durable accounting, no tools/storage/retries and zero replay spend", async () => {
+    const f = fixture(),
+      budget = createAiUsageBudget({ database });
+    const fetch = vi.fn((_url: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== "string") throw new Error("Expected a JSON request body");
+      const body = JSON.parse(init.body) as {
+        store: boolean;
+        tools?: unknown;
+        input: string;
+        model: string;
+      };
+      expect(body.store).toBe(false);
+      expect(body.tools).toBeUndefined();
+      const modelInput = JSON.parse(body.input) as Record<string, unknown>;
+      expect(modelInput["requesterPersonId"]).toBeUndefined();
+      expect(modelInput["instruction"]).toBeUndefined();
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "resp_auto",
+            object: "response",
+            model: body.model,
+            status: "completed",
+            service_tier: "default",
+            output: [
+              {
+                type: "message",
+                id: "msg_auto",
+                role: "assistant",
+                status: "completed",
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify(wireDetection(f)),
+                    annotations: []
+                  }
+                ]
+              }
+            ],
+            usage: {
+              input_tokens: 100,
+              output_tokens: 10,
+              total_tokens: 110,
+              input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+              output_tokens_details: { reasoning_tokens: 5 }
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "x-request-id": "req_auto" }
+          }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      f.configuration.automatic!.detector = createOpenAIAutomaticDecisionDetector({
+        apiKey: "synthetic-test-key",
+        budget
+      });
+      const mi = f.make();
+      expect((await mi.observe(f.request)).candidates[0]!.candidate?.statement.text).toBe(
+        f.source.evidence[0]!.text
+      );
+      await mi.observe(f.request);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(await budget.getStatus("dayova")).toMatchObject({
+        requestCount: 1,
+        reservedUsd: 0,
+        unknownUsd: 0,
+        byCapability: [{ capability: "decision-interpretation", requestCount: 1 }]
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it.each(["foreign-evidence", "unknown-person", "invented-target", "too-many"])(
+    "refuses ungrounded actual detector output: %s",
+    async (kind) => {
+      const f = fixture(),
+        wire = wireDetection(f);
+      f.enable();
+      if (kind === "foreign-evidence")
+        wire.candidates[0]!.interpretation.candidate.statement.evidenceIds = [
+          "private-other-source"
+        ];
+      if (kind === "unknown-person")
+        wire.candidates[0]!.interpretation.candidate.decisionMakerPersonIds = [
+          "outsider"
+        ];
+      if (kind === "invented-target")
+        wire.candidates[0]!.interpretation.reconciliation = {
+          action: "supersede",
+          targetRecordId: "invented"
+        };
+      if (kind === "too-many")
+        wire.candidates = Array.from({ length: 21 }, () =>
+          structuredClone(wire.candidates[0]!)
+        );
+      f.configuration.automatic!.detector = createOpenAIAutomaticDecisionDetector({
+        budget: createAiUsageBudget({ database }),
+        client: {
+          create: () =>
+            Promise.resolve({
+              outputText: JSON.stringify(wire),
+              model: "gpt-5.6-luna",
+              serviceTier: "default",
+              status: "completed",
+              providerResponseId: "resp_bad",
+              usage: {
+                inputTokens: 100,
+                cachedInputTokens: 0,
+                cacheWriteTokens: 0,
+                outputTokens: 10,
+                reasoningTokens: 0
+              }
+            })
+        }
+      });
+      const result = await f.make().observe(f.request);
+      expect(result).toMatchObject({ status: "needs-clarification", candidates: [] });
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it("keeps every same-scope candidate visible for joint review without recording or re-running detection", async () => {
+    const f = fixture();
+    f.enable();
+    f.detection.candidates.push(structuredClone(f.detection.candidates[0]!));
+    f.detection.candidates[1]!.interpretation.candidate.statement.text =
+      "A separate question in the same scope.";
+    const result = await f.make().observe(f.request);
+    expect(result.complete).toBe(false);
+    expect(result.candidates).toHaveLength(2);
+    expect(
+      result.candidates.every(
+        (candidate) =>
+          candidate.message.includes("share this scope") &&
+          candidate.approvedIntentId === null
+      )
+    ).toBe(true);
+    expect(f.provider.write).not.toHaveBeenCalled();
+    await f.make().observe(f.request);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  function secondScope(f: ReturnType<typeof fixture>) {
+    const next = structuredClone(f.detection.candidates[0]!);
+    next.interpretation.candidate.scopeId = "website";
+    next.interpretation.candidate.statement.text = "Keep the website internal too.";
+    f.detection.candidates.push(next);
+    f.authority.grants.push({
+      ...structuredClone(f.authority.grants[0]!),
+      id: "website-owner",
+      scopeId: "website"
+    });
+    f.configuration.automatic!.policy!.read = () =>
+      Promise.resolve([
+        f.grant,
+        { ...structuredClone(f.grant), id: "record-website", scopeId: "website" }
+      ]);
+  }
+  it("settles independent scopes only through exact owned positive catalog deltas", async () => {
+    const f = fixture();
+    f.enable();
+    secondScope(f);
+    const result = await f.make().observe(f.request);
+    expect(result.candidates.map((candidate) => candidate.state)).toEqual([
+      "recorded",
+      "recorded"
+    ]);
+    expect(f.provider.write).toHaveBeenCalledTimes(2);
+    expect(f.detect).toHaveBeenCalledTimes(1);
+    await f.make().observe(f.request);
+    expect(f.provider.write).toHaveBeenCalledTimes(2);
+  });
+  it("preserves the first known reference and visible second request when an unrelated catalog edit blocks the next scope", async () => {
+    const f = fixture();
+    f.enable();
+    secondScope(f);
+    const write = f.provider.write;
+    f.provider.write = vi.fn<DecisionRecords["write"]>(async (request) => {
+      const result = await write(request);
+      f.addRecord();
+      return result;
+    });
+    const result = await f.make().observe(f.request);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0]).toMatchObject({
+      state: "recorded",
+      execution: { outcome: { status: "succeeded" } }
+    });
+    expect(result.candidates[1]).toMatchObject({
+      candidate: null,
+      approvedIntentId: null,
+      state: "needs-clarification"
+    });
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    expect(result.complete).toBe(false);
+  });
+  it("stops later scopes after an uncertain stage and preserves first-stage recovery information", async () => {
+    const f = fixture();
+    f.enable();
+    secondScope(f);
+    f.setMode("unknown-after");
+    const result = await f.make().observe(f.request);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0]!.state).toBe("unknown");
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+    await f.make().observe(f.request);
+    expect(f.provider.write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("automatic observation and final-proof invariants", () => {
+  it("rejects reuse of a processed-source Observation ID for changed Evidence without paid replay", async () => {
+    const f = fixture();
+    await f.make().observe(f.request);
+    f.source.contentHash = "changed";
+    f.source.authorizationHash = "changed";
+    await expect(f.make().observe(f.request)).rejects.toThrow("immutable");
+    expect(f.detect).toHaveBeenCalledTimes(1);
+  });
+  it("withholds an ungrounded candidate from even a programmable detector", async () => {
+    const f = fixture();
+    f.detection.candidates[0]!.interpretation.candidate.statement.evidenceIds = [
+      "unknown-evidence"
+    ];
+    const result = await f.make().observe(f.request);
+    expect(result.candidates).toEqual([]);
+    expect(result.complete).toBe(false);
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+  it("withdraws a catalog-grounded candidate if authority changes during final batch delivery", async () => {
+    const f = fixture();
+    let reads = 0;
+    const current = f.configuration.authority.requireCurrent.bind(
+      f.configuration.authority
+    );
+    f.configuration.authority.requireCurrent = async (input) => {
+      await current(input);
+      reads++;
+      if (reads === 3) f.revokeAuthority();
+    };
+    const result = await f.make().observe(f.request);
+    expect(result.candidates[0]).toMatchObject({
+      candidate: null,
+      approvedIntentId: null,
+      state: "needs-clarification"
+    });
+    expect(result.complete).toBe(false);
+  });
+});
+
+describe("unqualified original owner acceptance", () => {
+  it.each([
+    "Have we decided to launch Luma publicly?",
+    "We have not yet decided to launch Luma publicly.",
+    "Wir haben noch nicht entschieden, Luma öffentlich anzubieten."
+  ])("keeps questioning or negated source wording for review: %s", async (text) => {
+    const f = fixture();
+    f.enable();
+    f.source.evidence[0]!.text = text;
+    await f.make().observe(f.request);
+    expect(f.provider.write).not.toHaveBeenCalled();
+  });
+});

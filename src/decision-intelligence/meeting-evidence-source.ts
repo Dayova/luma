@@ -1,4 +1,4 @@
-import type { DecisionEvidenceSource } from "./ports.js";
+import type { DecisionEvidenceSource, ProcessedDecisionEvidenceSource } from "./ports.js";
 import type { DecisionAudience, DecisionSource } from "../domain/decision-records.js";
 import type { EvidenceReference, MeetingState } from "../domain/model.js";
 import type { LumaDatabase } from "../persistence/db.js";
@@ -18,7 +18,7 @@ export function createMeetingDecisionEvidenceSource(input: {
   audience: MeetingDecisionSourceAudience;
   requireContextCurrent(state: MeetingState): Promise<void>;
   now?: () => Date;
-}): DecisionEvidenceSource {
+}): DecisionEvidenceSource & ProcessedDecisionEvidenceSource {
   const capture = async (
     workspaceId: string,
     meetingId: string,
@@ -113,16 +113,20 @@ export function createMeetingDecisionEvidenceSource(input: {
       capturedAt: (input.now ?? (() => new Date()))().toISOString()
     };
   };
+  const captureProcessed: ProcessedDecisionEvidenceSource["captureProcessed"] = (
+    request
+  ) => {
+    if (request.subject.type !== "meeting")
+      throw new Error("Expected an actual Meeting subject");
+    return capture(
+      request.workspace.workspaceId,
+      request.subject.meetingId,
+      request.audience
+    );
+  };
   return {
-    capture: (request) => {
-      if (request.subject.type !== "meeting")
-        throw new Error("Expected an actual Meeting subject");
-      return capture(
-        request.workspace.workspaceId,
-        request.subject.meetingId,
-        request.audience
-      );
-    },
+    captureProcessed,
+    capture: captureProcessed,
     requireCurrent: async (source) => {
       if (source.subject.type !== "meeting")
         throw new Error("Expected an actual Meeting subject");

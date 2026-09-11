@@ -1,3 +1,4 @@
+import type { ProcessedConversationSources } from "../context-intelligence/processed-conversation-source.js";
 import { createHash } from "node:crypto";
 import type { WorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import type {
@@ -16,10 +17,11 @@ import {
   type ObservedSourceLedger,
   type RawConversationSnapshot
 } from "../knowledge/observed-source-ledger.js";
-import type { DecisionEvidenceSource } from "./ports.js";
+import type { DecisionEvidenceSource, ProcessedDecisionEvidenceSource } from "./ports.js";
 
 type ConversationSubject = Extract<DecisionSubject, { type: "conversation-thread" }>;
-export interface ConversationDecisionEvidenceSource extends DecisionEvidenceSource {
+export interface ConversationDecisionEvidenceSource
+  extends DecisionEvidenceSource, ProcessedDecisionEvidenceSource {
   /** Read/projection permission for immutable retained history; never authorizes execution. */
   authorizeRetained(input: {
     audience: DecisionAudience;
@@ -30,6 +32,7 @@ export interface ConversationDecisionEvidenceSource extends DecisionEvidenceSour
 /** Original bounded Conversation evidence, with fresh identity and original-audience proof. */
 export function createConversationDecisionEvidenceSource(input: {
   workspaceId: string;
+  processedSources?: ProcessedConversationSources;
   conversationEvidenceSource: ConversationEvidenceSource;
   ledger: ObservedSourceLedger;
   accessPolicy: WorkspaceAccessPolicy;
@@ -67,7 +70,8 @@ export function createConversationDecisionEvidenceSource(input: {
     boundSubject: ConversationSubject,
     boundAudience: DecisionAudience,
     revision: string,
-    capturedAt: string
+    capturedAt: string,
+    processedAdmissionId?: string
   ): Promise<DecisionSource> {
     validateCapture(captured, boundSubject);
     const evidence: DecisionEvidence[] = [];
@@ -83,6 +87,15 @@ export function createConversationDecisionEvidenceSource(input: {
       // The owned capture adapter proves Luma poll origin. Its text and counts
       // remain generated/provider facts and can never establish Human authority.
       const personId = generatedPoll ? null : (person?.personId ?? null);
+      if (
+        processedAdmissionId &&
+        !generatedPoll &&
+        message.author.personId !== null &&
+        message.author.personId !== personId
+      )
+        throw unavailable();
+      const originalPersonId =
+        processedAdmissionId && message.author.personId === null ? null : personId;
       if (!generatedPoll && (!personId || !recipients.includes(personId)))
         throw unavailable();
       bindings.push({ messageId: message.id, personId });
@@ -91,14 +104,14 @@ export function createConversationDecisionEvidenceSource(input: {
         evidence.push({
           id,
           text,
-          authorPersonId: kind === "poll" ? null : personId,
+          authorPersonId: kind === "poll" ? null : originalPersonId,
           origin: kind === "poll" ? "poll" : generatedPoll ? "provider-derived" : "human",
           reference: {
             evidenceId: id,
             source: "external-activity",
             sourceObjectId: message.id,
             sourceVersion: revision,
-            ...(personId ? { participantId: personId } : {}),
+            ...(originalPersonId ? { participantId: originalPersonId } : {}),
             excerpt: text,
             externalReference: {
               providerId: boundSubject.providerId,
@@ -129,7 +142,8 @@ export function createConversationDecisionEvidenceSource(input: {
       authorizationHash: hash([
         consultationSourceAuthorizationHash(captured.snapshot),
         boundAudience,
-        bindings
+        bindings,
+        ...(processedAdmissionId ? [processedAdmissionId] : [])
       ]),
       audience: boundAudience,
       evidence,
@@ -140,11 +154,12 @@ export function createConversationDecisionEvidenceSource(input: {
   async function originalProof(original: DecisionSource) {
     const boundSubject = subject(original.subject);
     const boundAudience = audience(original.audience);
-    const revision = Number(original.revision);
+    const processed = /^processed:(\d+):([a-f0-9]{64})$/u.exec(original.revision);
+    const revision = Number(processed?.[1] ?? original.revision);
     if (
       !Number.isSafeInteger(revision) ||
       revision < 1 ||
-      String(revision) !== original.revision
+      String(revision) !== (processed?.[1] ?? original.revision)
     )
       throw unavailable();
     const retained = await input.ledger.get({
@@ -157,6 +172,20 @@ export function createConversationDecisionEvidenceSource(input: {
       revision
     });
     if (!retained || retained.contentHash !== original.contentHash) throw unavailable();
+    if (processed) {
+      if (!input.processedSources) throw unavailable();
+      const proof = await input.processedSources.read({
+        workspaceId: input.workspaceId,
+        subject: boundSubject,
+        audience: boundAudience,
+        admissionId: processed[2]!
+      });
+      if (
+        proof.original.revision !== revision ||
+        proof.original.contentHash !== original.contentHash
+      )
+        throw unavailable();
+    }
     const prior = await project(
       {
         source: retained.source,
@@ -167,13 +196,45 @@ export function createConversationDecisionEvidenceSource(input: {
       boundSubject,
       boundAudience,
       original.revision,
-      retained.capturedAt
+      retained.capturedAt,
+      processed?.[2]
     );
     if (hash(prior) !== hash(original)) throw unavailable();
-    return { boundSubject, boundAudience, retained };
+    return {
+      boundSubject,
+      boundAudience,
+      retained,
+      processedAdmissionId: processed?.[2]
+    };
   }
 
   const source: ConversationDecisionEvidenceSource = {
+    async captureProcessed(request) {
+      const boundSubject = subject(request.subject),
+        boundAudience = audience(request.audience);
+      if (request.workspace.workspaceId !== input.workspaceId || !input.processedSources)
+        throw unavailable();
+      const proof = await input.processedSources.read({
+        workspaceId: input.workspaceId,
+        subject: boundSubject,
+        audience: boundAudience
+      });
+      const result = await project(
+        {
+          source: proof.original.source,
+          providerVersion: proof.original.providerVersion,
+          snapshot: proof.original.snapshot,
+          observedAt: proof.original.capturedAt
+        },
+        boundSubject,
+        boundAudience,
+        `processed:${proof.original.revision}:${proof.admission.id}`,
+        proof.original.capturedAt,
+        proof.admission.id
+      );
+      await source.requireCurrent(result);
+      return result;
+    },
     async capture(request) {
       request = structuredClone(request);
       const boundSubject = subject(request.subject);
@@ -229,12 +290,13 @@ export function createConversationDecisionEvidenceSource(input: {
     },
     async requireCurrent(original) {
       original = structuredClone(original);
-      const { boundSubject, boundAudience } = await originalProof(original);
+      const { boundSubject, boundAudience, processedAdmissionId } =
+        await originalProof(original);
       const current = structuredClone(
         await input.conversationEvidenceSource.capture({
           workspaceId: input.workspaceId,
           subject: boundSubject,
-          purpose: "decision-record"
+          ...(!processedAdmissionId ? { purpose: "decision-record" as const } : {})
         })
       );
       const proof = await project(
@@ -242,7 +304,8 @@ export function createConversationDecisionEvidenceSource(input: {
         boundSubject,
         boundAudience,
         original.revision,
-        original.capturedAt
+        original.capturedAt,
+        processedAdmissionId
       );
       if (proof.authorizationHash !== original.authorizationHash) throw unavailable();
     },
@@ -260,12 +323,13 @@ export function createConversationDecisionEvidenceSource(input: {
           return false;
         // Reconstruct the original source from its immutable ledger revision. A
         // canonical page cannot supply a replacement audience or invented excerpt.
-        const { boundSubject, boundAudience, retained } = await originalProof(original);
+        const { boundSubject, boundAudience, retained, processedAdmissionId } =
+          await originalProof(original);
         const current = structuredClone(
           await input.conversationEvidenceSource.capture({
             workspaceId: input.workspaceId,
             subject: boundSubject,
-            purpose: "decision-record"
+            ...(!processedAdmissionId ? { purpose: "decision-record" as const } : {})
           })
         );
         // This fresh projection verifies complete source scope and current unique
@@ -275,7 +339,8 @@ export function createConversationDecisionEvidenceSource(input: {
           boundSubject,
           boundAudience,
           original.revision,
-          original.capturedAt
+          original.capturedAt,
+          processedAdmissionId
         );
         return (
           hash(retainedBoundary(retained.snapshot)) ===

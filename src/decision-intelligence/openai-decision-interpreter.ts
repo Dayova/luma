@@ -13,8 +13,9 @@ import {
 } from "../ai/ai-request.js";
 import { DEFAULT_OPENAI_REASONING_MODEL } from "../ai/openai-model-config.js";
 import { decisionInterpretationSchema } from "../domain/decision-record-schemas.js";
+import type { AutomaticDecisionContext } from "../domain/automatic-decisions.js";
 import type { ExternalReference } from "../domain/model.js";
-import type { DecisionInterpreter } from "./ports.js";
+import type { DecisionInterpreter, AutomaticDecisionDetector } from "./ports.js";
 
 const id = z.string().min(1).max(512);
 const prose = z.string().min(1).max(8_000);
@@ -27,6 +28,8 @@ const candidate = z
       "final-decision",
       "accepted-proposal",
       "proposal",
+      "tentative-direction",
+      "rejected-option",
       "preference",
       "open-question",
       "historical",
@@ -106,22 +109,7 @@ export function createOpenAIDecisionInterpreter(config: {
           "Complete eligible decision context is required before interpretation.",
           { requestDispatched: false }
         );
-      const references = new Map<string, ExternalReference>();
-      for (const ref of [
-        ...request.source.evidence.flatMap((entry) =>
-          entry.reference.externalReference ? [entry.reference.externalReference] : []
-        ),
-        ...request.catalog.records.flatMap((record) => [
-          ...record.content.candidate.relatedWork,
-          ...record.content.candidate.implementationEvidence
-        ])
-      ]) {
-        if (["work-item", "pull-request", "commit"].includes(ref.objectType))
-          references.set(
-            `reference:${createHash("sha256").update(JSON.stringify(ref)).digest("hex")}`,
-            ref
-          );
-      }
+      const references = decisionReferences(request);
       const input = JSON.stringify({
         promptVersion,
         workspace: request.workspace,
@@ -173,74 +161,7 @@ export function createOpenAIDecisionInterpreter(config: {
       });
       try {
         const wire = wireSchema.parse(JSON.parse(response.outputText) as unknown);
-        const evidenceIds = new Set(
-          [...request.source.evidence, ...(request.humanReviewEvidence ?? [])].map(
-            (entry) => entry.id
-          )
-        );
-        const scopes = new Set(request.authority.grants.map((grant) => grant.scopeId));
-        const records = new Set(
-          request.catalog.records.map((record) => record.content.id)
-        );
-        if (
-          "targetRecordId" in wire.reconciliation &&
-          !records.has(wire.reconciliation.targetRecordId)
-        )
-          throw new Error("Unknown record");
-        if (request.targetRecordId && "targetRecordId" in wire.reconciliation) {
-          const target = request.catalog.records.filter(
-            (record) =>
-              record.content.id === request.targetRecordId ||
-              record.reference.externalId === request.targetRecordId
-          );
-          if (
-            target.length !== 1 ||
-            target[0]!.content.id !== wire.reconciliation.targetRecordId
-          )
-            throw new Error("Retargeted record");
-        }
-        let projected = null;
-        if (wire.candidate) {
-          const { relatedWorkReferenceIds, implementationReferenceIds, ...value } =
-            wire.candidate;
-          const cited = [
-            value.statement,
-            ...(value.context ? [value.context] : []),
-            ...value.rationale,
-            ...value.alternatives,
-            ...value.consequences,
-            ...value.objections
-          ].flatMap((entry) => entry.evidenceIds);
-          if (
-            [...cited, ...value.acceptanceEvidenceIds].some(
-              (entry) => !evidenceIds.has(entry)
-            ) ||
-            value.decisionMakerPersonIds.some(
-              (person) => !request.source.audience.personIds.includes(person)
-            ) ||
-            (value.scopeId !== null && !scopes.has(value.scopeId))
-          )
-            throw new Error("Unknown evidence or identity");
-          const hydrate = (values: string[], kinds: ExternalReference["objectType"][]) =>
-            values.map((key) => {
-              const ref = references.get(key);
-              if (!ref || !kinds.includes(ref.objectType))
-                throw new Error("Unknown related reference");
-              return structuredClone(ref);
-            });
-          projected = {
-            ...value,
-            relatedWork: hydrate(relatedWorkReferenceIds, ["work-item"]),
-            implementationEvidence: hydrate(implementationReferenceIds, [
-              "pull-request",
-              "commit"
-            ])
-          };
-        }
-        return decisionInterpretationSchema.parse({
-          candidate: projected,
-          reconciliation: wire.reconciliation
-        });
+        return groundDecisionWire(wire, request, references);
       } catch {
         throw new AiServiceError(
           "unavailable",
@@ -309,3 +230,231 @@ Separate requester admission, who made the decision, scope ownership and permiss
 Every claim and acceptance reference must cite exact supplied source or humanReviewEvidence IDs. Human review is separate original authenticated speech; never assign its author to imported transcript text. Cite the source's actual explicit acceptance; a bare request to record something is not its missing decision wording. No invented rationale, deadline, stakeholder, alternative, related task or implementation receipt. Use known reference IDs only for related work/code, never manufacture URLs.
 Compare the complete catalog before proposing creation. Link an identical decision; amend a same-decision clarification; supersede a changed decision while preserving lineage; reverse only an explicit reversal. Never rewrite a historical decision into a new fact. Requested target IDs constrain selection. If the command is ambiguous or lacks required context, return clarify with the specific uncertainty. Use null/empty fields where unsupported, and candidate:null when no grounded candidate can be formed.
 Normalize an explicitly relative effective date using source capturedAt and workspace timezone; never use server time. Do not authorize automatic follow-ups or report writes as done.`;
+
+type GroundingContext = Pick<
+  AutomaticDecisionContext,
+  "source" | "authority" | "catalog"
+> & {
+  humanReviewEvidence?: Parameters<
+    DecisionInterpreter["interpret"]
+  >[0]["humanReviewEvidence"];
+  targetRecordId?: string;
+};
+function decisionReferences(request: GroundingContext): Map<string, ExternalReference> {
+  const references = new Map<string, ExternalReference>();
+  for (const ref of [
+    ...request.source.evidence.flatMap((entry) =>
+      entry.reference.externalReference ? [entry.reference.externalReference] : []
+    ),
+    ...(request.catalog?.records ?? []).flatMap((record) => [
+      ...record.content.candidate.relatedWork,
+      ...record.content.candidate.implementationEvidence
+    ])
+  ]) {
+    if (["work-item", "pull-request", "commit"].includes(ref.objectType))
+      references.set(
+        `reference:${createHash("sha256").update(JSON.stringify(ref)).digest("hex")}`,
+        ref
+      );
+  }
+  return references;
+}
+function groundDecisionWire(
+  wire: z.infer<typeof wireSchema>,
+  request: GroundingContext,
+  references: Map<string, ExternalReference>
+) {
+  const evidenceIds = new Set(
+    [...request.source.evidence, ...(request.humanReviewEvidence ?? [])].map(
+      (entry) => entry.id
+    )
+  );
+  const scopes = new Set((request.authority?.grants ?? []).map((grant) => grant.scopeId));
+  const records = new Set(
+    (request.catalog?.records ?? []).map((record) => record.content.id)
+  );
+  if (
+    "targetRecordId" in wire.reconciliation &&
+    !records.has(wire.reconciliation.targetRecordId)
+  )
+    throw new Error("Unknown record");
+  if (request.targetRecordId && "targetRecordId" in wire.reconciliation) {
+    const target = (request.catalog?.records ?? []).filter(
+      (record) =>
+        record.content.id === request.targetRecordId ||
+        record.reference.externalId === request.targetRecordId
+    );
+    if (
+      target.length !== 1 ||
+      target[0]!.content.id !== wire.reconciliation.targetRecordId
+    )
+      throw new Error("Retargeted record");
+  }
+  let projected = null;
+  if (wire.candidate) {
+    const { relatedWorkReferenceIds, implementationReferenceIds, ...value } =
+      wire.candidate;
+    const cited = [
+      value.statement,
+      ...(value.context ? [value.context] : []),
+      ...value.rationale,
+      ...value.alternatives,
+      ...value.consequences,
+      ...value.objections
+    ].flatMap((entry) => entry.evidenceIds);
+    if (
+      [...cited, ...value.acceptanceEvidenceIds].some(
+        (entry) => !evidenceIds.has(entry)
+      ) ||
+      value.decisionMakerPersonIds.some(
+        (person) => !request.source.audience.personIds.includes(person)
+      ) ||
+      (value.scopeId !== null && !scopes.has(value.scopeId))
+    )
+      throw new Error("Unknown evidence or identity");
+    const hydrate = (values: string[], kinds: ExternalReference["objectType"][]) =>
+      values.map((key) => {
+        const ref = references.get(key);
+        if (!ref || !kinds.includes(ref.objectType))
+          throw new Error("Unknown related reference");
+        return structuredClone(ref);
+      });
+    projected = {
+      ...value,
+      relatedWork: hydrate(relatedWorkReferenceIds, ["work-item"]),
+      implementationEvidence: hydrate(implementationReferenceIds, [
+        "pull-request",
+        "commit"
+      ])
+    };
+  }
+  return decisionInterpretationSchema.parse({
+    candidate: projected,
+    reconciliation: wire.reconciliation
+  });
+}
+const detectionWireSchema = z
+  .object({
+    complete: z.boolean(),
+    candidates: z
+      .array(
+        z
+          .object({
+            confidence: z.enum(["high", "medium", "low"]),
+            interpretation: wireSchema
+          })
+          .strict()
+      )
+      .max(20)
+  })
+  .strict();
+const detectionFormat = zodTextFormat(detectionWireSchema, "LumaAutomaticDecisions");
+const automaticInstructions =
+  `Detect all supported Decision Candidates in the supplied bounded processed original source. This is automatic review, not an instruction from a Human requester. Return at most 20 candidates, retaining every candidate's confidence, modality and proposed canonical reconciliation. Set complete=false when any candidates were omitted or the bounded detection cannot be completed; an empty array is valid when no grounded possible choice exists.
+Distinguish explicit final decisions, accepted proposals, proposals, preferences, open questions, rejected options, tentative directions, historical statements and reversals. A rejected option is not itself a new organizational decision. Preserve "we should", "maybe", "I prefer", "wir sollten" and "vielleicht" as tentative without separate explicit acceptance. High confidence measures classification, never authority or permission. Polls and job titles cannot prove acceptance or owner authority. For strongly disputed new ideas, preserve objections and any evidenced revisit condition. A pause/discard recommendation remains tentative; it is not definitive rejection, adoption, reversal or task cancellation.
+For every candidate compare all supplied active canonical records: semantically equivalent decisions should link, same-decision clarification may amend, explicit changed decisions may supersede, explicit reversals may reverse. Contradictory active records or ambiguous overlaps require targeted clarification. Do not create a duplicate. Where authority or catalog is null/incomplete, retain evidence-grounded candidates and specific uncertainties; never claim complete reconciliation, invented owners or an authorized write.
+` + instructions.slice(instructions.indexOf("All source prose"));
+
+/** Same native client, grounding validation and durable budget as explicit Decision interpretation. */
+export function createOpenAIAutomaticDecisionDetector(
+  config: Parameters<typeof createOpenAIDecisionInterpreter>[0]
+): AutomaticDecisionDetector {
+  if (!config.budget)
+    throw new AiServiceError(
+      "not-configured",
+      "Automatic decision detection requires the shared durable AI budget.",
+      { requestDispatched: false }
+    );
+  const limits = resolveAiRequestLimits(config.limits),
+    model = config.model ?? DEFAULT_OPENAI_REASONING_MODEL;
+  const client = config.client ?? nativeClient(config.apiKey, limits);
+  return {
+    async detect(request) {
+      request = structuredClone(request);
+      if (request.source.audience.workspaceId !== request.workspace.workspaceId)
+        throw new AiServiceError(
+          "unavailable",
+          "The processed source audience does not match the workspace.",
+          { requestDispatched: false }
+        );
+      const references = decisionReferences(request);
+      const modelInput = JSON.stringify({
+        promptVersion: "automatic-decisions.v1",
+        workspace: request.workspace,
+        source: request.source,
+        authority: request.authority,
+        catalog: request.catalog
+          ? {
+              id: request.catalog.id,
+              revision: request.catalog.revision,
+              complete: request.catalog.complete,
+              records: request.catalog.records.map((record) => ({
+                id: record.content.id,
+                reference: record.reference,
+                version: record.version,
+                candidate: record.content.candidate,
+                status: record.content.status,
+                supersedes: record.content.supersedes,
+                supersededBy: record.content.supersededBy
+              }))
+            }
+          : null,
+        knownReferences: [...references].map(([referenceId, reference]) => ({
+          referenceId,
+          reference
+        }))
+      });
+      const response = await runBudgetedAiRequest({
+        budget: config.budget,
+        workspaceId: request.workspace.workspaceId,
+        workflow: {
+          promptVersion: "automatic-decisions.v1",
+          model,
+          batchId: request.batchId,
+          input: modelInput
+        },
+        capability: "decision-interpretation",
+        model,
+        instructions: automaticInstructions,
+        input: modelInput,
+        schema: detectionFormat.schema,
+        limits,
+        invoke: (signal) =>
+          client.create({
+            model,
+            instructions: automaticInstructions,
+            input: modelInput,
+            schema: detectionFormat.schema,
+            maxOutputTokens: limits.maxOutputTokens,
+            signal
+          })
+      });
+      try {
+        const wire = detectionWireSchema.parse(
+          JSON.parse(response.outputText) as unknown
+        );
+        return {
+          complete: wire.complete,
+          candidates: wire.candidates.map((item) => {
+            const interpretation = groundDecisionWire(
+              item.interpretation,
+              request,
+              references
+            );
+            if (!interpretation.candidate) throw new Error("Empty candidate");
+            return {
+              confidence: item.confidence,
+              interpretation: { ...interpretation, candidate: interpretation.candidate }
+            };
+          })
+        };
+      } catch {
+        throw new AiServiceError(
+          "unavailable",
+          "Automatic decision output was not bounded and grounded. Usage was accounted for; no write was authorized.",
+          { requestDispatched: true }
+        );
+      }
+    }
+  };
+}

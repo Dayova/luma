@@ -1,3 +1,9 @@
+import { createContextIntelligence } from "../../src/context-intelligence/context-intelligence.js";
+import { createProcessedConversationSources } from "../../src/context-intelligence/processed-conversation-source.js";
+import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
+import { decisionRecord } from "../knowledge/decision-record-fixture.js";
+import type { ContextInquiry } from "../../src/context-intelligence/interface.js";
+import type { AutomaticDecisionDetector } from "../../src/decision-intelligence/ports.js";
 import { decisionSourceSchema } from "../../src/domain/decision-record-schemas.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConversationDecisionEvidenceSource } from "../../src/decision-intelligence/conversation-evidence-source.js";
@@ -54,7 +60,9 @@ function fixture() {
     Promise.resolve(structuredClone(current))
   );
   const ledger = createObservedSourceLedger({ database });
+  const processedSources = createProcessedConversationSources({ database, ledger });
   const source = createConversationDecisionEvidenceSource({
+    processedSources,
     workspaceId: workspace.workspaceId,
     conversationEvidenceSource: { capture },
     ledger,
@@ -73,6 +81,9 @@ function fixture() {
   };
   return {
     source,
+    ledger,
+    accessPolicy,
+    processedSources,
     current,
     capture,
     request,
@@ -332,5 +343,213 @@ describe("Retained Conversation Decision source authorization", () => {
       { workspaceId: workspace.workspaceId, personIds: ["person_jakob", "person_jakob"] }
     ])
       await expect(f.source.authorizeRetained({ source, audience })).resolves.toBe(false);
+  });
+});
+
+async function processedFixture() {
+  const f = fixture();
+  for (const message of f.current.snapshot.messages)
+    message.author.personId = "person_jakob";
+  const anchor = f.current.snapshot.messages.at(-1)!;
+  if (anchor.state !== "available") throw new Error("fixture");
+  anchor.text = "<@luma> what have we decided about Luma?";
+  const inquiry: ContextInquiry = {
+    type: "ask",
+    workspaceId: workspace.workspaceId,
+    inquiryId: "processed-inquiry",
+    question: "what have we decided about Luma?",
+    subject,
+    audience: f.request.audience
+  };
+  const answer = vi.fn(() =>
+    Promise.reject(new Error("No answer text is needed for original-source admission"))
+  );
+  const context = createContextIntelligence({
+    database,
+    ledger: f.ledger,
+    conversationEvidenceSource: { capture: f.capture },
+    answerer: { answer }
+  });
+  await expect(context.inquire(inquiry)).rejects.toThrow();
+  const capture = () =>
+    f.source.captureProcessed({ workspace, subject, audience: f.request.audience });
+  return { ...f, inquiry, context, answer, processedCapture: capture };
+}
+describe("processed original Discord Conversation source", () => {
+  it("uses an actual Context capture and original audience before AI, without a recording instruction, recapture write or invented requester", async () => {
+    const f = await processedFixture();
+    const rows = (await database.query("SELECT * FROM observed_source_snapshots")).rows
+      .length;
+    const source = await f.processedCapture();
+    expect(source.revision).toMatch(/^processed:1:/u);
+    expect(source.evidence.at(-1)?.text).toContain("what have we decided");
+    expect(source.evidence[0]).toMatchObject({
+      authorPersonId: "person_jakob",
+      origin: "human"
+    });
+    await f.source.requireCurrent(source);
+    expect(
+      (await database.query("SELECT * FROM observed_source_snapshots")).rows
+    ).toHaveLength(rows);
+    expect(f.answer).toHaveBeenCalledTimes(1);
+    expect(
+      f.capture.mock.calls.every(
+        (call) =>
+          !(call as unknown[]).some(
+            (argument) =>
+              typeof argument === "object" &&
+              argument !== null &&
+              "purpose" in argument &&
+              argument.purpose === "decision-record"
+          )
+      )
+    ).toBe(true);
+  });
+  it("refuses a raw legacy ledger snapshot without a durable original audience admission", async () => {
+    const f = fixture();
+    await f.ledger.record({ workspaceId: workspace.workspaceId, ...f.current });
+    await expect(
+      f.source.captureProcessed({ workspace, subject, audience: f.request.audience })
+    ).rejects.toThrow("admission");
+  });
+  it.each(["original-audience", "source", "author", "missing", "corrupt"])(
+    "refuses changed or missing processed proof: %s",
+    async (kind) => {
+      const f = await processedFixture();
+      const original = await f.processedCapture();
+      if (kind === "original-audience") original.audience.personIds.push("guest");
+      if (kind === "source") {
+        const message = f.current.snapshot.messages[0]!;
+        if (message.state === "available") message.text = "Changed source";
+      }
+      if (kind === "author") f.switchIdentity();
+      if (kind === "missing")
+        await database.exec("DELETE FROM processed_conversation_admissions");
+      if (kind === "corrupt")
+        await database.exec(
+          "UPDATE processed_conversation_admissions SET payload_hash='corrupt'"
+        );
+      await expect(f.source.requireCurrent(original)).rejects.toThrow();
+    }
+  );
+  it("allows eligible edited source history while keeping current execution exact", async () => {
+    const f = await processedFixture(),
+      original = await f.processedCapture();
+    const message = f.current.snapshot.messages[0]!;
+    if (message.state !== "available") throw new Error("fixture");
+    message.text = "A later edited proposal.";
+    await expect(f.source.requireCurrent(original)).rejects.toThrow();
+    expect(
+      await f.source.authorizeRetained({ source: original, audience: original.audience })
+    ).toBe(true);
+    expect(f.answer).toHaveBeenCalledTimes(1);
+  });
+  it("rejects an original source author label that conflicts with the currently verified provider account", async () => {
+    const f = await processedFixture();
+    await database.exec("DELETE FROM processed_conversation_admissions");
+    f.current.snapshot.messages[0]!.author.personId = "person_fabius";
+    await expect(
+      f.context.inquire({ ...f.inquiry, inquiryId: "second" })
+    ).rejects.toThrow();
+    await expect(f.processedCapture()).rejects.toThrow();
+  });
+  it("runs processed Discord original evidence through real MI automatic detection without an explicit command", async () => {
+    const f = await processedFixture(),
+      record = decisionRecord();
+    record.authority.snapshot.grants[0]!.personId = "person_jakob";
+    const detect = vi.fn<AutomaticDecisionDetector["detect"]>((request) =>
+      Promise.resolve({
+        complete: true,
+        candidates: [
+          {
+            confidence: "high",
+            interpretation: {
+              candidate: {
+                ...record.candidate,
+                modality: "proposal",
+                decisionMakerPersonIds: [],
+                acceptanceEvidenceIds: [],
+                statement: {
+                  text: request.source.evidence[0]!.text,
+                  evidenceIds: [request.source.evidence[0]!.id]
+                }
+              },
+              reconciliation: { action: "create" }
+            }
+          }
+        ]
+      })
+    );
+    const mi = createMeetingIntelligence({
+      database,
+      reasoningModel: {
+        generateStructured: () => Promise.reject(new Error("No Meeting"))
+      },
+      decisionIntelligence: {
+        evidenceSource: f.source,
+        authority: {
+          read: () => Promise.resolve(record.authority.snapshot),
+          requireCurrent: () => Promise.resolve()
+        },
+        interpreter: {
+          interpret: () => Promise.reject(new Error("No explicit command"))
+        },
+        accessPolicy: f.accessPolicy,
+        audience: () => Promise.resolve(f.request.audience),
+        automatic: { evidenceSource: f.source, detector: { detect } },
+        records: {
+          providerId: "notion",
+          discover: () =>
+            Promise.resolve({ id: "empty", revision: "1", complete: true, records: [] }),
+          requireCurrent: () => Promise.resolve(),
+          read: () => Promise.resolve(null),
+          readReference: () => Promise.resolve(null),
+          findWritten: () => Promise.resolve(null),
+          write: () => Promise.reject(new Error("No recording authorization"))
+        }
+      }
+    });
+    const observation = {
+      workspace,
+      subject,
+      observations: [
+        { type: "decision-source-processed" as const, observationId: "processed-discord" }
+      ] as [{ type: "decision-source-processed"; observationId: string }]
+    };
+    let result: Awaited<ReturnType<typeof mi.observe>> | undefined;
+    const context = createContextIntelligence({
+      database,
+      ledger: f.ledger,
+      conversationEvidenceSource: { capture: f.capture },
+      answerer: { answer: f.answer },
+      onProcessedSource: async (event) => {
+        expect(event.subject).toEqual(subject);
+        expect(event.sourceRevision).toBe(1);
+        result = await mi.observe({
+          ...observation,
+          observations: [
+            {
+              type: "decision-source-processed",
+              observationId: `context-processed:${event.admissionId}`
+            }
+          ]
+        });
+      }
+    });
+    await expect(
+      context.inquire({ ...f.inquiry, inquiryId: "pipeline-inquiry" })
+    ).rejects.toThrow();
+    if (!result || !("candidates" in result))
+      throw new Error("Automatic source notification was not consumed");
+
+    expect(result.candidates[0]).toMatchObject({
+      state: "needs-clarification",
+      candidate: { modality: "proposal" },
+      approvedIntentId: null
+    });
+    expect(result.source.evidence.at(-1)!.text).toContain("what have we decided");
+    await mi.observe(observation);
+    expect(detect).toHaveBeenCalledTimes(1);
+    expect(f.answer).toHaveBeenCalledTimes(2);
   });
 });

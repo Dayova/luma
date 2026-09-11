@@ -1,4 +1,9 @@
 import type {
+  AutomaticDecisionContext,
+  AutomaticDecisionDetection,
+  DecisionStandingGrant
+} from "../domain/automatic-decisions.js";
+import type {
   DecisionActor,
   DecisionAudience,
   DecisionAuthoritySnapshot,
@@ -43,4 +48,25 @@ export interface DecisionInterpreter {
     catalog: DecisionCatalogSnapshot;
     targetRecordId?: string;
   }): Promise<DecisionInterpretation>;
+}
+
+/** Reads accepted original material from a processed source, without inventing a Human request. */
+export interface ProcessedDecisionEvidenceSource {
+  captureProcessed(input: {
+    workspace: WorkspaceConfig;
+    subject: DecisionSubject;
+    audience: DecisionAudience;
+  }): Promise<DecisionSource>;
+  requireCurrent(source: DecisionSource): Promise<void>;
+}
+export interface AutomaticDecisionDetector {
+  detect(input: AutomaticDecisionContext): Promise<AutomaticDecisionDetection>;
+}
+/** The production adapter must prove an explicit Human standing instruction and current access. */
+export interface DecisionStandingPolicy {
+  read(input: { audience: DecisionAudience }): Promise<DecisionStandingGrant[]>;
+  requireCurrent(input: {
+    audience: DecisionAudience;
+    grant: DecisionStandingGrant;
+  }): Promise<void>;
 }

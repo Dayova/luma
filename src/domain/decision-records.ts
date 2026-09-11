@@ -1,3 +1,4 @@
+import type { DecisionStandingGrant } from "./automatic-decisions.js";
 import type {
   EvidenceReference,
   ExternalReference,
@@ -39,6 +40,8 @@ export type DecisionCandidate = {
     | "final-decision"
     | "accepted-proposal"
     | "proposal"
+    | "tentative-direction"
+    | "rejected-option"
     | "preference"
     | "open-question"
     | "historical"
@@ -162,12 +165,17 @@ export type DecisionFollowUpIntent = {
   catalog: DecisionCatalogSnapshot;
   record: DecisionRecordContent;
   target: CanonicalDecisionRecord | null;
-  authorization: {
-    basis: "explicit-instruction";
-    authorizedBy: PersonId;
-    instruction: string;
-    evidenceId: string;
-  };
+  authorization:
+    | {
+        basis: "explicit-instruction";
+        authorizedBy: PersonId;
+        instruction: string;
+        evidenceId: string;
+      }
+    | {
+        basis: "standing-policy";
+        grant: DecisionStandingGrant;
+      };
 };
 export type DecisionRequestObservation = {
   type: "decision-record-requested";
@@ -231,6 +239,14 @@ export type DecisionRequestState = {
   source: DecisionSource;
   /** Pins the complete candidate and its source/recording plan for explicit Human review. */
   reviewToken?: string;
+  automatic?: {
+    batchId: string;
+    confidence: "high" | "medium" | "low";
+    authority: "verified" | "unresolved";
+    reconciliation: DecisionReconciliation;
+    recording: "review-only" | "standing-policy" | "human-instruction";
+    humanReviewed: boolean;
+  };
 };
 export type ObserveDecision = {
   workspace: WorkspaceConfig;

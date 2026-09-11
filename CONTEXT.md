@@ -45,6 +45,10 @@ _Avoid_: Binding vote, inferred authority, final decision
 A canonical knowledge artifact documenting an evidenced Human decision and its source-backed authority. Recording permission is separate from decision authority. Exact Follow-up Intents govern creation or amendments; supersession/reversal preserves the predecessor and links a pending successor before activation.
 _Avoid_: Poll result, Meeting summary, executable work item
 
+**Standing Recording Policy**:
+An original authenticated Human instruction that grants Luma bounded permission to record clear decisions automatically, with explicit scope, decision classes, audience and current-source proof. It never supplies missing decision authority or Human acceptance.
+_Avoid_: Model confidence, job title, poll result, implicit approval
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row

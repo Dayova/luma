@@ -1,5 +1,6 @@
 import { withCaptureSynthesis } from "./capture-synthesis.js";
 import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
+import { createAutomaticDecisionIntelligence } from "../decision-intelligence/automatic-decisions.js";
 import {
   createDecisionIntelligence,
   type DecisionIntelligenceConfiguration
@@ -396,10 +397,14 @@ export function createMeetingIntelligence(
       }
     }
   };
+  const decision = createDecisionIntelligence(dependencies);
   const facade = scopeMeetingIntelligence(
     meeting,
-    createDecisionIntelligence(dependencies),
-    structured
+    decision,
+    structured,
+    configuration.automatic
+      ? createAutomaticDecisionIntelligence(dependencies, decision)
+      : undefined
   );
   bindDecisionModule(facade, dependencies);
   if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);

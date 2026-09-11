@@ -1,3 +1,4 @@
+import { requireAutomaticPolicyCurrent } from "./automatic-policy.js";
 import { AiServiceError } from "../ai/ai-service-error.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -10,6 +11,7 @@ import {
 import type { WorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
 import type {
   DecisionAudience,
+  DecisionFollowUpIntent,
   DecisionAuthorityProof,
   DecisionCandidate,
   DecisionInterpretation,
@@ -25,7 +27,10 @@ import type { DecisionIntelligence } from "./interface.js";
 import type {
   DecisionAuthority,
   DecisionEvidenceSource,
-  DecisionInterpreter
+  DecisionInterpreter,
+  ProcessedDecisionEvidenceSource,
+  AutomaticDecisionDetector,
+  DecisionStandingPolicy
 } from "./ports.js";
 import {
   decisionDigest,
@@ -44,6 +49,11 @@ import {
 } from "./human-review.js";
 
 export type DecisionIntelligenceConfiguration = {
+  automatic?: {
+    evidenceSource: ProcessedDecisionEvidenceSource;
+    detector: AutomaticDecisionDetector;
+    policy?: DecisionStandingPolicy;
+  };
   evidenceSource: DecisionEvidenceSource;
   authority: DecisionAuthority;
   interpreter: DecisionInterpreter;
@@ -72,22 +82,32 @@ export async function requireDecisionRequestCurrent(
       })
   )
     throw new Error("Decision audience changed; request a fresh review");
-  const actor = await input.accessPolicy.authorize({
-    workspaceId: audience.workspaceId,
-    ...stored.actor
-  });
-  if (
-    actor?.personId !== stored.requesterPersonId ||
-    !audience.personIds.includes(actor.personId)
-  )
-    throw new Error("Decision requester is no longer authorized");
-  await input.evidenceSource.requireCurrent(stored.state.source);
+  if (stored.actor) {
+    const actor = await input.accessPolicy.authorize({
+      workspaceId: audience.workspaceId,
+      ...stored.actor
+    });
+    if (
+      actor?.personId !== stored.requesterPersonId ||
+      !audience.personIds.includes(actor.personId)
+    )
+      throw new Error("Decision requester is no longer authorized");
+  } else if (!stored.state.automatic || stored.requesterPersonId !== null) {
+    throw new Error("Decision requester is not proven");
+  }
+  if (stored.state.automatic) {
+    if (!input.automatic) throw new Error("Automatic Decision source is not configured");
+    await input.automatic.evidenceSource.requireCurrent(stored.state.source);
+  } else await input.evidenceSource.requireCurrent(stored.state.source);
+  if (stored.intent?.authorization.basis === "standing-policy")
+    await requireAutomaticPolicyCurrent(input, stored.intent);
   await createDecisionHumanReviewAccess(input).requireCurrent(
     stored.state.source,
     stored.humanReviews ?? []
   );
-  await input.authority.requireCurrent({ audience, snapshot: stored.authority });
-  if (options.catalog)
+  if (stored.authority)
+    await input.authority.requireCurrent({ audience, snapshot: stored.authority });
+  if (options.catalog && stored.catalog)
     await input.records.requireCurrent({ audience, snapshot: stored.catalog });
   const refs = stored.state.execution?.outcome.references ?? [];
   for (const ref of refs) {
@@ -102,7 +122,7 @@ export async function requireDecisionRequestCurrent(
   }
 }
 
-function authorityFor(
+export function authorityFor(
   candidate: DecisionCandidate,
   stored: StoredDecisionRequest
 ): DecisionAuthorityProof | string {
@@ -140,6 +160,8 @@ function authorityFor(
     return "The source contains objections that need an explicit Human resolution.";
   if (!["final-decision", "accepted-proposal", "reversal"].includes(candidate.modality))
     return "This is not yet an evidenced final Human decision.";
+  if (!stored.authority)
+    return "Current responsibility evidence is unavailable; review is required.";
   const grants = stored.authority.grants.filter(
     (grant) =>
       grant.scopeId === candidate.scopeId &&
@@ -163,7 +185,7 @@ function authorityFor(
       (grant) =>
         grant.kind === "delegation" &&
         (!grant.delegatedBy ||
-          !stored.authority.grants.some(
+          !stored.authority!.grants.some(
             (parent) =>
               parent.personId === grant.delegatedBy &&
               parent.scopeId === grant.scopeId &&
@@ -237,10 +259,12 @@ export function reconcileDecision(
   interpretation: DecisionInterpretation,
   instruction: string,
   evidenceId: string,
-  now: Date
+  now: Date,
+  authorization?: DecisionFollowUpIntent["authorization"]
 ): StoredDecisionRequest {
   const result = structuredClone(stored);
   result.intent = null;
+  if (result.state.automatic) result.state.automatic.authority = "unresolved";
   result.interpretation = interpretation;
   const candidate = interpretation.candidate;
   const clarify = (message: string) => {
@@ -272,7 +296,7 @@ export function reconcileDecision(
         ? [decisionDigest(item.reference.externalReference)]
         : []
     ),
-    ...stored.catalog.records.flatMap((record) => [
+    ...(stored.catalog?.records ?? []).flatMap((record) => [
       decisionDigest(record.reference),
       ...record.content.candidate.relatedWork.map(decisionDigest),
       ...record.content.candidate.implementationEvidence.map(decisionDigest)
@@ -288,7 +312,8 @@ export function reconcileDecision(
     );
   const authority = authorityFor(candidate, stored);
   if (typeof authority === "string") return clarify(authority);
-  if (!stored.catalog.complete)
+  if (result.state.automatic) result.state.automatic.authority = "verified";
+  if (!stored.catalog?.complete)
     return clarify("The canonical Decision Record search was incomplete.");
   const action = interpretation.reconciliation;
   const targets =
@@ -345,6 +370,27 @@ export function reconcileDecision(
     return clarify(
       "The selected record does not state this exact decision; choose an explicit amendment or replacement."
     );
+  const recordingAuthorization =
+    authorization ??
+    (stored.actor && stored.requesterPersonId
+      ? {
+          basis: "explicit-instruction" as const,
+          authorizedBy: stored.requesterPersonId,
+          instruction,
+          evidenceId
+        }
+      : null);
+  if (!recordingAuthorization) {
+    result.state = {
+      ...result.state,
+      state: "candidate",
+      candidate,
+      approvedIntentId: null,
+      message:
+        "The evidenced decision is retained for review. No standing policy authorizes automatic recording."
+    };
+    return result;
+  }
   const operationId = randomUUID(),
     intentId = `decision-intent:${randomUUID()}`;
   const record: DecisionRecordContent = {
@@ -378,12 +424,7 @@ export function reconcileDecision(
     catalog: stored.catalog,
     record,
     target: target ?? null,
-    authorization: {
-      basis: "explicit-instruction",
-      authorizedBy: stored.requesterPersonId,
-      instruction,
-      evidenceId
-    }
+    authorization: recordingAuthorization
   };
   result.state = {
     ...result.state,
@@ -460,7 +501,7 @@ export function createDecisionIntelligence(
       };
     }
     await requireDecisionRequestCurrent(input, stored, {
-      catalog: !stages.length && !stored.state.execution && stored.catalog.complete
+      catalog: !stages.length && !stored.state.execution && !!stored.catalog?.complete
     });
     await input.database.transaction(async (transaction) => {
       const current = await readDecisionRequest(
@@ -645,6 +686,19 @@ export function createDecisionIntelligence(
                 ...prior,
                 actor: observation.actor,
                 requesterPersonId: person.personId,
+                humanReviewed: true,
+                state: {
+                  ...prior.state,
+                  ...(prior.state.automatic
+                    ? {
+                        automatic: {
+                          ...prior.state.automatic,
+                          humanReviewed: true,
+                          recording: "human-instruction" as const
+                        }
+                      }
+                    : {})
+                },
                 ...(humanReviews.length ? { humanReviews } : {})
               },
               {

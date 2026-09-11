@@ -78,6 +78,7 @@ async function fixture() {
   let allowed = true;
   const recipients = ["jakob", "fabius", "julius", "philipp"];
   const requests: StructuredReasoningRequest<unknown>[] = [];
+  let afterProof: (() => void) | undefined;
   let duringCapture: (() => Promise<void>) | undefined;
   let duringAnalysis: (() => Promise<void>) | undefined;
   let failAnalysis = false;
@@ -185,7 +186,14 @@ async function fixture() {
     })
   });
   const importedSourceAnalysis = {
-    access,
+    access: {
+      requireCurrent: async (request: Parameters<typeof access.requireCurrent>[0]) => {
+        await access.requireCurrent(request);
+        const completed = afterProof;
+        afterProof = undefined;
+        completed?.();
+      }
+    },
     audience: () =>
       Promise.resolve({ workspaceId: workspace.workspaceId, personIds: [...recipients] })
   };
@@ -242,6 +250,9 @@ async function fixture() {
     },
     fail: () => {
       failAnalysis = true;
+    },
+    afterProof: (operation: () => void) => {
+      afterProof = operation;
     },
     duringCapture: (operation: () => Promise<void>) => {
       duringCapture = operation;
@@ -374,6 +385,49 @@ describe("governed imported transcript understanding", () => {
       }
     }
   );
+
+  it.each([
+    "action-item-reconciliation-review",
+    "action-item-reconciliation-history",
+    "participant-brief"
+  ] as const)("rechecks exact original grants after projecting %s", async (type) => {
+    const f = await fixture();
+    try {
+      await f.ingest();
+      if (type === "participant-brief") {
+        // A legacy stored item has source Evidence but predates derived receipt metadata.
+        const state = await f.snapshot();
+        for (const item of state.openQuestions) {
+          delete item.provenance.contextReceiptIds;
+          delete item.provenance.contextCoverage;
+        }
+        await f.database.query(
+          "UPDATE meetings SET state_json=$1 WHERE workspace_id=$2 AND meeting_id=$3",
+          [JSON.stringify(state), workspace.workspaceId, state.meetingId]
+        );
+      }
+      const query =
+        type === "participant-brief" ? { type, participantId: "jakob" } : { type };
+      const read = () =>
+        f
+          .current()
+          .query({
+            workspaceId: workspace.workspaceId,
+            meetingId: f.observation().meetingId,
+            query
+          });
+      const before = JSON.stringify(await read());
+      expect(before).toContain(
+        type === "participant-brief" ? "Wir pausieren" : "Export prüfen"
+      );
+      f.afterProof(() => f.revoke());
+      const after = JSON.stringify(await read());
+      expect(after).not.toContain("Wir pausieren");
+      expect(after).not.toContain("Export prüfen");
+    } finally {
+      await f.database.close();
+    }
+  });
 
   it("retains unauthorized Evidence and analyzes an already accepted import once a fresh explicit grant permits its first analysis", async () => {
     const f = await fixture();

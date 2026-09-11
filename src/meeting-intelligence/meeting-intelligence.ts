@@ -283,11 +283,11 @@ export function createMeetingIntelligence(
     query: (queryInput) =>
       freshContextOutput(
         (guard) => queryMeeting(input.database, guard, queryInput),
-        queryContextReceiptIds,
+        (result) => result.receiptIds,
         contextConfiguration,
         contextGuard,
         queryInput
-      ),
+      ).then((result) => result.value),
     conclude: (concludeInput) =>
       freshContextOutput(
         (guard) => concludeMeeting(input.database, guard, now, concludeInput),
@@ -332,28 +332,6 @@ async function freshContextOutput<T>(
         : {})
     })
   );
-}
-function queryContextReceiptIds(result: MeetingQueryResult): string[] {
-  switch (result.type) {
-    case "snapshot":
-      return contextReceiptIds(result.state);
-    case "catch-up":
-    case "freeform":
-    case "decision-history":
-      return result.answer.contextReceiptIds ?? [];
-    case "participant-brief":
-      return [
-        ...new Set(
-          [
-            ...result.brief.commitments,
-            ...result.brief.decisionsAffectingWork,
-            ...result.brief.unresolvedQuestions
-          ].flatMap((item) => item.provenance.contextReceiptIds ?? [])
-        )
-      ];
-    default:
-      return [];
-  }
 }
 
 async function observeMeeting(
@@ -2402,10 +2380,22 @@ async function queryMeeting(
   database: LumaDatabase,
   contextGuard: ReturnType<typeof createMeetingContextGuard>,
   input: QueryMeeting
-): Promise<MeetingQueryResult> {
+): Promise<{ value: MeetingQueryResult; receiptIds: string[] }> {
   const state = await contextGuard.project(
     await requireMeetingState(database, input.workspaceId, input.meetingId)
   );
+  return {
+    value: await queryProjectedMeeting(database, contextGuard, input, state),
+    receiptIds: contextReceiptIds(state)
+  };
+}
+
+async function queryProjectedMeeting(
+  database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
+  input: QueryMeeting,
+  state: MeetingState
+): Promise<MeetingQueryResult> {
   const query = input.query;
   const receiptIds = contextReceiptIds(state);
   const answerContext = receiptIds.length ? { contextReceiptIds: receiptIds } : {};

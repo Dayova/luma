@@ -3,19 +3,25 @@
 This package runs one founders-only Discord service on an always-on Linux host
 with systemd and persistent local storage. It does not provision a host, pay for
 hosting, create a production Discord application, or prove that Luma is live.
-The runtime includes Discord Meeting analysis and bounded Context Ask, with
-optional governed retrieval from explicitly shared Notion pages, Linear work,
-and GitHub code. This is not the complete agreed Luma product: Granola,
-multi-capture synthesis, cross-Meeting recall, polls, and native review still
-have separate acceptance work. The isolated Notion observer stays dormant.
+The shared runtime includes Discord Meeting analysis and bounded Context Ask,
+governed Notion/Linear/GitHub retrieval, canonical Decision Records and their
+signed history, founder consultations, Notion/Granola capture and synthesis,
+reviewed action execution, and explicit compound structured Notion/Linear work.
+Automatic Decision candidates use the shared AI allowance; canonical recording
+additionally requires current owner-specific standing permission. These are
+implemented capabilities, not evidence that source activation or production
+validation has been completed. The isolated Notion observer stays dormant;
+native Notion review has a separate authenticated-ingress acceptance gate.
 
 ## Runtime and ownership
 
 Use Node.js 24 at `/usr/bin/node`, pnpm 11.12.0 for building, and `flock` from
 util-linux at `/usr/bin/flock`. Pin the exact application commit for each release.
-The application opens outbound Discord/OpenAI connections; this service needs
-no inbound listener, public domain, or TLS endpoint. It has no HTTP readiness
-endpoint. Do not configure a hosting HTTP health check against an invented port.
+The Discord transport opens outbound connections. Enabled Notion webhooks and
+Granola browser OAuth add separate loopback HTTP listeners (defaults 3001 and 3002) and need HTTPS forwarding to their exact configured paths. Granola's
+production redirect must be HTTPS. Those callback paths are not health endpoints;
+the application has no HTTP readiness endpoint. Do not configure a hosting HTTP
+health check against an invented port.
 The optional operations profile uses a private local Gateway-health receipt and
 an independent systemd timer instead; see
 [unattended operations](unattended-operations.md) for daily encrypted off-host
@@ -125,8 +131,8 @@ Before first activation, verify these existing product requirements:
   ledger for that same budget. Usage records are estimates based on actual token
   reporting; reconcile with the provider bill.
 
-The template contains empty dedicated read-only organizational credential
-fields; collection remains disabled. To activate it, configure the
+The template contains all implemented optional capability groups with empty
+credentials and disabled flags. To activate organizational retrieval, configure the
 [organizational sharing policy and catalogs](../configuration/organizational-context.md).
 Install the policy as `root:luma`, mode `0640`, so the service can read it without
 being able to modify it. Provider source readability and permission for the full
@@ -134,6 +140,24 @@ four-founder audience are separate requirements. Notion/Linear writer and
 personal capture credentials are not implied by this configuration. Do not
 inject observer/native-review variables into this service. The launcher
 intentionally rejects that mixed topology.
+
+Configure the other enabled workflows from their owned guides:
+
+- [Founder Decision Records](../integrations/discord-decision-records.md),
+  [standing recording permissions](../integrations/decision-standing-permission.md),
+  and [current and historical recall](../decision-record-recall.md).
+- [Shared meeting capture](../integrations/shared-meeting-capture-runtime.md),
+  including per-founder Granola account attestation and source exclusions.
+- [Founder consultations](../integrations/discord-consultations.md).
+- [Compound structured work](../structured-work.md), with
+  protected target mappings and independently checked Notion/Linear grants.
+
+All workflows use the same store and AI budget. When shared capture is enabled,
+automatic Decision processing follows the accepted LogicalMeeting event once;
+the underlying Notion import does not enqueue a second paid analysis. Changing
+or revoking a source grant withholds its retained outputs without deleting the
+original history. Include the exact enabled policies, signing keys and Granola
+credential key in the authenticated [recovery bundle](backup-restore.md).
 
 Run the offline preflight against the installed release:
 

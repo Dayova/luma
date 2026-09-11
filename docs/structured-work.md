@@ -37,9 +37,10 @@ every write, receipt query and replay.
 module and accepts `{ workspace, subject, structuredWorkRequestId, intentId }`.
 Normal execution and positive-only recovery use the same durable plan.
 
-The native Discord ingress and owned application factory are implemented. The
-main server must compose the factory as described below before activation; that
-small integration is tracked separately. No table, token, command or schedule has
+The native Discord ingress and owned application factory are composed in the main
+server with its existing MI, Follow-up Execution, Linear provider, database and AI
+budget. Actual main-runtime tests exercise both requested mutations, replay, source
+revocation, exhausted budget and shutdown. No table, token, command or schedule has
 been activated by these local tests, and this document does not claim deployment.
 
 ## Native commands and main-runtime factory

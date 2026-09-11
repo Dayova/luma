@@ -99,7 +99,7 @@ not a valid way to reset usage.
 
 Plan **USD 5–15/month initially** for all four founders using the current model
 and text workflows. This is a planning range, not measured consumption. Prices
-were checked on 8 September 2026 against the
+were checked on 11 September 2026 against the
 [official pricing table](https://developers.openai.com/api/docs/pricing) and
 [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna):
 per million tokens, Standard short-context input is $0.20, cached input $0.02,

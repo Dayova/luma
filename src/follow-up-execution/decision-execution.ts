@@ -352,7 +352,11 @@ export function createDecisionFollowUpExecution(
               request.workspace.workspaceId,
               stored
             );
+            let dispatched = false;
             try {
+              // Durable claims may await I/O; recheck admission at the actual send boundary.
+              await requireDecisionRequestCurrent(input, stored);
+              dispatched = true;
               const receipt = await input.records.write({
                 audience: intent.source.audience,
                 stage: structuredClone(active.stage),
@@ -368,7 +372,9 @@ export function createDecisionFollowUpExecution(
               );
             } catch (error) {
               active.state =
-                error instanceof DecisionWriteNotAppliedError ? "not-applied" : "unknown";
+                !dispatched || error instanceof DecisionWriteNotAppliedError
+                  ? "not-applied"
+                  : "unknown";
               await saveDecisionStage(
                 input.database,
                 request.workspace.workspaceId,

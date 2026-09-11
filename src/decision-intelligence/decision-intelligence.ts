@@ -1,3 +1,4 @@
+import { AiServiceError } from "../ai/ai-service-error.js";
 import { randomUUID } from "node:crypto";
 import {
   decisionInterpretationSchema,
@@ -254,14 +255,19 @@ export function reconcileDecision(
   if (!stored.catalog.complete)
     return clarify("The canonical Decision Record search was incomplete.");
   const action = interpretation.reconciliation;
-  const target =
+  const targets =
     "targetRecordId" in action
-      ? stored.catalog.records.find(
+      ? stored.catalog.records.filter(
           (record) =>
             record.content.id === action.targetRecordId ||
             record.reference.externalId === action.targetRecordId
         )
-      : undefined;
+      : [];
+  if (targets.length > 1)
+    return clarify(
+      "The selected record identity is ambiguous in the current canonical catalog."
+    );
+  const target = targets[0];
   if ("targetRecordId" in action && !target)
     return clarify(
       "The selected canonical record was not found in the complete current catalog."
@@ -317,9 +323,11 @@ export function reconcileDecision(
       action.action === "supersede" || action.action === "reverse" ? "pending" : "active",
     recordedAt: now.toISOString(),
     supersedes:
-      target && (action.action === "supersede" || action.action === "reverse")
-        ? [target.reference]
-        : [],
+      action.action === "amend" && target
+        ? structuredClone(target.content.supersedes)
+        : target && (action.action === "supersede" || action.action === "reverse")
+          ? [target.reference]
+          : [],
     supersededBy: null
   };
   result.intent = {
@@ -365,9 +373,11 @@ export function createDecisionIntelligence(
       request.query.requestId,
       request.subject
     );
+    const requestHead = decisionDigest(stored);
     const stages = stored.intent
       ? await readDecisionStages(input.database, request.workspaceId, stored.intent.id)
       : [];
+    const stageHead = decisionDigest(stages);
     if (stages.length && stored.state.execution?.outcome.status !== "succeeded") {
       const known = new Map(
         (stored.state.execution?.outcome.references ?? []).map((reference) => [
@@ -407,6 +417,24 @@ export function createDecisionIntelligence(
     }
     await requireDecisionRequestCurrent(input, stored, {
       catalog: !stages.length && !stored.state.execution
+    });
+    await input.database.transaction(async (transaction) => {
+      const current = await readDecisionRequest(
+        transaction,
+        request.workspaceId,
+        request.query.requestId,
+        request.subject
+      );
+      const currentStages = current.intent
+        ? await readDecisionStages(transaction, request.workspaceId, current.intent.id)
+        : [];
+      if (
+        decisionDigest(current) !== requestHead ||
+        decisionDigest(currentStages) !== stageHead
+      )
+        throw new Error(
+          "Decision state changed during its final currentness check; read the current request again"
+        );
     });
     return structuredClone(stored.state);
   };
@@ -474,14 +502,6 @@ export function createDecisionIntelligence(
               throw new Error(
                 "This recording already entered execution; use an explicit new update instruction"
               );
-            const fresh = await saveDecisionObservation(
-              input.database,
-              bound.workspace.workspaceId,
-              requestId,
-              observation.observationId,
-              bound
-            );
-            if (!fresh) return { ...structuredClone(prior.state), duplicate: true };
             if (!prior.interpretation)
               throw new Error(
                 "A clarified recording instruction is required before correcting this candidate"
@@ -496,11 +516,23 @@ export function createDecisionIntelligence(
               observation.observationId,
               now()
             );
-            await saveDecisionRequest(
-              input.database,
-              bound.workspace.workspaceId,
-              updated
-            );
+            const fresh = await input.database.transaction(async (transaction) => {
+              const accepted = await saveDecisionObservation(
+                transaction,
+                bound.workspace.workspaceId,
+                requestId,
+                observation.observationId,
+                bound
+              );
+              if (accepted)
+                await saveDecisionRequest(
+                  transaction,
+                  bound.workspace.workspaceId,
+                  updated
+                );
+              return accepted;
+            });
+            if (!fresh) return { ...structuredClone(prior.state), duplicate: true };
             return {
               ...(await read({
                 workspaceId: bound.workspace.workspaceId,
@@ -615,12 +647,11 @@ export function createDecisionIntelligence(
               observation.observationId,
               now()
             );
-          } catch {
+          } catch (error) {
             stored.state = {
               ...stored.state,
               state: "needs-clarification",
-              message:
-                "Decision interpretation could not be completed safely. Use a fresh explicit instruction after the source, model or catalog becomes available."
+              message: decisionFailureMessage(error)
             };
           }
           await saveDecisionRequest(input.database, bound.workspace.workspaceId, stored);
@@ -682,4 +713,25 @@ function validateRequest(request: ObserveDecision): void {
       observation.reason.length > 2000)
   )
     throw new Error("A bounded Human correction reason is required");
+}
+
+function decisionFailureMessage(error: unknown): string {
+  if (!(error instanceof AiServiceError))
+    return "Decision interpretation could not be completed safely. Use a fresh explicit instruction after the source, model or catalog becomes available.";
+  const reasons: Record<AiServiceError["code"], string> = {
+    "budget-exhausted": "Luma's AI usage budget is exhausted.",
+    "provider-quota": "The AI provider quota or credits are exhausted.",
+    "rate-limited": "The AI provider is rate limiting requests.",
+    timeout: "The AI interpretation timed out.",
+    unavailable: "The AI service is temporarily unavailable.",
+    "not-configured": "The AI service is not configured.",
+    "request-too-large": "This decision source exceeds the AI request limit.",
+    "request-indeterminate":
+      "The AI request outcome is uncertain; it will not be replayed automatically."
+  };
+  const reset =
+    error.resetAt && Number.isFinite(Date.parse(error.resetAt))
+      ? ` Budget reset: ${new Date(error.resetAt).toISOString()}.`
+      : "";
+  return `${reasons[error.code]}${reset} The source was retained and no canonical write was sent. Use a fresh recording instruction when the service is available.`;
 }

@@ -15,6 +15,7 @@ import {
 } from "../../src/knowledge/decision-records.js";
 import { decisionDigest } from "../../src/decision-intelligence/persistence.js";
 import { decisionRecord } from "../knowledge/decision-record-fixture.js";
+import { AiServiceError } from "../../src/ai/ai-service-error.js";
 
 let database: LumaDatabase;
 beforeEach(async () => {
@@ -223,6 +224,99 @@ function fixture() {
   };
 }
 describe("MI-owned first-class Decision Records", () => {
+  it("commits a Human correction and its idempotency observation atomically", async () => {
+    const f = fixture(),
+      e = await f.executable();
+    const correction: ObserveDecision = {
+      workspace: f.request.workspace,
+      subject: f.request.subject,
+      observations: [
+        {
+          type: "decision-candidate-corrected",
+          observationId: "atomic-correction",
+          requestId: "request-1",
+          actor: { providerId: "discord", providerUserId: "requester" },
+          candidate: { ...f.candidate(), disposition: "pause" },
+          reason: "corrected-pause"
+        }
+      ]
+    };
+    await database.exec(
+      `ALTER TABLE decision_requests ADD CONSTRAINT simulated_head_fault CHECK(payload_json NOT LIKE '%corrected-pause%')`
+    );
+    await expect(e.current.mi.observe(correction)).rejects.toThrow();
+    expect(
+      (
+        await database.query(
+          `SELECT observation_id FROM decision_observations WHERE observation_id='atomic-correction'`
+        )
+      ).rows
+    ).toHaveLength(0);
+    await database.exec(
+      `ALTER TABLE decision_requests DROP CONSTRAINT simulated_head_fault`
+    );
+    const accepted = await e.current.mi.observe(correction);
+    expect(accepted.candidate?.disposition).toBe("pause");
+    expect(accepted.approvedIntentId).not.toBe(e.input.intentId);
+    expect((await e.current.mi.observe(correction)).duplicate).toBe(true);
+  });
+  it("withholds a stale request head when Human correction lands during the final source proof", async () => {
+    const f = fixture(),
+      e = await f.executable();
+    let correcting = false;
+    f.configuration.evidenceSource.requireCurrent = async () => {
+      if (correcting) return;
+      correcting = true;
+      await e.current.mi.observe({
+        workspace: f.request.workspace,
+        subject: f.request.subject,
+        observations: [
+          {
+            type: "decision-candidate-corrected",
+            observationId: "racing-correction",
+            requestId: "request-1",
+            actor: { providerId: "discord", providerUserId: "requester" },
+            candidate: { ...f.candidate(), disposition: "pause" },
+            reason: "Pause was intended"
+          }
+        ]
+      });
+    };
+    await expect(
+      e.current.mi.query({
+        workspaceId: "dayova",
+        subject: f.request.subject,
+        query: { type: "decision-request", requestId: "request-1" }
+      })
+    ).rejects.toThrow("Decision state changed");
+    expect(
+      (
+        await e.current.mi.query({
+          workspaceId: "dayova",
+          subject: f.request.subject,
+          query: { type: "decision-request", requestId: "request-1" }
+        })
+      ).candidate?.disposition
+    ).toBe("pause");
+  });
+  it.each(["budget-exhausted", "provider-quota", "rate-limited", "timeout"] as const)(
+    "retains visible safe %s status without repeating paid interpretation",
+    async (code) => {
+      const f = fixture();
+      f.interpret.mockRejectedValueOnce(
+        new AiServiceError(code, "private-provider-payload", {
+          resetAt: "2026-10-01T00:00:00Z"
+        })
+      );
+      const state = await f.make().mi.observe(f.request);
+      expect(state.state).toBe("needs-clarification");
+      expect(state.message).not.toContain("private-provider-payload");
+      expect(state.message).toMatch(/budget|quota|rate limiting|timed out/u);
+      expect((await f.make().mi.observe(f.request)).message).toBe(state.message);
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
   it("uses canonical original speech for an actual Meeting, with an explicit original/current audience grant", async () => {
     const f = fixture();
     let grant = "original-grant";
@@ -429,6 +523,86 @@ describe("MI-owned first-class Decision Records", () => {
     });
     expect((await f.make().mi.observe(f.request)).state).toBe("needs-clarification");
   });
+  it.each(["duplicate-content-id", "cross-identity"] as const)(
+    "refuses an ambiguous %s canonical target",
+    async (kind) => {
+      const f = fixture(),
+        original = f.addRecord();
+      f.records.set("second", {
+        ...structuredClone(original),
+        content: {
+          ...structuredClone(original.content),
+          id: kind === "duplicate-content-id" ? "previous" : "second"
+        },
+        reference: {
+          ...original.reference,
+          externalId: kind === "cross-identity" ? "previous" : "second",
+          url: "https://notion.so/second"
+        }
+      });
+      if (kind === "cross-identity") {
+        f.records.get("previous")!.reference.externalId = "first-page";
+      }
+      f.setInterpretation({
+        candidate: f.candidate(),
+        reconciliation: { action: "link", targetRecordId: "previous" }
+      });
+      expect((await f.make().mi.observe(f.request)).state).toBe("needs-clarification");
+      expect(f.provider.write).not.toHaveBeenCalled();
+    }
+  );
+  it("preserves inherited supersession history when amending an active successor", async () => {
+    const f = fixture(),
+      original = f.addRecord();
+    original.content.supersedes = [
+      {
+        providerId: "notion",
+        objectType: "document",
+        externalId: "older",
+        url: "https://notion.so/older",
+        version: "historic"
+      }
+    ];
+    f.setInterpretation({
+      candidate: f.candidate(),
+      reconciliation: { action: "amend", targetRecordId: "previous" }
+    });
+    const e = await f.executable();
+    expect((await e.current.execution.execute(e.input)).record.outcome.status).toBe(
+      "succeeded"
+    );
+    expect(f.records.get("previous")!.content.supersedes).toEqual(
+      original.content.supersedes
+    );
+  });
+  it.each(["revokeSource", "revokeAuthority"] as const)(
+    "rechecks %s after the durable pre-send claim",
+    async (revoke) => {
+      const f = fixture(),
+        e = await f.executable();
+      const realQuery = database.query.bind(database);
+      const spy = vi
+        .spyOn(database, "query")
+        .mockImplementation(async (sql, params, options) => {
+          const result = await realQuery(sql, params, options);
+          if (
+            sql.startsWith("INSERT INTO decision_requests") &&
+            JSON.stringify(params).includes("decision-write-in-progress")
+          )
+            f[revoke]();
+          return result;
+        });
+      await expect(e.current.execution.execute(e.input)).rejects.toThrow();
+      expect(f.provider.write).not.toHaveBeenCalled();
+      spy.mockRestore();
+      const stage = (
+        await database.query<{ payload_json: string }>(
+          `SELECT payload_json FROM decision_write_stages`
+        )
+      ).rows[0]!;
+      expect(JSON.parse(stage.payload_json)).toMatchObject({ state: "not-applied" });
+    }
+  );
   it("refuses unsupported details and mismatched explicit canonical targets", async () => {
     const f = fixture();
     f.setInterpretation({

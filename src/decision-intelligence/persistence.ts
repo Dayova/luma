@@ -81,7 +81,7 @@ function decode<T>(row: { payload_json: string; payload_hash: string }): T {
   return value as T;
 }
 export async function readDecisionRequest(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   requestId: string,
   subject: DecisionSubject
@@ -100,7 +100,7 @@ export async function readDecisionRequest(
   return decode<StoredDecisionRequest>(row);
 }
 export async function findDecisionRequest(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   requestId: string
 ): Promise<StoredDecisionRequest | null> {
@@ -111,7 +111,7 @@ export async function findDecisionRequest(
   return result.rows[0] ? decode<StoredDecisionRequest>(result.rows[0]) : null;
 }
 export async function saveDecisionRequest(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   value: StoredDecisionRequest
 ): Promise<void> {
@@ -131,7 +131,7 @@ export async function saveDecisionRequest(
   );
 }
 export async function saveDecisionObservation(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   requestId: string,
   observationId: string,
@@ -156,7 +156,7 @@ export async function saveDecisionObservation(
   return true;
 }
 export async function readDecisionStages(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   intentId: string
 ): Promise<StoredDecisionStage[]> {
@@ -167,7 +167,7 @@ export async function readDecisionStages(
   return result.rows.map((row) => decode<StoredDecisionStage>(row));
 }
 export async function saveDecisionStage(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   workspaceId: string,
   intentId: string,
   value: StoredDecisionStage
@@ -185,7 +185,7 @@ export async function saveDecisionStage(
   );
 }
 export async function acquireDecisionFence(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   providerId: string,
   workspaceId: string,
   intentId: string
@@ -206,7 +206,7 @@ export async function acquireDecisionFence(
     );
 }
 export async function releaseDecisionFence(
-  database: LumaDatabase,
+  database: Pick<LumaDatabase, "query">,
   providerId: string,
   workspaceId: string,
   intentId: string

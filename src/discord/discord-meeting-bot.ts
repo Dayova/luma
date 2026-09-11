@@ -1,3 +1,4 @@
+import { handleDiscordStructuredWorkMention } from "./discord-structured-work-mention.js";
 import {
   handleDiscordStructuredWorkCommand,
   isStructuredWorkCommand,
@@ -317,6 +318,12 @@ export function createDiscordMeetingBot(
         now: () => now().getTime()
       })
     : undefined;
+  const structuredRateLimiter = input.structuredWork
+    ? createDiscordContextAskRateLimiter({
+        minIntervalMs: input.structuredWork.config.minIntervalMs,
+        now: () => now().getTime()
+      })
+    : undefined;
   // A second Gateway delivery must not become a second cooldown/status reply.
   const seenContextMessages = new Map<string, number>();
 
@@ -336,7 +343,7 @@ export function createDiscordMeetingBot(
                 )
           );
         },
-        input.contextAsk || input.decisionRecords
+        input.contextAsk || input.decisionRecords || input.structuredWork
           ? (ask) =>
               stopping
                 ? Promise.resolve(null)
@@ -346,9 +353,11 @@ export function createDiscordMeetingBot(
                       ask,
                       accessPolicy,
                       channelScope,
-                      ask.purpose === "decision-record"
-                        ? decisionRateLimiter
-                        : contextRateLimiter,
+                      ask.purpose === "structured-work"
+                        ? structuredRateLimiter
+                        : ask.purpose === "decision-record"
+                          ? decisionRateLimiter
+                          : contextRateLimiter,
                       seenContextMessages,
                       now
                     )
@@ -389,7 +398,12 @@ async function answerConversationThread(
   const contextAsk = input.contextAsk;
   const decisionRecords =
     ask.purpose === "decision-record" ? input.decisionRecords : undefined;
-  const scope = ask.purpose === "decision-record" ? decisionRecords : contextAsk;
+  const scope =
+    ask.purpose === "structured-work"
+      ? input.structuredWork
+      : ask.purpose === "decision-record"
+        ? decisionRecords
+        : contextAsk;
 
   if (
     !scope ||
@@ -441,6 +455,36 @@ async function answerConversationThread(
   }
 
   try {
+    if (ask.purpose === "structured-work") {
+      if (!input.structuredWork) return null;
+      const requireCurrent = async () => {
+        if (
+          !(await accessPolicy.authorize({
+            workspaceId: input.workspace.workspaceId,
+            providerId: "discord",
+            providerUserId: ask.actorDiscordUserId
+          })) ||
+          !(await allowedSurface())
+        )
+          throw new DiscordChannelAccessError();
+      };
+      const result = await handleDiscordStructuredWorkMention({
+        runtime: input.structuredWork,
+        workspace: input.workspace,
+        mention: ask,
+        requireCurrent
+      });
+      const response = await reply(await appendAiUsageWarning(input, result.content));
+      return response
+        ? {
+            ...response,
+            requireCurrent: async () => {
+              await requireCurrent();
+              await result.requireCurrent?.();
+            }
+          }
+        : null;
+    }
     if (ask.purpose === "decision-record") {
       if (!decisionRecords || !isExplicitDecisionRecordInstruction(ask.question))
         return null;

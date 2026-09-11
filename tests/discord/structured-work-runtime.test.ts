@@ -83,7 +83,11 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-async function setup(importMeeting = false) {
+async function setup(
+  importMeeting = false,
+  targetLabel = "Hypotheses",
+  ambiguousTargets = false
+) {
   const database = await createPgliteDatabase();
   cleanup.push(() => database.close());
   const directory = await mkdtemp(join(tmpdir(), "luma-structured-runtime-"));
@@ -107,7 +111,7 @@ async function setup(importMeeting = false) {
     targets: [
       {
         key: "hypotheses",
-        label: "Hypotheses",
+        label: targetLabel,
         dataSourceId,
         titleField: "hypothesis",
         fields: {
@@ -120,6 +124,13 @@ async function setup(importMeeting = false) {
       }
     ]
   };
+  if (ambiguousTargets)
+    targetPolicy.targets.push({
+      ...structuredClone(targetPolicy.targets[0]!),
+      key: "experiments",
+      label: "Experiments",
+      dataSourceId: "22222222-2222-4222-8222-222222222222"
+    });
   const sharing = {
     version: 1,
     workspaceId: workspace.workspaceId,
@@ -483,8 +494,38 @@ async function setup(importMeeting = false) {
     );
     expect(bound).toContain("attached");
   }
+  const mention = (overrides: Record<string, unknown> = {}) => {
+    const reply = vi.fn<
+      (value: {
+        content: string;
+        allowedMentions?: unknown;
+        nonce?: string;
+      }) => Promise<void>
+    >(() => Promise.resolve());
+    const message = {
+      ...messages.at(-1)!,
+      guildId: "guild",
+      channel: {
+        type: ChannelType.PublicThread,
+        parentId,
+        isThread: () => true,
+        isSendable: () => true
+      },
+      reply,
+      ...overrides
+    };
+    sdk.emit(Events.MessageCreate, message);
+    return { message, reply };
+  };
   return {
     command,
+    mention,
+    drainTransport: () => transport.disconnect(),
+    replay: () => {
+      const next = make();
+      cleanup.push(() => next.bot.stop());
+      return next.bot.start();
+    },
     external,
     database,
     revokeImported: () => {
@@ -516,6 +557,147 @@ function requestId(content: string) {
   return id.replace(/\.$/u, "");
 }
 describe("native structured work runtime", () => {
+  it("executes one natural-language mention through the actual messageCreate path and replays the same canonical bundle", async () => {
+    const f = await setup();
+    const original = f.messages.at(-1)!.content;
+    const sent = f.mention();
+    sdk.emit(Events.MessageCreate, sent.message);
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    const content = sent.reply.mock.calls[0]![0].content;
+    expect(content).toContain("Notion record: created");
+    expect(content).toContain("Linear task: created");
+    expect(sent.reply.mock.calls[0]![0].allowedMentions).toEqual({
+      parse: [],
+      repliedUser: false
+    });
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+    expect(f.interpret.mock.calls[0]![0].instruction).toBe(
+      original.replace(/^<@bot_luma> /u, "")
+    );
+    expect(f.interpret.mock.calls[0]![0].source.subject).toMatchObject({
+      type: "conversation-thread",
+      anchorMessageId: sourceId
+    });
+    expect(f.external.createRecord).toHaveBeenCalledTimes(1);
+    expect(f.external.createIssue).toHaveBeenCalledTimes(1);
+    // A reconstructed owned MI/bot facade uses the persisted operation identity.
+    await f.replay();
+    const replayed = f.mention();
+    await expect.poll(() => replayed.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(replayed.reply.mock.calls[0]![0].content).toContain(requestId(content));
+    expect(await f.command()).toContain(requestId(content));
+    expect(f.interpret).toHaveBeenCalledTimes(1);
+    expect(f.external.createRecord).toHaveBeenCalledTimes(1);
+    expect(f.external.createIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves a configured full schema label without a hard-coded domain name", async () => {
+    const f = await setup(false, "Product Experiments & Validation");
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Add this hypothesis to Product Experiments & Validation and create a Linear task to validate it.";
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("completed");
+    expect(f.interpret.mock.calls[0]![0].records.schema.targetKey).toBe("hypotheses");
+    expect(f.external.createRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for the missing target before capturing or interpreting the thread", async () => {
+    const f = await setup();
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Add this hypothesis to our table and create a Linear task to validate it.";
+    sdk.fetch.mockClear();
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("Name exactly one target");
+    expect(sdk.fetch).not.toHaveBeenCalled();
+    expect(f.interpret).not.toHaveBeenCalled();
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+    expect(f.external.createIssue).not.toHaveBeenCalled();
+  });
+
+  it("returns one native clarification for ambiguous configured targets before any source read", async () => {
+    const f = await setup(false, "Hypotheses", true);
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Add this to Hypotheses or Experiments and create a Linear task to validate it.";
+    sdk.fetch.mockClear();
+    const sent = f.mention();
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain(
+      "more than one configured table"
+    );
+    expect(sdk.fetch).not.toHaveBeenCalled();
+    expect(f.interpret).not.toHaveBeenCalled();
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+    expect(f.external.createIssue).not.toHaveBeenCalled();
+  });
+
+  it.each(["guest", "public", "bot", "quoted", "negated", "conceptual"])(
+    "ignores %s mention before source/model/write work",
+    async (kind) => {
+      const f = await setup();
+      const overrides: Record<string, unknown> = {};
+      if (kind === "guest")
+        overrides["author"] = { id: "777777777777777777", bot: false };
+      if (kind === "public")
+        f.live.state.members.push({
+          user: { id: "guest-person", bot: false },
+          roles: ["team"]
+        });
+      if (kind === "bot") overrides["author"] = { id: founderId, bot: true };
+      if (kind === "quoted")
+        overrides["content"] =
+          `<@bot_luma> "Add this hypothesis to Hypotheses and create a Linear task."`;
+      if (kind === "negated")
+        overrides["content"] =
+          "<@bot_luma> Do not add this hypothesis to Hypotheses and create a Linear task.";
+      if (kind === "conceptual")
+        overrides["content"] =
+          "<@bot_luma> Should we add a Hypotheses record and create a Linear task?";
+      sdk.fetch.mockClear();
+      const sent = f.mention(overrides);
+      await f.runtime.bot.stop();
+      expect(sent.reply).not.toHaveBeenCalled();
+      expect(sdk.fetch).not.toHaveBeenCalled();
+      expect(f.interpret).not.toHaveBeenCalled();
+      expect(f.external.createRecord).not.toHaveBeenCalled();
+      expect(f.external.createIssue).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses a command edited between the Gateway event and exact source capture", async () => {
+    const f = await setup();
+    const original = f.messages.at(-1)!.content;
+    f.messages.at(-1)!.content =
+      "<@bot_luma> Add a different hypothesis to our Hypotheses table and create a Linear task to validate it.";
+    const sent = f.mention({ content: original });
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("changed before admission");
+    expect(f.interpret).not.toHaveBeenCalled();
+    expect(f.external.createRecord).not.toHaveBeenCalled();
+  });
+
+  it("withholds the private mention receipt when the thread gains a guest during execution", async () => {
+    const f = await setup();
+    const create = f.external.createIssue.getMockImplementation()!;
+    f.external.createIssue.mockImplementationOnce(async (...args) => {
+      const result = await create(...args);
+      f.live.state.members.push({
+        user: { id: "guest-person", bot: false },
+        roles: ["team"]
+      });
+      return result;
+    });
+    const sent = f.mention();
+    await expect
+      .poll(() => f.external.createIssue.mock.calls.length, { timeout: 15000 })
+      .toBe(1);
+    await f.runtime.bot.stop();
+    expect(sent.reply).not.toHaveBeenCalled();
+    expect(f.external.createRecord).toHaveBeenCalledTimes(1);
+    expect(f.external.createIssue).toHaveBeenCalledTimes(1);
+  });
+
   it("drains a timed-out model's admitted proof before store closure and refuses late proof admission", async () => {
     const f = await setup();
     let release!: () => void;

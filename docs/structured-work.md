@@ -56,7 +56,21 @@ activates writes. The existing single Gateway client supplies the separate
 
 Post the actual explicit instruction with a leading @Luma mention in an admitted
 thread, for example: “Add this hypothesis to our Hypotheses table and create a
-Linear task to validate it.” Then use:
+Linear task to validate it.” This directly starts the owned compound workflow and
+returns one source-thread receipt. Name a configured target alias or its full label
+in the table clause. Missing or multiple target matches produce a focused
+clarification before source analysis, model calls or writes. A target mentioned only
+in the task clause does not select the table. Current provider schema, source and
+owner checks still run inside MI; the literal name does not grant authority.
+
+The exact original anchor must remain unchanged between the Gateway event and
+source admission. Repeated events and later slash retries use the same durable
+operation identity. Native mentions use the existing founder-only channel proof,
+separate capability scope, rate limit and shared AI budget. There is no second
+Gateway or autonomous polling loop. Receipt delivery rechecks current source and
+recipient access, with all mentions disabled.
+
+The explicit commands remain available for choosing a target or viewing recovery:
 
 - `/structured-work request source_message:<original-message-id> target:hypotheses`
   selects a configured table alias. The author must be the person who wrote the
@@ -78,8 +92,7 @@ page:<number>` exposes every preview field, uncertainty and per-target result in
   second target. The same source and selection retain one request ID across new
   slash interactions and process restarts, so this does not repeat inference.
 
-The source message ID is available through Discord's **Copy Message ID** action
-with Developer Mode enabled. Conceptual questions and quoted/negated instructions
+The optional explicit commands take a source message ID, available through Discord's **Copy Message ID** action with Developer Mode enabled. The direct mention flow needs no copied ID. Conceptual questions and quoted/negated instructions
 remain outside this command's execution admission. Requests and status replies are
 founder-only and ephemeral, with mentions disabled; there is no guest support mode.
 

@@ -1,3 +1,4 @@
+import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
 import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
 import {
@@ -322,11 +323,21 @@ export function createDiscordJsTransport(
     const originalInstruction =
       questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
     const usageRequest = /^(?:usage|status)$/iu.test(originalInstruction.trim());
-    let decisionRequest = Boolean(
-      config.decisionRecords &&
-      (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+    let structuredRequest = Boolean(
+      config.structuredWork &&
+      (isExplicitStructuredWorkInstruction(originalInstruction) || usageRequest)
     );
-    const captureConfig = decisionRequest ? config.decisionRecords : config.contextAsk;
+    let decisionRequest =
+      !structuredRequest &&
+      Boolean(
+        config.decisionRecords &&
+        (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+      );
+    const captureConfig = structuredRequest
+      ? config.structuredWork
+      : decisionRequest
+        ? config.decisionRecords
+        : config.contextAsk;
     if (!captureConfig) return;
 
     const candidate = discordContextAskMessageCandidate(message);
@@ -337,22 +348,33 @@ export function createDiscordJsTransport(
       config: captureConfig
     });
 
-    // Usage is a deterministic shared service. Its admission may come from the
-    // Ask scope when this channel is outside the separately enabled write scope.
-    if (!ask && decisionRequest && usageRequest && config.contextAsk) {
-      ask = discordContextAskMentionFromCandidate({
-        candidate,
-        botUserId,
-        guildId: config.guildId,
-        config: config.contextAsk
-      });
-      decisionRequest = false;
+    // Usage is a deterministic shared service and may use any separately
+    // enabled scope without granting that scope another capability's writes.
+    if (!ask && usageRequest) {
+      for (const fallback of [
+        { config: config.decisionRecords, decision: true },
+        { config: config.contextAsk, decision: false }
+      ]) {
+        if (!fallback.config) continue;
+        ask = discordContextAskMentionFromCandidate({
+          candidate,
+          botUserId,
+          guildId: config.guildId,
+          config: fallback.config
+        });
+        if (ask) {
+          decisionRequest = fallback.decision;
+          structuredRequest = false;
+          break;
+        }
+      }
     }
 
     if (!ask) {
       return;
     }
-    if (decisionRequest) ask.purpose = "decision-record";
+    if (structuredRequest) ask.purpose = "structured-work";
+    else if (decisionRequest) ask.purpose = "decision-record";
 
     trackDelivery(
       handleContextAskMention({

@@ -394,6 +394,7 @@ export async function createStructuredWorkRuntime(
     discord: ({ meetingIntelligence, execution }) => ({
       config: structuredClone(config.discord),
       targetKeys: targets.map((target) => target.key),
+      targets: targets.map(({ key, label }) => ({ key, label })),
       source: input.conversationEvidenceSource,
       meetingIntelligence,
       execution

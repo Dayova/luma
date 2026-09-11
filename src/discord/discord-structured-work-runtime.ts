@@ -75,6 +75,7 @@ export function isStructuredWorkCommand(command: {
 export type DiscordStructuredWorkRuntime = {
   config: DiscordContextAskConfig;
   targetKeys: readonly string[];
+  targets?: readonly { key: string; label: string }[];
   source: ConversationEvidenceSource;
   meetingIntelligence: StructuredWorkIntelligence;
   execution: StructuredWorkExecution;
@@ -104,6 +105,8 @@ export async function handleDiscordStructuredWorkCommand(input: {
   workspace: WorkspaceConfig;
   command: DiscordStructuredWorkCommand;
   meetingId?: string;
+  /** Native mentions must still match the exact original event before admission. */
+  expectedInstruction?: string;
   requireCurrent?: () => Promise<void>;
 }): Promise<DiscordCommandResponse> {
   const { runtime, workspace, command } = input;
@@ -163,6 +166,13 @@ export async function handleDiscordStructuredWorkCommand(input: {
         "The original command must be complete, readable, and written by you in this thread. Ask its author to run the command, or post your own explicit instruction."
       );
     const instruction = anchor.text.trim().replace(/^<@!?[^>]+>\s*/u, "");
+    if (
+      input.expectedInstruction !== undefined &&
+      instruction !== input.expectedInstruction
+    )
+      throw new DiscordStructuredWorkUnavailableError(
+        "The original command changed before admission. Post the current instruction as a new @Luma message. No writes were started."
+      );
     if (!isExplicitStructuredWorkInstruction(instruction))
       throw new DiscordStructuredWorkUnavailableError(
         "The original @Luma message must explicitly request both the table entry and validation task. Questions, quotations and negated instructions do not authorize writes."

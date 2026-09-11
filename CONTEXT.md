@@ -117,6 +117,10 @@ _Avoid_: Tool call, provider request
 The recorded outcome of attempting an approved Follow-up Intent.
 _Avoid_: Result, receipt
 
+**Canonical Knowledge Patch**:
+An immutable Human-approved replacement of one exact region in one explicitly selected existing knowledge document, grounded in source Evidence and bound to a Follow-up Intent. It preserves unrelated content and conflicts rather than guessing when the region changes.
+_Avoid_: Generic document update, whole-page replacement, automatic merge
+
 **Operational Outcome**:
 A compact Luma-owned record of authorized reconciliation and execution against canonical organizational surfaces, distinct from raw Meeting Captures and a Luma Synthesis.
 _Avoid_: Meeting Notes, source evidence, synthesis

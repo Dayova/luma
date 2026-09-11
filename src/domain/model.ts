@@ -539,7 +539,25 @@ export type MeetingItemDraft = {
   evidence: EvidenceReference[];
 };
 
+export type CanonicalKnowledgePatchProposal = {
+  id: string;
+  target: ExternalReference & { objectType: "document" };
+  expectedMarkdown: string;
+  replacementMarkdown: string;
+  approvedBy: PersonId;
+  approvedAt: string;
+  evidence: EvidenceReference[];
+};
+
 export type HumanJudgment =
+  | {
+      /** Explicit instruction authorizes this exact patch and its source settlement. */
+      kind: "approve-canonical-knowledge-patch";
+      intentId: FollowUpIntentId;
+      target: ExternalReference & { objectType: "document" };
+      expectedMarkdown: string;
+      replacementMarkdown: string;
+    }
   | {
       kind: "confirm";
       meetingItemId: MeetingItemId;
@@ -827,6 +845,7 @@ export type ActionItemReconciliationIntentBinding = {
 export type SettleOperationalOutcomeIntent = {
   id: FollowUpIntentId;
   type: "settle-operational-outcome";
+  canonicalKnowledgePatch?: CanonicalKnowledgePatchProposal;
   reconciliation: ActionItemReconciliationIntentBinding;
   relatedMeetingItemIds: MeetingItemId[];
   status: FollowUpIntentStatus;

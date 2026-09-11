@@ -1,3 +1,8 @@
+import type { CanonicalKnowledgePatchWriter } from "../knowledge/canonical-knowledge-patch.js";
+import {
+  CanonicalPatchStageError,
+  settleCanonicalKnowledgePatch
+} from "./canonical-knowledge-patch-stage.js";
 import { randomUUID } from "node:crypto";
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { OperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
@@ -66,6 +71,7 @@ export type CreateFollowUpExecutionInput = {
   meetingIntelligence: MeetingIntelligence;
   identityDirectory?: IdentityDirectory;
   knowledgeProvider?: KnowledgeProvider;
+  canonicalKnowledgePatchWriter?: CanonicalKnowledgePatchWriter;
   operationalOutcomeWriter?: OperationalOutcomeWriter;
   /** Production ledger guard for source freshness before settlement mutation. */
   operationalOutcomeSourceCurrentnessVerifier?: OperationalOutcomeSourceCurrentnessVerifier;
@@ -233,6 +239,14 @@ async function withCurrentExecutionContext(
     ...(dependencies.knowledgeProvider
       ? {
           knowledgeProvider: guardProvider(dependencies.knowledgeProvider, requireCurrent)
+        }
+      : {}),
+    ...(dependencies.canonicalKnowledgePatchWriter
+      ? {
+          canonicalKnowledgePatchWriter: guardProvider(
+            dependencies.canonicalKnowledgePatchWriter,
+            requireCurrent
+          )
         }
       : {}),
     ...(dependencies.workProvider
@@ -898,16 +912,29 @@ async function settleOperationalOutcome(
     );
   }
 
+  const knowledgeReferences = await settleKnowledgeStage(
+    dependencies,
+    input,
+    durable,
+    false,
+    work.externalReferences
+  );
+  const settledReferences = uniqueExternalReferences([
+    ...work.externalReferences,
+    ...knowledgeReferences
+  ]);
+
   const receipt = await settleOperationalOutcomeWriteStage(
     dependencies,
     input,
     durable,
     writer,
-    work.externalReferences
+    settledReferences
   );
 
   const externalReferences = uniqueExternalReferences([
     ...work.externalReferences,
+    ...knowledgeReferences,
     receipt.externalReference
   ]);
 
@@ -921,6 +948,70 @@ async function settleOperationalOutcome(
   }
 
   return externalReferences;
+}
+
+async function settleKnowledgeStage(
+  dependencies: CreateFollowUpExecutionInput,
+  input: CanonicalExecutionInput,
+  durable: OperationalOutcomeSettlement,
+  readOnly = false,
+  establishedReferences: ExternalReference[] = []
+): Promise<ExternalReference[]> {
+  try {
+    return await settleCanonicalKnowledgePatch({
+      database: dependencies.database,
+      workspaceId: input.workspace.workspaceId,
+      meetingId: input.meetingId,
+      executionLeaseId: input.executionLeaseId,
+      settlement: durable,
+      ...(dependencies.canonicalKnowledgePatchWriter
+        ? { writer: dependencies.canonicalKnowledgePatchWriter }
+        : {}),
+      readOnly,
+      async requireCurrent() {
+        await assertOperationalOutcomeSourceExecutionFenceHeldCurrent(
+          dependencies,
+          input,
+          durable.plan.target
+        );
+        await assertOperationalOutcomeSourceCurrentness(
+          dependencies,
+          durable.plan.target
+        );
+        const current = await canonicalMeetingStateForSettlement(dependencies, input);
+        if (
+          input.intent.type !== "settle-operational-outcome" ||
+          !settlementFromCanonicalState(current, input.intent)
+        ) {
+          throw new Error("The approved patch source is no longer current");
+        }
+      }
+    });
+  } catch (error) {
+    let current = durable;
+    try {
+      current =
+        (await readOperationalOutcomeSettlement({
+          database: dependencies.database,
+          workspaceId: input.workspace.workspaceId,
+          meetingId: input.meetingId,
+          intentId: input.intent.id
+        })) ?? durable;
+    } catch {
+      /* Preserve already established receipts even when the store is unavailable. */
+    }
+    throw new PartialOperationalOutcomeSettlementError(
+      uniqueExternalReferences([
+        ...establishedReferences,
+        ...settlementDurableExternalReferences(current)
+      ]),
+      "canonical-knowledge-patch-unresolved",
+      error instanceof CanonicalPatchStageError
+        ? error.message
+        : "Canonical patch state could not be established durably.",
+      error instanceof CanonicalPatchStageError ? error.disposition : "manual"
+    );
+  }
 }
 
 async function assertOperationalOutcomeSourceCurrentness(
@@ -1048,12 +1139,21 @@ async function recoverOperationalOutcomeSettlement(
       throw new Error("expected an Operational Outcome settlement Intent");
     }
 
-    const durable = await readOperationalOutcomeSettlement({
+    let durable = await readOperationalOutcomeSettlement({
       database: dependencies.database,
       workspaceId: input.workspace.workspaceId,
       meetingId: input.meetingId,
       intentId: input.intent.id
     });
+    if (durable?.plan.canonicalKnowledgePatch) {
+      await settleKnowledgeStage(dependencies, input, durable, true);
+      durable = await readOperationalOutcomeSettlement({
+        database: dependencies.database,
+        workspaceId: input.workspace.workspaceId,
+        meetingId: input.meetingId,
+        intentId: input.intent.id
+      });
+    }
     const state = await canonicalMeetingStateForSettlement(dependencies, input);
     const canonical = settlementFromCanonicalState(state, input.intent);
 
@@ -1210,7 +1310,11 @@ async function recoverOperationalOutcomeSettlement(
       );
     }
 
-    if (durable.plan.intentId !== expectedPlan.intentId) {
+    if (
+      durable.plan.intentId !== expectedPlan.intentId ||
+      JSON.stringify(durable.plan.canonicalKnowledgePatch) !==
+        JSON.stringify(expectedPlan.canonicalKnowledgePatch)
+    ) {
       throw new IndeterminateProviderMutationError(
         "Luma found a conflicting Operational Outcome settlement identity"
       );
@@ -1376,7 +1480,15 @@ async function recoverOperationalOutcomeSettlement(
       );
     }
 
-    if (input.intent.status === "requires-manual-recovery") {
+    if (
+      input.intent.status === "requires-manual-recovery" &&
+      !(
+        afterOutput.knowledge?.status === "succeeded" &&
+        afterOutput.outcome.status === "pending" &&
+        afterOutput.outcome.attempts === 0 &&
+        afterOutput.outcome.error === null
+      )
+    ) {
       return executionFailureObservation(
         input,
         new IndeterminateProviderMutationError(
@@ -1878,6 +1990,7 @@ function finalizedOperationalOutcomeSettlementObservation(
 
   const externalReferences = uniqueExternalReferences([
     ...work.externalReferences,
+    ...(settlement.knowledge?.externalReferences ?? []),
     ...settlement.outcome.externalReferences
   ]);
 
@@ -1987,6 +2100,8 @@ function operationalOutcomeEntryForSettlement(
   currentExecutingIntentId: string
 ): OperationalOutcomeEntry | null {
   const { plan, work } = settlement;
+  if (plan.canonicalKnowledgePatch && settlement.knowledge?.status !== "succeeded")
+    return null;
 
   // The current writer is allowed to publish only its own work result. Other
   // pending settlements have not revalidated their sources at this mutation
@@ -2037,7 +2152,10 @@ function operationalOutcomeEntryForSettlement(
     ownership: plan.ownership,
     resolution: plan.resolution.outcome,
     workReferences,
-    knowledgeReferences: [],
+    knowledgeReferences:
+      settlement.knowledge?.status === "succeeded"
+        ? settlement.knowledge.externalReferences
+        : [],
     githubReferences: plan.sourceBoundImplementationReferences,
     unresolved: [
       ...(plan.resolution.outcome.type === "needs-clarification"
@@ -2055,6 +2173,9 @@ function operationalOutcomeSettlementPlan(
   return {
     version: 3,
     intentId: intent.id,
+    ...(intent.canonicalKnowledgePatch
+      ? { canonicalKnowledgePatch: structuredClone(intent.canonicalKnowledgePatch) }
+      : {}),
     binding: intent.reconciliation,
     target: settlement.target,
     candidate: settlement.review.candidate,
@@ -3427,6 +3548,7 @@ function settlementDurableExternalReferences(
 ): ExternalReference[] {
   return uniqueExternalReferences([
     ...settlement.work.externalReferences,
+    ...(settlement.knowledge?.externalReferences ?? []),
     ...settlement.outcome.externalReferences
   ]);
 }

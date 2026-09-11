@@ -120,3 +120,14 @@ the exact prepared marker and release its lease. A durably provider-confirmed
 prewrite interruption or adapter-confirmed no-write is the narrow exception:
 it may abandon its uncalled write and release the lease. It never repeats a
 completed work mutation or writes an unknown page state.
+
+## Canonical knowledge patches
+
+An explicitly authorized Human Judgment can attach one immutable Canonical
+Knowledge Patch to a current suggested source-bound settlement and approve it in
+one observation. A separate durable knowledge stage uses an owned
+`CanonicalKnowledgePatchWriter` capability. Its proven document reference is
+included in the source Meeting's Operational Outcome. Existing generic
+`update-knowledge` intents remain disabled. See the
+[canonical patch runbook](../operations/canonical-knowledge-patches.md) for exact
+selection, conflict, authorization, and recovery behavior.

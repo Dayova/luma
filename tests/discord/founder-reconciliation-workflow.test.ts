@@ -1,3 +1,4 @@
+import type { CanonicalKnowledgePatchWriter } from "../../src/knowledge/canonical-knowledge-patch.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
@@ -125,6 +126,7 @@ async function harness(
     sourceAccess?: boolean;
     outcomeFailsOnce?: boolean;
     catalogUnavailable?: boolean;
+    canonicalKnowledgePatchWriter?: CanonicalKnowledgePatchWriter;
   } = {}
 ) {
   const db = await createPgliteDatabase();
@@ -217,6 +219,9 @@ async function harness(
     identityDirectory,
     workProvider: work,
     operationalOutcomeWriter: writer,
+    ...(input.canonicalKnowledgePatchWriter
+      ? { canonicalKnowledgePatchWriter: input.canonicalKnowledgePatchWriter }
+      : {}),
     operationalOutcomeSourceCurrentnessVerifier:
       createLedgerBackedOperationalOutcomeSourceCurrentnessVerifier({ ledger }),
     operationalOutcomeSourceExecutionFence:
@@ -595,4 +600,81 @@ describe("founder reconciliation workflow", () => {
     expect(pages.join("\n")).toContain("End of original wording.");
     expect(pages.join("\n")).toContain("Ownership claim:");
   });
+});
+
+describe("founder canonical patch command", () => {
+  it.each(["founder", "guest", "revoked"])(
+    "handles an explicit patch instruction from %s",
+    async (mode) => {
+      const targetId = "1c2dd0f2-bad4-42f9-806e-932393a20109";
+      let markdown = "# Handbook\n\n## Policy\nOld text.\n\n## Keep\nUnrelated.";
+      let writes = 0;
+      const h = await harness({
+        canonicalKnowledgePatchWriter: {
+          providerId: "notion",
+          readComplete: (externalId) =>
+            Promise.resolve({
+              reference: {
+                providerId: "notion",
+                objectType: "document",
+                externalId,
+                url: `https://notion.so/${externalId}`
+              },
+              markdown
+            }),
+          replaceExact: (request) => {
+            writes++;
+            expect(request.externalId).toBe(targetId);
+            markdown = markdown.replace(
+              request.expectedMarkdown,
+              () => request.replacementMarkdown
+            );
+            return Promise.resolve();
+          }
+        }
+      });
+      await h.bind();
+      const review = await h.query();
+      await h.transport.execute({
+        ...base,
+        type: "reconcile",
+        interactionId: "patch-reconcile",
+        reviewId: review.proposal.id,
+        choice: "reject-proposal",
+        execute: false
+      });
+      const state = await h.intelligence.query({
+        workspaceId: workspace.workspaceId,
+        meetingId: h.ingested.meetingId,
+        query: { type: "snapshot" }
+      });
+      if (state.type !== "snapshot") throw new Error("Unexpected snapshot");
+      const intent = state.state.followUpIntentions.find(
+        (item) => item.type === "settle-operational-outcome"
+      );
+      if (!intent) throw new Error("Missing settlement");
+      if (mode === "revoked") h.setReadable(false);
+      const result = await h.transport.execute({
+        ...base,
+        actorDiscordUserId: mode === "guest" ? "guest-id" : base.actorDiscordUserId,
+        type: "patch",
+        interactionId: "patch-command",
+        intentId: intent.id,
+        pageId: targetId.replaceAll("-", ""),
+        expectedMarkdown: "## Policy\nOld text.",
+        replacementMarkdown: "## Policy\nApproved text."
+      });
+      if (mode === "founder") {
+        expect(result.content).toContain("were completed");
+        expect(writes).toBe(1);
+        expect(h.writes[0]?.entries[0]?.knowledgeReferences[0]?.externalId).toBe(
+          targetId
+        );
+        expect(markdown).toContain("## Keep\nUnrelated.");
+      } else {
+        expect(writes).toBe(0);
+        expect(h.writes).toEqual([]);
+      }
+    }
+  );
 });

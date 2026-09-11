@@ -1,4 +1,5 @@
 import type {
+  CanonicalKnowledgePatchProposal,
   ActionItemOwnershipAttribution,
   ActionItemReconciliationHumanResolution,
   ActionItemReconciliationIntentBinding,
@@ -19,6 +20,7 @@ export type OperationalOutcomeSettlementPlan = {
    * remain aggregates without gaining a new source claim during recovery.
    */
   version: 1 | 2 | 3;
+  canonicalKnowledgePatch?: CanonicalKnowledgePatchProposal;
   intentId: string;
   binding: ActionItemReconciliationIntentBinding;
   target: OperationalOutcomeTarget;
@@ -38,7 +40,7 @@ export type NewOperationalOutcomeSettlementPlan = OperationalOutcomeSettlementPl
   version: 3;
 };
 
-export type OperationalOutcomeSettlementStageName = "work" | "outcome";
+export type OperationalOutcomeSettlementStageName = "work" | "knowledge" | "outcome";
 
 export type OperationalOutcomeSettlementStageStatus =
   | "not-required"
@@ -55,6 +57,7 @@ export type OperationalOutcomeSettlementStage = {
   externalReferences: ExternalReference[];
   /** Immutable aggregate prepared before the page mutation boundary. */
   preparedOutcomeJson: string | null;
+  preparedPatchJson?: string | null;
   preparedOperationToken: string | null;
   payloadDigest: string | null;
   contentDigest: string | null;
@@ -67,6 +70,7 @@ export type OperationalOutcomeSettlementStage = {
 export type OperationalOutcomeSettlement = {
   plan: OperationalOutcomeSettlementPlan;
   work: OperationalOutcomeSettlementStage;
+  knowledge?: OperationalOutcomeSettlementStage;
   outcome: OperationalOutcomeSettlementStage;
 };
 
@@ -80,6 +84,7 @@ type SettlementStageRow = {
   idempotency_key: string;
   reference_json: string | null;
   prepared_outcome_json: string | null;
+  prepared_patch_json?: string | null;
   prepared_operation_token: string | null;
   payload_digest: string | null;
   content_digest: string | null;
@@ -166,7 +171,9 @@ export async function ensureOperationalOutcomeSettlement(input: {
 
       const workStatus = workStageInitialStatus(plan);
 
-      for (const stage of ["work", "outcome"] as const) {
+      for (const stage of (plan.canonicalKnowledgePatch
+        ? ["work", "knowledge", "outcome"]
+        : ["work", "outcome"]) as OperationalOutcomeSettlementStageName[]) {
         await transaction.query(
           `INSERT INTO operational_outcome_settlement_stages (
              workspace_id, meeting_id, intent_id, stage, status,
@@ -213,7 +220,7 @@ export async function readOperationalOutcomeSettlement(input: {
   }
 
   const stages = await input.database.query<SettlementStageRow>(
-    `SELECT stage, status, idempotency_key, reference_json, prepared_outcome_json,
+    `SELECT stage, status, idempotency_key, reference_json, prepared_outcome_json, prepared_patch_json,
             prepared_operation_token,
             payload_digest,
             content_digest, operation_digest, last_error_code,
@@ -241,7 +248,7 @@ export async function listOperationalOutcomeSettlementsForPage(input: {
   >(
     `SELECT settlement.intent_id, settlement.plan_json,
             stage.stage, stage.status, stage.idempotency_key, stage.reference_json,
-            stage.prepared_outcome_json, stage.prepared_operation_token,
+            stage.prepared_outcome_json, stage.prepared_patch_json, stage.prepared_operation_token,
             stage.payload_digest, stage.content_digest, stage.operation_digest,
             stage.last_error_code, stage.last_error_message,
             stage.execution_lease_id, stage.attempts
@@ -289,7 +296,7 @@ export async function claimOperationalOutcomeSettlementStage(input: {
 
   return input.database.transaction(async (transaction) => {
     const result = await transaction.query<SettlementStageRow>(
-      `SELECT stage, status, idempotency_key, reference_json, prepared_outcome_json,
+      `SELECT stage, status, idempotency_key, reference_json, prepared_outcome_json, prepared_patch_json,
               prepared_operation_token,
               payload_digest,
               content_digest, operation_digest, last_error_code,
@@ -317,7 +324,7 @@ export async function claimOperationalOutcomeSettlementStage(input: {
               attempts = attempts + 1, updated_at = $6,
               last_error_code = NULL, last_error_message = NULL
         WHERE workspace_id = $1 AND meeting_id = $2 AND intent_id = $3 AND stage = $4
-        RETURNING stage, status, idempotency_key, reference_json, prepared_outcome_json,
+        RETURNING stage, status, idempotency_key, reference_json, prepared_outcome_json, prepared_patch_json,
                   prepared_operation_token,
                   payload_digest,
                   content_digest, operation_digest, last_error_code,
@@ -1121,7 +1128,10 @@ function settlementFromRows(
     );
   }
 
-  return { plan, work, outcome };
+  const knowledge = byStage.get("knowledge");
+  if (plan.canonicalKnowledgePatch && !knowledge)
+    throw new Error("Canonical patch stage is missing");
+  return { plan, work, outcome, ...(knowledge ? { knowledge } : {}) };
 }
 
 function stageFromRow(row: SettlementStageRow): OperationalOutcomeSettlementStage {
@@ -1131,6 +1141,7 @@ function stageFromRow(row: SettlementStageRow): OperationalOutcomeSettlementStag
     idempotencyKey: row.idempotency_key,
     externalReferences: parseExternalReferences(row.reference_json),
     preparedOutcomeJson: row.prepared_outcome_json,
+    preparedPatchJson: row.prepared_patch_json ?? null,
     preparedOperationToken: row.prepared_operation_token,
     payloadDigest: row.payload_digest,
     contentDigest: row.content_digest,

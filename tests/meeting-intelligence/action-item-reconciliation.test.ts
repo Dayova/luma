@@ -1,3 +1,4 @@
+import type { CanonicalKnowledgePatchWriter } from "../../src/knowledge/canonical-knowledge-patch.js";
 import { describe, expect, it } from "vitest";
 import type {
   ActionItemReconciliationResolution,
@@ -1058,6 +1059,7 @@ async function resolveAndApproveOperationalOutcome(input: {
   reviewId: string;
   observationSuffix: string;
   resolution?: ActionItemReconciliationResolution;
+  approve?: boolean;
 }) {
   let reviewId = input.reviewId;
   const reviewQuery = await input.meetingIntelligence.query({
@@ -1169,6 +1171,8 @@ async function resolveAndApproveOperationalOutcome(input: {
   if (!intent) {
     throw new Error("expected an Operational Outcome settlement Intent");
   }
+
+  if (input.approve === false) return intent;
 
   const approval = await input.meetingIntelligence.observe({
     workspace,
@@ -6049,6 +6053,410 @@ describe("Action Item reconciliation", () => {
       }
     } finally {
       await database.close();
+    }
+  });
+});
+
+class ProgrammableCanonicalPatchWriter implements CanonicalKnowledgePatchWriter {
+  readonly providerId = "notion";
+  markdown = "# Handbook\n\n## Luma\nOnly founders use Luma.\n\n## Other\nKeep this.";
+  readonly calls: Array<{
+    externalId: string;
+    expectedMarkdown: string;
+    replacementMarkdown: string;
+  }> = [];
+  beforeWrite: (() => Promise<void>) | undefined;
+  afterWrite: (() => Promise<void>) | undefined;
+  readFailure = false;
+  readComplete(externalId: string) {
+    if (this.readFailure)
+      return Promise.reject(new Error("private API diagnostic must not escape"));
+    return Promise.resolve({
+      reference: {
+        providerId: this.providerId,
+        objectType: "document" as const,
+        externalId,
+        url: `https://notion.so/${externalId}`,
+        version: "current"
+      },
+      markdown: this.markdown
+    });
+  }
+  async replaceExact(input: {
+    externalId: string;
+    expectedMarkdown: string;
+    replacementMarkdown: string;
+  }) {
+    this.calls.push(input);
+    await this.beforeWrite?.();
+    this.markdown = this.markdown.replace(
+      input.expectedMarkdown,
+      () => input.replacementMarkdown
+    );
+    await this.afterWrite?.();
+  }
+}
+
+async function canonicalPatchHarness(
+  suffix: string,
+  writer = new ProgrammableCanonicalPatchWriter(),
+  shared?: Awaited<ReturnType<typeof createHarness>>
+) {
+  const harness = shared ?? (await createHarness());
+  const source = sourceObservation({
+    sourceObjectId: `patch-source-${suffix}`,
+    meetingId: `patch-meeting-${suffix}`
+  });
+  const reviewed = await observeAndReview(harness.meetingIntelligence, source);
+  const review = reviewed.reviews[0];
+  if (!review) throw new Error("Missing patch source review");
+  const intent = await resolveAndApproveOperationalOutcome({
+    meetingIntelligence: harness.meetingIntelligence,
+    meetingId: source.meetingId,
+    reviewId: review.proposal.id,
+    observationSuffix: suffix,
+    resolution: {
+      type: "reject-proposal",
+      reason: "This updates canonical knowledge, not a new work item."
+    },
+    approve: false
+  });
+  const approval = {
+    type: "human-judgment-recorded" as const,
+    observationId: `patch-approval-${suffix}`,
+    workspaceId: workspace.workspaceId,
+    meetingId: source.meetingId,
+    occurredAt: "2026-08-08T10:01:00.000Z",
+    observedAt: "2026-08-08T10:01:00.000Z",
+    participantId: "person_jakob",
+    judgment: {
+      kind: "approve-canonical-knowledge-patch" as const,
+      intentId: intent.id,
+      target: {
+        providerId: "notion",
+        objectType: "document" as const,
+        externalId: "canonical-handbook",
+        url: "https://notion.so/handbook"
+      },
+      expectedMarkdown: "## Luma\nOnly founders use Luma.",
+      replacementMarkdown: "## Luma\nOnly Jakob, Fabius, Philipp and Julius use Luma."
+    }
+  };
+  const outcome = new RecordingOperationalOutcomeWriter();
+  const execution = createFollowUpExecution({
+    ...harness,
+    canonicalKnowledgePatchWriter: writer,
+    operationalOutcomeWriter: outcome
+  });
+  const executeInput = { workspace, meetingId: source.meetingId, intentId: intent.id };
+  return {
+    ...harness,
+    source,
+    approval,
+    intent,
+    writer,
+    outcome,
+    execution,
+    executeInput,
+    async approve() {
+      const result = await harness.meetingIntelligence.observe({
+        workspace,
+        observations: [approval]
+      });
+      expect(result.errors).toEqual([]);
+      return result;
+    },
+    async stages() {
+      return (
+        await harness.database.query<{
+          stage: string;
+          status: string;
+          prepared_patch_json: string | null;
+        }>(
+          "SELECT stage,status,prepared_patch_json FROM operational_outcome_settlement_stages WHERE intent_id=$1",
+          [intent.id]
+        )
+      ).rows;
+    }
+  };
+}
+
+describe("Human-approved canonical knowledge patches", () => {
+  it("authorizes once, patches only the selected document region, and records its Outcome reference", async () => {
+    const h = await canonicalPatchHarness("success");
+    try {
+      await h.approve();
+      expect((await h.approve()).duplicateObservationIds).toEqual([
+        h.approval.observationId
+      ]);
+      const result = await h.execution.execute(h.executeInput);
+      expect(result.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toEqual([
+        {
+          externalId: "canonical-handbook",
+          expectedMarkdown: h.approval.judgment.expectedMarkdown,
+          replacementMarkdown: h.approval.judgment.replacementMarkdown
+        }
+      ]);
+      expect(h.writer.markdown).toBe(
+        "# Handbook\n\n" +
+          h.approval.judgment.replacementMarkdown +
+          "\n\n## Other\nKeep this."
+      );
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({
+          externalId: "canonical-handbook",
+          objectType: "document"
+        })
+      ]);
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it.each(["missing", "duplicate", "incomplete"])(
+    "does not write a %s selected region",
+    async (mode) => {
+      const h = await canonicalPatchHarness(mode);
+      try {
+        await h.approve();
+        if (mode === "missing") h.writer.markdown = "A different region";
+        if (mode === "duplicate") h.writer.markdown += h.writer.markdown;
+        if (mode === "incomplete") h.writer.readFailure = true;
+        const result = await h.execution.execute(h.executeInput);
+        expect(result.observation.outcome).toMatchObject({
+          status: "failed",
+          retryable: false,
+          requiresManualRecovery: false
+        });
+        expect(h.writer.calls).toEqual([]);
+        expect(h.outcome.writes).toEqual([]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toEqual([]);
+        expect(JSON.stringify(result)).not.toContain("private API diagnostic");
+      } finally {
+        await h.database.close();
+      }
+    }
+  );
+
+  it("freezes the approved target and patch against later edits or empty replacements", async () => {
+    const h = await canonicalPatchHarness("immutable");
+    try {
+      const empty = await h.meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            ...h.approval,
+            observationId: "empty-patch",
+            judgment: { ...h.approval.judgment, replacementMarkdown: "" }
+          }
+        ]
+      });
+      expect(empty.errors).toHaveLength(1);
+      await h.approve();
+      const changed = await h.meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            ...h.approval,
+            observationId: "changed-patch",
+            judgment: {
+              ...h.approval.judgment,
+              replacementMarkdown: "Something different"
+            }
+          }
+        ]
+      });
+      expect(changed.errors).toHaveLength(1);
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls[0]?.replacementMarkdown).toBe(
+        h.approval.judgment.replacementMarkdown
+      );
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("persists preparation before send and recovers an applied interrupted write without sending it again", async () => {
+    const h = await canonicalPatchHarness("positive");
+    try {
+      await h.approve();
+      h.writer.beforeWrite = async () => {
+        const stage = (await h.stages()).find((row) => row.stage === "knowledge");
+        expect(stage?.status).toBe("executing");
+        const prepared = JSON.parse(stage?.prepared_patch_json ?? "null") as Record<
+          string,
+          unknown
+        >;
+        expect(prepared["operationToken"]).toBeTypeOf("string");
+        expect(prepared["beforeDigest"]).toBeTypeOf("string");
+        expect(prepared["afterDigest"]).toBeTypeOf("string");
+        expect(prepared).toMatchObject({
+          expectedMarkdown: h.approval.judgment.expectedMarkdown,
+          replacementMarkdown: h.approval.judgment.replacementMarkdown
+        });
+      };
+      h.writer.afterWrite = () =>
+        Promise.reject(new Error("connection lost after provider commit"));
+      expect(
+        (await h.execution.execute(h.executeInput)).observation.outcome
+      ).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true,
+        retryable: false
+      });
+      expect(
+        (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+      ).toHaveLength(1);
+      expect((await h.execution.recover(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      expect(
+        h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences[0]?.externalId
+      ).toBe("canonical-handbook");
+      expect(
+        (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+      ).toEqual([]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it.each(["not-applied", "outside-edit"])(
+    "keeps %s ambiguous recovery manual without repeating the write",
+    async (mode) => {
+      const h = await canonicalPatchHarness(mode);
+      try {
+        await h.approve();
+        if (mode === "not-applied")
+          h.writer.beforeWrite = () => Promise.reject(new Error("send was interrupted"));
+        else
+          h.writer.afterWrite = () => {
+            h.writer.markdown += "\nConcurrent unrelated edit";
+            return Promise.reject(new Error("connection lost"));
+          };
+        expect(
+          (await h.execution.execute(h.executeInput)).observation.outcome
+        ).toMatchObject({ requiresManualRecovery: true });
+        expect(
+          (await h.execution.recover(h.executeInput)).observation.outcome
+        ).toMatchObject({ requiresManualRecovery: true });
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toEqual([]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toHaveLength(1);
+      } finally {
+        await h.database.close();
+      }
+    }
+  );
+
+  it("serializes different approved source settlements on the same physical canonical target", async () => {
+    const first = await canonicalPatchHarness("serial-first");
+    try {
+      const second = await canonicalPatchHarness("serial-second", first.writer, first);
+      await first.approve();
+      await second.approve();
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      first.writer.beforeWrite = async () => {
+        entered();
+        await gate;
+      };
+      const ongoing = first.execution.execute(first.executeInput);
+      await started;
+      expect(
+        (await second.execution.execute(second.executeInput)).observation.outcome.status
+      ).toBe("partially-succeeded");
+      expect(first.writer.calls).toHaveLength(1);
+      release();
+      expect((await ongoing).observation.outcome.status).toBe("succeeded");
+      expect(
+        (await second.execution.recover(second.executeInput)).observation.outcome.status
+      ).toBe("failed");
+      expect(first.writer.calls).toHaveLength(1);
+    } finally {
+      await first.database.close();
+    }
+  });
+
+  it("does not permit an exact-region request to replace the whole page", async () => {
+    const h = await canonicalPatchHarness("whole-page");
+    try {
+      h.approval.judgment.expectedMarkdown = h.writer.markdown;
+      await h.approve();
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "failed"
+      );
+      expect(h.writer.calls).toEqual([]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("retains a completed canonical reference when the later Outcome write is interrupted", async () => {
+    const h = await canonicalPatchHarness("outcome-partial");
+    try {
+      await h.approve();
+      const upsert = h.outcome.upsert.bind(h.outcome);
+      let first = true;
+      h.outcome.upsert = (request) => {
+        if (first) {
+          first = false;
+          return Promise.reject(
+            new OperationalOutcomeWriteNotAppliedError("Outcome not applied")
+          );
+        }
+        return upsert(request);
+      };
+      const partial = await h.execution.execute(h.executeInput);
+      expect(partial.observation.outcome.status).toBe("partially-succeeded");
+      if (partial.observation.outcome.status !== "partially-succeeded")
+        throw new Error("Expected partial outcome");
+      expect(
+        partial.observation.outcome.externalReferences.some(
+          (ref) => ref.externalId === "canonical-handbook"
+        )
+      ).toBe(true);
+      expect((await h.execution.recover(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      expect(
+        h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences[0]?.externalId
+      ).toBe("canonical-handbook");
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("allows unrelated edits made before the complete preflight read", async () => {
+    const h = await canonicalPatchHarness("outside-before");
+    try {
+      await h.approve();
+      h.writer.markdown += "\nUnrelated fresh text.";
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.markdown).toContain("Unrelated fresh text.");
+    } finally {
+      await h.database.close();
     }
   });
 });

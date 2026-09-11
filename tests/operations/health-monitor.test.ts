@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { publishRuntimeHealth } from "../../src/app/runtime-health.js";
+import {
+  publishRuntimeHealth,
+  runtimeHealthSchema
+} from "../../src/app/runtime-health.js";
 import {
   assessOperationalHealth,
   BACKUP_SERVICE_TIMEOUT_MS,
@@ -29,6 +32,45 @@ const backup = {
 };
 
 describe("operational health", () => {
+  it("reports current processing failures even with a connected Gateway, without trusting stale capability receipts", async () => {
+    const capabilityProblems = [
+      "ai-budget-exhausted",
+      "source-ingestion-degraded",
+      "automatic-decisions-need-attention"
+    ] as const;
+    const input = {
+      now,
+      service: { active: true, mainPid: 1234 },
+      backupReceipt: backup,
+      runtimeReceipt: { ...runtime, capabilityProblems: [...capabilityProblems] }
+    };
+    expect(assessOperationalHealth(input)).toEqual(capabilityProblems);
+    expect(
+      assessOperationalHealth({ ...input, service: { active: true, mainPid: 9999 } })
+    ).toEqual(["runtime-unavailable"]);
+    expect(
+      runtimeHealthSchema.safeParse({
+        ...runtime,
+        capabilityProblems: ["secret provider failure text"]
+      }).success
+    ).toBe(false);
+    const messages: string[] = [];
+    await deliverHealthStatus({
+      problems: [...capabilityProblems],
+      previous: null,
+      now,
+      send: (message) => {
+        messages.push(message);
+        return Promise.resolve();
+      },
+      record: () => Promise.resolve(),
+      heartbeat: () =>
+        Promise.reject(new Error("Unhealthy state must not renew heartbeat"))
+    });
+    expect(messages[0]).toContain("/meeting usage");
+    expect(messages[0]).toContain("/decision-record candidates");
+    expect(messages[0]).toContain("evidence is retained");
+  });
   it("shares the scheduled service's full maintenance timeout", async () => {
     const unit = await readFile(
       new URL("../../deploy/luma-backup.service", import.meta.url),

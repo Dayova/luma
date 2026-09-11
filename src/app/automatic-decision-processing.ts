@@ -26,6 +26,8 @@ export type AutomaticDecisionProcessingStatus = {
   completed: number;
   unavailable: number;
   interrupted: number;
+  /** Only each subject's latest notification can require present attention. */
+  needsAttention: number;
 };
 
 /** Accepted source notifications are durable before returning to ingestion/Ask.
@@ -182,6 +184,13 @@ export async function createAutomaticDecisionProcessing(input: {
       await pause();
     },
     async status(): Promise<AutomaticDecisionProcessingStatus> {
+      const attention = await database.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM
+        (SELECT DISTINCT ON(subject_hash) phase FROM automatic_decision_jobs
+         WHERE workspace_id=$1 ORDER BY subject_hash,created_at DESC) latest
+        WHERE phase IN ('unavailable','interrupted')`,
+        [workspace.workspaceId]
+      );
       const rows = await database.query<{ phase: Phase; count: number }>(
         "SELECT phase,count(*)::int AS count FROM automatic_decision_jobs WHERE workspace_id=$1 GROUP BY phase",
         [workspace.workspaceId]
@@ -192,7 +201,8 @@ export async function createAutomaticDecisionProcessing(input: {
         processing: 0,
         completed: 0,
         unavailable: 0,
-        interrupted: 0
+        interrupted: 0,
+        needsAttention: attention.rows[0]?.count ?? 0
       };
       for (const row of rows.rows) result[row.phase] = row.count;
       return result;

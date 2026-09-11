@@ -90,12 +90,13 @@ async function fixture(limit = "30") {
   raw.snapshot.boundary.messageIds.unshift(commitment.id);
   let granted = true;
   let handler: Parameters<DiscordJsTransport["connect"]>[0];
+  const disconnect = vi.fn(() => Promise.resolve());
   const transport: DiscordJsTransport = {
     connect: (commands) => {
       handler = commands;
       return Promise.resolve();
     },
-    disconnect: () => Promise.resolve(),
+    disconnect,
     capture: () =>
       granted
         ? Promise.resolve(structuredClone(raw))
@@ -199,6 +200,7 @@ async function fixture(limit = "30") {
     occurredAt: "2026-09-11T10:00:00.000Z"
   };
   return {
+    disconnect,
     model,
     external,
     invoke: (interactionId: string) => handler({ ...command, interactionId }),
@@ -209,6 +211,51 @@ async function fixture(limit = "30") {
 }
 
 describe("structured work through the actual shared main app", () => {
+  it("stops ingress immediately but keeps the real store open for an admitted health read", async () => {
+    const f = await fixture();
+    let release = () => {},
+      entered = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const transaction = database.transaction.bind(database);
+    let intercepted = false;
+    const gate = vi
+      .spyOn(database, "transaction")
+      .mockImplementation(
+        async <T>(work: Parameters<typeof database.transaction<T>>[0]) => {
+          if (!intercepted) {
+            intercepted = true;
+            entered();
+            await held;
+          }
+          return transaction(work);
+        }
+      );
+    const close = vi.spyOn(database, "close");
+    const read = app!.capabilityProblems!();
+    let stopping: Promise<void> | undefined;
+    try {
+      await started;
+      stopping = app!.stop();
+      await vi.waitFor(() => expect(f.disconnect).toHaveBeenCalledTimes(1));
+      expect(close).not.toHaveBeenCalled();
+      expect(await app!.capabilityProblems!()).toEqual(["capability-status-unavailable"]);
+      release();
+      await read;
+      await stopping;
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await read.catch(() => undefined);
+      await stopping;
+      gate.mockRestore();
+      close.mockRestore();
+    }
+  });
   it("creates both requested records once and preserves the original command across native retries", async () => {
     const f = await fixture();
     const result = await f.invoke("first");
@@ -227,6 +274,7 @@ describe("structured work through the actual shared main app", () => {
   });
   it("exposes the shared zero monthly cap without a model call or either mutation", async () => {
     const f = await fixture("0");
+    expect(await app!.capabilityProblems!()).toContain("ai-budget-exhausted");
     const result = await f.invoke("no-budget");
     expect(result.content).toMatch(/budget|limit/i);
     expect(f.model).not.toHaveBeenCalled();

@@ -40,7 +40,8 @@ try {
   if (healthPath && !startupCancellation.signal.aborted) {
     stopHealth = startRuntimeHealthReporter({
       path: healthPath,
-      gatewayConnected: () => app.gatewayConnected()
+      gatewayConnected: () => app.gatewayConnected(),
+      capabilityProblems: () => app.capabilityProblems?.() ?? Promise.resolve([])
     });
   }
 } catch {

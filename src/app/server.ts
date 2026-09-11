@@ -86,8 +86,10 @@ import { toWorkCatalog } from "../work/interface.js";
 import { loadAppConfigFromEnv } from "./env.js";
 import { dayovaFounderPersonIds } from "./founder-access.js";
 import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
+import type { RuntimeCapabilityProblem } from "./runtime-health.js";
 
 export type RunningLumaApp = {
+  capabilityProblems?(): Promise<RuntimeCapabilityProblem[]>;
   automaticDecisionStatus?(): Promise<AutomaticDecisionProcessingStatus | null>;
   stop(): Promise<void>;
   gatewayConnected(): boolean;
@@ -753,7 +755,55 @@ export async function startServer(
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
     let stopping: Promise<void> | undefined;
+    let healthClosed = false;
+    const healthReads = new Set<Promise<RuntimeCapabilityProblem[]>>();
     return {
+      capabilityProblems() {
+        if (healthClosed) return Promise.resolve(["capability-status-unavailable"]);
+        const pending = (async (): Promise<RuntimeCapabilityProblem[]> => {
+          const results = await Promise.allSettled([
+            aiUsage.getStatus(workspaceId),
+            decisionIntelligence?.recall.status(),
+            automaticDecisions?.status()
+          ]);
+          const [usageResult, recallResult, automaticResult] = results;
+          if (
+            usageResult.status !== "fulfilled" ||
+            recallResult.status !== "fulfilled" ||
+            automaticResult.status !== "fulfilled"
+          )
+            throw new Error("Processing capability status is unavailable");
+          const usage = usageResult.value,
+            recall = recallResult.value,
+            automatic = automaticResult.value;
+          const problems: RuntimeCapabilityProblem[] = [];
+          if (usage.accountingBlocked || usage.status === "not-configured")
+            problems.push("ai-unavailable");
+          else if (usage.status === "exhausted") problems.push("ai-budget-exhausted");
+          else if (usage.status === "warning" || usage.status === "critical")
+            problems.push("ai-budget-near-limit");
+          if (
+            recall &&
+            ["stale", "partial", "unavailable", "stopped"].includes(recall.state)
+          )
+            problems.push("decision-recall-degraded");
+          if (automatic && (!automatic.active || automatic.needsAttention > 0))
+            problems.push("automatic-decisions-need-attention");
+          const granola = captureRuntime?.status();
+          const notion = notionWebhook?.status();
+          const sync = notion?.canonicalRecovery ?? meetingNotesSync?.status();
+          if (
+            granola?.lastFailure ||
+            granola?.lastResult?.failures.length ||
+            notion?.runtime.lastFailure ||
+            sync?.lastOutcome === "failed"
+          )
+            problems.push("source-ingestion-degraded");
+          return problems;
+        })().finally(() => healthReads.delete(pending));
+        healthReads.add(pending);
+        return pending;
+      },
       automaticDecisionStatus: () =>
         automaticDecisions?.status() ?? Promise.resolve(null),
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
@@ -761,6 +811,7 @@ export async function startServer(
       decisionRecallStatus: () =>
         decisionIntelligence?.recall.status() ?? Promise.resolve(null),
       stop() {
+        healthClosed = true;
         stopping ??= (async () => {
           // Stop admission and scheduled ingestion immediately, then drain both.
           // A failed/timed-out drain never closes the store later in a detached
@@ -781,6 +832,7 @@ export async function startServer(
               // background cancellation; all command admission has now settled.
               await decisionIntelligence?.recall.stop();
               await structuredWorkRuntime?.stop();
+              await Promise.allSettled([...healthReads]);
               await captureRuntime?.stop();
               await automaticDecisions?.stop();
               await granolaConnections?.stop();

@@ -3,12 +3,24 @@ import { rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 
+export const runtimeCapabilityProblemSchema = z.enum([
+  "ai-budget-near-limit",
+  "ai-budget-exhausted",
+  "ai-unavailable",
+  "source-ingestion-degraded",
+  "decision-recall-degraded",
+  "automatic-decisions-need-attention",
+  "capability-status-unavailable"
+]);
+export type RuntimeCapabilityProblem = z.infer<typeof runtimeCapabilityProblemSchema>;
+
 export const runtimeHealthSchema = z
   .object({
     format: z.literal("luma-runtime-health-v1"),
     pid: z.number().int().positive(),
     checkedAt: z.string().datetime(),
-    gatewayConnected: z.boolean()
+    gatewayConnected: z.boolean(),
+    capabilityProblems: z.array(runtimeCapabilityProblemSchema).max(7).optional()
   })
   .strict();
 
@@ -16,7 +28,8 @@ export const runtimeHealthSchema = z
 export async function publishRuntimeHealth(
   path: string,
   gatewayConnected: boolean,
-  now = new Date()
+  now = new Date(),
+  capabilityProblems?: RuntimeCapabilityProblem[]
 ): Promise<void> {
   if (!isAbsolute(path)) throw new Error("Runtime health path must be absolute");
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -28,7 +41,10 @@ export async function publishRuntimeHealth(
           format: "luma-runtime-health-v1",
           pid: process.pid,
           checkedAt: now.toISOString(),
-          gatewayConnected
+          gatewayConnected,
+          ...(capabilityProblems
+            ? { capabilityProblems: [...new Set(capabilityProblems)].sort() }
+            : {})
         })
       ) + "\n",
       { flag: "wx", mode: 0o600 }
@@ -42,6 +58,7 @@ export async function publishRuntimeHealth(
 export function startRuntimeHealthReporter(input: {
   path: string;
   gatewayConnected(): boolean;
+  capabilityProblems?(): Promise<RuntimeCapabilityProblem[]>;
 }): () => Promise<void> {
   let stopped = false;
   let pending = Promise.resolve();
@@ -49,7 +66,19 @@ export function startRuntimeHealthReporter(input: {
     pending = pending.then(async () => {
       if (stopped) return;
       try {
-        await publishRuntimeHealth(input.path, input.gatewayConnected());
+        let problems: RuntimeCapabilityProblem[] | undefined;
+        try {
+          problems = await input.capabilityProblems?.();
+        } catch {
+          problems = ["capability-status-unavailable"];
+        }
+        if (!stopped)
+          await publishRuntimeHealth(
+            input.path,
+            input.gatewayConnected(),
+            new Date(),
+            problems
+          );
       } catch {
         // The independent monitor detects missing/stale receipts. Do not leak paths.
         console.error("Luma could not publish its local health receipt.");

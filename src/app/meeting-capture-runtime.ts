@@ -272,6 +272,10 @@ export async function createMeetingCaptureRuntime(input: {
         });
       return changing;
     },
-    status: () => registry?.runtime.status() ?? null
+    status: () => registry?.runtime.status() ?? null,
+    granolaSourceStatus: (connectionId: string) =>
+      stopped || admissionPaused
+        ? null
+        : (activeRegistry?.runtime.connectionStatus(connectionId) ?? null)
   };
 }

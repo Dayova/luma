@@ -587,7 +587,9 @@ export async function startServer(
               workspaceId,
               connections: granolaConnections,
               begin: (request) => granolaCallback.begin(request),
-              afterConnectionsChanged: refreshGranolaConnections
+              afterConnectionsChanged: refreshGranolaConnections,
+              sourceStatus: (connectionId) =>
+                Promise.resolve(captureRuntime?.granolaSourceStatus(connectionId) ?? null)
             })
           }
         : {}),

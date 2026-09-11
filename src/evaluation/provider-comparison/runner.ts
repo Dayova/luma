@@ -85,7 +85,7 @@ export async function runComparison(options: RunnerOptions): Promise<Report> {
     options.repeats > 5 ||
     options.selected.length < 1 ||
     new Set(options.selected.map((c) => c.id)).size !== options.selected.length ||
-    options.selected.some((c) => !candidates.includes(c))
+    options.selected.some((c) => !candidates.some((known) => known === c))
   )
     throw new ComparisonError("invalid-run-options");
   const limits = options.limits ?? defaultLimits;

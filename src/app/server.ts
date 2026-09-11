@@ -540,11 +540,16 @@ export async function startServer(
           // A failed/timed-out drain never closes the store later in a detached
           // continuation: its lease must survive process termination for recovery.
           await drainBeforeClose(
-            Promise.all([
-              bot.stop(),
-              notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
-              decisionIntelligence?.recall.stop()
-            ])
+            (async () => {
+              await Promise.all([
+                bot.stop(),
+                notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
+                decisionIntelligence?.recall.stop()
+              ]);
+              // An admitted foreground operation can begin its final retained proof
+              // after background cancellation. Drain again once ingress is settled.
+              await decisionIntelligence?.recall.stop();
+            })()
           );
           await database.close();
         })();

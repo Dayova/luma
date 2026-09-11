@@ -224,6 +224,25 @@ function fixture() {
   };
 }
 describe("MI-owned first-class Decision Records", () => {
+  it("preserves a definitive pre-write refusal in status instead of reporting unknown remote work", async () => {
+    const f = fixture(),
+      e = await f.executable();
+    f.setWrite("not-applied");
+    await e.current.execution.execute(e.input);
+    const status = await f
+      .make()
+      .mi.query({
+        workspaceId: "dayova",
+        subject: f.request.subject,
+        query: { type: "decision-request", requestId: "request-1" }
+      });
+    expect(status.state).toBe("confirmed");
+    expect(status.execution?.outcome).toMatchObject({
+      status: "failed",
+      requiresManualRecovery: false,
+      references: []
+    });
+  });
   it("commits a Human correction and its idempotency observation atomically", async () => {
     const f = fixture(),
       e = await f.executable();

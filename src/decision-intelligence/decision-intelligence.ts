@@ -378,7 +378,15 @@ export function createDecisionIntelligence(
       ? await readDecisionStages(input.database, request.workspaceId, stored.intent.id)
       : [];
     const stageHead = decisionDigest(stages);
-    if (stages.length && stored.state.execution?.outcome.status !== "succeeded") {
+    const provenRefusal =
+      stored.state.execution?.outcome.status === "failed" &&
+      !stored.state.execution.outcome.requiresManualRecovery &&
+      stages.every((stage) => stage.state === "not-applied" && stage.receipt === null);
+    if (
+      stages.length &&
+      !provenRefusal &&
+      stored.state.execution?.outcome.status !== "succeeded"
+    ) {
       const known = new Map(
         (stored.state.execution?.outcome.references ?? []).map((reference) => [
           `${reference.providerId}:${reference.externalId}`,

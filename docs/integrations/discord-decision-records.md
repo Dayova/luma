@@ -7,7 +7,7 @@ The founder can ask Luma to record an agreed decision in an enabled public threa
 - `@Luma record this decision`
 - `@Luma Bitte dokumentiere diese Entscheidung.`
 
-Only an original leading mention from an admitted founder routes to this capability.
+For an unbound Conversation, only an original leading mention from an admitted founder routes to this capability.
 Questions, quoted instructions, bot messages and guest messages do not authorize a
 write. Enabling conversation Ask does not enable Decision Records. The source is
 bounded through the instruction message; subsequent messages require a new request.
@@ -27,6 +27,33 @@ rationale, unresolved objections and ambiguous existing targets retain their act
 standing. Clarification does not cause a canonical write. Poll wording and aggregate
 results remain advisory; generated poll text is not attributed to a Human. Raw
 German, English and mixed-language wording is retained unchanged.
+
+## Imported Meeting decisions and Human review
+
+In an existing founder-only thread, first attach the exact imported Notion page
+with `/meeting bind`. Then use `/decision-record meeting instruction:<literal
+instruction>`. An optional `target_record` selects an existing canonical record for
+an explicit update. This uses that real imported Meeting; it creates no Meeting
+or Conversation to stand in for the source.
+
+An explicit owner decision such as `Ich entscheide: Luma bleibt intern bei uns vier
+Gründern. Bitte festhalten.` can be recorded immediately when the source and
+current ownership evidence support it. A generic instruction to record an
+unattributed discussion retains a candidate instead. The requester's identity is
+never attached to the imported transcript.
+
+Use `/decision-record status request_id:<id> page:<number>` to read every part of
+that candidate. The last page includes its exact review token. The accountable
+owner can use `/decision-record accept request_id:<id> review_token:<token>
+confirmation:<literal confirmation>` to confirm and record it. This retains a
+separate original Human observation and does not call AI again. Missing scope,
+objections or unresolved qualifications still need clarification; accepting a
+candidate does not erase them.
+
+For imported Meeting commands, omit `source_message`; the current thread binding
+selects the source. Include `source_message` to address an existing Conversation
+request instead. Status and recovery preserve both workflows. A changed binding,
+source, audience or owner withholds the old response and blocks execution.
 
 ## Scope and configuration
 

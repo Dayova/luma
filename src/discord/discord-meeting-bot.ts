@@ -1,4 +1,5 @@
 import {
+  discordDecisionRequestId,
   handleDiscordDecisionRecordCommand,
   handleDiscordDecisionRecordMention,
   renderDecisionRecordFailure,
@@ -652,11 +653,7 @@ async function handleCommand(
               input.decisionRecords.config.allowedDiscordUserIds.includes(
                 command.actorDiscordUserId
               )
-              ? await handleDiscordDecisionRecordCommand({
-                  runtime: input.decisionRecords,
-                  workspace: input.workspace,
-                  command
-                })
+              ? await executeDecisionRecordCommand(input, command)
               : {
                   content: "Decision Records are not enabled for you in this discussion."
                 }
@@ -688,8 +685,8 @@ async function handleCommand(
       return {
         content: renderDecisionRecordFailure(
           error,
-          command.requestId,
-          command.sourceMessageId
+          discordDecisionRequestId(command),
+          "sourceMessageId" in command ? command.sourceMessageId : undefined
         )
       };
     return {
@@ -703,6 +700,68 @@ async function handleCommand(
             : renderAiServiceFailure(error)
     };
   }
+}
+
+async function executeDecisionRecordCommand(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordDecisionRecordCommand
+): Promise<DiscordCommandResponse> {
+  if (!input.decisionRecords) throw new Error("Decision Records are not configured");
+  if ("sourceMessageId" in command && command.sourceMessageId)
+    return handleDiscordDecisionRecordCommand({
+      runtime: input.decisionRecords,
+      workspace: input.workspace,
+      command
+    });
+  const binding = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  if (!binding || binding.thread_id !== command.channelId)
+    return {
+      content:
+        "Attach this thread to its imported Meeting with /meeting bind first, or supply source_message for a Conversation request."
+    };
+  const state = await queryMeetingSnapshot(input, binding);
+  if (!state.importedSources.length)
+    return {
+      content:
+        "This command needs an imported Meeting binding. Use an explicit @Luma recording request for the discussion."
+    };
+  const requireBinding = async () => {
+    const current = await findMeetingThreadForChannel(
+      input,
+      command.guildId,
+      command.channelId,
+      "include-ended-thread"
+    );
+    if (
+      !current ||
+      current.meeting_id !== binding.meeting_id ||
+      current.thread_id !== binding.thread_id ||
+      current.parent_channel_id !== binding.parent_channel_id
+    )
+      throw new ImportedMeetingReviewUnavailableError();
+    await requireImportedMeetingCurrent(input, state);
+  };
+  await requireBinding();
+  const response = await handleDiscordDecisionRecordCommand({
+    runtime: input.decisionRecords,
+    workspace: input.workspace,
+    command,
+    meetingId: binding.meeting_id,
+    requireCurrent: requireBinding
+  });
+  await requireBinding();
+  return {
+    content: response.content,
+    requireCurrent: async () => {
+      await requireBinding();
+      await response.requireCurrent?.();
+    }
+  };
 }
 
 async function readAiUsage(input: CreateDiscordMeetingBotInput): Promise<string> {

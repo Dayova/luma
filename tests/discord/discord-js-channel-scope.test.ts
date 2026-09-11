@@ -947,7 +947,7 @@ describe("Discord explicit Decision Record entry", () => {
     );
     await live.disconnect();
   });
-  it.each(["status", "recover"])(
+  it.each(["status", "recover", "meeting", "accept"])(
     "registers and maps source-bound /decision-record %s",
     async (subcommand) => {
       const live = decisionTransport();
@@ -955,7 +955,11 @@ describe("Discord explicit Decision Record entry", () => {
       await live.connect(handler);
       const fields: Record<string, string> = {
         source_message: "message",
-        request_id: "decision-request"
+        request_id: "decision-request",
+        instruction: "Ich entscheide: Luma bleibt intern. Bitte festhalten.",
+        target_record: "canonical-decision-id",
+        review_token: "a".repeat(64),
+        confirmation: "Ich bestätige diese genaue Entscheidung."
       };
       const interaction = {
         isChatInputCommand: () => true,
@@ -968,7 +972,8 @@ describe("Discord explicit Decision Record entry", () => {
         createdAt: new Date("2026-09-11T10:00:00Z"),
         options: {
           getSubcommand: () => subcommand,
-          getString: (key: string) => fields[key] ?? null
+          getString: (key: string) => fields[key] ?? null,
+          getInteger: () => null
         },
         deferReply: vi.fn(() => Promise.resolve()),
         editReply: vi.fn(() => Promise.resolve())
@@ -978,8 +983,18 @@ describe("Discord explicit Decision Record entry", () => {
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           type: `decision-record-${subcommand}`,
-          sourceMessageId: "message",
-          requestId: "decision-request"
+          ...(subcommand === "meeting"
+            ? {
+                instruction: fields["instruction"],
+                targetRecordId: "canonical-decision-id"
+              }
+            : {
+                sourceMessageId: "message",
+                requestId: "decision-request",
+                ...(subcommand === "accept"
+                  ? { reviewToken: "a".repeat(64), instruction: fields["confirmation"] }
+                  : {})
+              })
         })
       );
       await live.disconnect();

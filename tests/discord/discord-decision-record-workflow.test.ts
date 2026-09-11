@@ -337,6 +337,41 @@ function fixture() {
 }
 
 describe("Explicit Discord Decision Record workflow through owned MI", () => {
+  it("accepts a reviewed Conversation proposal and replays its receipt after canonical discovery changes because of that write", async () => {
+    const f = fixture();
+    f.proposal();
+    const live = f.make();
+    await live.bot.start();
+    try {
+      await live.invoke();
+      const state = await live.mi.query({
+        workspaceId: workspace.workspaceId,
+        subject,
+        query: {
+          type: "decision-request",
+          requestId: `discord:${f.mention.messageId}:decision-record`
+        }
+      });
+      const accept: DiscordCommand = {
+        type: "decision-record-accept",
+        guildId: "guild",
+        channelId: f.mention.channelId,
+        actorDiscordUserId: f.mention.actorDiscordUserId,
+        occurredAt: f.mention.occurredAt,
+        interactionId: "accept-proposal",
+        requestId: state.requestId,
+        sourceMessageId: f.mention.messageId,
+        reviewToken: state.reviewToken!,
+        instruction: "Ich bestätige diese Entscheidung und möchte sie festhalten."
+      };
+      expect((await live.command(accept)).content).toContain("Decision Record: recorded");
+      expect((await live.command(accept)).content).toContain("Decision Record: recorded");
+      expect(f.write).toHaveBeenCalledTimes(1);
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+    } finally {
+      await live.bot.stop();
+    }
+  });
   it("records once from original discussion without a Meeting, then replays and reads status without more paid interpretation or writes", async () => {
     const f = fixture();
     const first = f.make();

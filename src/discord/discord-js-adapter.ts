@@ -1042,13 +1042,35 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
   };
   const subcommand = interaction.options.getSubcommand(true);
   if (interaction.commandName === "decision-record") {
+    if (subcommand === "meeting") {
+      const targetRecordId = interaction.options.getString("target_record");
+      return {
+        ...base,
+        type: "decision-record-meeting",
+        instruction: interaction.options.getString("instruction", true),
+        ...(targetRecordId ? { targetRecordId } : {})
+      };
+    }
+    const sourceMessageId = interaction.options.getString("source_message");
+    const address = {
+      ...base,
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+      requestId: interaction.options.getString("request_id", true)
+    };
+    if (subcommand === "accept")
+      return {
+        ...address,
+        type: "decision-record-accept",
+        reviewToken: interaction.options.getString("review_token", true),
+        instruction: interaction.options.getString("confirmation", true)
+      };
     if (subcommand !== "status" && subcommand !== "recover")
       throw new Error("Unknown Decision Record command");
+    const page = subcommand === "status" ? interaction.options.getInteger("page") : null;
     return {
-      ...base,
+      ...address,
       type: `decision-record-${subcommand}`,
-      sourceMessageId: interaction.options.getString("source_message", true),
-      requestId: interaction.options.getString("request_id", true)
+      ...(page ? { page } : {})
     };
   }
   if (interaction.commandName === "consultation") {
@@ -1740,12 +1762,36 @@ function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
 
 const decisionRecordCommand = new SlashCommandBuilder()
   .setName("decision-record")
-  .setDescription("Check an explicitly requested Decision Record")
+  .setDescription("Record or review a decision from its original source")
+  .addSubcommand((command) =>
+    command
+      .setName("meeting")
+      .setDescription("Record a decision from the imported Meeting bound to this thread")
+      .addStringOption((option) =>
+        option
+          .setName("instruction")
+          .setDescription("Your literal recording instruction or decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target_record")
+          .setDescription("Exact existing record ID when requesting an update")
+          .setMaxLength(512)
+      )
+  )
   .addSubcommand((command) =>
     decisionRecordAddress(
       command
         .setName("status")
         .setDescription("Read the retained result of an explicit recording request")
+    ).addIntegerOption((option) =>
+      option
+        .setName("page")
+        .setDescription("Candidate review page")
+        .setMinValue(1)
+        .setMaxValue(10000)
     )
   )
   .addSubcommand((command) =>
@@ -1754,21 +1800,54 @@ const decisionRecordCommand = new SlashCommandBuilder()
         .setName("recover")
         .setDescription("Check for an existing uncertain write without resending it")
     )
-  );
-function decisionRecordAddress(command: SlashCommandSubcommandBuilder) {
-  return command
-    .addStringOption((option) =>
-      option
-        .setName("source_message")
-        .setDescription("Original @Luma message ID in this discussion")
-        .setRequired(true)
-        .setMaxLength(22)
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("accept")
+        .setDescription(
+          "Confirm the exact reviewed candidate as your decision and record it"
+        ),
+      true
     )
-    .addStringOption((option) =>
-      option
-        .setName("request_id")
-        .setDescription("Request ID returned by Luma")
-        .setRequired(true)
-        .setMaxLength(512)
-    );
+      .addStringOption((option) =>
+        option
+          .setName("review_token")
+          .setDescription("Token from the final candidate review page")
+          .setRequired(true)
+          .setMaxLength(64)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("confirmation")
+          .setDescription("Your literal confirmation of this decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+  );
+function decisionRecordAddress(
+  command: SlashCommandSubcommandBuilder,
+  omitSource = false
+) {
+  const addressed = command.addStringOption((option) =>
+    option
+      .setName("request_id")
+      .setDescription("Request ID returned by Luma")
+      .setRequired(true)
+      .setMaxLength(512)
+  );
+  return omitSource
+    ? addressed
+    : addressed.addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      );
 }

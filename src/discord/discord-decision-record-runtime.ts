@@ -97,11 +97,28 @@ export type DiscordDecisionRecordRuntime = {
   execution: DecisionFollowUpExecution;
   config: DiscordContextAskConfig;
 };
-export type DiscordDecisionRecordCommand = DiscordCommandBase & {
-  type: "decision-record-status" | "decision-record-recover";
-  sourceMessageId: string;
-  requestId: string;
-};
+export type DiscordDecisionRecordCommand = DiscordCommandBase &
+  (
+    | { type: "decision-record-meeting"; instruction: string; targetRecordId?: string }
+    | {
+        type: "decision-record-status" | "decision-record-recover";
+        sourceMessageId?: string;
+        requestId: string;
+        page?: number;
+      }
+    | {
+        type: "decision-record-accept";
+        sourceMessageId?: string;
+        requestId: string;
+        reviewToken: string;
+        instruction: string;
+      }
+  );
+export function discordDecisionRequestId(command: DiscordDecisionRecordCommand): string {
+  return command.type === "decision-record-meeting"
+    ? `discord:${command.interactionId}:decision-record`
+    : command.requestId;
+}
 
 /** The Discord edge forwards one original instruction to the owned MI facade. */
 export async function handleDiscordDecisionRecordMention(input: {
@@ -152,21 +169,71 @@ export async function handleDiscordDecisionRecordCommand(input: {
   runtime: DiscordDecisionRecordRuntime;
   workspace: WorkspaceConfig;
   command: DiscordDecisionRecordCommand;
+  /** Resolved from the bot's existing guarded imported Meeting binding, never user input. */
+  meetingId?: string;
+  requireCurrent?: () => Promise<void>;
 }): Promise<DiscordCommandResponse> {
   const { runtime, workspace, command } = input;
-  const subject = conversationSubject(command.channelId, command.sourceMessageId);
+  await input.requireCurrent?.();
+  const subject: DecisionSubject =
+    "sourceMessageId" in command && command.sourceMessageId
+      ? conversationSubject(command.channelId, command.sourceMessageId)
+      : input.meetingId
+        ? { type: "meeting", meetingId: input.meetingId }
+        : (() => {
+            throw new Error("Bind this thread to its imported Meeting first");
+          })();
+  const requestId = discordDecisionRequestId(command);
+  if (
+    command.type === "decision-record-meeting" ||
+    command.type === "decision-record-accept"
+  ) {
+    await runtime.meetingIntelligence.observe({
+      workspace,
+      subject,
+      observations: [
+        command.type === "decision-record-meeting"
+          ? {
+              type: "decision-record-requested",
+              observationId: requestId,
+              actor: {
+                providerId: "discord",
+                providerUserId: command.actorDiscordUserId
+              },
+              instruction: command.instruction,
+              ...(command.targetRecordId
+                ? { targetRecordId: command.targetRecordId }
+                : {})
+            }
+          : {
+              type: "decision-candidate-accepted",
+              observationId: `discord:${command.interactionId}:decision-acceptance`,
+              requestId,
+              actor: {
+                providerId: "discord",
+                providerUserId: command.actorDiscordUserId
+              },
+              reviewToken: command.reviewToken,
+              instruction: command.instruction
+            }
+      ]
+    });
+  }
   const state = await runtime.meetingIntelligence.query({
     workspaceId: workspace.workspaceId,
     subject,
-    query: { type: "decision-request", requestId: command.requestId }
+    query: { type: "decision-request", requestId }
   });
   let executionUnavailable = false;
-  if (command.type === "decision-record-recover" && state.approvedIntentId) {
+  if (command.type !== "decision-record-status" && state.approvedIntentId) {
     try {
-      await runtime.execution.recover({
+      await input.requireCurrent?.();
+      await runtime.execution[
+        command.type === "decision-record-recover" ? "recover" : "execute"
+      ]({
         workspace,
         subject,
-        decisionRequestId: command.requestId,
+        decisionRequestId: requestId,
         intentId: state.approvedIntentId
       });
     } catch {
@@ -177,8 +244,9 @@ export async function handleDiscordDecisionRecordCommand(input: {
     runtime,
     workspace.workspaceId,
     subject,
-    command.requestId,
-    executionUnavailable
+    requestId,
+    executionUnavailable,
+    command.type === "decision-record-status" ? (command.page ?? 1) : 1
   );
 }
 
@@ -187,7 +255,8 @@ async function readResponse(
   workspaceId: string,
   subject: DecisionSubject,
   requestId: string,
-  executionUnavailable = false
+  executionUnavailable = false,
+  page = 1
 ): Promise<DiscordCommandResponse> {
   const address = {
     workspaceId,
@@ -197,7 +266,7 @@ async function readResponse(
   const state = await runtime.meetingIntelligence.query(address);
   const retained = JSON.stringify(state);
   return {
-    content: `${executionUnavailable && !state.execution ? "Luma could not verify the execution result. Use /decision-record recover before another recording request.\n" : ""}${renderDecisionRecordResponse(state)}`,
+    content: `${executionUnavailable && !state.execution ? "Luma could not verify the execution result. Use /decision-record recover before another recording request.\n" : ""}${renderDecisionRecordResponse(state, page)}`,
 
     requireCurrent: async () => {
       // The owned query checks original source, authority and canonical target.
@@ -218,7 +287,10 @@ function conversationSubject(
     anchorMessageId: sourceMessageId
   };
 }
-export function renderDecisionRecordResponse(state: DecisionRequestState): string {
+export function renderDecisionRecordResponse(
+  state: DecisionRequestState,
+  page = 1
+): string {
   const outcome = state.execution?.outcome;
   const references = [
     ...new Set(outcome?.references.map((reference) => reference.url) ?? [])
@@ -229,7 +301,7 @@ export function renderDecisionRecordResponse(state: DecisionRequestState): strin
     )
   ].filter((url): url is string => !!url && safeReference(url));
   const detail =
-    state.message.length <= 550
+    state.message.length <= (state.candidate && state.reviewToken ? 200 : 550)
       ? state.message
       : "The detailed result is retained. Check this request with /decision-record status.";
   const lines = [
@@ -241,12 +313,49 @@ export function renderDecisionRecordResponse(state: DecisionRequestState): strin
         ]
       : []),
     ...references.slice(0, 2).map((url) => `Record: <${url}>`),
-    ...(source[0] ? [`Source: <${source[0]}>`] : []),
+    ...(source[0] && (!state.reviewToken || source[0].length <= 200)
+      ? [`Source: <${source[0]}>`]
+      : []),
     `Request ID: ${state.requestId}.`,
     ...(state.subject.type === "conversation-thread"
       ? [`Source message: ${state.subject.anchorMessageId}.`]
       : [])
   ];
+  if (state.candidate && !state.execution && state.reviewToken) {
+    const candidate = state.candidate;
+    const details = [
+      `Statement: ${candidate.statement.text}`,
+      `Scope: ${candidate.scopeId ?? "unclear"}. Decision-maker: ${candidate.decisionMakerPersonIds.join(", ") || "unclear"}.`,
+      `Status: ${candidate.modality}. Disposition: ${candidate.disposition}. Effective: ${candidate.effectiveAt ?? "not specified"}.`,
+      ...(candidate.context ? [`Context: ${candidate.context.text}`] : []),
+      ...candidate.rationale.map((claim) => `Reason: ${claim.text}`),
+      ...candidate.alternatives.map((claim) => `Alternative: ${claim.text}`),
+      ...candidate.consequences.map((claim) => `Consequence: ${claim.text}`),
+      ...candidate.objections.map((claim) => `Objection: ${claim.text}`),
+      ...candidate.unresolved.map((value) => `Unresolved: ${value}`),
+      ...candidate.relatedWork.map((ref) => `Related work: ${ref.url}`),
+      ...candidate.implementationEvidence.map(
+        (ref) => `Implementation evidence: ${ref.url}`
+      )
+    ].join("\n");
+    const pages = [""];
+    for (const character of details) {
+      if (pages[pages.length - 1]!.length + character.length > 500) pages.push("");
+      pages[pages.length - 1] += character;
+    }
+    const selected =
+      Number.isSafeInteger(page) && page >= 1 ? Math.min(page, pages.length) : 1;
+    lines.push(`Candidate review ${selected}/${pages.length}:`, pages[selected - 1]!);
+    if (selected < pages.length)
+      lines.push(
+        `Read the remaining details with /decision-record status page:${selected + 1}.`
+      );
+    else
+      lines.push(
+        `Review token: ${state.reviewToken}`,
+        "If this is your decision, use /decision-record accept with this token and your literal confirmation. Unresolved qualifications still require clarification."
+      );
+  }
   const rendered = lines.join("\n");
   if (rendered.length <= 1_850) return rendered;
   return `Decision Record: ${state.state}. The full result and any known references are retained. Use /decision-record status with request ID ${state.requestId}.`;
@@ -269,11 +378,11 @@ function safeReference(value: string): boolean {
 export function renderDecisionRecordFailure(
   error: unknown,
   requestId: string,
-  sourceMessageId: string
+  sourceMessageId?: string
 ): string {
   const reason =
     error instanceof AiServiceError
       ? renderAiServiceFailure(error)
       : "Luma could not verify this Decision Record request. No unverified decision or receipt will be displayed.";
-  return `${reason}\nCheck /decision-record status before requesting another write. Request ID: ${requestId}. Source message: ${sourceMessageId}.`;
+  return `${reason}\nCheck /decision-record status before requesting another write. Request ID: ${requestId}.${sourceMessageId ? ` Source message: ${sourceMessageId}.` : ""}`;
 }

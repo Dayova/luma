@@ -19,6 +19,13 @@ import type {
   DecisionCandidate
 } from "../../src/domain/decision-records.js";
 import { createDecisionHumanReviewAccess } from "../../src/decision-intelligence/human-review.js";
+import {
+  createDiscordMeetingBot,
+  type DiscordCommand,
+  type DiscordCommandResponse,
+  type DiscordTransport
+} from "../../src/discord/discord-meeting-bot.js";
+import { createStaticIdentityDirectory } from "../../src/identity/static-identity-directory.js";
 
 let database: LumaDatabase;
 beforeEach(async () => {
@@ -233,6 +240,7 @@ async function fixture() {
     write,
     written,
     reviewAccess: createDecisionHumanReviewAccess({ database, accessPolicy, audience }),
+    accessPolicy,
     allowWrites: () =>
       write.mockImplementation(({ stage, operationId }) => {
         if (stage.type !== "create-record") throw new Error("Unexpected test stage");
@@ -703,5 +711,252 @@ describe("Original Human review of imported Decision candidates", () => {
       ).rows
     ).toEqual([]);
     expect(f.interpret).toHaveBeenCalledTimes(1);
+  });
+});
+
+async function importedDecisionBot(f: Awaited<ReturnType<typeof fixture>>) {
+  let command: ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | undefined;
+  const transport: DiscordTransport = {
+    connect: (handler) => {
+      command = handler;
+      return Promise.resolve();
+    },
+    disconnect: () => Promise.resolve(),
+    resolveChannel: ({ channelId }) =>
+      Promise.resolve({
+        id: channelId,
+        guildId: "guild",
+        kind: "public-thread",
+        parentChannelId: "parent"
+      }),
+    createThread: () => Promise.reject(new Error("Existing bound thread only")),
+    sendMessage: () => Promise.reject(new Error("Only command replies"))
+  };
+  const executor = createFollowUpExecution({ database, meetingIntelligence: f.mi });
+  const people = await Promise.all(
+    f.people.map((personId) =>
+      f.accessPolicy.authorize({
+        providerUserId: personId === "jakob" ? "founder" : personId
+      })
+    )
+  );
+  const bot = createDiscordMeetingBot({
+    database,
+    meetingIntelligence: f.mi,
+    followUpExecution: executor,
+    identityDirectory: createStaticIdentityDirectory({
+      people: people.filter((person) => person !== null)
+    }),
+    authorizedPersonIds: [...f.people],
+    transport,
+    workspace,
+    guildId: "guild",
+    allowedParentChannelIds: ["parent"],
+    importedMeetingAccess: {
+      resolve: () => Promise.resolve(f.imported.meetingId),
+      requireCurrent: async ({ state, personIds }) => {
+        for (const source of state.importedSources)
+          await f.access.requireCurrent({
+            source,
+            audience: { workspaceId: workspace.workspaceId, personIds: [...personIds] }
+          });
+      }
+    },
+    decisionRecords: {
+      meetingIntelligence: f.mi,
+      execution: executor,
+      config: {
+        parentChannelIds: ["parent"],
+        allowedDiscordUserIds: ["founder", "fabius"],
+        maxMessages: 50,
+        maxEvidenceChars: 32000,
+        minIntervalMs: 1000
+      }
+    }
+  });
+  await bot.start();
+  const base = {
+    guildId: "guild",
+    channelId: "review-thread",
+    actorDiscordUserId: "founder",
+    occurredAt: time,
+    interactionId: "record-imported"
+  };
+  return {
+    bot,
+    base,
+    invoke: (input: DiscordCommand) => command!(input),
+    bind: () =>
+      command!({
+        ...base,
+        type: "bind",
+        interactionId: "bind-imported",
+        sourcePage: "11111111-1111-4111-8111-111111111111"
+      })
+  };
+}
+
+describe("Native imported Decision commands through the actual MI facade", () => {
+  it("rechecks the imported thread binding after interpretation before executing an otherwise approved record", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const live = await importedDecisionBot(f);
+    try {
+      await live.bind();
+      f.interpret.mockImplementation(async (request) => {
+        await database.query(
+          "UPDATE discord_meeting_threads SET thread_id='moved-thread' WHERE workspace_id=$1",
+          [workspace.workspaceId]
+        );
+        const evidence = request.humanReviewEvidence![0]!;
+        return {
+          candidate: {
+            ...decisionRecord().candidate,
+            statement: { text: "Luma bleibt intern.", evidenceIds: [evidence.id] },
+            acceptanceEvidenceIds: [evidence.id]
+          },
+          reconciliation: { action: "create" }
+        };
+      });
+      const response = await live.invoke({
+        ...live.base,
+        type: "decision-record-meeting",
+        instruction: "Ich entscheide: Luma bleibt intern. Bitte festhalten."
+      });
+      expect(response.content).toContain("could not verify");
+      expect(f.write).not.toHaveBeenCalled();
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+    } finally {
+      await live.bot.stop();
+    }
+  });
+  it("binds the actual import, reviews and accepts its candidate, then records once without another model call", async () => {
+    const f = await fixture();
+    f.allowWrites();
+    const live = await importedDecisionBot(f);
+    try {
+      const record: DiscordCommand = {
+        ...live.base,
+        type: "decision-record-meeting",
+        instruction: "Record the decision from this imported Meeting."
+      };
+      expect((await live.invoke(record)).content).toContain("/meeting bind");
+      expect(f.interpret).not.toHaveBeenCalled();
+      expect((await live.bind()).content).toContain("Imported Meeting attached");
+      const candidate = await live.invoke(record);
+      expect(candidate.content).toContain("needs-clarification");
+      expect(candidate.content).toContain("Luma bleibt intern bei den vier Gründern.");
+      expect(candidate.content.length).toBeLessThanOrEqual(1850);
+      const requestId = "discord:record-imported:decision-record";
+      const review = await live.invoke({
+        ...live.base,
+        type: "decision-record-status",
+        requestId,
+        page: 1000
+      });
+      const reviewToken = /Review token: ([a-f0-9]{64})/u.exec(review.content)?.[1];
+      expect(reviewToken).toBeDefined();
+      const acceptance: DiscordCommand = {
+        ...live.base,
+        type: "decision-record-accept",
+        interactionId: "accept-imported",
+        requestId,
+        reviewToken: reviewToken!,
+        instruction: "Ich bestätige diese genaue Entscheidung. Bitte festhalten."
+      };
+      expect(
+        (await live.invoke({ ...acceptance, reviewToken: "stale" })).content
+      ).toContain("could not verify");
+      expect(f.write).not.toHaveBeenCalled();
+      const accepted = await live.invoke(acceptance);
+      expect(accepted.content).toContain("recorded");
+      await accepted.requireCurrent?.();
+      expect((await live.invoke(acceptance)).content).toContain("recorded");
+      expect(
+        (await live.invoke({ ...live.base, type: "decision-record-status", requestId }))
+          .content
+      ).toContain("recorded");
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+      expect(f.write).toHaveBeenCalledTimes(1);
+      expect((await database.query("SELECT * FROM meetings")).rows).toHaveLength(1);
+      expect(
+        f.written
+          .get("decision-page")!
+          .content.source.evidence.every((item) => item.authorPersonId === null)
+      ).toBe(true);
+    } finally {
+      await live.bot.stop();
+    }
+  });
+  it.each(["binding", "source"])(
+    "withholds the actual cached Discord response after %s changes",
+    async (change) => {
+      const f = await fixture();
+      const live = await importedDecisionBot(f);
+      try {
+        await live.bind();
+        const response = await live.invoke({
+          ...live.base,
+          type: "decision-record-meeting",
+          instruction: "Record this imported discussion."
+        });
+        expect(response.requireCurrent).toBeDefined();
+        if (change === "source") f.revoke();
+        else
+          await database.query(
+            "UPDATE discord_meeting_threads SET thread_id='another-thread' WHERE workspace_id=$1",
+            [workspace.workspaceId]
+          );
+        await expect(response.requireCurrent!()).rejects.toThrow();
+        expect(f.write).not.toHaveBeenCalled();
+      } finally {
+        await live.bot.stop();
+      }
+    }
+  );
+  it("makes every long candidate detail reviewable through bounded pages before giving the acceptance token", async () => {
+    const f = await fixture();
+    const original = f.interpret.getMockImplementation()!;
+    const longReason = "This precise reason remains under review. ".repeat(80);
+    f.interpret.mockImplementation(async (request) => {
+      const result = await original(request);
+      result.candidate!.rationale = [
+        { text: longReason, evidenceIds: result.candidate!.statement.evidenceIds }
+      ];
+      return result;
+    });
+    const live = await importedDecisionBot(f);
+    try {
+      await live.bind();
+      const first = await live.invoke({
+        ...live.base,
+        type: "decision-record-meeting",
+        instruction: "Record the meeting decision."
+      });
+      expect(first.content).not.toContain("Review token:");
+      const count = Number(/Candidate review 1\/(\d+)/u.exec(first.content)?.[1]);
+      expect(count).toBeGreaterThan(2);
+      const pages: string[] = [];
+      for (let page = 1; page <= count; page++) {
+        const result = await live.invoke({
+          ...live.base,
+          type: "decision-record-status",
+          requestId: "discord:record-imported:decision-record",
+          page
+        });
+        expect(result.content.length).toBeLessThanOrEqual(1850);
+        pages.push(
+          result.content
+            .split(`Candidate review ${page}/${count}:\n`)[1]!
+            .split(/\n(?:Read the remaining|Review token:)/u)[0]!
+        );
+        if (page < count) expect(result.content).not.toContain("Review token:");
+        else expect(result.content).toContain("Review token:");
+      }
+      expect(pages.join("")).toContain(longReason);
+      expect(f.interpret).toHaveBeenCalledTimes(1);
+    } finally {
+      await live.bot.stop();
+    }
   });
 });

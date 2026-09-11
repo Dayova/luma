@@ -542,7 +542,6 @@ export function createDecisionIntelligence(
               decisionDigest(prior.state.subject) !== decisionDigest(bound.subject)
             )
               throw new Error("Select an existing decision candidate in this subject");
-            await requireDecisionRequestCurrent(input, prior, { catalog: true });
             const previousObservation = (
               await input.database.query<{ payload_hash: string }>(
                 `SELECT payload_hash FROM decision_observations WHERE workspace_id=$1 AND observation_id=$2`,
@@ -563,6 +562,10 @@ export function createDecisionIntelligence(
                 duplicate: true
               };
             }
+            // Replay uses the guarded canonical read above. Its own successful write
+            // is expected to change discovery; only a new correction needs that old
+            // catalog to remain the current recording basis.
+            await requireDecisionRequestCurrent(input, prior, { catalog: true });
             const stages = prior.intent
               ? await readDecisionStages(
                   input.database,

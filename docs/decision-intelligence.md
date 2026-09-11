@@ -114,5 +114,6 @@ execution stage; the original imported source remains byte-for-byte unchanged.
 `createDecisionHumanReviewAccess` supplies an independent retained review grant for
 canonical record readers. An ownership-page grant does not grant access to a Human
 review. Provider composition must require that additional proof for every retained
-review; archives without Human reviews remain compatible. The native bound-Meeting
-recording and candidate acceptance commands are a separate ingress follow-up.
+review; archives without Human reviews remain compatible. The native bound-Meeting recording, paginated candidate review and exact-token
+acceptance commands are documented in
+[integrations/discord-decision-records.md](integrations/discord-decision-records.md).

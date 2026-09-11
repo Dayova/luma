@@ -40,7 +40,7 @@ export function notionKnowledgeContextCatalog(
         version: document.version,
         updatedAt: document.updatedAt,
         externalReference: document.externalReference,
-        standing: "current",
+        standing: document.standing ?? "current",
         authority: "source"
       };
     }

@@ -1,4 +1,5 @@
 import type { ExternalReference, PersonId, WorkspaceId } from "../domain/model.js";
+import type { KnowledgeStanding } from "../domain/knowledge-standing.js";
 
 export type KnowledgeAudience = { workspaceId: WorkspaceId; personIds: PersonId[] };
 export type ReadableKnowledgeDocument = {
@@ -8,6 +9,8 @@ export type ReadableKnowledgeDocument = {
   version: string;
   updatedAt: string;
   externalReference: ExternalReference;
+  /** Explicit source metadata, not inferred from dates, prose or workflow completion. */
+  standing?: KnowledgeStanding;
 };
 
 /** Audience-scoped reads only. It neither narrows nor exposes a KnowledgeProvider. */

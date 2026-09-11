@@ -4,6 +4,10 @@ import type { Client } from "@notionhq/client";
 import type * as NotionSdk from "@notionhq/client";
 import { z } from "zod";
 import {
+  isKnowledgeStanding,
+  type KnowledgeStanding
+} from "../domain/knowledge-standing.js";
+import {
   type ContextCatalogAuthorization,
   validCatalogAudience,
   validCatalogIdentity
@@ -171,6 +175,7 @@ function createCatalog(
             .update(JSON.stringify([after, contentMarkdown]))
             .digest("hex"),
           updatedAt: after.updatedAt,
+          standing: after.standing,
           externalReference: {
             providerId: "notion",
             objectType: "document",
@@ -249,7 +254,35 @@ function parsePage(raw: unknown, pageId: string) {
     .parse(titles[0]);
   const title = titleProperty.title.map((item) => item.plain_text).join("") || "Untitled";
   if (title.length > 1024) throw new NotionKnowledgeReadError();
-  return { id: pageId, title, url: page.url, updatedAt: page.last_edited_time };
+  return {
+    id: pageId,
+    title,
+    url: page.url,
+    updatedAt: page.last_edited_time,
+    standing: explicitStanding(page.properties)
+  };
+}
+
+function explicitStanding(properties: Record<string, unknown>): KnowledgeStanding {
+  const raw = properties["Luma knowledge state"];
+  if (raw === undefined) return "current";
+  const property = z
+    .discriminatedUnion("type", [
+      z.object({
+        type: z.literal("select"),
+        select: z.object({ name: z.string() }).nullable()
+      }),
+      z.object({
+        type: z.literal("status"),
+        status: z.object({ name: z.string() }).nullable()
+      })
+    ])
+    .parse(raw);
+  const option = property.type === "select" ? property.select : property.status;
+  // An explicitly present but unset/unknown policy field cannot silently assert currentness.
+  const standing = option?.name.trim().toLowerCase();
+  if (!isKnowledgeStanding(standing)) throw new NotionKnowledgeReadError();
+  return standing;
 }
 function parseMarkdown(raw: unknown, pageId: string): string {
   const markdown = z

@@ -26,6 +26,13 @@ Meeting recall across prior Meetings. See the
 [structured-work guide](docs/structured-work.md), and
 [Decision guide](docs/integrations/discord-decision-records.md).
 
+Compound commands create or reuse configured Notion records and Linear tasks.
+Native table-property and task updates currently produce exact manual-change
+proposals: those APIs lack the conditional-write capability needed to preserve
+concurrent Human edits. This is a functional limitation, not a credential or
+hosting requirement. The structured-work guide records the supported fields,
+catalog bounds and recovery behavior.
+
 Implementation and offline validation do not prove live deployment. Production
 activation still requires the dedicated application and provider credentials,
 reviewed founder/source grants and notices, the selected host, and real

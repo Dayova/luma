@@ -7,6 +7,10 @@ The shared runtime includes Discord Meeting analysis and bounded Context Ask,
 governed Notion/Linear/GitHub retrieval, canonical Decision Records and their
 signed history, founder consultations, Notion/Granola capture and synthesis,
 reviewed action execution, and explicit compound structured Notion/Linear work.
+Compound creation and reuse execute directly when authorized. Existing native
+table-property and task changes remain exact manual proposals because the
+providers cannot enforce an expected-version condition; deployment does not
+remove that functional limitation.
 Automatic Decision candidates use the shared AI allowance; canonical recording
 additionally requires current owner-specific standing permission. These are
 implemented capabilities, not evidence that source activation or production

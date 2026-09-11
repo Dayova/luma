@@ -9,10 +9,12 @@ import { createPgliteDatabase, type LumaDatabase } from "../../src/persistence/d
 import { createNotionReadOnlyKnowledgeCatalogForTest } from "../../src/knowledge/notion-read-only-knowledge-catalog.js";
 import {
   createNotionDecisionRecords,
+  createNotionDecisionRecordCatalog,
   type NotionDecisionTransport
 } from "../../src/knowledge/notion-decision-records.js";
 import { createOpenAIDecisionInterpreter } from "../../src/decision-intelligence/openai-decision-interpreter.js";
 import { decisionAuthorityContentHash } from "../../src/decision-intelligence/notion-decision-authority.js";
+import { createOrganizationalContext } from "../../src/organizational-context/organizational-context.js";
 import type { DecisionSource } from "../../src/domain/decision-records.js";
 import type { DiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
 import type { DiscordContextAskMention } from "../../src/discord/discord-context-ask-runtime.js";
@@ -47,7 +49,7 @@ async function fixture(monthlyLimit = "30") {
       {
         provider: "notion",
         credentialScopeId: "authority-read",
-        resources: [authorityId],
+        resources: [authorityId, dataSourceId],
         personIds: [...dayovaFounderPersonIds]
       },
       {
@@ -225,14 +227,15 @@ async function fixture(monthlyLimit = "30") {
       }
     });
   });
+  let runtime: Awaited<ReturnType<typeof createDecisionRuntime>> | undefined;
   app = await startServer(env, {
     createDatabase: () => Promise.resolve(database),
     createDiscordTransport: () => transport,
     createOpenAIReasoningModel: () => {
       throw new Error("Meeting analysis is disabled");
     },
-    createDecisionRuntime: (input) =>
-      createDecisionRuntime(input, {
+    createDecisionRuntime: async (input) => {
+      runtime = await createDecisionRuntime(input, {
         createKnowledge: (config) =>
           createNotionReadOnlyKnowledgeCatalogForTest(config, {
             retrievePage: () =>
@@ -258,9 +261,23 @@ async function fixture(monthlyLimit = "30") {
           }),
         createRecords: (config) =>
           createNotionDecisionRecords({ ...config, transport: notion }),
+        createRecordCatalog: (config) => {
+          expect(config.readOnlyApiToken).toBe("test-only-read");
+          expect("token" in config).toBe(false);
+          return createNotionDecisionRecordCatalog({
+            ...config,
+            transport: {
+              list: (...args) => notion.list(...args),
+              readPage: (...args) => notion.readPage(...args),
+              readMarkdown: (...args) => notion.readMarkdown(...args)
+            }
+          });
+        },
         createInterpreter: (config) =>
           createOpenAIDecisionInterpreter({ ...config, client: { create: model } })
-      })
+      });
+      return runtime;
+    }
   });
   const mention: DiscordContextAskMention = {
     guildId: "guild",
@@ -276,6 +293,27 @@ async function fixture(monthlyLimit = "30") {
     writes,
     pages,
     model,
+    async recall() {
+      if (!runtime) throw new Error("Missing composed Decision runtime");
+      // Settle a possible startup sync before explicitly refreshing the changed catalog.
+      await runtime.recall.syncOnce();
+      await runtime.recall.syncOnce();
+      return createOrganizationalContext({
+        database,
+        catalogs: [runtime.recall.catalog]
+      }).retrieve({
+        audience: {
+          workspaceId: workspace.workspaceId,
+          personIds: [...dayovaFounderPersonIds]
+        },
+        subject: { type: "conversation", id: "another-founder-thread" },
+        purpose: "answer-question",
+        concepts: ["Luma"],
+        time: { mode: "current" },
+        limit: 3,
+        maxCharacters: 10_000
+      });
+    },
     raw,
     mention,
     invoke: () => {
@@ -311,6 +349,26 @@ async function fixture(monthlyLimit = "30") {
   };
 }
 describe("composed production Decision Records", () => {
+  it("recalls the created canonical Decision through a separate read credential and withholds revoked source evidence", async () => {
+    const f = await fixture();
+    await f.invoke();
+    await f.revokeDestination();
+    const recalled = await f.recall();
+    expect(recalled.sources).toHaveLength(1);
+    expect(recalled.sources[0]).toMatchObject({
+      catalogId: "canonical-decisions",
+      authority: "human-confirmed",
+      standing: "current",
+      externalReference: { externalId: recordPageId }
+    });
+    expect(recalled.sources[0]!.content).toContain("nur für uns vier Gründer intern");
+    expect(recalled.retrieval.complete).toBe(false);
+    expect((await app?.decisionRecallStatus?.())?.indexedCount).toBe(1);
+    expect(f.model).toHaveBeenCalledTimes(1);
+    expect(f.writes).toEqual(["create"]);
+    f.revokeChannel();
+    expect((await f.recall()).sources).toEqual([]);
+  });
   it("records from a founder mention through real source, ownership, budget, MI, execution and Notion adapters without a Meeting", async () => {
     const f = await fixture();
     const result = await f.invoke();

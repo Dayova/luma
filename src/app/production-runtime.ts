@@ -1,4 +1,5 @@
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
+import { decisionRuntimeConfig } from "./decision-runtime.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
 import { notionWebhookRuntimeConfig } from "./notion-webhook-runtime.js";
@@ -98,6 +99,7 @@ export async function validateProductionEnvironment(
       "Context Ask parents must be within the configured Discord channel scope."
     );
     const decision = discordDecisionRecordConfigFromEnv(env);
+    decisionRuntimeConfig(env, decision !== undefined);
     const consultation = discordConsultationConfigFromEnv(env);
     for (const capture of [decision, consultation?.capture])
       check(

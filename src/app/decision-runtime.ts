@@ -5,7 +5,12 @@ import type { ImportedSourceHistoryAccess } from "../meeting-intelligence/import
 import { createNotionDecisionAuthority } from "../decision-intelligence/notion-decision-authority.js";
 import { createDecisionHumanReviewAccess } from "../decision-intelligence/human-review.js";
 import { createOpenAIDecisionInterpreter } from "../decision-intelligence/openai-decision-interpreter.js";
-import { createNotionDecisionRecords } from "../knowledge/notion-decision-records.js";
+import {
+  createNotionDecisionRecords,
+  createNotionDecisionRecordCatalog,
+  type NotionDecisionRecordsConfig
+} from "../knowledge/notion-decision-records.js";
+import { createDecisionRecallRuntime } from "../organizational-context/decision-recall-runtime.js";
 import { createNotionReadOnlyKnowledgeCatalog } from "../knowledge/notion-read-only-knowledge-catalog.js";
 import { canonicalNotionObjectId } from "../knowledge/notion-object-id.js";
 import { createContextSharingPolicy } from "./context-sharing-policy.js";
@@ -77,6 +82,7 @@ export function decisionRuntimeConfig(
 export type DecisionRuntimeDependencies = {
   createKnowledge?: typeof createNotionReadOnlyKnowledgeCatalog;
   createRecords?: typeof createNotionDecisionRecords;
+  createRecordCatalog?: typeof createNotionDecisionRecordCatalog;
   createInterpreter?: typeof createOpenAIDecisionInterpreter;
 };
 export async function createDecisionRuntime(
@@ -94,7 +100,11 @@ export async function createDecisionRuntime(
     model: string;
   },
   dependencies: DecisionRuntimeDependencies = {}
-): Promise<DecisionIntelligenceConfiguration> {
+): Promise<
+  DecisionIntelligenceConfiguration & {
+    recall: Awaited<ReturnType<typeof createDecisionRecallRuntime>>;
+  }
+> {
   const { workspaceId } = input;
   const audience: DecisionIntelligenceConfiguration["audience"] = (
     requestedWorkspaceId
@@ -152,10 +162,9 @@ export async function createDecisionRuntime(
     accessPolicy: input.accessPolicy,
     audience
   });
-  const records = (dependencies.createRecords ?? createNotionDecisionRecords)({
+  const recordPolicy: Omit<NotionDecisionRecordsConfig, "token" | "transport"> = {
     workspaceId,
     dataSourceId: config.dataSourceId,
-    token: env["LUMA_DECISION_RECORDS_NOTION_API_TOKEN"]!,
     signingKey: env["LUMA_DECISION_RECORDS_SIGNING_KEY"]!,
     authorize: ({ audience, dataSourceId }) =>
       policy.authorize({
@@ -172,8 +181,33 @@ export async function createDecisionRuntime(
       authority.authorizeRetainedAuthority(request),
     authorizeRetainedHumanReview: (request) =>
       humanReviewAccess.authorizeRetainedHumanReview(request)
+  };
+  const records = (dependencies.createRecords ?? createNotionDecisionRecords)({
+    ...recordPolicy,
+    token: env["LUMA_DECISION_RECORDS_NOTION_API_TOKEN"]!
+  });
+  const catalog = (dependencies.createRecordCatalog ?? createNotionDecisionRecordCatalog)(
+    {
+      ...recordPolicy,
+      readOnlyApiToken: env["LUMA_CONTEXT_NOTION_READONLY_API_TOKEN"]!,
+      authorize: ({ audience, dataSourceId }) =>
+        policy.authorize({
+          audience,
+          provider: "notion",
+          credentialScopeId: config.knowledgeCredentialScopeId,
+          resource: dataSourceId
+        })
+    }
+  );
+  const recall = await createDecisionRecallRuntime({
+    database: input.database,
+    workspaceId,
+    catalogId: "canonical-decisions",
+    records: catalog,
+    audience: () => audience(workspaceId)
   });
   return {
+    recall,
     authority,
     records,
     evidenceSource,

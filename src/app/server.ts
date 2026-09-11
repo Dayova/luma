@@ -1,3 +1,4 @@
+import type { DecisionRecallStatus } from "../organizational-context/decision-recall-runtime.js";
 import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createDecisionRuntime, decisionRuntimeConfig } from "./decision-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
@@ -68,6 +69,7 @@ import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.j
 export type RunningLumaApp = {
   stop(): Promise<void>;
   gatewayConnected(): boolean;
+  decisionRecallStatus?(): Promise<DecisionRecallStatus | null>;
   notionObservationStatus?(): NotionMeetingNotesObservationHostStatus | null;
 };
 
@@ -269,24 +271,6 @@ export async function startServer(
       ledger: observedSourceLedger,
       operationalOutcomeMarkerVerifier
     });
-    const contextCatalogs = [...(externalContextCatalogs ?? [])];
-    if (importedSourceAnalysis) {
-      contextCatalogs.push(
-        createImportedMeetingContextCatalog({
-          database,
-          sourceAccess: importedSourceAnalysis.access,
-          externalContext: createExternalContextReceiptVerifier({
-            database,
-            catalogs: externalContextCatalogs ?? [],
-            ignoredEmptyCatalogIds: [importedMeetingContextCatalogId]
-          })
-        })
-      );
-    }
-    const organizationalContext =
-      externalContextCatalogs || contextCatalogs.length
-        ? createOrganizationalContext({ database, catalogs: contextCatalogs })
-        : undefined;
     const workItemProviderId = workProvider?.providerId ?? "linear";
     const discordTransport = createDiscordTransport(env, discordContextAskConfig);
     startupCleanup.push(() => discordTransport.disconnect());
@@ -313,6 +297,30 @@ export async function startServer(
           model: openAIReasoningModelName
         })
       : undefined;
+    if (decisionIntelligence)
+      startupCleanup.push(() => decisionIntelligence.recall.stop());
+    const providerContextCatalogs = [
+      ...(externalContextCatalogs ?? []),
+      ...(decisionIntelligence ? [decisionIntelligence.recall.catalog] : [])
+    ];
+    const contextCatalogs = [...providerContextCatalogs];
+    if (importedSourceAnalysis) {
+      contextCatalogs.push(
+        createImportedMeetingContextCatalog({
+          database,
+          sourceAccess: importedSourceAnalysis.access,
+          externalContext: createExternalContextReceiptVerifier({
+            database,
+            catalogs: providerContextCatalogs,
+            ignoredEmptyCatalogIds: [importedMeetingContextCatalogId]
+          })
+        })
+      );
+    }
+    const organizationalContext =
+      externalContextCatalogs || contextCatalogs.length
+        ? createOrganizationalContext({ database, catalogs: contextCatalogs })
+        : undefined;
     const meetingDependencies = {
       database,
       ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
@@ -516,6 +524,7 @@ export async function startServer(
     startupSignal?.throwIfAborted();
     if (notionWebhook) await notionWebhook.start();
     else meetingNotesSync?.start();
+    decisionIntelligence?.recall.start();
     startupSignal?.throwIfAborted();
     console.log(`Luma Discord bot connected in ${config.nodeEnv} mode`);
 
@@ -523,6 +532,8 @@ export async function startServer(
     return {
       gatewayConnected: () => discordTransport.gatewayConnected?.() ?? false,
       notionObservationStatus: () => notionWebhook?.status() ?? null,
+      decisionRecallStatus: () =>
+        decisionIntelligence?.recall.status() ?? Promise.resolve(null),
       stop() {
         stopping ??= (async () => {
           // Stop admission and scheduled ingestion immediately, then drain both.
@@ -531,7 +542,8 @@ export async function startServer(
           await drainBeforeClose(
             Promise.all([
               bot.stop(),
-              notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop()
+              notionWebhook ? notionWebhook.stop() : meetingNotesSync?.stop(),
+              decisionIntelligence?.recall.stop()
             ])
           );
           await database.close();

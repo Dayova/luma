@@ -101,8 +101,8 @@ OPENAI_API_KEY=<shared-ai-account>
 
 Use the existing protected sharing-policy format to grant the exact Decision
 Records data-source ID under the writer scope to all four founder Person IDs.
-Grant the exact ownership page under its separate read-only scope to that same
-original audience. The Notion integration itself must have access to the selected
+Grant the exact ownership page and Decision Records data source under the separate
+read-only scope to that same original audience. The Notion integration itself must have access to the selected
 data source. Every record's actual parent and retained source grants are checked
 at use time. A configured writer token alone never authorizes disclosure.
 
@@ -121,9 +121,16 @@ recording before an AI call or canonical mutation. Budget exhaustion is visible
 without another paid call. Live source access, native Notion round-trip, production
 secrets and host recovery still need deployment verification.
 
-This path handles explicit Conversation recording instructions. Automatic candidate
-recognition and actual imported-Meeting Decision audiences are separate required
-work; enabling this flag does not claim they are composed.
+This path handles explicit Conversation and imported-Meeting recording instructions.
+Automatic candidate recognition remains separate required work.
+
+The same runtime includes [background Decision recall](../decision-record-recall.md).
+Discovery uses the dedicated read-only credential and never invokes the writer.
+The index refreshes every five minutes; a question checks at most three selected
+records live within the existing context deadline. Cold, stale or incomplete
+discovery is exposed as partial coverage. Revoked original-source or recipient
+access withholds a record even when its indexed terms remain locally retained.
+The index drains before the shared database closes.
 
 ## Receipts, replay and recovery
 

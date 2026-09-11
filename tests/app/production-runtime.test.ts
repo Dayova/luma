@@ -138,6 +138,15 @@ describe("production deployment preflight", () => {
   it("requires all four mapped founders and the common parent scope for explicit recording", async () => {
     const env = {
       ...configuration(),
+      LUMA_DECISION_RECORDS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+      LUMA_DECISION_RECORDS_CREDENTIAL_SCOPE_ID: "decision-write",
+      LUMA_DECISION_RECORDS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_DECISION_RECORDS_SIGNING_KEY: "synthetic-key-longer-than-thirty-two-bytes",
+      LUMA_DECISION_AUTHORITY_POLICY_PATH: "/etc/luma/decision-authority.json",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/context-sharing.json",
+      LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "synthetic-reader",
+      LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "source-read",
+      LUMA_CONTEXT_NOTION_PAGE_IDS: "00000000-0000-0000-0000-000000000001",
       LUMA_DISCORD_DECISION_RECORDS_ENABLED: "1",
       LUMA_DISCORD_DECISION_RECORDS_PARENT_CHANNEL_IDS: "1507049196006408352",
       LUMA_DISCORD_DECISION_RECORDS_ALLOWED_DISCORD_USER_IDS:
@@ -152,7 +161,10 @@ describe("production deployment preflight", () => {
         LUMA_DISCORD_DECISION_RECORDS_ALLOWED_DISCORD_USER_IDS:
           "779381502311137301,726409024894926869,1492911575806251219,777777777777777777"
       },
-      { LUMA_DISCORD_DECISION_RECORDS_PARENT_CHANNEL_IDS: "777777777777777777" }
+      { LUMA_DISCORD_DECISION_RECORDS_PARENT_CHANNEL_IDS: "777777777777777777" },
+      { LUMA_DECISION_RECORDS_SIGNING_KEY: "short" },
+      { LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "" },
+      { LUMA_DECISION_AUTHORITY_POLICY_PATH: "relative.json" }
     ])
       await expect(
         validateProductionEnvironment(

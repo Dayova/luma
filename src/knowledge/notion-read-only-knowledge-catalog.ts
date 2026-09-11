@@ -23,7 +23,10 @@ export const notionKnowledgeCatalogBrand: unique symbol = Symbol(
 export interface NotionKnowledgeCatalog extends KnowledgeCatalog {
   readonly [notionKnowledgeCatalogBrand]: true;
   readDocument(
-    input: Parameters<KnowledgeCatalog["readDocument"]>[0] & { signal?: AbortSignal }
+    input: Parameters<KnowledgeCatalog["readDocument"]>[0] & {
+      signal?: AbortSignal;
+      priority?: "background";
+    }
   ): ReturnType<KnowledgeCatalog["readDocument"]>;
 }
 export type NotionKnowledgeCatalogConfig = {
@@ -37,8 +40,16 @@ export type NotionKnowledgeCatalogConfig = {
   client?: never;
 };
 type RawTransport = {
-  retrievePage(pageId: string, signal?: AbortSignal): Promise<unknown>;
-  retrieveMarkdown(pageId: string, signal?: AbortSignal): Promise<unknown>;
+  retrievePage(
+    pageId: string,
+    signal?: AbortSignal,
+    priority?: "background"
+  ): Promise<unknown>;
+  retrieveMarkdown(
+    pageId: string,
+    signal?: AbortSignal,
+    priority?: "background"
+  ): Promise<unknown>;
 };
 /** Finite deterministic read seam only; production accepts no injected client. */
 export type NotionKnowledgeTransportForTest = RawTransport & {
@@ -150,14 +161,20 @@ function createCatalog(
       const pageId = canonicalNotionObjectId(documentId);
       if (!pageId || !(await allowed(audience, pageId))) return null;
       try {
-        const before = parsePage(await transport.retrievePage(pageId, signal), pageId);
-        if (!(await allowed(audience, pageId))) return null;
-        const contentMarkdown = parseMarkdown(
-          await transport.retrieveMarkdown(pageId, signal),
+        const before = parsePage(
+          await transport.retrievePage(pageId, signal, input.priority),
           pageId
         );
         if (!(await allowed(audience, pageId))) return null;
-        const after = parsePage(await transport.retrievePage(pageId, signal), pageId);
+        const contentMarkdown = parseMarkdown(
+          await transport.retrieveMarkdown(pageId, signal, input.priority),
+          pageId
+        );
+        if (!(await allowed(audience, pageId))) return null;
+        const after = parsePage(
+          await transport.retrievePage(pageId, signal, input.priority),
+          pageId
+        );
         if (!(await allowed(audience, pageId))) return null;
         if (signal.aborted || JSON.stringify(before) !== JSON.stringify(after))
           throw new NotionKnowledgeReadError();
@@ -298,16 +315,18 @@ function parseMarkdown(raw: unknown, pageId: string): string {
 function sdkTransport(token: string): RawTransport {
   const { client, request } = createScheduledNotionClient(token);
   return {
-    retrievePage: (pageId, signal) =>
+    retrievePage: (pageId, signal, priority) =>
       request({
         signal: signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
         readOnly: true,
+        ...(priority ? { priority } : {}),
         send: () => client.pages.retrieve({ page_id: pageId })
       }),
-    retrieveMarkdown: (pageId, signal) =>
+    retrieveMarkdown: (pageId, signal, priority) =>
       request({
         signal: signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
         readOnly: true,
+        ...(priority ? { priority } : {}),
         send: () =>
           client.pages.retrieveMarkdown({ page_id: pageId, include_transcript: true })
       })

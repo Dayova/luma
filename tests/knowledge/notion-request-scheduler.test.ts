@@ -29,6 +29,39 @@ describe("bounded Notion connection scheduling", () => {
     expect(sent).toHaveBeenCalledTimes(180);
   });
 
+  it("reserves foreground capacity while background discovery waits", async () => {
+    vi.useFakeTimers();
+    const scheduler = createNotionRequestScheduler();
+    const signal = new AbortController().signal;
+    await Promise.all(
+      Array.from({ length: 156 }, () =>
+        scheduler.request({
+          signal,
+          readOnly: true,
+          priority: "background",
+          send: () => Promise.resolve()
+        })
+      )
+    );
+    const background = vi.fn(() => Promise.resolve());
+    const queued = scheduler.request({
+      signal,
+      readOnly: true,
+      priority: "background",
+      send: background
+    });
+    const foreground = vi.fn(() => Promise.resolve());
+    await Promise.all(
+      Array.from({ length: 24 }, () =>
+        scheduler.request({ signal, readOnly: true, send: foreground })
+      )
+    );
+    expect(foreground).toHaveBeenCalledTimes(24);
+    expect(background).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await queued;
+    expect(background).toHaveBeenCalledTimes(1);
+  });
   it("rechecks mutation proof when its own reads consume the remaining request window", async () => {
     vi.useFakeTimers();
     const scheduler = createNotionRequestScheduler();

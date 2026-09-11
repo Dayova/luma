@@ -11,13 +11,37 @@ import type { ContextCatalog, ContextSource } from "./interface.js";
 export function createDecisionContextCatalog(input: {
   id: string;
   records: DecisionRecordCatalog;
+  /** Background candidates are discovery only; every returned source is still read live. */
+  candidates?: {
+    search(request: Parameters<ContextCatalog["search"]>[0]): Promise<{
+      references: ExternalReference[];
+      complete: boolean;
+      warnings: string[];
+    }>;
+  };
+  readTimeoutMs?: number;
+  signal?: AbortSignal;
 }): ContextCatalog {
   if (!input.id.trim())
     throw new Error("A unique Decision context catalog ID is required");
   const { records } = input;
+  const readTimeoutMs = input.readTimeoutMs ?? 4_500;
+  if (
+    !Number.isSafeInteger(readTimeoutMs) ||
+    readTimeoutMs < 100 ||
+    readTimeoutMs > 4_500
+  )
+    throw new Error("Decision context reads must fit the context deadline");
   return Object.freeze({
     id: input.id,
     async search(request) {
+      if (input.candidates) {
+        const found = await input.candidates.search(request);
+        const ids = found.references.map(sourceId);
+        if (new Set(ids).size !== ids.length || ids.length > request.limit)
+          throw new Error("Decision candidate discovery is ambiguous or unbounded");
+        return { sourceIds: ids, complete: found.complete, warnings: found.warnings };
+      }
       const result = await records.discover({
         audience: request.audience,
         limit: request.limit
@@ -36,9 +60,39 @@ export function createDecisionContextCatalog(input: {
       return { sourceIds: ids.sort(), complete: true, warnings: [] };
     },
     async read({ audience, sourceId: id }) {
+      if (input.signal?.aborted) return null;
       const reference = sourceReference(id);
       if (!reference || reference.providerId !== records.providerId) return null;
-      const raw = await records.readReference({ audience, reference });
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      input.signal?.addEventListener("abort", abort, { once: true });
+      const timer = setTimeout(abort, readTimeoutMs);
+      const timeout = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () =>
+            reject(
+              new Error("Decision context read was cancelled or exceeded its bound")
+            ),
+          { once: true }
+        );
+      });
+      const raw = await Promise.race([
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted)
+            throw new Error("Decision context read was cancelled");
+          return records.readReference({
+            audience,
+            reference,
+            signal: controller.signal
+          });
+        }),
+        timeout
+      ]).finally(() => {
+        clearTimeout(timer);
+        input.signal?.removeEventListener("abort", abort);
+        controller.abort();
+      });
       if (!raw) return null;
       const record = canonicalDecisionRecordSchema.parse(raw);
       if (sourceId(record.reference) !== id || !hasRecordedHumanAcceptance(record))
@@ -79,7 +133,15 @@ function hasRecordedHumanAcceptance({ content }: CanonicalDecisionRecord): boole
     !candidate.acceptanceEvidenceIds.length ||
     !same(candidate.decisionMakerPersonIds, authority.decisionMakerPersonIds) ||
     !same(candidate.acceptanceEvidenceIds, authority.acceptanceEvidenceIds) ||
-    !authority.grantIds.length
+    !authority.grantIds.length ||
+    (authority.humanReviews ?? []).some(
+      (review) =>
+        JSON.stringify(review.subject) !== JSON.stringify(source.subject) ||
+        review.sourceContentHash !== source.contentHash ||
+        review.sourceAuthorizationHash !== source.authorizationHash ||
+        review.audience.workspaceId !== source.audience.workspaceId ||
+        !same(review.audience.personIds, source.audience.personIds)
+    )
   )
     return false;
   const owner = candidate.decisionMakerPersonIds[0];
@@ -96,7 +158,10 @@ function hasRecordedHumanAcceptance({ content }: CanonicalDecisionRecord): boole
       )
     ) &&
     candidate.acceptanceEvidenceIds.every((id) =>
-      source.evidence.some(
+      [
+        ...source.evidence,
+        ...(authority.humanReviews ?? []).map((review) => review.evidence)
+      ].some(
         (evidence) =>
           evidence.id === id &&
           evidence.origin === "human" &&
@@ -125,7 +190,10 @@ function project(record: CanonicalDecisionRecord, id: string): ContextSource {
     `Responsibility evidence: ${authority.snapshot.source.url}`,
     ...[
       ...new Set(
-        record.content.source.evidence.flatMap((evidence) =>
+        [
+          ...record.content.source.evidence,
+          ...(authority.humanReviews ?? []).map((review) => review.evidence)
+        ].flatMap((evidence) =>
           evidence.reference.externalReference
             ? [evidence.reference.externalReference.url]
             : []

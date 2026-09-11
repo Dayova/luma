@@ -29,6 +29,7 @@ export function createScheduledNotionClient(token: string) {
       input: {
         signal: AbortSignal;
         readOnly: boolean;
+        priority?: "background";
         beforeDispatch?: () => Promise<void>;
         send: () => Promise<T>;
       }

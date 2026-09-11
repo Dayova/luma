@@ -66,7 +66,9 @@ timestamps alone never prove unchanged content.
 
 The native Decision writer, reader and governed ownership-page reader share a
 per-credential scheduler. It admits at most four concurrent requests and 180 starts
-in a sliding 60-second window. Notion currently documents 180 requests/minute for
+in a sliding 60-second window. Background discovery is limited to 156 starts,
+reserving 24 for foreground reads and writes; it carries that priority through
+retained Notion authority reads too. Notion currently documents 180 requests/minute for
 non-Business/Enterprise connections and 600 for Business/Enterprise, with additional
 workspace limits. The conservative local window covers either plan; independent
 processes and other integrations can still consume provider capacity. Native fetch

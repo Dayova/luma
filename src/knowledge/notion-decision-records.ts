@@ -33,6 +33,7 @@ import {
 
 export type NotionDecisionRequestContext = {
   signal: AbortSignal;
+  priority?: "background";
   beforeDispatch?: () => Promise<void>;
   onDispatch?: () => void;
 };
@@ -78,18 +79,21 @@ export type NotionDecisionRecordsConfig = {
     audience: DecisionAudience;
     source: DecisionSource;
     signal?: AbortSignal;
+    priority?: "background";
   }): Promise<boolean>;
   /** Historical authority evidence has its own current source permission fence. */
   authorizeRetainedAuthority(input: {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
     signal?: AbortSignal;
+    priority?: "background";
   }): Promise<boolean>;
   /** Supplemental original Human reviews have independent retained actor/source/audience proofs. */
   authorizeRetainedHumanReview?(input: {
     audience: DecisionAudience;
     review: DecisionHumanReview;
     signal?: AbortSignal;
+    priority?: "background";
   }): Promise<boolean>;
   transport?: NotionDecisionTransport;
   now?: () => Date;
@@ -102,7 +106,7 @@ export type NotionDecisionRecordCatalogConfig = Omit<
   transport?: NotionDecisionReadTransport;
   token?: never;
 };
-type Deadline = { signal: AbortSignal; check(): void };
+type Deadline = { signal: AbortSignal; priority?: "background"; check(): void };
 type ProofPass = {
   sources: Map<string, DecisionSource>;
   authorities: Map<string, DecisionAuthoritySnapshot>;
@@ -236,7 +240,8 @@ function createCapability(
         !(await config.authorizeRetainedSource({
           audience: structuredClone(audience),
           source: structuredClone(source),
-          signal: deadline.signal
+          signal: deadline.signal,
+          ...(deadline.priority ? { priority: deadline.priority } : {})
         }))
       )
         throw safeFailure();
@@ -248,7 +253,8 @@ function createCapability(
         !(await config.authorizeRetainedAuthority({
           audience: structuredClone(audience),
           snapshot: structuredClone(snapshot),
-          signal: deadline.signal
+          signal: deadline.signal,
+          ...(deadline.priority ? { priority: deadline.priority } : {})
         }))
       )
         throw safeFailure();
@@ -261,7 +267,8 @@ function createCapability(
         !(await config.authorizeRetainedHumanReview({
           audience: structuredClone(audience),
           review: structuredClone(review),
-          signal: deadline.signal
+          signal: deadline.signal,
+          ...(deadline.priority ? { priority: deadline.priority } : {})
         }))
       )
         throw safeFailure();
@@ -490,22 +497,28 @@ function createCapability(
   return {
     providerId: "notion",
     discover(input) {
-      const bound = structuredClone(input);
-      return withinDeadline(async (deadline) => {
-        try {
-          return (await discover(deadline, bound.audience, bound.limit)).snapshot;
-        } catch {
-          return {
-            id: `notion-decisions:${workspaceId}:${dataSourceId}`,
-            revision: "unavailable",
-            complete: false,
-            records: []
-          };
-        }
-      });
+      const { signal, priority, ...request } = input;
+      const bound = structuredClone(request);
+      return withinDeadline(
+        async (deadline) => {
+          try {
+            return (await discover(deadline, bound.audience, bound.limit)).snapshot;
+          } catch {
+            return {
+              id: `notion-decisions:${workspaceId}:${dataSourceId}`,
+              revision: "unavailable",
+              complete: false,
+              records: []
+            };
+          }
+        },
+        signal,
+        priority
+      );
     },
     requireCurrent(input) {
-      const bound = structuredClone(input);
+      const { signal, ...request } = input;
+      const bound = structuredClone(request);
       return withinDeadline(async (deadline) => {
         const records = bound.snapshot.records.map((record) =>
           canonicalDecisionRecordSchema.parse(record)
@@ -530,10 +543,11 @@ function createCapability(
           grant(deadline, bound.audience, record.reference.externalId)
         );
         await grant(deadline, bound.audience);
-      });
+      }, signal);
     },
     read(input) {
-      const bound = structuredClone(input);
+      const { signal, ...request } = input;
+      const bound = structuredClone(request);
       return withinDeadline(async (deadline) => {
         try {
           const { snapshot } = await discover(deadline, bound.audience, MAX_RECORDS);
@@ -547,10 +561,11 @@ function createCapability(
         } catch {
           return null;
         }
-      });
+      }, signal);
     },
     readReference(input) {
-      const bound = structuredClone(input);
+      const { signal, ...request } = input;
+      const bound = structuredClone(request);
       return withinDeadline(async (deadline) => {
         try {
           return (
@@ -559,7 +574,7 @@ function createCapability(
         } catch {
           return null;
         }
-      });
+      }, signal);
     },
     findWritten(input) {
       const bound = structuredClone({
@@ -833,17 +848,27 @@ function pageMarkdown(raw: unknown, pageId: string): string {
     throw safeFailure();
   return value.markdown;
 }
-function withinDeadline<T>(work: (deadline: Deadline) => Promise<T>): Promise<T> {
+function withinDeadline<T>(
+  work: (deadline: Deadline) => Promise<T>,
+  outer?: AbortSignal,
+  priority?: "background"
+): Promise<T> {
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (outer?.aborted) abort();
+  else outer?.addEventListener("abort", abort, { once: true });
   const timeout = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener("abort", () => reject(safeFailure()), {
-      once: true
-    });
+    if (controller.signal.aborted) reject(safeFailure());
+    else
+      controller.signal.addEventListener("abort", () => reject(safeFailure()), {
+        once: true
+      });
   });
   const timer = setTimeout(() => controller.abort(), NOTION_OPERATION_TIMEOUT_MS);
   return Promise.race([
     work({
       signal: controller.signal,
+      ...(priority ? { priority } : {}),
       check() {
         if (controller.signal.aborted) throw safeFailure();
       }
@@ -851,6 +876,7 @@ function withinDeadline<T>(work: (deadline: Deadline) => Promise<T>): Promise<T>
     timeout
   ]).finally(() => {
     clearTimeout(timer);
+    outer?.removeEventListener("abort", abort);
     controller.abort();
   });
 }
@@ -886,6 +912,7 @@ function sdkReadTransport(token: string): NotionDecisionReadTransport {
     request({
       signal: context?.signal ?? AbortSignal.timeout(NOTION_OPERATION_TIMEOUT_MS),
       readOnly: true,
+      ...(context?.priority ? { priority: context.priority } : {}),
       send
     });
   return {

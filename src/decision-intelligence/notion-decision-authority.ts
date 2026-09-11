@@ -57,6 +57,7 @@ export type SourceBackedDecisionAuthority = DecisionAuthority & {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
     signal?: AbortSignal;
+    priority?: "background";
   }): Promise<boolean>;
 };
 export function decisionAuthorityContentHash(markdown: string): string {
@@ -237,6 +238,7 @@ export function createNotionDecisionAuthority(input: {
     audience: DecisionAudience;
     snapshot: DecisionAuthoritySnapshot;
     signal?: AbortSignal;
+    priority?: "background";
   }): Promise<boolean> =>
     bounded(async (check, signal) => {
       try {
@@ -274,6 +276,7 @@ export function createNotionDecisionAuthority(input: {
         const document = await input.knowledge.readDocument({
           audience: bound,
           signal,
+          ...(request.priority ? { priority: request.priority } : {}),
           documentId: snapshot.source.externalId
         });
         check();

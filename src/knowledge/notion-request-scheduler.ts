@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export const NOTION_OPERATION_TIMEOUT_MS = 240_000;
 const WINDOW_MS = 60_000;
 const REQUESTS_PER_WINDOW = 180;
+const BACKGROUND_REQUESTS_PER_WINDOW = 156;
 const CONCURRENT_REQUESTS = 4;
 type Waiter = () => void;
 
@@ -29,6 +30,7 @@ export interface NotionRequestScheduler {
   request<T>(input: {
     signal: AbortSignal;
     readOnly: boolean;
+    priority?: "background";
     /** Runs after a queued wait and again if proof itself exhausts capacity. */
     beforeDispatch?: () => Promise<void>;
     send: () => Promise<T>;
@@ -43,19 +45,22 @@ export function createNotionRequestScheduler(): NotionRequestScheduler {
   const check = (signal: AbortSignal) => {
     if (signal.aborted) throw new NotionRequestUnavailableError();
   };
-  const delay = () => {
+  const delay = (priority?: "background") => {
     const now = Date.now();
     while (started.length && started[0]! <= now - WINDOW_MS) started.shift();
+    const limit =
+      priority === "background" ? BACKGROUND_REQUESTS_PER_WINDOW : REQUESTS_PER_WINDOW;
     return Math.max(
       0,
       pauseUntil - now,
-      started.length >= REQUESTS_PER_WINDOW ? started[0]! + WINDOW_MS - now : 0
+      started.length >= limit ? started[started.length - limit]! + WINDOW_MS - now : 0
     );
   };
-  const ready = () => delay() === 0 && active < CONCURRENT_REQUESTS;
-  const wait = (signal: AbortSignal): Promise<void> => {
+  const ready = (priority?: "background") =>
+    delay(priority) === 0 && active < CONCURRENT_REQUESTS;
+  const wait = (signal: AbortSignal, priority?: "background"): Promise<void> => {
     check(signal);
-    if (ready()) return Promise.resolve();
+    if (ready(priority)) return Promise.resolve();
     return new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const clear = () => {
@@ -71,12 +76,12 @@ export function createNotionRequestScheduler(): NotionRequestScheduler {
       const wake = () => {
         if (signal.aborted) return abort();
         if (timer) clearTimeout(timer);
-        if (ready()) {
+        if (ready(priority)) {
           clear();
           resolve();
           return;
         }
-        const milliseconds = delay();
+        const milliseconds = delay(priority);
         if (milliseconds > 0) timer = setTimeout(wake, milliseconds);
       };
       waiters.add(wake);
@@ -91,11 +96,11 @@ export function createNotionRequestScheduler(): NotionRequestScheduler {
     async request(input) {
       for (let attempt = 0; ;) {
         check(input.signal);
-        await wait(input.signal);
+        await wait(input.signal, input.priority);
         // Do not hold a request slot while a source proof makes its own reads.
         await input.beforeDispatch?.();
         check(input.signal);
-        if (!ready()) continue;
+        if (!ready(input.priority)) continue;
         active += 1;
         started.push(Date.now());
         try {

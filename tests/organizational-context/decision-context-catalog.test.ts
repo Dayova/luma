@@ -227,6 +227,44 @@ describe("canonical Decision recall", () => {
       expect((await f.context().retrieve(request)).sources).toEqual([]);
     }
   );
+  it.each(["valid", "subject", "content", "authorization", "audience"])(
+    "binds supplemental Human acceptance to its exact original source: %s",
+    async (variant) => {
+      const f = await fixture();
+      const record = canonical("active", "Luma remains internal to the four founders.");
+      const source = record.content.source;
+      const original = structuredClone(source.evidence[0]!);
+      original.id = "review-evidence";
+      original.reference.evidenceId = original.id;
+      record.content.candidate.acceptanceEvidenceIds = [original.id];
+      record.content.authority.acceptanceEvidenceIds = [original.id];
+      source.evidence[0]!.origin = "provider-derived";
+      source.evidence[0]!.authorPersonId = null;
+      const review = {
+        id: "review",
+        requestId: "request",
+        observationId: "observation",
+        subject: structuredClone(source.subject),
+        actor: { providerId: "discord", providerUserId: "jakob-discord" },
+        personId: "jakob",
+        audience: structuredClone(source.audience),
+        sourceContentHash: source.contentHash,
+        sourceAuthorizationHash: source.authorizationHash,
+        reviewToken: null,
+        acceptedCandidateHash: null,
+        evidence: original,
+        observedAt: "2026-09-11T12:00:00Z"
+      };
+      if (variant === "subject") review.subject = { type: "meeting", meetingId: "other" };
+      if (variant === "content") review.sourceContentHash = "different";
+      if (variant === "authorization") review.sourceAuthorizationHash = "different";
+      if (variant === "audience") review.audience.personIds = ["jakob"];
+      record.content.authority.humanReviews = [review];
+      f.setRecords([record]);
+      const result = await f.context().retrieve(request);
+      expect(result.sources).toHaveLength(variant === "valid" ? 1 : 0);
+    }
+  );
   it("withholds incomplete catalog discovery and audience expansion", async () => {
     const f = await fixture();
     f.incomplete();
@@ -235,12 +273,10 @@ describe("canonical Decision recall", () => {
     expect(result.retrieval.complete).toBe(false);
     expect(
       (
-        await f
-          .context()
-          .retrieve({
-            ...request,
-            audience: { ...audience, personIds: [...audience.personIds, "guest"] }
-          })
+        await f.context().retrieve({
+          ...request,
+          audience: { ...audience, personIds: [...audience.personIds, "guest"] }
+        })
       ).sources
     ).toEqual([]);
   });

@@ -22,7 +22,9 @@ The help page does not publish stable argument/output schemas. The adapter check
 live `tools/list` for compatible `limit` and `meeting_ids` inputs. Its bounded
 XML-like list/get decoder follows the format shown in the original
 [Honcho Granola integration](https://honcho.dev/docs/v3/guides/granola), while
-rejecting incomplete/duplicate wrappers and unrecognized shapes. This is a
+rejecting incomplete/duplicate wrappers and unrecognized shapes. Participant,
+notes and summary sections must be distinct top-level fields; nested or
+overlapping section markup cannot establish meeting eligibility. This is a
 conservative compatibility implementation, not a claim of live account testing.
 A changed schema or unsupported provider result produces an explicit failure;
 it never becomes an empty successful scan or invented Evidence.
@@ -31,7 +33,9 @@ The HTTP client implements JSON and SSE responses, protocol negotiation, session
 headers, read deadlines and byte limits using the
 [MCP Streamable HTTP contract](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
 It accepts only the three named read tools. It follows no redirects, executes no
-server-initiated requests and returns content-free errors. A credential callback
+server-initiated requests and returns content-free errors. The same deadline
+bounds stream cancellation, including failed responses and notifications; a
+stalled cleanup cannot retain an admitted request indefinitely. A credential callback
 supplies an already authorized OAuth token with its expiry. The token stays in
 memory for one session; expiry or authorization failure requires a fresh session.
 There is no credential discovery or fallback to local Granola/other-app sessions.

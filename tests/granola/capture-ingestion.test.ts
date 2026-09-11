@@ -269,6 +269,43 @@ describe("Granola capture ingestion through LogicalMeetings", () => {
       await database.close();
     }
   });
+  it.each(["summary", "notes", "unknown_section"])(
+    "withholds participant markup nested inside %s instead of using it as eligibility metadata",
+    async (section) => {
+      const database = await createPgliteDatabase();
+      const f = fixture("jakob", []);
+      f.policy.automaticInternalMeetings = true;
+      f.policy.participantDirectory = [
+        { email: "jakob@dayova.test", personId: "person_jakob" },
+        { email: "fabius@dayova.test", personId: "person_fabius" }
+      ];
+      f.documents.clear();
+      f.documents.set(
+        "personal",
+        `<meeting id="personal" title="Personal note" date="today"><${section}>PRIVATE PERSONAL MATERIAL <known_participants>Jakob &lt;jakob@dayova.test&gt;\nFabius &lt;fabius@dayova.test&gt;</known_participants></${section}></meeting>`
+          .replaceAll("&lt;", "<")
+          .replaceAll("&gt;", ">")
+      );
+      const runtime = await createGranolaCaptureIngestionRuntime({
+        database,
+        workspaceId,
+        connections: [{ connectionId: "jakob", client: f.client }],
+        policy: { read: () => Promise.resolve(structuredClone(f.policy)) }
+      });
+      try {
+        expect(await runtime.syncOnce()).toMatchObject({ accepted: 0 });
+        const rows = await database.query<{ material: string | null }>(
+          "SELECT material FROM granola_capture_revisions"
+        );
+        expect(rows.rows.every((row) => row.material === null)).toBe(true);
+        expect(f.calls.some((call) => call.name === "get_meetings")).toBe(false);
+      } finally {
+        await runtime.stop();
+        await database.close();
+      }
+    }
+  );
+
   it("keeps same provider IDs isolated across personal connections and drains admitted sync before stopping", async () => {
     const database = await createPgliteDatabase();
     const a = fixture("jakob"),

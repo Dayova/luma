@@ -103,9 +103,10 @@ export function granolaMeetingDocuments(result: unknown): GranolaMeetingDocument
     const inner = body.slice(header[0].length, end);
     if (/<\/?meeting(?:\s|>)/.test(inner)) throw unsupported();
     const document = body.slice(0, end + "</meeting>".length);
-    const participants = uniqueSection(inner, "known_participants");
-    const notes = uniqueSection(inner, "notes");
-    const summary = uniqueSection(inner, "summary");
+    const sections = topLevelSections(inner);
+    const participants = sections.get("known_participants") ?? null;
+    const notes = sections.get("notes");
+    const summary = sections.get("summary");
     output.push({
       id: header[1]!,
       title: header[2]!,
@@ -120,20 +121,26 @@ export function granolaMeetingDocuments(result: unknown): GranolaMeetingDocument
     throw unsupported();
   return output;
 }
-function uniqueSection(body: string, tag: string): string | null {
-  const opening = `<${tag}>`;
-  const closing = `</${tag}>`;
-  const start = body.indexOf(opening);
-  const end = body.indexOf(closing);
-  if (start < 0 && end < 0) return null;
-  if (
-    start < 0 ||
-    end < start ||
-    body.indexOf(opening, start + opening.length) >= 0 ||
-    body.indexOf(closing, end + closing.length) >= 0
-  )
-    throw unsupported();
-  return body.slice(start + opening.length, end);
+function topLevelSections(body: string): Map<string, string> {
+  const sections = new Map<string, string>();
+  let remaining = body.trim();
+  while (remaining.length) {
+    const opening = /^<(known_participants|notes|summary)>/.exec(remaining);
+    if (!opening) throw unsupported();
+    const tag = opening[1]!;
+    const closing = `</${tag}>`;
+    const end = remaining.indexOf(closing, opening[0].length);
+    if (end < 0 || sections.has(tag)) throw unsupported();
+    const value = remaining.slice(opening[0].length, end);
+    // A string inside notes is never provider participant metadata. Reject
+    // nested/overlapping recognized envelopes instead of promoting their text
+    // into the eligibility decision. Unknown top-level shapes fail closed too.
+    if (/<\/?(?:known_participants|notes|summary)(?:\s|>)/.test(value))
+      throw unsupported();
+    sections.set(tag, value);
+    remaining = remaining.slice(end + closing.length).trim();
+  }
+  return sections;
 }
 function unsupported(): GranolaSourceError {
   return new GranolaSourceError("provider-shape-unsupported");

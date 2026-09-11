@@ -105,6 +105,63 @@ describe("read-only Granola Streamable HTTP", () => {
       );
     }
   );
+  it.each(["read", "http-error", "notification"])(
+    "bounds a stalled %s response even when cancellation never settles",
+    async (phase) => {
+      vi.useFakeTimers();
+      try {
+        let cancelled = false;
+        let aborted = false;
+        const client = createGranolaMcpClient({
+          credential,
+          timeoutMs: 20,
+          fetch: (_url, init) => {
+            if (typeof init?.body !== "string") throw new Error("Expected JSON body");
+            const body = JSON.parse(init.body) as Record<string, unknown>;
+            if (phase === "notification" && body["method"] === "initialize")
+              return Promise.resolve(
+                rpc(Number(body["id"]), { protocolVersion: "2025-06-18" })
+              );
+            init?.signal?.addEventListener("abort", () => {
+              aborted = true;
+            });
+            return Promise.resolve(
+              new Response(
+                new ReadableStream<Uint8Array>({
+                  pull: () => new Promise(() => undefined),
+                  cancel: () => {
+                    cancelled = true;
+                    return new Promise(() => undefined);
+                  }
+                }),
+                {
+                  status:
+                    phase === "http-error" ? 401 : phase === "notification" ? 202 : 200,
+                  headers: { "content-type": "application/json" }
+                }
+              )
+            );
+          }
+        });
+        let settled = false;
+        const pending = client.tools().then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          }
+        );
+        await vi.advanceTimersByTimeAsync(100);
+        expect(cancelled).toBe(true);
+        expect(aborted).toBe(true);
+        expect(settled).toBe(true);
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
   it("refuses an unsolicited server request instead of treating it as source content", async () => {
     const client = createGranolaMcpClient({
       credential,

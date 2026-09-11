@@ -90,7 +90,10 @@ export function createGranolaMcpClient(input: {
         controller.signal
       );
       if (!response.ok) {
-        await response.body?.cancel();
+        if (response.body)
+          await withSignal(response.body.cancel(), controller.signal).catch(
+            () => undefined
+          );
         if ([401, 403, 404].includes(response.status)) {
           sessionCredential = undefined;
           initialized = undefined;
@@ -105,7 +108,10 @@ export function createGranolaMcpClient(input: {
         );
       }
       if (notification) {
-        await response.body?.cancel();
+        if (response.body)
+          await withSignal(response.body.cancel(), controller.signal).catch(
+            () => undefined
+          );
         if (response.status !== 202)
           throw new GranolaSourceError("provider-shape-unsupported");
         return undefined;
@@ -160,7 +166,7 @@ export function createGranolaMcpClient(input: {
           }
         }
       } finally {
-        await reader.cancel().catch(() => undefined);
+        await withSignal(reader.cancel(), controller.signal).catch(() => undefined);
       }
       throw new GranolaSourceError("provider-shape-unsupported");
     } catch (error) {
@@ -243,13 +249,13 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 async function withSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   let abort: (() => void) | undefined;
   try {
-    signal.throwIfAborted();
     return await Promise.race([
-      operation,
       new Promise<never>((_, reject) => {
         abort = () => reject(new GranolaSourceError("connection-unavailable"));
-        signal.addEventListener("abort", abort, { once: true });
-      })
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      }),
+      operation
     ]);
   } finally {
     if (abort) signal.removeEventListener("abort", abort);

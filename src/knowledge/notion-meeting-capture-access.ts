@@ -3,8 +3,8 @@ import type { LumaDatabase } from "../persistence/db.js";
 import type { MeetingCaptureAccess } from "../meeting-intelligence/meeting-capture-access.js";
 import {
   ImportedSourceUnavailableError,
-  type ImportedSourceAnalysisAccess,
-  type ImportedSourceAnalysisReceipt
+  readImportedSourceAnalysisReceipt,
+  type ImportedSourceAnalysisAccess
 } from "../meeting-intelligence/imported-source-analysis.js";
 import type { ObservedSourceLedger } from "./observed-source-ledger.js";
 import { observedNotionMeetingCapture } from "./notion-meeting-capture.js";
@@ -57,25 +57,27 @@ export function createNotionMeetingCaptureAccess(input: {
       )
         throw new ImportedSourceUnavailableError();
       const meetingId = `meeting:source:${opaqueIdentifierSegment(input.providerId)}:${opaqueIdentifierSegment(address.externalCaptureId)}`;
-      const stored = await input.database.query<{ receipt_json: string }>(
-        "SELECT receipt_json FROM meeting_imported_source_receipts WHERE workspace_id=$1 AND meeting_id=$2 AND receipt_json::jsonb->'source'->>'sourceRevision'=$3 AND receipt_json::jsonb->'source'->>'contentHash'=$4 LIMIT 2",
+      const stored = await input.database.query<{ receipt_id: string }>(
+        "SELECT receipt_id FROM meeting_imported_source_receipts WHERE workspace_id=$1 AND meeting_id=$2 AND receipt_json::jsonb->'source'->>'sourceRevision'=$3 AND receipt_json::jsonb->'source'->>'contentHash'=$4 LIMIT 2",
         [workspaceId, meetingId, String(source.revision), source.contentHash]
       );
       if (stored.rows.length !== 1) throw new ImportedSourceUnavailableError();
-      const receipt = stored.rows
-        .map((row) => JSON.parse(row.receipt_json) as ImportedSourceAnalysisReceipt)
-        .find(
-          (value) =>
-            value.source.providerId === input.providerId &&
-            value.source.sourceObjectId === address.externalCaptureId &&
-            value.source.sourceRevision === source.revision &&
-            value.source.contentHash === source.contentHash &&
-            value.audience.workspaceId === workspaceId &&
-            audience.personIds.length > 0 &&
-            audience.personIds.every((person) =>
-              value.audience.personIds.includes(person)
-            )
-        );
+      const verified = await readImportedSourceAnalysisReceipt(
+        input.database,
+        workspaceId,
+        meetingId,
+        stored.rows[0]!.receipt_id
+      );
+      const receipt = [verified].find(
+        (value) =>
+          value.source.providerId === input.providerId &&
+          value.source.sourceObjectId === address.externalCaptureId &&
+          value.source.sourceRevision === source.revision &&
+          value.source.contentHash === source.contentHash &&
+          value.audience.workspaceId === workspaceId &&
+          audience.personIds.length > 0 &&
+          audience.personIds.every((person) => value.audience.personIds.includes(person))
+      );
       if (!receipt) throw new ImportedSourceUnavailableError();
       await input.sourceAccess.requireCurrent({ source: receipt.source, audience });
       const materials = revision.materials.map((descriptor) => {

@@ -194,6 +194,22 @@ describe("Notion capture synthesis through the original source grant", () => {
         availability: "unavailable",
         synthesis: null
       });
+      const stored = await database.query<{ receipt_id: string; receipt_json: string }>(
+        "SELECT receipt_id,receipt_json FROM meeting_imported_source_receipts"
+      );
+      const originalReceipt = stored.rows[0]!;
+      await database.query(
+        "UPDATE meeting_imported_source_receipts SET receipt_json=jsonb_set(receipt_json::jsonb, '{audience,personIds}', $1::jsonb)::text WHERE receipt_id=$2",
+        [JSON.stringify(recipients), originalReceipt.receipt_id]
+      );
+      expect(await query()).toMatchObject({
+        availability: "unavailable",
+        synthesis: null
+      });
+      await database.query(
+        "UPDATE meeting_imported_source_receipts SET receipt_json=$1 WHERE receipt_id=$2",
+        [originalReceipt.receipt_json, originalReceipt.receipt_id]
+      );
       recipients = ["person_jakob"];
       allowed = false;
       expect(await query()).toMatchObject({

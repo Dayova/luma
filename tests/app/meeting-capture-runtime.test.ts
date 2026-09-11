@@ -27,6 +27,13 @@ import type {
 
 const workspace = { workspaceId: "workspace_dayova", timezone: "Europe/Berlin" };
 const at = "2026-09-11T09:00:00.000Z";
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 function reasoning() {
   const requests: StructuredReasoningRequest<unknown>[] = [];
   const model: ReasoningModel = {
@@ -146,10 +153,14 @@ describe("meeting capture application composition", () => {
       },
       captureSynthesis: runtime.configuration
     });
-    const ingestion = runtime.connect(
-      mi,
-      createMeetingNotesIngestion({ meetingIntelligence: mi })
-    );
+    const baseIngestion = createMeetingNotesIngestion({ meetingIntelligence: mi });
+    let beforeIngest = () => Promise.resolve();
+    const ingestion = runtime.connect(mi, {
+      ingest: async (request) => {
+        await beforeIngest();
+        return baseIngestion.ingest(request);
+      }
+    });
     try {
       const source = await ledger.record({
         workspaceId: workspace.workspaceId,
@@ -195,6 +206,42 @@ describe("meeting capture application composition", () => {
         synthesis: null
       });
       expect(f.requests).toHaveLength(count);
+      allowed = true;
+      snapshot.sections.transcript = {
+        state: "available",
+        sourceBlockId: "transcript",
+        text: "Neuer Vorschlag, weiterhin unentschieden.",
+        blocks: []
+      };
+      const changed = await ledger.record({
+        workspaceId: workspace.workspaceId,
+        source: identity,
+        observedAt: at,
+        providerVersion: "v2",
+        snapshot
+      });
+      const entered = deferred();
+      const release = deferred();
+      beforeIngest = async () => {
+        entered.resolve();
+        await release.promise;
+      };
+      const pending = ingestion.ingest({ workspace, source: changed });
+      await entered.promise;
+      let stopped = false;
+      const stopping = runtime.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(stopped).toBe(false);
+      await expect(ingestion.ingest({ workspace, source: changed })).rejects.toThrow(
+        "stopped"
+      );
+      release.resolve();
+      expect(await pending).toMatchObject({ errors: [] });
+      await stopping;
+      expect(stopped).toBe(true);
+      expect(f.requests.length).toBeGreaterThan(count);
     } finally {
       await runtime.stop();
       await database.close();

@@ -149,6 +149,7 @@ export async function createMeetingCaptureRuntime(input: {
   let started = false;
   let stopped = false;
   let changing: Promise<void> = Promise.resolve();
+  const notionRuns = new Set<Promise<MeetingUpdate>>();
   return {
     configuration,
     logicalMeetings,
@@ -161,51 +162,57 @@ export async function createMeetingCaptureRuntime(input: {
       connected = true;
       ingestion = createMeetingCaptureIngestion({ workspace, meetingIntelligence });
       return {
-        async ingest(request): Promise<MeetingUpdate> {
-          if (request.workspace.workspaceId !== workspace.workspaceId)
-            throw new Error("Capture intake is outside this runtime's workspace");
-          const update = await base.ingest(request);
-          if (!input.notion) return update;
-          const observation = observedMeetingNoteToObservation(
-            request,
-            input.workItemProviderId
-          );
-          if (
-            request.source.source.providerId !== input.notion.providerId ||
-            ![
-              ...update.acceptedObservationIds,
-              ...update.duplicateObservationIds
-            ].includes(observation.observationId)
-          )
-            return update;
-          // Only already-admitted original material can become a shared Logical
-          // Meeting. This does not treat provider enumeration as a recipient grant.
-          await input.notion.sourceAccess.requireCurrent({
-            source: observation.source,
-            audience: {
+        ingest(request): Promise<MeetingUpdate> {
+          if (stopped) return Promise.reject(new Error("Capture runtime is stopped"));
+          const run = async (): Promise<MeetingUpdate> => {
+            if (request.workspace.workspaceId !== workspace.workspaceId)
+              throw new Error("Capture intake is outside this runtime's workspace");
+            const update = await base.ingest(request);
+            if (!input.notion) return update;
+            const observation = observedMeetingNoteToObservation(
+              request,
+              input.workItemProviderId
+            );
+            if (
+              request.source.source.providerId !== input.notion.providerId ||
+              ![
+                ...update.acceptedObservationIds,
+                ...update.duplicateObservationIds
+              ].includes(observation.observationId)
+            )
+              return update;
+            // Only already-admitted original material can become a shared Logical
+            // Meeting. This does not treat provider enumeration as a recipient grant.
+            await input.notion.sourceAccess.requireCurrent({
+              source: observation.source,
+              audience: {
+                workspaceId: workspace.workspaceId,
+                personIds: [...dayovaFounderPersonIds]
+              }
+            });
+            const resolved = await logicalMeetings.resolveCapture({
               workspaceId: workspace.workspaceId,
-              personIds: [...dayovaFounderPersonIds]
-            }
-          });
-          const resolved = await logicalMeetings.resolveCapture({
-            workspaceId: workspace.workspaceId,
-            revision: observedNotionMeetingCapture({
-              source: request.source,
-              canonicalSourceScopeId: input.notion.canonicalSourceScopeId
-            })
-          });
-          if (resolved.status !== "accepted")
-            throw new Error("Notion capture could not be resolved for synthesis.");
-          const synthesis = await deliver(resolved.decision.logicalMeeting);
-          return {
-            ...update,
-            errors: [...update.errors, ...synthesis.errors],
-            analysisStatus:
-              update.analysisStatus === "deferred" ||
-              synthesis.analysisStatus === "deferred"
-                ? "deferred"
-                : update.analysisStatus
+              revision: observedNotionMeetingCapture({
+                source: request.source,
+                canonicalSourceScopeId: input.notion.canonicalSourceScopeId
+              })
+            });
+            if (resolved.status !== "accepted")
+              throw new Error("Notion capture could not be resolved for synthesis.");
+            const synthesis = await deliver(resolved.decision.logicalMeeting);
+            return {
+              ...update,
+              errors: [...update.errors, ...synthesis.errors],
+              analysisStatus:
+                update.analysisStatus === "deferred" ||
+                synthesis.analysisStatus === "deferred"
+                  ? "deferred"
+                  : update.analysisStatus
+            };
           };
+          const pending = run().finally(() => notionRuns.delete(pending));
+          notionRuns.add(pending);
+          return pending;
         }
       };
     },
@@ -218,7 +225,11 @@ export async function createMeetingCaptureRuntime(input: {
     stop: async () => {
       stopped = true;
       activeRegistry = undefined;
-      await Promise.all([registry?.runtime.stop(), changing.catch(() => undefined)]);
+      await Promise.all([
+        registry?.runtime.stop(),
+        changing.catch(() => undefined),
+        ...notionRuns
+      ]);
     },
     syncGranolaOnce: () => {
       if (!connected || !activeRegistry || stopped)

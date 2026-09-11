@@ -1,4 +1,6 @@
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
+import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
+import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
 import { importedSourceAnalysisFromEnv } from "./imported-source-analysis-runtime.js";
 import {
   organizationalContextRuntimeConfig,
@@ -113,6 +115,15 @@ export async function startServer(
   const guildId = requireEnv(env, "DISCORD_GUILD_ID");
   const allowedParentChannelIds = discordAllowedParentChannelIdsFromEnv(env);
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
+  const consultationConfig = discordConsultationConfigFromEnv(env);
+  if (
+    consultationConfig?.capture.parentChannelIds.some(
+      (id) => !allowedParentChannelIds.includes(id)
+    )
+  )
+    throw new Error(
+      "Consultation parent channels must be within the common Discord scope"
+    );
   if (
     discordContextAskConfig?.parentChannelIds.some(
       (id) => !allowedParentChannelIds.includes(id)
@@ -153,6 +164,34 @@ export async function startServer(
     }
   }
 
+  const resolveConsultationRecipients = async (
+    personIds: readonly string[]
+  ): Promise<string[] | null> => {
+    const ids: string[] = [];
+    for (const personId of personIds) {
+      const person = await identityDirectory.getPerson({ workspaceId, personId });
+      if (!person?.discordUserId) return null;
+      const authorized = await accessPolicy.authorize({
+        workspaceId,
+        providerId: "discord",
+        providerUserId: person.discordUserId
+      });
+      if (authorized?.personId !== personId) return null;
+      ids.push(person.discordUserId);
+    }
+    return new Set(ids).size === ids.length ? ids : null;
+  };
+  if (consultationConfig) {
+    const recipients = await resolveConsultationRecipients(dayovaFounderPersonIds);
+    if (
+      !recipients ||
+      JSON.stringify([...recipients].sort()) !==
+        JSON.stringify([...consultationConfig.capture.allowedDiscordUserIds].sort())
+    )
+      throw new Error(
+        "Consultations require the exact four uniquely mapped founder Discord users"
+      );
+  }
   const externalContextCatalogs = contextConfig
     ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
         workspaceId,
@@ -267,8 +306,31 @@ export async function startServer(
     if (meetingNotesSync) {
       startupCleanup.push(() => meetingNotesSync.stop());
     }
+    const conversationConsultations = consultationConfig
+      ? createConversationConsultations({
+          database,
+          ledger: observedSourceLedger,
+          evidenceSource: discordTransport,
+          accessPolicy,
+          workspaceId,
+          recipientPersonIds: dayovaFounderPersonIds,
+          recipientGroupId: consultationConfig.teamRoleId
+        })
+      : undefined;
+    const consultationProvider = consultationConfig
+      ? discordTransport.createConsultationProvider?.({
+          resolveRecipients: resolveConsultationRecipients
+        })
+      : undefined;
+    if (consultationConfig && !consultationProvider)
+      throw new Error(
+        "The shared Discord transport must supply the configured consultation capability"
+      );
     const followUpExecution = createFollowUpExecution({
       database,
+      ...(conversationConsultations && consultationProvider
+        ? { conversationConsultations, consultationProvider }
+        : {}),
       organizationalContextGuard: createMeetingContextGuard({
         database,
         ...(organizationalContext ? { organizationalContext, contextAudience } : {}),
@@ -320,6 +382,14 @@ export async function startServer(
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
+      ...(conversationConsultations
+        ? {
+            consultations: {
+              context: conversationConsultations,
+              execution: followUpExecution
+            }
+          }
+        : {}),
       meetingIntelligence,
       followUpExecution,
       identityDirectory,

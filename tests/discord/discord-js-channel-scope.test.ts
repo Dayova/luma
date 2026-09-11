@@ -477,7 +477,8 @@ describe("Discord production channel resolution and delivery", () => {
     sdk.emit(Events.InteractionCreate, interaction);
     await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
     expect(interaction.editReply).toHaveBeenCalledWith({
-      content: "Luma is not enabled in this Discord channel."
+      content: "Luma is not enabled in this Discord channel.",
+      allowedMentions: { parse: [] }
     });
     expect(handler).toHaveBeenCalledOnce();
     await live.disconnect();

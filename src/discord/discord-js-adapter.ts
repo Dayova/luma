@@ -508,8 +508,13 @@ async function handleInteraction(
     flags: MessageFlags.Ephemeral
   });
   const response = await commandHandler(toDiscordCommand(interaction));
-  const admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  if (admitted && response.requireCurrent) {
+    await response.requireCurrent();
+    admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  }
   await interaction.editReply({
+    allowedMentions: { parse: [] },
     content: admitted
       ? truncateDiscordMessage(response.content)
       : "Luma is not enabled in this Discord channel."
@@ -800,6 +805,68 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
   const subcommand = interaction.options.getSubcommand(true);
 
   switch (subcommand) {
+    case "bind": {
+      return {
+        ...base,
+        type: "bind",
+        sourcePage: interaction.options.getString("source_page", true)
+      };
+    }
+    case "review": {
+      const reviewId = interaction.options.getString("review_id");
+      return {
+        ...base,
+        type: "review",
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(reviewId ? { reviewId } : {})
+      };
+    }
+    case "owner": {
+      const ownership = interaction.options.getString("choice", true);
+      if (
+        ownership !== "confirm-owner" &&
+        ownership !== "intentionally-unassigned" &&
+        ownership !== "keep-unresolved"
+      )
+        throw new Error("Unknown ownership choice");
+      const ownerDiscordUserId = interaction.options.getUser("owner")?.id;
+      return {
+        ...base,
+        type: "owner",
+        claimId: interaction.options.getString("claim_id", true),
+        ownership,
+        ...(ownerDiscordUserId ? { ownerDiscordUserId } : {})
+      };
+    }
+    case "reconcile": {
+      const choice = interaction.options.getString("choice", true);
+      if (
+        choice !== "accept-proposal" &&
+        choice !== "reject-proposal" &&
+        choice !== "select-create-new" &&
+        choice !== "select-needs-clarification" &&
+        choice !== "link-existing" &&
+        choice !== "update-existing"
+      )
+        throw new Error("Unknown reconciliation choice");
+      const externalId = interaction.options.getString("target_id");
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "reconcile",
+        reviewId: interaction.options.getString("review_id", true),
+        choice,
+        execute: interaction.options.getBoolean("execute") ?? false,
+        ...(externalId ? { externalId } : {}),
+        ...(reason ? { reason } : {})
+      };
+    }
+    case "refresh":
+      return {
+        ...base,
+        type: "refresh",
+        reviewId: interaction.options.getString("review_id", true)
+      };
     case "start":
       return {
         ...base,
@@ -969,6 +1036,121 @@ const meetingCommand = new SlashCommandBuilder()
   .setName("meeting")
   .setDescription("Run a Luma Meeting in Discord")
   .addSubcommand((command) =>
+    command
+      .setName("bind")
+      .setDescription("Attach an imported Notion Meeting to this founder thread")
+      .addStringOption((option) =>
+        option
+          .setName("source_page")
+          .setDescription("Exact Notion Meeting Note page URL or UUID")
+          .setRequired(true)
+          .setMaxLength(1000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("review")
+      .setDescription(
+        "Inspect original Action Items, ownership, canonical matches and follow-ups"
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page (starts at 1)").setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Show only this exact review")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("owner")
+      .setDescription("Record a Human ownership decision for a source Action Item")
+      .addStringOption((option) =>
+        option
+          .setName("claim_id")
+          .setDescription("Exact ownership claim ID from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Ownership decision")
+          .setRequired(true)
+          .addChoices(
+            { name: "Confirm selected founder", value: "confirm-owner" },
+            { name: "Intentionally unassigned", value: "intentionally-unassigned" },
+            { name: "Keep unresolved", value: "keep-unresolved" }
+          )
+      )
+      .addUserOption((option) =>
+        option
+          .setName("owner")
+          .setDescription("Founder to confirm (only for Confirm selected founder)")
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("reconcile")
+      .setDescription(
+        "Resolve an exact review; execute=true also authorizes its described writes"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact review ID from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Decision for this source Action Item")
+          .setRequired(true)
+          .addChoices(
+            { name: "Accept proposed outcome", value: "accept-proposal" },
+            { name: "Not work / reject proposal", value: "reject-proposal" },
+            { name: "Create genuinely new work", value: "select-create-new" },
+            { name: "Needs clarification", value: "select-needs-clarification" },
+            { name: "Link displayed existing work", value: "link-existing" },
+            { name: "Apply displayed existing-work update", value: "update-existing" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target_id")
+          .setDescription("Exact displayed canonical work ID, for link/update only")
+          .setMaxLength(256)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason for rejection or clarification")
+          .setMaxLength(1000)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("execute")
+          .setDescription(
+            "Also execute this decision and write its outcome to the original Meeting Note"
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("refresh")
+      .setDescription("Refresh canonical work evidence for an exact current review")
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact current review ID")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
     command.setName("usage").setDescription("Show shared AI usage, budget and reset time")
   )
   .addSubcommand((command) =>
@@ -1026,7 +1208,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
   )
   .addSubcommand((command) =>
@@ -1038,7 +1220,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
   )
   .addSubcommand((command) =>
@@ -1050,7 +1232,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
       .addStringOption((option) =>
         option

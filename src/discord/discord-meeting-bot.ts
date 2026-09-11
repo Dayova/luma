@@ -3,6 +3,11 @@ import {
   DiscordChannelAccessError,
   type DiscordChannelSurface
 } from "./discord-channel-scope.js";
+import {
+  renderReconciliationReviewPages,
+  reviewIntent
+} from "./discord-reconciliation-review.js";
+import { canonicalNotionObjectId } from "../knowledge/notion-object-id.js";
 import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
 import {
   renderDeferredAnalysis,
@@ -12,6 +17,8 @@ import {
 } from "./discord-ai-status.js";
 import type {
   FollowUpIntent,
+  HumanJudgment,
+  CurrentActionItemReconciliationReview,
   MeetingIntelligenceEvent,
   MeetingLanguageMode,
   MeetingState,
@@ -87,10 +94,35 @@ export type DiscordCommand =
   | (DiscordCommandBase & {
       type: "stop";
     })
-  | (DiscordCommandBase & { type: "usage" });
+  | (DiscordCommandBase & { type: "usage" })
+  | (DiscordCommandBase & { type: "bind"; sourcePage: string; sourceObjectId?: string })
+  | (DiscordCommandBase & { type: "review"; page: number; reviewId?: string })
+  | (DiscordCommandBase & {
+      type: "owner";
+      claimId: string;
+      ownership: "confirm-owner" | "intentionally-unassigned" | "keep-unresolved";
+      ownerDiscordUserId?: string;
+    })
+  | (DiscordCommandBase & {
+      type: "reconcile";
+      reviewId: string;
+      choice:
+        | "accept-proposal"
+        | "reject-proposal"
+        | "select-create-new"
+        | "select-needs-clarification"
+        | "link-existing"
+        | "update-existing";
+      externalId?: string;
+      reason?: string;
+      execute: boolean;
+    })
+  | (DiscordCommandBase & { type: "refresh"; reviewId: string });
 
 export type DiscordCommandResponse = {
   content: string;
+  /** Fresh source/recipient proof at the actual Discord reply boundary. */
+  requireCurrent?: () => Promise<void>;
 };
 
 export type DiscordContextAskResponse = {
@@ -159,6 +191,13 @@ export type CreateDiscordMeetingBotInput = {
     contextIntelligence: ContextIntelligence;
     config: DiscordContextAskConfig;
   };
+  importedMeetingAccess?: {
+    resolve(input: { workspaceId: string; pageId: string }): Promise<string | null>;
+    requireCurrent(input: {
+      state: MeetingState;
+      personIds: readonly PersonId[];
+    }): Promise<void>;
+  };
   aiUsage?: Pick<AiUsageBudget, "getStatus">;
   now?: () => Date;
 };
@@ -214,7 +253,7 @@ export function createDiscordMeetingBot(
     start: (startupSignal) =>
       input.transport.connect(
         (command) => {
-          if (command.type !== "start") {
+          if (command.type !== "start" && command.type !== "bind") {
             return handleCommand(input, command, now, accessPolicy, channelScope);
           }
 
@@ -430,6 +469,7 @@ async function publishMeetingEvents(
   const allowedUserIds = mentions.map((mention) => mention.userId);
   const mentionContent = mentions.map((mention) => mention.content);
 
+  const publicationState = await queryMeetingSnapshot(input, meetingThread);
   for (const event of publishInput.events) {
     const content = renderMeetingEvent(event, mentionContent);
     const message: {
@@ -450,6 +490,7 @@ async function publishMeetingEvents(
       message.idempotencyKey = `${publishInput.idempotencyKeyPrefix}:${event.type}`;
     }
 
+    await requireImportedMeetingCurrent(input, publicationState);
     await input.transport.sendMessage(message);
   }
 }
@@ -482,22 +523,43 @@ async function handleCommand(
     return { content: new DiscordChannelAccessError().message };
   }
   try {
+    const sourceFence = await commandSourceFence(input, command);
+    await sourceFence?.();
+    const response =
+      command.type === "usage"
+        ? { content: await readAiUsage(input) }
+        : await executeAdmittedCommand(input, command, now);
     const content =
       command.type === "usage"
-        ? await readAiUsage(input)
-        : await appendAiUsageWarning(
-            input,
-            (await executeAdmittedCommand(input, command, now)).content
-          );
-    await channelScope.requireChannel(command.channelId);
-    return { content };
+        ? response.content
+        : await appendAiUsageWarning(input, response.content);
+    const requireCurrent = async () => {
+      if (
+        !(await accessPolicy.authorize({
+          workspaceId: input.workspace.workspaceId,
+          providerId: "discord",
+          providerUserId: command.actorDiscordUserId
+        }))
+      )
+        throw new DiscordChannelAccessError();
+      await sourceFence?.();
+      await response.requireCurrent?.();
+      await channelScope.requireChannel(command.channelId);
+    };
+    await requireCurrent();
+    return {
+      content,
+      ...(sourceFence || response.requireCurrent ? { requireCurrent } : {})
+    };
   } catch (error: unknown) {
     return {
       content:
-        error instanceof DiscordChannelAccessError ||
-        !(await channelScope.resolveAllowedChannel(command.channelId))
-          ? new DiscordChannelAccessError().message
-          : renderAiServiceFailure(error)
+        error instanceof ImportedMeetingReviewUnavailableError
+          ? error.message
+          : error instanceof DiscordChannelAccessError ||
+              !(await channelScope.resolveAllowedChannel(command.channelId))
+            ? new DiscordChannelAccessError().message
+            : renderAiServiceFailure(error)
     };
   }
 }
@@ -536,6 +598,14 @@ async function executeAdmittedCommand(
   now: () => Date
 ): Promise<DiscordCommandResponse> {
   switch (command.type) {
+    case "bind":
+      return bindImportedMeeting(input, command, now);
+    case "review":
+      return reviewMeeting(input, command);
+    case "owner":
+    case "reconcile":
+    case "refresh":
+      return judgeReconciliation(input, command, now);
     case "start":
       return startMeeting(input, command, now);
     case "ask":
@@ -553,6 +623,340 @@ async function executeAdmittedCommand(
     case "stop":
       return stopMeeting(input, command, now);
   }
+}
+
+class ImportedMeetingReviewUnavailableError extends Error {
+  constructor() {
+    super(
+      "Luma withheld this response because current source access or revision could not be verified. Existing decisions and execution receipts are retained. Check the exact source grant and refresh source ingestion."
+    );
+  }
+}
+
+async function requireImportedMeetingCurrent(
+  input: ScopedDiscordMeetingBotInput,
+  state: MeetingState
+): Promise<void> {
+  if (!state.importedSources.length) return;
+  if (!input.importedMeetingAccess) throw new ImportedMeetingReviewUnavailableError();
+  try {
+    await input.importedMeetingAccess.requireCurrent({
+      state,
+      personIds: input.authorizedPersonIds
+    });
+  } catch {
+    throw new ImportedMeetingReviewUnavailableError();
+  }
+}
+
+async function commandSourceFence(
+  input: ScopedDiscordMeetingBotInput,
+  command: DiscordCommand
+): Promise<(() => Promise<void>) | undefined> {
+  if (command.type === "usage" || command.type === "bind" || command.type === "start")
+    return undefined;
+  const thread = await findMeetingThreadForChannel(
+    input,
+    command.guildId,
+    command.channelId,
+    "include-ended-thread"
+  );
+  if (!thread) return undefined;
+  const state = await queryMeetingSnapshot(input, thread);
+  if (!state.importedSources.length) return undefined;
+  // Capture the exact sources used by this operation; a later provider revision cannot authorize an older reply.
+  return () => requireImportedMeetingCurrent(input, state);
+}
+
+async function bindImportedMeeting(
+  input: ScopedDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "bind" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const surface = await input.channelScope.requireChannel(
+    command.channelId,
+    "public-thread"
+  );
+  if (!surface.parentChannelId || !input.importedMeetingAccess)
+    throw new ImportedMeetingReviewUnavailableError();
+  const pageId = notionPageId(command.sourcePage);
+  if (!pageId) return { content: "Use the exact Notion Meeting Note page URL or UUID." };
+  const meetingId = await input.importedMeetingAccess.resolve({
+    workspaceId: input.workspace.workspaceId,
+    pageId
+  });
+  if (!meetingId)
+    return {
+      content:
+        "No unique imported Meeting was found for that page. Wait for source ingestion. A page containing multiple Meeting Note roots cannot be bound safely."
+    };
+  const result = await input.meetingIntelligence.query({
+    workspaceId: input.workspace.workspaceId,
+    meetingId,
+    query: { type: "snapshot" }
+  });
+  if (result.type !== "snapshot" || !result.state.importedSources.length)
+    throw new ImportedMeetingReviewUnavailableError();
+  const requireCurrent = () => requireImportedMeetingCurrent(input, result.state);
+  await requireCurrent();
+  // Never redirect an existing binding or overwrite another Meeting in this thread.
+  const existing = await findMeetingThread(
+    input.database,
+    input.workspace.workspaceId,
+    meetingId
+  );
+  if (existing)
+    return existing.thread_id === command.channelId &&
+      existing.guild_id === command.guildId &&
+      existing.parent_channel_id === surface.parentChannelId
+      ? {
+          content:
+            "This thread is already attached to the imported Meeting. Use /meeting review.",
+          requireCurrent
+        }
+      : {
+          content: "This Meeting already has a Discord thread. Its binding was preserved."
+        };
+  const bound = await input.database.query(
+    `INSERT INTO discord_meeting_threads (workspace_id, meeting_id, guild_id, parent_channel_id, meeting_title, thread_name, language_mode, actor_discord_user_id, meeting_observed_at, thread_id, thread_url, started_at, ended_at, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,$8,$8,$8) ON CONFLICT DO NOTHING RETURNING meeting_id`,
+    [
+      input.workspace.workspaceId,
+      meetingId,
+      command.guildId,
+      surface.parentChannelId,
+      result.state.title,
+      "multilingual",
+      command.actorDiscordUserId,
+      now().toISOString(),
+      command.channelId,
+      `https://discord.com/channels/${command.guildId}/${command.channelId}`,
+      result.state.importedSources[0]!.capturedAt
+    ]
+  );
+  if (!bound.rows.length)
+    return {
+      content:
+        "This thread or Meeting was attached by another command. Its binding was preserved."
+    };
+  await requireCurrent();
+  return {
+    content:
+      "Imported Meeting attached. Use /meeting review to inspect the original wording, ownership and canonical work matches.",
+    requireCurrent
+  };
+}
+
+function notionPageId(value: string): string | null {
+  const direct = canonicalNotionObjectId(value.trim());
+  if (direct) return direct;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      !["notion.so", "www.notion.so", "app.notion.com"].includes(url.hostname)
+    )
+      return null;
+    const segment = url.pathname.split("/").filter(Boolean).at(-1) ?? "";
+    return (
+      canonicalNotionObjectId(segment) ?? canonicalNotionObjectId(segment.slice(-32))
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function currentReviewState(
+  input: ScopedDiscordMeetingBotInput,
+  thread: DiscordMeetingThreadRow
+) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const state = await queryMeetingSnapshot(input, thread);
+    const result = await input.meetingIntelligence.query({
+      workspaceId: thread.workspace_id,
+      meetingId: thread.meeting_id,
+      query: { type: "action-item-reconciliation-review" }
+    });
+    if (result.type !== "action-item-reconciliation-review")
+      throw new Error("Unexpected reconciliation query result");
+    const current = await queryMeetingSnapshot(input, thread);
+    if (state.revision === current.revision)
+      return { state: current, reviews: result.reviews };
+  }
+  throw new Error("The Meeting changed repeatedly while reading its review");
+}
+
+async function reviewMeeting(
+  input: ScopedDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "review" }>
+): Promise<DiscordCommandResponse> {
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
+  if ("response" in context) return context.response;
+  const view = await currentReviewState(input, context.meetingThread);
+  if (command.reviewId)
+    view.reviews = view.reviews.filter(
+      (review) => review.proposal.id === command.reviewId
+    );
+  const pages = renderReconciliationReviewPages(view);
+  if (
+    !Number.isSafeInteger(command.page) ||
+    command.page < 1 ||
+    command.page > pages.length
+  )
+    return { content: `Choose a review page from 1 to ${pages.length}.` };
+  return { content: pages[command.page - 1]! };
+}
+
+async function judgeReconciliation(
+  input: ScopedDiscordMeetingBotInput,
+  command: Extract<DiscordCommand, { type: "owner" | "reconcile" | "refresh" }>,
+  now: () => Date
+): Promise<DiscordCommandResponse> {
+  const context = await resolveMeetingActor(input, command, "include-ended-thread");
+  if ("response" in context) return context.response;
+  const view = await currentReviewState(input, context.meetingThread);
+  let judgment: HumanJudgment;
+  let review: CurrentActionItemReconciliationReview | undefined;
+  if (command.type === "owner") {
+    review = view.reviews.find((review) => review.ownershipClaimId === command.claimId);
+    if (!review)
+      return {
+        content:
+          "That ownership claim is no longer current. Use /meeting review for its current revision."
+      };
+    let resolution: Extract<
+      HumanJudgment,
+      { kind: "resolve-action-item-ownership" }
+    >["resolution"];
+    if (command.ownership === "confirm-owner") {
+      if (!command.ownerDiscordUserId)
+        return { content: "Select the founder who owns this Action Item." };
+      const people = await input.identityDirectory.findPeopleByProviderUserId({
+        workspaceId: input.workspace.workspaceId,
+        providerId: "discord",
+        providerUserId: command.ownerDiscordUserId
+      });
+      const owner = people[0];
+      if (
+        people.length !== 1 ||
+        !owner ||
+        !input.authorizedPersonIds.includes(owner.personId)
+      )
+        return {
+          content:
+            "The selected owner must uniquely map to one of the four authorized founders."
+        };
+      resolution = { type: "confirm-owner", ownerPersonId: owner.personId };
+    } else {
+      if (command.ownerDiscordUserId)
+        return { content: "An unassigned or unresolved choice cannot include an owner." };
+      resolution = { type: command.ownership };
+    }
+    judgment = {
+      kind: "resolve-action-item-ownership",
+      claimId: command.claimId,
+      resolution
+    };
+  } else {
+    review = view.reviews.find((review) => review.proposal.id === command.reviewId);
+    if (!review)
+      return {
+        content:
+          "That review is no longer current. Use /meeting review for its current revision."
+      };
+    if (command.type === "refresh")
+      judgment = {
+        kind: "refresh-action-item-reconciliation",
+        reviewId: command.reviewId
+      };
+    else {
+      let resolution: Extract<
+        HumanJudgment,
+        { kind: "resolve-action-item-reconciliation" }
+      >["resolution"];
+      if (command.choice === "link-existing" || command.choice === "update-existing") {
+        const matches = review.proposal.searches
+          .flatMap((search) => search.workItems)
+          .filter((work) => work.externalId === command.externalId);
+        const outcome = review.proposal.outcome;
+        if (
+          (outcome.type === "link-existing" || outcome.type === "update-existing") &&
+          outcome.workItem.externalId === command.externalId
+        )
+          matches.push(outcome.workItem);
+        const providers = new Set(matches.map((work) => work.providerId));
+        if (providers.size !== 1 || !matches[0])
+          return {
+            content:
+              "Select an exact target ID already shown in this review. Use /meeting refresh if canonical work has changed."
+          };
+        resolution = {
+          type: "select-existing",
+          providerId: matches[0].providerId,
+          externalId: matches[0].externalId,
+          action: command.choice
+        };
+      } else {
+        if (command.externalId)
+          return {
+            content: "Only a link or update choice can select an existing target."
+          };
+        resolution = {
+          type: command.choice,
+          ...((command.choice === "reject-proposal" ||
+            command.choice === "select-needs-clarification") &&
+          command.reason
+            ? { reason: command.reason }
+            : {})
+        };
+      }
+      judgment = {
+        kind: "resolve-action-item-reconciliation",
+        reviewId: command.reviewId,
+        resolution
+      };
+    }
+  }
+  await requireImportedMeetingCurrent(input, view.state);
+  const update = await input.meetingIntelligence.observe({
+    workspace: input.workspace,
+    observations: [
+      {
+        type: "human-judgment-recorded",
+        observationId: `discord:${command.interactionId}:${command.type}`,
+        workspaceId: context.meetingThread.workspace_id,
+        meetingId: context.meetingThread.meeting_id,
+        occurredAt: command.occurredAt,
+        observedAt: now().toISOString(),
+        participantId: context.actor.personId,
+        judgment
+      }
+    ]
+  });
+  const error = update.errors[0];
+  if (error)
+    return {
+      content: `No review decision was applied: ${"message" in error ? error.message : error.code}`
+    };
+  const after = await queryMeetingSnapshot(input, context.meetingThread);
+  if (command.type !== "reconcile")
+    return {
+      content:
+        "Human Judgment recorded. Use /meeting review to inspect the current ownership and reconciliation proposal."
+    };
+  const intents = after.followUpIntentions.filter((intent) =>
+    reviewIntent(intent, command.reviewId)
+  );
+  const intent = intents.find((intent) => intent.type === "settle-operational-outcome");
+  if (command.execute && intent)
+    return approveFollowUp(
+      input,
+      { ...command, type: "approve", intentId: intent.id },
+      now
+    );
+  return {
+    content: `Reconciliation decision recorded.${intent ? ` Follow-up ${intent.id} is ${intent.status}. Use /meeting approve to execute it.` : " No executable follow-up was produced."}`
+  };
 }
 
 async function recordMeetingNote(
@@ -629,6 +1033,10 @@ async function requireFollowUpExecutionScope(
   )
     throw new DiscordChannelAccessError();
 
+  await requireImportedMeetingCurrent(
+    input,
+    await queryMeetingSnapshot(input, meetingThread)
+  );
   const threadCheck = input.channelScope.requireChannel(
     meetingThread.thread_id,
     "public-thread"
@@ -676,9 +1084,12 @@ async function approveFollowUp(
     return { content: `Follow-up Intent was rejected: ${command.intentId}` };
   }
 
-  if (intent.status === "succeeded" || intent.status === "partially-succeeded") {
+  if (intent.status === "succeeded")
     return { content: `Follow-up already executed: ${command.intentId}` };
-  }
+  if (intent.status === "partially-succeeded")
+    return {
+      content: `Follow-up is only partly complete. Use /meeting recover intent_id:${command.intentId} to resume the unfinished stage.`
+    };
 
   if (!input.followUpExecution) {
     return { content: "Follow-up execution is not configured." };
@@ -749,6 +1160,10 @@ async function approveFollowUp(
     return { content: `Follow-up failed: ${result.observation.outcome.message}` };
   }
 
+  if (result.observation.outcome.status === "partially-succeeded")
+    return {
+      content: `Follow-up needs attention: ${result.observation.outcome.message} Use /meeting recover intent_id:${intent.id}. Completed writes are retained.`
+    };
   return {
     content: firstReference
       ? `Follow-up completed: ${firstReference.url}`
@@ -944,6 +1359,7 @@ async function stopMeeting(
       meetingId: meetingThread.meeting_id
     });
 
+    await requireImportedMeetingCurrent(input, snapshot.state);
     await input.transport.sendMessage({
       channelId: meetingThread.thread_id,
       content: `Meeting ended: **${snapshot.state.title}**\n\n${conclusion.summary.brief}`,
@@ -1304,14 +1720,14 @@ async function findMeetingThreadForChannel(
             actor_discord_user_id, started_at, meeting_observed_at, thread_id, thread_url,
             start_message_sent_at, conclusion_message_sent_at
        FROM discord_meeting_threads
-      WHERE guild_id = $1
+      WHERE guild_id = $1 AND workspace_id = $4
         AND (
           (parent_channel_id = $2 AND ended_at IS NULL)
           OR (thread_id = $2 AND (ended_at IS NULL OR $3))
         )
       ORDER BY created_at DESC
       LIMIT 1`,
-    [guildId, channelId, scope === "include-ended-thread"]
+    [guildId, channelId, scope === "include-ended-thread", input.workspace.workspaceId]
   );
 
   const meetingThread = result.rows[0] ?? null;

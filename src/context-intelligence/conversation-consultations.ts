@@ -266,7 +266,13 @@ export function createConversationConsultations(input: {
         subject: request.subject,
         consultationId: request.consultationId
       };
-      const requestDigest = consultationDigest(request);
+      const requestDigest = consultationDigest({
+        workspaceId: request.workspace.workspaceId,
+        subject: request.subject,
+        consultationId: request.consultationId,
+        actor: request.actor,
+        instruction: request.instruction
+      });
       const existing = await readCanonicalConsultation(input.database, address);
       if (existing) {
         const row = await input.database.query<{ request_digest: string }>(

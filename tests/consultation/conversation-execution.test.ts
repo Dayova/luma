@@ -97,6 +97,60 @@ describe("Canonical Conversation consultation execution", () => {
     expect(replacement.consultation.consultation.durationHours).toBe(48);
     expect(h.publish).not.toHaveBeenCalled();
   });
+  it("replays immutable instructions after workspace presentation settings change, while preserving actor and payload conflicts", async () => {
+    const h = harness(database);
+    const original = await h.context.request(requestFixture());
+    const changed = {
+      ...requestFixture(),
+      workspace: {
+        ...workspace,
+        timezone: "America/New_York",
+        outputLanguagePolicy: "english" as const,
+        publishingPolicy: {
+          publishMeetingNotes: false,
+          publishCleanedTranscript: false,
+          publishRawTranscript: false,
+          publishTranslatedTranscript: false,
+          transcriptPlacement: "inline" as const,
+          defaultKnowledgeDestination: "notion" as const,
+          requireHumanApprovalBeforePublishing: true
+        }
+      }
+    };
+    expect(await h.context.request(changed)).toEqual(original);
+    for (const instruction of [
+      { purpose: "Another purpose" },
+      { question: "Another question?" },
+      { options: ["Wait", "Discuss again"] },
+      { durationHours: 48 },
+      { allowsMultiple: true },
+      { ownerPersonId: "person_fabius" },
+      { replacesConsultationId: "another-request" }
+    ])
+      await expect(
+        h.context.request({
+          ...changed,
+          instruction: { ...changed.instruction, ...instruction }
+        })
+      ).rejects.toMatchObject({ code: "consultation-request-conflict" });
+    await expect(
+      h.context.request({
+        ...changed,
+        actor: { providerId: "discord", providerUserId: "726409024894926869" }
+      })
+    ).rejects.toMatchObject({ code: "consultation-request-conflict" });
+    await expect(
+      h.context.request({
+        ...changed,
+        workspace: { ...changed.workspace, workspaceId: "another-workspace" }
+      })
+    ).rejects.toMatchObject({ code: "consultation-access-refused" });
+    expect(
+      (await database.query("SELECT * FROM conversation_consultations")).rows
+    ).toHaveLength(1);
+    expect(h.publish).not.toHaveBeenCalled();
+    expect(h.model.generateStructured).not.toHaveBeenCalled();
+  });
   it("permits a fresh explicit replacement of obsolete source wording without exposing the obsolete plan", async () => {
     const h = harness(database);
     await h.context.request(requestFixture());
@@ -139,6 +193,18 @@ describe("Canonical Conversation consultation execution", () => {
       await database.close();
       database = await createPgliteDatabase(join(dir, "store"));
       const restarted = harness(database);
+      expect(
+        (
+          await restarted.context.request({
+            ...requestFixture(),
+            workspace: {
+              ...workspace,
+              timezone: "America/New_York",
+              outputLanguagePolicy: "english"
+            }
+          })
+        ).intentId
+      ).toBe(execute.intentId);
       expect(
         (await restarted.execution.execute(execute)).observation.outcome
       ).toMatchObject({ requiresManualRecovery: true });

@@ -395,6 +395,9 @@ describe("production imported Meeting recall composition", () => {
             expect(sourceRefreshes).toEqual([{ workspaceId, pageId: page }]);
           });
           await send();
+          await vi.waitFor(() => {
+            expect(app.notionObservationStatus?.()?.backgroundDrainActive).toBe(false);
+          });
           expect(sourceRefreshes).toHaveLength(1);
         }
         expect(warnings).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
 import { createNotionCanonicalKnowledgePatchWriter } from "../knowledge/notion-canonical-knowledge-patch-writer.js";
 import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
 import { createConversationConsultations } from "../context-intelligence/conversation-consultations.js";
@@ -124,6 +125,19 @@ export async function startServer(
   const allowedParentChannelIds = discordAllowedParentChannelIdsFromEnv(env);
   const discordContextAskConfig = discordContextAskConfigFromEnv(env);
   const consultationConfig = discordConsultationConfigFromEnv(env);
+  const decisionRecordConfig = discordDecisionRecordConfigFromEnv(env);
+  if (
+    decisionRecordConfig?.parentChannelIds.some(
+      (id) => !allowedParentChannelIds.includes(id)
+    )
+  )
+    throw new Error(
+      "Decision Record parent channels must be within the common Discord scope"
+    );
+  if (decisionRecordConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"]))
+    throw new Error(
+      "OPENAI_API_KEY is required when Discord Decision Records are enabled"
+    );
   if (
     consultationConfig?.capture.parentChannelIds.some(
       (id) => !allowedParentChannelIds.includes(id)
@@ -201,6 +215,17 @@ export async function startServer(
         "Consultations require the exact four uniquely mapped founder Discord users"
       );
   }
+  if (decisionRecordConfig) {
+    const recipients = await resolveConsultationRecipients(dayovaFounderPersonIds);
+    if (
+      !recipients ||
+      JSON.stringify([...recipients].sort()) !==
+        JSON.stringify([...decisionRecordConfig.allowedDiscordUserIds].sort())
+    )
+      throw new Error(
+        "Decision Records require the exact four uniquely mapped founder Discord users"
+      );
+  }
   const externalContextCatalogs = contextConfig
     ? await (dependencies.createContextCatalogs ?? organizationalContextCatalogsFromEnv)({
         workspaceId,
@@ -221,7 +246,8 @@ export async function startServer(
         isAiModelPriced(openAIReasoningModelName) &&
         hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
         (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
-          discordContextAskConfig !== undefined)
+          discordContextAskConfig !== undefined ||
+          decisionRecordConfig !== undefined)
     });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(

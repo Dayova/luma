@@ -34,6 +34,12 @@ export const modelSpecSchema = z
     inputRate: z.number().finite().nonnegative(),
     outputRate: z.number().finite().nonnegative(),
     pricing: z.string().url().startsWith("https://"),
+    promptInstructions: z
+      .string()
+      .min(1)
+      .max(20000)
+      .refine((value) => value.trim().length > 0, "Blank prompt")
+      .optional(),
     pricingVerifiedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
   })
   .strict();
@@ -178,7 +184,10 @@ export async function runQualityEvaluation(options: Options): Promise<QualityRun
           candidate: m.label,
           caseId: c.fixture.id,
           repetition,
-          requestHash: comparisonPayload(requestForFixture(c.fixture)).hash,
+          requestHash: comparisonPayload(
+            requestForFixture(c.fixture),
+            m.promptInstructions
+          ).hash,
           status: candidateKey(candidateFor(m), options.env)
             ? "not-run"
             : "missing-credential",
@@ -210,6 +219,9 @@ export async function runQualityEvaluation(options: Options): Promise<QualityRun
         createComparisonReasoningModel({
           candidate,
           apiKey: key,
+          ...(modelSpec.promptInstructions === undefined
+            ? {}
+            : { promptInstructions: modelSpec.promptInstructions }),
           limits,
           googleEndpoint: settings.googleEndpoint,
           anthropicOutputMode: settings.anthropicOutputMode,

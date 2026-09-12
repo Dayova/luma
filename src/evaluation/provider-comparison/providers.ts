@@ -130,7 +130,10 @@ export function candidateKey(
 }
 
 /** Identical schema and input text for every candidate, including JSON-mode providers. */
-export function comparisonPayload(request: StructuredReasoningRequest<unknown>) {
+export function comparisonPayload(
+  request: StructuredReasoningRequest<unknown>,
+  promptInstructions?: string
+) {
   const input = JSON.stringify({
     purpose: request.purpose,
     workspaceId: request.workspaceId,
@@ -139,7 +142,7 @@ export function comparisonPayload(request: StructuredReasoningRequest<unknown>) 
     context: request.context,
     input: request.input
   });
-  const instructions = `${MEETING_INTELLIGENCE_INSTRUCTIONS}\n\nReturn only JSON matching this schema:\n${JSON.stringify(meetingAnalysisJsonSchema)}`;
+  const instructions = `${promptInstructions ?? MEETING_INTELLIGENCE_INSTRUCTIONS}\n\nReturn only JSON matching this schema:\n${JSON.stringify(meetingAnalysisJsonSchema)}`;
   return {
     instructions,
     input,
@@ -152,6 +155,7 @@ export function comparisonPayload(request: StructuredReasoningRequest<unknown>) 
 export function createComparisonReasoningModel(options: {
   candidate: Candidate;
   apiKey: string;
+  promptInstructions?: string;
   limits: Limits;
   transport?: Transport;
   googleEndpoint?: GoogleEndpoint;
@@ -171,7 +175,7 @@ export function createComparisonReasoningModel(options: {
     async generateStructured<T>(request: StructuredReasoningRequest<T>) {
       if (request.schemaName !== "MeetingAnalysisProposalBatch")
         throw new ComparisonError("unsupported-schema");
-      const payload = comparisonPayload(request);
+      const payload = comparisonPayload(request, options.promptInstructions);
       const { url, body, headers } = outbound(
         candidate,
         options.apiKey,

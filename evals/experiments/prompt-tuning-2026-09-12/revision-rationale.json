@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "reviewKind": "coordinator-development-review-not-blinded-not-human",
+  "sourceReport": "../../../results/2026-09-12-prompt-tuning/shared/combined.json",
+  "addedWords": {
+    "openai": 93,
+    "anthropic": 97,
+    "google": 89,
+    "deepseek": 103
+  },
+  "rationale": {
+    "openai": "The accepted-rollout output omits the separate unresolved support availability dependency (utterance 8). Preserve it as a question or risk rather than only a broad deployment decision.",
+    "anthropic": "The revised-decision output populates personal supporter lists from collective announcements. The accepted-rollout output also assigns Jo personal support from reading approval. The quoted example output drops the distinct unresolved future-need question.",
+    "google": "The quoted example output is entirely empty, dropping the unresolved question about future need despite no current commission. The investigation meeting-title wording also warrants a general uncertainty check; this is a concern rather than a definite separate error. A development HTTP 429 is retained and is not treated as prompt-correctable.",
+    "deepseek": "Personal supporter attribution is unsupported in approval-reporting and quoted-example decisions. The investigation meeting title describes an unverified cause in the named module, strengthening the source suspicion. Correct stance and title fidelity without suppressing accepted work."
+  }
+}

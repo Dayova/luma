@@ -1,0 +1,2220 @@
+{
+  "version": 1,
+  "validationPlanHash": "66e3d5b218dcaeb24cfe54d27d9c50435d830ac378301a89e85b052739c194c2",
+  "packetHash": "f034f0aa3002de4f8e0d4e6f8ec7c7533de709d22197f810f4d8214470664b9b",
+  "sourceFileSha256": {
+    "evals/results/2026-09-12-prompt-tuning/validation/combined.json": "2b2afc6cec3103e5d83d592e0c601a3261d9dd387f7aeda6c7aa0d29c74e3403",
+    "evals/results/2026-09-12-prompt-tuning/ai-review/reviewer-a.json": "840f9c875c282e6d9e868aba58eabb01408cc26c6d8e2844c8a5e491fb1c66b6",
+    "evals/results/2026-09-12-prompt-tuning/ai-review/reviewer-b.json": "fb2a410473c7f10e6142602b786f0a264b744ca13689e32046b93a3d2b909b47"
+  },
+  "candidates": {
+    "openai-original": {
+      "attempts": 16,
+      "valid": 16,
+      "automaticPasses": 13,
+      "operationalFailures": [],
+      "knownCostUsd": 0.0356044,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 11272.0,
+      "p95AttemptLatencyMs": 29061,
+      "medianValidLatencyMs": 11272.0,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 7,
+            "fail": 5,
+            "uncertain": 4
+          },
+          "automaticAndSemanticPasses": 7,
+          "dimensions": {
+            "source-support": {
+              "pass": 10,
+              "fail": 2,
+              "uncertain": 4
+            },
+            "commitment-fidelity": {
+              "pass": 15,
+              "fail": 1,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 12,
+              "fail": 1,
+              "uncertain": 3
+            },
+            "important-recall": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 12,
+              "fail": 4,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 7,
+            "fail": 7,
+            "uncertain": 2
+          },
+          "automaticAndSemanticPasses": 7,
+          "dimensions": {
+            "source-support": {
+              "pass": 11,
+              "fail": 4,
+              "uncertain": 1
+            },
+            "commitment-fidelity": {
+              "pass": 12,
+              "fail": 1,
+              "uncertain": 3
+            },
+            "participant-attribution": {
+              "pass": 12,
+              "fail": 3,
+              "uncertain": 1
+            },
+            "important-recall": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 12,
+              "fail": 4,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "openai-selected": {
+      "attempts": 16,
+      "valid": 16,
+      "automaticPasses": 16,
+      "operationalFailures": [],
+      "knownCostUsd": 0.0371692,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 11118.0,
+      "p95AttemptLatencyMs": 19914,
+      "medianValidLatencyMs": 11118.0,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 15,
+            "fail": 0,
+            "uncertain": 1
+          },
+          "automaticAndSemanticPasses": 15,
+          "dimensions": {
+            "source-support": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "commitment-fidelity": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 1
+            },
+            "duplicate-items": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 16,
+            "fail": 0,
+            "uncertain": 0
+          },
+          "automaticAndSemanticPasses": 16,
+          "dimensions": {
+            "source-support": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "commitment-fidelity": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 16,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "anthropic-original": {
+      "attempts": 16,
+      "valid": 12,
+      "automaticPasses": 8,
+      "operationalFailures": [
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "code": "unknown-evidence",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyoZHHthqE9qWyLCpGm8",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 3748,
+              "outputTokens": 829,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.015786
+          }
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011Ceyoafdr3zVDUDbgTydd1",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 3732,
+              "outputTokens": 2401,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.031474
+          }
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "code": "unknown-evidence",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyosVQf5ybegjfJ8w93C",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 3748,
+              "outputTokens": 903,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.016526
+          }
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "code": "unknown-evidence",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011Ceyp2JU6L11HsuSv8yrek",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 4005,
+              "outputTokens": 1660,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.02461
+          }
+        }
+      ],
+      "knownCostUsd": 0.40837,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 15787.5,
+      "p95AttemptLatencyMs": 28524,
+      "medianValidLatencyMs": 17273.0,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 2,
+            "fail": 8,
+            "uncertain": 2
+          },
+          "automaticAndSemanticPasses": 2,
+          "dimensions": {
+            "source-support": {
+              "pass": 4,
+              "fail": 5,
+              "uncertain": 3
+            },
+            "commitment-fidelity": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 7,
+              "fail": 2,
+              "uncertain": 3
+            },
+            "important-recall": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 6,
+              "fail": 5,
+              "uncertain": 1
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 2,
+            "fail": 10,
+            "uncertain": 0
+          },
+          "automaticAndSemanticPasses": 2,
+          "dimensions": {
+            "source-support": {
+              "pass": 4,
+              "fail": 8,
+              "uncertain": 0
+            },
+            "commitment-fidelity": {
+              "pass": 10,
+              "fail": 0,
+              "uncertain": 2
+            },
+            "participant-attribution": {
+              "pass": 7,
+              "fail": 5,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 7,
+              "fail": 5,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "anthropic-selected": {
+      "attempts": 16,
+      "valid": 8,
+      "automaticPasses": 7,
+      "operationalFailures": [
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyoYrFWVP8qNRRbk2vsn",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5056,
+              "outputTokens": 622,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.016332
+          }
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyoZnusigaCaigrvPheV",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5040,
+              "outputTokens": 1319,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.02327
+          }
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyogontrndRj54ePxe1e",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5045,
+              "outputTokens": 2618,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.03627
+          }
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011Ceyon5HwZy5Dg1wgEWSpZ",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5270,
+              "outputTokens": 3301,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.04355
+          }
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011Ceyop8fQp2ST3gzx5DHcP",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5023,
+              "outputTokens": 672,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.016766
+          }
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyoqKrPVK3SqBbFbxey9",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5139,
+              "outputTokens": 1438,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.024658
+          }
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011CeyovNAvLrQHzVkLNphft",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5133,
+              "outputTokens": 3185,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.042116
+          }
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "code": "invalid-json-or-schema",
+          "response": {
+            "returnedModel": "claude-sonnet-5",
+            "responseId": "msg_011Ceyp3L5cJsZhZT4QYPUjQ",
+            "finishReason": "end_turn",
+            "usage": {
+              "inputTokens": 5045,
+              "outputTokens": 1540,
+              "reasoningTokens": null
+            },
+            "estimatedUncachedCostUsd": 0.02549
+          }
+        }
+      ],
+      "knownCostUsd": 0.450326,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 14252.5,
+      "p95AttemptLatencyMs": 28450,
+      "medianValidLatencyMs": 15313.5,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 6,
+            "fail": 2,
+            "uncertain": 0
+          },
+          "automaticAndSemanticPasses": 6,
+          "dimensions": {
+            "source-support": {
+              "pass": 6,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "commitment-fidelity": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 7,
+              "fail": 1,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 6,
+            "fail": 2,
+            "uncertain": 0
+          },
+          "automaticAndSemanticPasses": 6,
+          "dimensions": {
+            "source-support": {
+              "pass": 6,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "commitment-fidelity": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 8,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 7,
+              "fail": 1,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "deepseek-original": {
+      "attempts": 16,
+      "valid": 13,
+      "automaticPasses": 12,
+      "operationalFailures": [
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "deepseek-flash",
+            "responseId": "20e140ed-de57-4e98-b697-9f69533df10a",
+            "finishReason": "length",
+            "usage": {
+              "inputTokens": 2366,
+              "outputTokens": 8192,
+              "reasoningTokens": 7588
+            },
+            "estimatedUncachedCostUsd": 0.0105402
+          }
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "deepseek-flash",
+            "responseId": "fc500caf-2d57-4dc5-a0b2-3e5fa4c59c60",
+            "finishReason": "length",
+            "usage": {
+              "inputTokens": 2503,
+              "outputTokens": 8192,
+              "reasoningTokens": 6911
+            },
+            "estimatedUncachedCostUsd": 0.0105813
+          }
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "deepseek-flash",
+            "responseId": "d8b8b3ba-f3d3-4fe5-b72a-6335afcf8431",
+            "finishReason": "length",
+            "usage": {
+              "inputTokens": 2546,
+              "outputTokens": 8192,
+              "reasoningTokens": 7508
+            },
+            "estimatedUncachedCostUsd": 0.010594199999999998
+          }
+        }
+      ],
+      "knownCostUsd": 0.133899,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 26878.5,
+      "p95AttemptLatencyMs": 34383,
+      "medianValidLatencyMs": 25937,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 6,
+            "fail": 2,
+            "uncertain": 5
+          },
+          "automaticAndSemanticPasses": 6,
+          "dimensions": {
+            "source-support": {
+              "pass": 7,
+              "fail": 1,
+              "uncertain": 5
+            },
+            "commitment-fidelity": {
+              "pass": 12,
+              "fail": 1,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 8,
+              "fail": 1,
+              "uncertain": 4
+            },
+            "important-recall": {
+              "pass": 13,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 11,
+              "fail": 0,
+              "uncertain": 2
+            },
+            "language-dates-identifiers": {
+              "pass": 12,
+              "fail": 1,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 6,
+            "fail": 6,
+            "uncertain": 1
+          },
+          "automaticAndSemanticPasses": 6,
+          "dimensions": {
+            "source-support": {
+              "pass": 6,
+              "fail": 6,
+              "uncertain": 1
+            },
+            "commitment-fidelity": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 1
+            },
+            "participant-attribution": {
+              "pass": 7,
+              "fail": 5,
+              "uncertain": 1
+            },
+            "important-recall": {
+              "pass": 13,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 13,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 12,
+              "fail": 1,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "deepseek-selected": {
+      "attempts": 16,
+      "valid": 14,
+      "automaticPasses": 14,
+      "operationalFailures": [
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "deepseek-flash",
+            "responseId": "f46a75ee-905e-4e7d-8cd5-c1eb4b9236d8",
+            "finishReason": "length",
+            "usage": {
+              "inputTokens": 3328,
+              "outputTokens": 8192,
+              "reasoningTokens": 6862
+            },
+            "estimatedUncachedCostUsd": 0.0108288
+          }
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "deepseek-flash",
+            "responseId": "9e3f501d-0c19-450e-ba5c-bd6ce1fd7d64",
+            "finishReason": "length",
+            "usage": {
+              "inputTokens": 3206,
+              "outputTokens": 8192,
+              "reasoningTokens": 7916
+            },
+            "estimatedUncachedCostUsd": 0.010792199999999998
+          }
+        }
+      ],
+      "knownCostUsd": 0.1352034,
+      "knownCostAttempts": 16,
+      "medianAttemptLatencyMs": 25551.0,
+      "p95AttemptLatencyMs": 36650,
+      "medianValidLatencyMs": 24798.5,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 11,
+            "fail": 2,
+            "uncertain": 1
+          },
+          "automaticAndSemanticPasses": 11,
+          "dimensions": {
+            "source-support": {
+              "pass": 11,
+              "fail": 2,
+              "uncertain": 1
+            },
+            "commitment-fidelity": {
+              "pass": 13,
+              "fail": 1,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 11,
+            "fail": 2,
+            "uncertain": 1
+          },
+          "automaticAndSemanticPasses": 11,
+          "dimensions": {
+            "source-support": {
+              "pass": 11,
+              "fail": 2,
+              "uncertain": 1
+            },
+            "commitment-fidelity": {
+              "pass": 13,
+              "fail": 1,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        }
+      }
+    },
+    "google-original": {
+      "attempts": 16,
+      "valid": 15,
+      "automaticPasses": 15,
+      "operationalFailures": [
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "code": "http-429",
+          "response": null
+        }
+      ],
+      "knownCostUsd": 0.18727575,
+      "knownCostAttempts": 15,
+      "medianAttemptLatencyMs": 14363.0,
+      "p95AttemptLatencyMs": 23714,
+      "medianValidLatencyMs": 14476,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 7,
+            "fail": 0,
+            "uncertain": 8
+          },
+          "automaticAndSemanticPasses": 7,
+          "dimensions": {
+            "source-support": {
+              "pass": 7,
+              "fail": 0,
+              "uncertain": 8
+            },
+            "commitment-fidelity": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 10,
+              "fail": 0,
+              "uncertain": 5
+            },
+            "important-recall": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 6,
+            "fail": 7,
+            "uncertain": 2
+          },
+          "automaticAndSemanticPasses": 6,
+          "dimensions": {
+            "source-support": {
+              "pass": 7,
+              "fail": 7,
+              "uncertain": 1
+            },
+            "commitment-fidelity": {
+              "pass": 12,
+              "fail": 0,
+              "uncertain": 3
+            },
+            "participant-attribution": {
+              "pass": 10,
+              "fail": 5,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 15,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 14,
+              "fail": 0,
+              "uncertain": 1
+            }
+          }
+        }
+      }
+    },
+    "google-selected": {
+      "attempts": 16,
+      "valid": 11,
+      "automaticPasses": 11,
+      "operationalFailures": [
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "code": "http-429",
+          "response": null
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "gemini-3.8-flash",
+            "responseId": "4nOlao3IH8Stz_IPo7_8GA",
+            "finishReason": "MAX_TOKENS",
+            "usage": {
+              "inputTokens": 6026,
+              "outputTokens": 8174,
+              "reasoningTokens": 7865
+            },
+            "estimatedUncachedCostUsd": 0.035172
+          }
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "gemini-3.8-flash",
+            "responseId": "K3Slaun4I9Hhz_IPj_3NwQI",
+            "finishReason": "MAX_TOKENS",
+            "usage": {
+              "inputTokens": 5829,
+              "outputTokens": 8178,
+              "reasoningTokens": 7863
+            },
+            "estimatedUncachedCostUsd": 0.03503925
+          }
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "code": "http-429",
+          "response": null
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "code": "incomplete-or-refused",
+          "response": {
+            "returnedModel": "gemini-3.8-flash",
+            "responseId": "iXWlauDVJ9m8stMPmM7KgA0",
+            "finishReason": "MAX_TOKENS",
+            "usage": {
+              "inputTokens": 5829,
+              "outputTokens": 8178,
+              "reasoningTokens": 7863
+            },
+            "estimatedUncachedCostUsd": 0.03503925
+          }
+        }
+      ],
+      "knownCostUsd": 0.3578235,
+      "knownCostAttempts": 14,
+      "medianAttemptLatencyMs": 30327.5,
+      "p95AttemptLatencyMs": 48995,
+      "medianValidLatencyMs": 29835,
+      "judges": {
+        "prompt-reviewer-a": {
+          "semantic": {
+            "pass": 5,
+            "fail": 3,
+            "uncertain": 3
+          },
+          "automaticAndSemanticPasses": 5,
+          "dimensions": {
+            "source-support": {
+              "pass": 5,
+              "fail": 3,
+              "uncertain": 3
+            },
+            "commitment-fidelity": {
+              "pass": 9,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 9,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 11,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 11,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 11,
+              "fail": 0,
+              "uncertain": 0
+            }
+          }
+        },
+        "prompt-reviewer-b": {
+          "semantic": {
+            "pass": 5,
+            "fail": 4,
+            "uncertain": 2
+          },
+          "automaticAndSemanticPasses": 5,
+          "dimensions": {
+            "source-support": {
+              "pass": 5,
+              "fail": 4,
+              "uncertain": 2
+            },
+            "commitment-fidelity": {
+              "pass": 9,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "participant-attribution": {
+              "pass": 9,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "important-recall": {
+              "pass": 9,
+              "fail": 2,
+              "uncertain": 0
+            },
+            "duplicate-items": {
+              "pass": 11,
+              "fail": 0,
+              "uncertain": 0
+            },
+            "language-dates-identifiers": {
+              "pass": 10,
+              "fail": 0,
+              "uncertain": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "comparisons": [
+    {
+      "provider": "openai",
+      "reviewer": "prompt-reviewer-a",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.5,
+      "exploratoryGroupBootstrap95": [0.125, 0.8125],
+      "improvedPairs": 9,
+      "regressedPairs": 1
+    },
+    {
+      "provider": "openai",
+      "reviewer": "prompt-reviewer-b",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.5625,
+      "exploratoryGroupBootstrap95": [0.25, 0.875],
+      "improvedPairs": 9,
+      "regressedPairs": 0
+    },
+    {
+      "provider": "anthropic",
+      "reviewer": "prompt-reviewer-a",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.25,
+      "exploratoryGroupBootstrap95": [0.0, 0.4375],
+      "improvedPairs": 5,
+      "regressedPairs": 1
+    },
+    {
+      "provider": "anthropic",
+      "reviewer": "prompt-reviewer-b",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.25,
+      "exploratoryGroupBootstrap95": [0.0, 0.4375],
+      "improvedPairs": 5,
+      "regressedPairs": 1
+    },
+    {
+      "provider": "google",
+      "reviewer": "prompt-reviewer-a",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": -0.125,
+      "exploratoryGroupBootstrap95": [-0.375, 0],
+      "improvedPairs": 0,
+      "regressedPairs": 2
+    },
+    {
+      "provider": "google",
+      "reviewer": "prompt-reviewer-b",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": -0.0625,
+      "exploratoryGroupBootstrap95": [-0.375, 0.1875],
+      "improvedPairs": 1,
+      "regressedPairs": 2
+    },
+    {
+      "provider": "deepseek",
+      "reviewer": "prompt-reviewer-a",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.3125,
+      "exploratoryGroupBootstrap95": [0.0, 0.625],
+      "improvedPairs": 6,
+      "regressedPairs": 1
+    },
+    {
+      "provider": "deepseek",
+      "reviewer": "prompt-reviewer-b",
+      "groups": 8,
+      "pairs": [
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 1,
+          "originalSemantic": "uncertain",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 1,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "uncertain",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 1,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 1,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-collective-change",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "operational-error",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-calendar-boundary",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-quoted-instructions",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-resolved-questions",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "fail",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": false
+        },
+        {
+          "caseId": "validation-ledger-investigation",
+          "repetition": 2,
+          "originalSemantic": "operational-error",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-scope-negotiation",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-owner-resolution",
+          "repetition": 2,
+          "originalSemantic": "fail",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": false,
+          "selectedAutomaticAndAI": true
+        },
+        {
+          "caseId": "validation-undecided-need",
+          "repetition": 2,
+          "originalSemantic": "pass",
+          "selectedSemantic": "pass",
+          "originalAutomaticAndAI": true,
+          "selectedAutomaticAndAI": true
+        }
+      ],
+      "automaticAndAISuccessDifference": 0.3125,
+      "exploratoryGroupBootstrap95": [0.0, 0.625],
+      "improvedPairs": 7,
+      "regressedPairs": 2
+    }
+  ],
+  "totalExperiment": {
+    "attempts": 160,
+    "knownCostUsd": 2.10463835,
+    "knownCostAttempts": 156
+  },
+  "interpretation": "Selected minus original on eight synthetic scenario groups. Operational failures count as unsuccessful attempts; uncertain is not pass. Automatic-and-AI is provisional and never human quality. Intervals resample eight whole groups; correlated repetitions and subjective judgments do not establish production accuracy, equivalence, or a best-model ranking. No correction for multiple exploratory comparisons. Saved prices are uncached estimates, including conservative DeepSeek peak rates; missing usage is unknown and Codex costs are excluded."
+}

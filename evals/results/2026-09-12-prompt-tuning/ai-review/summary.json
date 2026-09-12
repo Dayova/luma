@@ -1,0 +1,5034 @@
+{
+  "version": 1,
+  "benchmarkHash": "98774ca7dea6538bc62be498745d7cbcf99fca795b1c7e332aabf1ab8c18f3c2",
+  "packetHash": "f034f0aa3002de4f8e0d4e6f8ec7c7533de709d22197f810f4d8214470664b9b",
+  "contextHash": "14eb20f71d1a72b212cfddaf1713b8ce146ef28b3fe0df7faa1932ce33cc97a4",
+  "calibrationHash": "5dea0199df887e0906a3447912a407518b61dcb8ce74b06b96442cff3d2b1b34",
+  "reviewers": [
+    {
+      "id": "prompt-reviewer-a",
+      "system": "Codex fresh agent session",
+      "model": "inherited-parent-model; exact API model ID not exposed",
+      "freshContext": true,
+      "metadataBlinded": true,
+      "calibrationPassed": false,
+      "calibrationChecks": 18,
+      "calibrationCorrect": 16,
+      "checks": [
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "participant-attribution",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "fail",
+          "passed": false
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "fail",
+          "passed": false
+        }
+      ]
+    },
+    {
+      "id": "prompt-reviewer-b",
+      "system": "Codex fresh agent session",
+      "model": "inherited-parent-model; exact API model ID not exposed",
+      "freshContext": true,
+      "metadataBlinded": true,
+      "calibrationPassed": false,
+      "calibrationChecks": 18,
+      "calibrationCorrect": 15,
+      "checks": [
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "fail",
+          "passed": false
+        },
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "participant-attribution",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "e10b697e70fc41e5571c3ab7eae9688c0ef32759971e529221d6a54e29da8939",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "participant-attribution",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "c0c727e298f36418b74f9254caa4a2fd0a55fa6108957080725a500b2d084aa4",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "bc71df20a8bcccfcaae28b0243b3552844d82868ccbb9959e35ab21aa0a97d77",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "3b93c6f289779c00af68fb254724648b588b1597760d73134161942f22dd4d00",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "fail",
+          "passed": false
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "source-support",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "446aecd62a0a811318f6126398e03c3aca28d7ad0ce3f0eddc3be8627255a1f0",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "pass",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "source-support",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail",
+          "observed": "fail",
+          "passed": true
+        },
+        {
+          "answerId": "32ef5f12a5b17c348c3721c8412c229bd0467f9939387a53d9fba24a697f65ff",
+          "rubricId": "important-recall",
+          "verdict": "pass",
+          "observed": "fail",
+          "passed": false
+        }
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "candidate": "openai-original",
+      "attempts": 16,
+      "validAnswers": 16,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 7,
+          "semanticFailures": 5,
+          "semanticUncertain": 4,
+          "automaticAndAIPasses": 7,
+          "criticalSemanticFailures": 2
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 7,
+          "semanticFailures": 7,
+          "semanticUncertain": 2,
+          "automaticAndAIPasses": 7,
+          "criticalSemanticFailures": 4
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "attempts": 16,
+      "validAnswers": 16,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 15,
+          "semanticFailures": 0,
+          "semanticUncertain": 1,
+          "automaticAndAIPasses": 15,
+          "criticalSemanticFailures": 0
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 16,
+          "semanticFailures": 0,
+          "semanticUncertain": 0,
+          "automaticAndAIPasses": 16,
+          "criticalSemanticFailures": 0
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "attempts": 16,
+      "validAnswers": 12,
+      "operationalErrors": 4,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 2,
+          "semanticFailures": 8,
+          "semanticUncertain": 2,
+          "automaticAndAIPasses": 2,
+          "criticalSemanticFailures": 5
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 2,
+          "semanticFailures": 10,
+          "semanticUncertain": 0,
+          "automaticAndAIPasses": 2,
+          "criticalSemanticFailures": 8
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "attempts": 16,
+      "validAnswers": 8,
+      "operationalErrors": 8,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 6,
+          "semanticFailures": 2,
+          "semanticUncertain": 0,
+          "automaticAndAIPasses": 6,
+          "criticalSemanticFailures": 2
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 6,
+          "semanticFailures": 2,
+          "semanticUncertain": 0,
+          "automaticAndAIPasses": 6,
+          "criticalSemanticFailures": 2
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "attempts": 16,
+      "validAnswers": 13,
+      "operationalErrors": 3,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 6,
+          "semanticFailures": 2,
+          "semanticUncertain": 5,
+          "automaticAndAIPasses": 6,
+          "criticalSemanticFailures": 1
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 6,
+          "semanticFailures": 6,
+          "semanticUncertain": 1,
+          "automaticAndAIPasses": 6,
+          "criticalSemanticFailures": 6
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "attempts": 16,
+      "validAnswers": 14,
+      "operationalErrors": 2,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 11,
+          "semanticFailures": 2,
+          "semanticUncertain": 1,
+          "automaticAndAIPasses": 11,
+          "criticalSemanticFailures": 2
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 11,
+          "semanticFailures": 2,
+          "semanticUncertain": 1,
+          "automaticAndAIPasses": 11,
+          "criticalSemanticFailures": 2
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "attempts": 16,
+      "validAnswers": 15,
+      "operationalErrors": 1,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 7,
+          "semanticFailures": 0,
+          "semanticUncertain": 8,
+          "automaticAndAIPasses": 7,
+          "criticalSemanticFailures": 0
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 6,
+          "semanticFailures": 7,
+          "semanticUncertain": 2,
+          "automaticAndAIPasses": 6,
+          "criticalSemanticFailures": 7
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "attempts": 16,
+      "validAnswers": 11,
+      "operationalErrors": 5,
+      "unrun": 0,
+      "humanReviewedPasses": 0,
+      "judges": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "semanticPasses": 5,
+          "semanticFailures": 3,
+          "semanticUncertain": 3,
+          "automaticAndAIPasses": 5,
+          "criticalSemanticFailures": 3
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "semanticPasses": 5,
+          "semanticFailures": 4,
+          "semanticUncertain": 2,
+          "automaticAndAIPasses": 5,
+          "criticalSemanticFailures": 4
+        }
+      ]
+    }
+  ],
+  "answers": [
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-collective-change",
+      "answerId": "7020b2e2c5976262998e0deb46ced1d49f2ef0d47d3572c1b6bd41d1c7185a34",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "e292a71abd1e387e26f17522e040efd70e168da1d3e2a93fb29840c253fe48e6",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "eaa6c6dac98ebc73a3fd6a41c7f86fcceee80064eff8566f3894f32915991019",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "98ea8851afca1715a9a374e44296cff5aeec18a74b44cc9e67db2815e3d79890",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "413d54fdbc78d98a12f65d9dc6a7b0530e48e0a0f4aa44c7f6564838893c717f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "15188af2a8c07c10457448c2a315d579f4b114aa2cf733120efe1cad65f4105b",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "d20d78155343865ddd638c08107559f4cef2bcd9a17ccb59d5b610fadaffad33",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "a8607e73dd5efca91c01ca9b9541bf1e54a3eb817087a99ab615f316fb72f36d",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "713ac597d61322bac692f05a42c5db8ecd3da85771540a4da9a3f5a1033015bb",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "cc7250abe221d4365a17d57ceabc93e49bf1977145dcf60382ea698ace0873f7",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "86c20f6bbd95125262cc54db34a7c5498a40689d187ea219d844261e823505ba",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "2c5c26605a2b90410484a5c8056a05935d71d382e728d60bf6dd5a609f45fcf9",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "ed39239b7e53c8569a861c84cfc032c8fbee3fdc94cbe598191b960c483be325",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "f77cdafb0cb7f47bff68aeb3c1bf51c38b1a20f71aeefad13a19c7b893e1c255",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "bf4fa1b744940f5ad04dae6718ca281eb81f3db863877e47a809c5af0548cea9",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-collective-change",
+      "answerId": "41079f567e9ad8e71ad6c58fff131c5f9d131e730331ca9ed4c50f7a3bb0aa42",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "9ce38b48a11888b43584694f2f491954f31cc22aa0a1f0113dda5b1b5e5e8299",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "bdc9c36917800f1f33b2ac37c2ebe00c295edd4550bf3e41bfe88255951d2ac0",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "7bfac28d65e1ce5acb809c46a0624456d75529aeb353506895a8dfc1ec98ce05",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "a5454e128c36487c7e9ed5309ebe1d102e24f52da9c9b0fd8829fbaaf24f7fb4",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "fb1113faa1a8d9a14f0c08e3c39d0b616fb0cb0141a2e9924e9eb27c1182e88d",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "adbf23fbf23e1b0cb575fb6b13bb9b42b9a6494810641f1a2af3f8075c3afc5b",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "be0c8af3833f135bdd135059221a5940513adb20f83a4b0fb328b0965fa82e0b",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "e8fd0559727178b005c234cb0b963c9c7b6eccdcdb5919595e0936f14564b316",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "e6e74cf7586b9019e8b263f321c23eb057dd749391f17c953c0c62dbe201aabc",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "d30fb07c8f621cc6afa61517e656bfc794831bb74554f2afebc66240c747741e",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "1c7f4a834d3fd52c98b902b2b7851951e892b6be30efdcb2b206275165009d21",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "openai-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "197f8aebe579091e9e5b7f24fc79da9a5fb776f5dee3091b6fa674a14a7e0428",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "93204dc8ec0e7f6a20a8d028e497cb34d5e4c773847d15d0525f1be4d929389e",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-collective-change",
+      "answerId": "2640a15511790f5f2d7a3cca0421178289f048b7b5af3c83b6baadb2e25e9e3a",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "50fb26837d0ebd75f747b8e6f283946800731d40f9a76b782e618a49528ea9d4",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "4a82575b31b3666784cf64889767d6316ad0ef7a58aca9cc5dedeb610c0484b0",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "f87ed55d685b3846d73be177c26416b321b92c60bf310709f86738d36e7d07d2",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "6d6945c3561e34791e32c97ead192704f1ec908e09b13a764c3507866ea80937",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-collective-change",
+      "answerId": "25f6ae2012c05908b0c32fce10d1b6501a9edebe2406c3113529ad8be903e750",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "abf313aade0d0cf044c1c241e3aab37bf5b8d683ec7b79cb6d7e9bac35910d31",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "e8cdb288791b6d741885333466f6b29cfa89ae49acc2d604483911eae4cf02fe",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "fcda4dad7d6fc427514190dbb3fd83cca233a54d78854f8168af3144d9e811d9",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "1b379e56b6fc6e8a64055d1d7d28d90e51f02ee41ed0245c7dc601aeccfe315b",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "8c20e3e1a14bba96995034d311ba1725a1e6aedc2b76609d1d36376a605f4efe",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "37dfdcc4422280d6fe0f182389d8d9565be76339f472ffa640c993acb806b8e5",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "0be8db017f3ed53cc3c7713a1646122386f7b4067b7d05ae36c29a3ea032feff",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "6d91bd7c6a81a46ed4bba3b75721194e6e57fb3a6c947eb0bd5df173cce74b82",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "anthropic-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "c2a3aa57f8ef845a323f5dda45068a788749e7697e18a7a4e0d2c4b6ff996776",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-collective-change",
+      "answerId": "3a4c6dc959cf5803bfe73a56057892ee96005c934edf3f5271706a097a8116e7",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "d6f7b985d7ecd091be44d5ce47a7443e5e5c89357354d63b2f6364c220c83704",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "9fc3ec7523bbdeaac92126df0f033f67b2cdd8298fdcdc1a040a6f00498c81fb",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "2f8bf09c9b0be704dcd8f5d4fa67da5ea51ba9bd6e116388aa50f94afc23d796",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "e8d66c42dcc1055bc63d1ad162fa50082cb9d37bca24d8f5241c3c1e22a90e11",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "af33ad7e09dd2ee6720d0d4bee74538c8273ac33bcc744a6542794c62411d716",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "668caab5e18395bda8fcf86632cb21a6006136461d9dd3f784a20d7e6cca5ded",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "f3c4eeb376b0b6281ff9d55df3734cfc1d16d288b705d154aed702b28d6e3eb2",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "a9c1386ae0cd98716f4d9e46f4e267a5db35b50dc22ad55c2a6f353387f19c94",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-collective-change",
+      "answerId": "3a75fe45fd26c04ae6ff2e99928035c3ac86fa608d99c78a69582232fc0c3693",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "edbf3551662afe19d1e687e211328149138e1d928516bba7e44ed3dd6544122f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "c863eee646633b22667ee4dab47387db1cdafbe5929003d1ee3b5434800722ed",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "0fdd32968f7f6717d2d6ffa964089479ae116b996d2ca3165ec05412ee47a699",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "f7ad01b4e2654fed224912f8ab48d7bf2af3a293f7337513596d89c5a0914bb8",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "41198f5430093857ebe06f6657e4c85c19d67e243d494a169cf9fd3dba61c86d",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "985f6b62e4fde7538aa7badf29e8d91e735244526becb0a73f86d1093b9bfc24",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "55233be4648afd8f5d1bed344b9edf315693df789dde3d43c8b8d60a74ceb878",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "df6e086e0f4cc36b3efe0598d6826f1dcb0d8e737155f7c6f64d97c84fb4fc3e",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "google-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "1e19862d76e5ad43e1db30dfc92fd7771836184b6f7742dc91cc69274dd5c6b5",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-collective-change",
+      "answerId": "cc2d8220f3bd26b0411fa5c4fea60bdb04b57e770aa80f2fec389e8c13a0a9b3",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-collective-change",
+      "answerId": "7b838c0d91e6cdc77b76daf3f55ebbed227b510591a7c1149244bf469b695e74",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "54f5aa15e31248d2f310efa72b4b271874b6eada381659dca3abc765bfce95d1",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "8d61eccfef6399986c2e43d74631914fa22263b43b9373ae67de52f31872386f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "61e54ef99ecd785b08000401c3a629e0c2b938399cf069244f5f5fe623904f90",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "26390fb7caf59607e2b4d6b9d10252cdaa7a1201e960ad6f0f4008bdaf304643",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "7034614d26ab875ac57b8dd4b8e3acb2b7ed9b1a79c1c5c7a5f0c4ab9ed94169",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "uncertain"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "ed5aa0ed28c6e0afca617019fbf013cde23952c65112f4853c22cbe1bd99c00a",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "c04ce5c22930e14d676dac441e4429b09ef98c1329f799944759c86aeb399623",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "f8fc928f9e0296a2f59280354f69da5cd5d96cb6cd0ebf2548d617f84e863e29",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-collective-change",
+      "answerId": "2cd4b35eeb53225d9768daa2c7f86cbc217b48d0102d380d1e70a1b1533f5b56",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "679a947f5bcd04c015be7bb36c96f03ff6f090bbee355357656ae5beb6cad577",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-calendar-boundary",
+      "answerId": "fa83ccde8d1368f4654cc276d6408d0652dc9d91b38ce4e57ebc86e3867d02f3",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-quoted-instructions",
+      "answerId": "3136cfb3e24ad8e158acdf3810e957fdb4227e09145458d9d6214e1aa2be981f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-resolved-questions",
+      "answerId": "e13d0a8f79c4b07d3f75242df3e734607cb59de00f02326d2238ac239e9d1228",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-resolved-questions",
+      "answerId": "4d1f283f14c63f5c4ba86074e9c148fe64ca4bfe0c762c8d9ce3f49456c9657f",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "fail"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-ledger-investigation",
+      "answerId": "14903fa0a547c394c39413d30b7aef9914f585b256e93d69eca53e5f40df3a05",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "uncertain"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-scope-negotiation",
+      "answerId": "c901f2988bef831018dfa3506c7edfa6851bd08016b96f5bc4bcf1ca2e4524cd",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-owner-resolution",
+      "answerId": "222711613c60b45b558f73ee435213cad5272353ff69ad4701952021d719eb0c",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-owner-resolution",
+      "answerId": "4b6a0dd0255b953a6e8947f1fd1e1500fa19cd8cd8fe9f929a5e0677329febfa",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "fail"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-selected",
+      "caseId": "validation-undecided-need",
+      "answerId": "e78cdd99873b5c7d9a6b950d05f03be354f5d7d49534da6d9e7f32632dced0c8",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "candidate": "deepseek-original",
+      "caseId": "validation-undecided-need",
+      "answerId": "7f7e9df01f8c017106b3218880c547d83b133181c73e060ebe92f3997704fe61",
+      "judgments": [
+        {
+          "reviewer": "prompt-reviewer-a",
+          "verdict": "pass"
+        },
+        {
+          "reviewer": "prompt-reviewer-b",
+          "verdict": "pass"
+        }
+      ]
+    }
+  ],
+  "agreement": {
+    "compared": 630,
+    "agreed": 576,
+    "disagreements": 54,
+    "rate": 0.9142857142857143
+  },
+  "disagreements": [
+    {
+      "answerId": "0be8db017f3ed53cc3c7713a1646122386f7b4067b7d05ae36c29a3ea032feff",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "0fdd32968f7f6717d2d6ffa964089479ae116b996d2ca3165ec05412ee47a699",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "caseId": "validation-undecided-need",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "fail",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "197f8aebe579091e9e5b7f24fc79da9a5fb776f5dee3091b6fa674a14a7e0428",
+      "caseId": "validation-undecided-need",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "26390fb7caf59607e2b4d6b9d10252cdaa7a1201e960ad6f0f4008bdaf304643",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "2cd4b35eeb53225d9768daa2c7f86cbc217b48d0102d380d1e70a1b1533f5b56",
+      "caseId": "validation-collective-change",
+      "rubricId": "duplicate-items",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "2f8bf09c9b0be704dcd8f5d4fa67da5ea51ba9bd6e116388aa50f94afc23d796",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "caseId": "validation-collective-change",
+      "rubricId": "important-recall",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "language-dates-identifiers",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "41198f5430093857ebe06f6657e4c85c19d67e243d494a169cf9fd3dba61c86d",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "4b6a0dd0255b953a6e8947f1fd1e1500fa19cd8cd8fe9f929a5e0677329febfa",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "4b6a0dd0255b953a6e8947f1fd1e1500fa19cd8cd8fe9f929a5e0677329febfa",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "duplicate-items",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "caseId": "validation-collective-change",
+      "rubricId": "important-recall",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "86c20f6bbd95125262cc54db34a7c5498a40689d187ea219d844261e823505ba",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "985f6b62e4fde7538aa7badf29e8d91e735244526becb0a73f86d1093b9bfc24",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "a5454e128c36487c7e9ed5309ebe1d102e24f52da9c9b0fd8829fbaaf24f7fb4",
+      "caseId": "validation-quoted-instructions",
+      "rubricId": "important-recall",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "pass"
+    },
+    {
+      "answerId": "af33ad7e09dd2ee6720d0d4bee74538c8273ac33bcc744a6542794c62411d716",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "language-dates-identifiers",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "cc2d8220f3bd26b0411fa5c4fea60bdb04b57e770aa80f2fec389e8c13a0a9b3",
+      "caseId": "validation-collective-change",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "cc2d8220f3bd26b0411fa5c4fea60bdb04b57e770aa80f2fec389e8c13a0a9b3",
+      "caseId": "validation-collective-change",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "d30fb07c8f621cc6afa61517e656bfc794831bb74554f2afebc66240c747741e",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "caseId": "validation-owner-resolution",
+      "rubricId": "commitment-fidelity",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "caseId": "validation-ledger-investigation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "e8d66c42dcc1055bc63d1ad162fa50082cb9d37bca24d8f5241c3c1e22a90e11",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "language-dates-identifiers",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "pass",
+      "rightVerdict": "uncertain"
+    },
+    {
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "caseId": "validation-resolved-questions",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "source-support",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    },
+    {
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "caseId": "validation-scope-negotiation",
+      "rubricId": "participant-attribution",
+      "left": "prompt-reviewer-a",
+      "right": "prompt-reviewer-b",
+      "leftVerdict": "uncertain",
+      "rightVerdict": "fail"
+    }
+  ],
+  "findings": [
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "0be8db017f3ed53cc3c7713a1646122386f7b4067b7d05ae36c29a3ea032feff",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation work proposal cites utterances 3 and 9 but additionally asserts Nora and Omar explicitly refused; those facts require utterances 2 and 5. The record title also cites only need/date rather than identity ambiguity.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:1",
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "0fdd32968f7f6717d2d6ffa964089479ae116b996d2ca3165ec05412ee47a699",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Privacy rationale is plausible but unstated; uncertain whether asserting this as decision rationale exceeds contextual inference.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Emil asks whether unnecessary was decided; listing him as supporting it is unsupported.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:3",
+        "evidence:validation-undecided-need:4",
+        "evidence:validation-undecided-need:5",
+        "evidence:validation-undecided-need:6",
+        "evidence:validation-undecided-need:7",
+        "evidence:validation-undecided-need:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "A question becomes support for a rejected proposition.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:3",
+        "evidence:validation-undecided-need:4",
+        "evidence:validation-undecided-need:5",
+        "evidence:validation-undecided-need:6",
+        "evidence:validation-undecided-need:7",
+        "evidence:validation-undecided-need:8"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Emil's support for the unnecessary claim is not established.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:3",
+        "evidence:validation-undecided-need:4",
+        "evidence:validation-undecided-need:5",
+        "evidence:validation-undecided-need:6",
+        "evidence:validation-undecided-need:7",
+        "evidence:validation-undecided-need:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV scope and conditional XML are accurate; Omar's support for the narrower scope is only inferable from his confirmation question.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:1",
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar requested both formats then sought clarification; whether this establishes support for CSV-only is uncertain.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:1",
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Investigation content is grounded; listing Emil as a supporter goes beyond his scope question without clear assent.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess is the owner; Emil's support is uncertain because he asks about scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The dated meeting and explicit November 20 resolve the deadline; marking it ambiguous loses available precision.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "197f8aebe579091e9e5b7f24fc79da9a5fb776f5dee3091b6fa674a14a7e0428",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "The group-agreed rationale slightly strengthens Omar's let-us proposal; surrounding agreement on uncertainty makes this ambiguous rather than clearly invented.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:2",
+        "evidence:validation-undecided-need:3",
+        "evidence:validation-undecided-need:5",
+        "evidence:validation-undecided-need:6",
+        "evidence:validation-undecided-need:7",
+        "evidence:validation-undecided-need:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "1b379e56b6fc6e8a64055d1d7d28d90e51f02ee41ed0245c7dc601aeccfe315b",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 23 is resolvable from the 2026 meeting; calling the date ambiguous and declining the year loses supplied temporal context.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "25f6ae2012c05908b0c32fce10d1b6501a9edebe2406c3113529ad8be903e750",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Cedar supporter IDs incorrectly turn reporting and recognition into personal support, especially despite Nora's explicit neutrality.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "25f6ae2012c05908b0c32fce10d1b6501a9edebe2406c3113529ad8be903e750",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Nora explicitly did not disclose her stance; Omar and Emil likewise acknowledge validity rather than personally endorse Cedar.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "26390fb7caf59607e2b4d6b9d10252cdaa7a1201e960ad6f0f4008bdaf304643",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Testing scope and non-authoritative quote are grounded; high-severity employee-exposure risk is plausible but not explicitly evidenced.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "2640a15511790f5f2d7a3cca0421178289f048b7b5af3c83b6baadb2e25e9e3a",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Nora's supporter attribution contradicts her explicit refusal to supply a personal position.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "2640a15511790f5f2d7a3cca0421178289f048b7b5af3c83b6baadb2e25e9e3a",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Reporting a steering decision does not establish Nora as its supporter.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "2cd4b35eeb53225d9768daa2c7f86cbc217b48d0102d380d1e70a1b1533f5b56",
+      "kind": "rubric-concern",
+      "rubricId": "duplicate-items",
+      "explanation": "The separate supersession decision restates Birch's status; uncertain whether redundant bookkeeping rather than a distinct record rule.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:1",
+        "evidence:validation-collective-change:2",
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["recall"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "2f8bf09c9b0be704dcd8f5d4fa67da5ea51ba9bd6e116388aa50f94afc23d796",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Synthetic-only scope is explicit; security/privacy rationale is plausible but not spoken and is presented as settled rationale.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The question presupposes future migration work will be agreed, although the source only says none is agreed today.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "What task or owner will be agreed strengthens absence of agreement into anticipated agreement.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar states today's limited scope, not the output's future migration question.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "37dfdcc4422280d6fe0f182389d8d9565be76339f472ffa640c993acb806b8e5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up asserts Nora explicitly declined this week, but its citations 3, 5, 6 and 9 do not establish Nora's refusal; utterance 2 is required.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:1",
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Investigation scope is supported; all three supporters are less clear because Emil only asks and Nora discusses fix uncertainty.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess owns work; Emil and Nora support for the combined scope decision is uncertain.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV/XML facts are supported; Omar's narrower-scope support and a newly suggested XML resolution window lack explicit acceptance.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess owns CSV; Omar's supporter status is ambiguous because he sought scope confirmation.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "kind": "rubric-concern",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Main CSV date is correct; mitigation adds a before-or-shortly-after CSV timing recommendation with no source timing basis.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "41079f567e9ad8e71ad6c58fff131c5f9d131e730331ca9ed4c50f7a3bb0aa42",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Nora and Emil are labeled Cedar supporters though they only report or acknowledge the decision's validity.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:1",
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "41079f567e9ad8e71ad6c58fff131c5f9d131e730331ca9ed4c50f7a3bb0aa42",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Nora explicitly withholds personal stance; Emil's recognition is not personal support.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:1",
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "41198f5430093857ebe06f6657e4c85c19d67e243d494a169cf9fd3dba61c86d",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Scope is accurate; causal rationale linking synthetic data specifically to unknown cause is unstated and only inferable.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:3",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4a82575b31b3666784cf64889767d6316ad0ef7a58aca9cc5dedeb610c0484b0",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 23 is resolvable from supplied 2026 context; null ambiguous date discards that information.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Investigation-only content is supported; Nora's support for the combined synthetic-scope decision is inferential.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess owns work; Nora only states fix uncertainty rather than explicitly accepting all combined scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The fix question says it remains open after investigation, whereas Nora says they will know only after it.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The temporal dependency on investigation becomes a claim of continuing uncertainty afterward.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 20 is resolvable, yet normalized dates are null and ambiguous; the fix-question temporal meaning also shifts.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4d1f283f14c63f5c4ba86074e9c148fe64ca4bfe0c762c8d9ce3f49456c9657f",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Risk asserts funding is not yet approved, but the source only establishes that the finance owner has not answered.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "4d1f283f14c63f5c4ba86074e9c148fe64ca4bfe0c762c8d9ce3f49456c9657f",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "Unknown approval status is strengthened to non-approval in the risk.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Test and quotation treatment are grounded; Tess's support for synthetic inputs and high privacy risk are inferential.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess asks about real data without explicitly supporting the synthetic-only answer; Emil ownership is clear.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "kind": "rubric-concern",
+      "rubricId": "duplicate-items",
+      "explanation": "Unsafe content and parser-handling risks substantially overlap but may address content versus processing.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["recall"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Core investigation is supported; collective support for the combined scope is only inferred from different participant statements.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's acceptance is clear; Emil and Nora have not explicitly endorsed all of synthetic-only scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV-only and undecided XML are supported; Omar's support for narrower scope is inferential.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess ownership is explicit; Omar asks clarification without explicit acceptance of CSV-only scope.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "668caab5e18395bda8fcf86632cb21a6006136461d9dd3f784a20d7e6cca5ded",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The meeting-record title asserts an agreement about requirements documentation, but its cited utterances 1 and 9 concern export need and unidentified implementer only; documentation is supported by 7 and 10.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:1",
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "7034614d26ab875ac57b8dd4b8e3acb2b7ed9b1a79c1c5c7a5f0c4ab9ed94169",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Main facts are sound; will funding be approved shifts a present-status question toward a future outcome, though context may permit that paraphrase.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Future migration agreement is presupposed without evidence.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "No migration agreed today becomes what will be agreed, strengthening limited scope.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar did not raise the attributed future-migration question.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "a5454e128c36487c7e9ed5309ebe1d102e24f52da9c9b0fd8829fbaaf24f7fb4",
+      "kind": "rubric-concern",
+      "rubricId": "important-recall",
+      "explanation": "Real task and answered data scope are present; whether omitting the explicit rejection of quoted authorization loses a material clarification is uncertain.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["recall", "clarification"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "af33ad7e09dd2ee6720d0d4bee74538c8273ac33bcc744a6542794c62411d716",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Translating board as Vorstand may invent an executive body where the source could mean a planning board; interpretation is unresolved.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "c04ce5c22930e14d676dac441e4429b09ef98c1329f799944759c86aeb399623",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up describes speaker-display failure and Omar's denial but cites only 3, 6 and 8; the additional assertions require 4 and 5.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:1",
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV/XML content is grounded; Omar's support is inferred from his scope question.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess ownership is clear, but Omar did not explicitly endorse the narrowed scope.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d20d78155343865ddd638c08107559f4cef2bcd9a17ccb59d5b610fadaffad33",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 23 is resolvable from 2026 context but wrongly marked ambiguous with null normalization.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d30fb07c8f621cc6afa61517e656bfc794831bb74554f2afebc66240c747741e",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Normalized fields retain only day/month, omitting the available 2026 year and leaving incomplete normalized deadlines.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The 2025 normalized deadlines contradict the supplied November 2026 meeting context.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Both action and follow-up dates use 2025 instead of 2026; November 25 2025 also does not match the clarified Wednesday.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV scope is accurate; listing Emil and Omar as supporters goes beyond their uncertainty/clarification statements.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess is supported; Emil and Omar's endorsement of the combined scope decision is uncertain.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Core investigation is grounded; Emil's synthetic-only support is inferred and settlement is mistranslated in two fields.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess owns work; Emil asks about test data without explicit endorsement of the answer.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Siedlungs-Diskrepanz means a residential-settlement discrepancy and mistranslates the financial settlement mismatch in a question and work title; date and filename are correct.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "e8d66c42dcc1055bc63d1ad162fa50082cb9d37bca24d8f5241c3c1e22a90e11",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Vorstand resolves ambiguous board into an executive body without evidence; source may mean a planning board.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV and conditional XML facts are grounded; Omar's supporter ID is inferred from his clarification question.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess ownership is clear but Omar's support for CSV-only scope is uncertain.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Core facts are supported; Tess's supporter ID is inferred despite her questions about negotiability.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:7",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Emil owns documentation, but Tess only asks about its deadline and does not expressly support the decision.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:7",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "f7ad01b4e2654fed224912f8ab48d7bf2af3a293f7337513596d89c5a0914bb8",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Main task/scope grounded; plural pages and danger to parser generalize one unsafe example, with uncertain contextual support.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:2",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "f87ed55d685b3846d73be177c26416b321b92c60bf310709f86738d36e7d07d2",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "2025 deadline contradicts the 2026 meeting and explicit Friday November 20 context.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "f87ed55d685b3846d73be177c26416b321b92c60bf310709f86738d36e7d07d2",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Action and work proposal use November 20 2025 instead of 2026, with an unjustified exact confidence.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Core facts are grounded; Tess's deadline support is inferred from her questions rather than explicit endorsement.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:7",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Emil ownership is clear but Tess's support is uncertain because she asks about negotiation.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:7",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "CSV-only commitment and open XML need are grounded; Omar's narrower-scope support is inferred.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess owns work; Omar asked clarification rather than expressly supporting CSV-only scope.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "fb1113faa1a8d9a14f0c08e3c39d0b616fb0cb0141a2e9924e9eb27c1182e88d",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 23 can resolve to 2026; null ambiguous action date and yearless follow-up discard provided temporal context.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:4",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:8",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "fcda4dad7d6fc427514190dbb3fd83cca233a54d78854f8168af3144d9e811d9",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The 2025 deadline contradicts the 2026 source instant despite otherwise supported testing and quote context.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-a",
+      "answerId": "fcda4dad7d6fc427514190dbb3fd83cca233a54d78854f8168af3144d9e811d9",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Action and follow-up use November 20 2025 instead of 2026, inconsistent with Friday in the meeting context.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:3",
+        "evidence:validation-quoted-instructions:4",
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7",
+        "evidence:validation-quoted-instructions:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "fcda4dad7d6fc427514190dbb3fd83cca233a54d78854f8168af3144d9e811d9",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The action and follow-up give 2025-11-20, whereas the November 2026 source establishes November 20, 2026.",
+      "evidenceIds": ["evidence:validation-quoted-instructions:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "fcda4dad7d6fc427514190dbb3fd83cca233a54d78854f8168af3144d9e811d9",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "2025-11-20 is the wrong year for the explicitly named Friday November 20 in this 2026 meeting, in both deadline fields.",
+      "evidenceIds": ["evidence:validation-quoted-instructions:5"],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "fb1113faa1a8d9a14f0c08e3c39d0b616fb0cb0141a2e9924e9eb27c1182e88d",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The source instant provides 2026 and November 23 is confirmed; normalizedDate null with ambiguous confidence unnecessarily loses the resolvable deadline.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar is listed as supporting the CSV-only decision, but his cited utterance asks whether the commitment stands without XML rather than endorsing that scope.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "faceaeb03aa85688ede543a69885ce6d0288c1615b7ab32987f1268f6220e3f2",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar's clarifying question does not establish personal support for CSV-only scope; Tess's ownership is established.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Tess is marked as a deadline supporter although her two utterances ask whether the date is committed and negotiable.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:7"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "f97b88b086e395bd0fe78e0ef354ecd347d5184565d53a64ebb96d6e60fc5207",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's questions do not evidence endorsement; Emil's ownership and Omar's funding question are correctly attributed.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "f87ed55d685b3846d73be177c26416b321b92c60bf310709f86738d36e7d07d2",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Both deadline fields assert 2025-11-20 despite a November 2026 meeting and an explicit November 20 report date.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "f87ed55d685b3846d73be177c26416b321b92c60bf310709f86738d36e7d07d2",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The normalized action date and proposed work dueDate use 2025 rather than 2026; ledger-map.ts itself is preserved.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "f7ad01b4e2654fed224912f8ab48d7bf2af3a293f7337513596d89c5a0914bb8",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "The risk generalizes one unsafe page to imported pages and says they can endanger the parser; the safe-test request supports concern but no parser vulnerability is actually established.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:1",
+        "evidence:validation-quoted-instructions:2",
+        "evidence:validation-quoted-instructions:4"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Tess is listed as a supporter of the fixed deadline, but both her cited utterances are questions about its status.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:7"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "ecab0d03f47bb4b247894bb17dc4c6d59d96ee9f17bf275e7679e456b37b9d6f",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Questioning the deadline does not establish Tess's support; Emil's ownership and Omar's funding attribution are supported.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:1",
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar's clarification question is turned into supporter membership for CSV-only scope without an endorsement.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "ec82e8ef5f1823f90ec97a7eddb776662349ac966c560ae8866b027b1d3373ce",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's owner attribution is sound, but Omar is unsupported as a decision supporter.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "e8d66c42dcc1055bc63d1ad162fa50082cb9d37bca24d8f5241c3c1e22a90e11",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "The rationale translates 'the board lists' into 'vom Vorstand genannten'; the source could mean a planning board rather than a governing board, so governance attribution is not settled.",
+      "evidenceIds": ["evidence:validation-resolved-questions:4"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "e8d66c42dcc1055bc63d1ad162fa50082cb9d37bca24d8f5241c3c1e22a90e11",
+      "kind": "rubric-concern",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "Dates and identifiers are preserved, but translating ambiguous 'board' as 'Vorstand' may change the original organizational meaning.",
+      "evidenceIds": ["evidence:validation-resolved-questions:4"],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The output calls the financial settlement mismatch 'Siedlungs-Diskrepanz' and attributes support for synthetic-only scope to Emil, whose cited statement is a question.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Emil asks whether the search is limited to test data; that does not establish his endorsement of the synthetic-data decision. Tess's ownership is sound.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "dd18c65a0d79908dbdc2c18baedb476cd3d7f2875049317388cd13e39b7d50f6",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "'Siedlungs-Diskrepanz' mistranslates the technical financial term settlement in the question and work-item title; the date itself is correct.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:1",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The supporter list includes Omar despite no supporting statement and no Omar utterance among the decision's citations.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:4",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "dc0ee0ed1b5da71ad4f1ef5520c201078bc32c4f784d80c77ccd20fa9392a6c5",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar's scope question does not establish personal support for CSV-only scope; Tess's ownership is established.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "All normalized deadlines use 2025 although the meeting and explicit November dates are in 2026.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The implementation is candidate/low confidence despite an unequivocal accepted commitment, but its descriptions explicitly acknowledge the commitment and uncertainty is only identity; a single item status may conflate these states.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d69ff442497a4a31c23b8966c5f42661d34b32dbcc375bcf52f0949e8090a436",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "2025-11-19 and 2025-11-25 are wrong-year deadlines in both action and follow-up fields; the source provides November 2026.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d30fb07c8f621cc6afa61517e656bfc794831bb74554f2afebc66240c747741e",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "Candidate status and asking to confirm acceptance risk downgrading an already clear commitment; however the question and descriptions recognize it as accepted, suggesting a status/identity representation ambiguity.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d30fb07c8f621cc6afa61517e656bfc794831bb74554f2afebc66240c747741e",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The normalized date fields omit the supplied year and use '25 November'/'19 November' instead of fully resolving the 2026 dates in context.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d20d78155343865ddd638c08107559f4cef2bcd9a17ccb59d5b610fadaffad33",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The explicit November 23 date is resolvable in the supplied 2026 meeting, but normalizedDate is null/ambiguous and the follow-up date is null.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar is marked as a CSV-only supporter although his cited utterance is a clarification question.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "d02567c6057e7ce59f6caa3b1c1af99ccc25f4a4a2b087b35ddb440cee208070",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's ownership is explicit, but Omar's question does not establish endorsement of the scope decision.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "cc2d8220f3bd26b0411fa5c4fea60bdb04b57e770aa80f2fec389e8c13a0a9b3",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Omar is a supporter on the superseded Birch entry; his evidence supports reporting supersession, not clearly personal support for the original choice, so the meaning of that supporter field is ambiguous.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:1",
+        "evidence:validation-collective-change:6"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "cc2d8220f3bd26b0411fa5c4fea60bdb04b57e770aa80f2fec389e8c13a0a9b3",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's Cedar dissent and Nora's neutral reporting are respected; Omar's supporter membership could refer to supersession wording or to the historical Birch decision, which the evidence does not disambiguate.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:1",
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "c04ce5c22930e14d676dac441e4429b09ef98c1329f799944759c86aeb399623",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up states that the speaker display failed and Omar denied the commitment, but cites only utterances 3, 6 and 8; those details require uncited utterances 4 and 5.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "af33ad7e09dd2ee6720d0d4bee74538c8273ac33bcc744a6542794c62411d716",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "'Vom Vorstand' chooses a governing-board interpretation of the ambiguous source 'the board lists'; a planning board is also possible.",
+      "evidenceIds": ["evidence:validation-resolved-questions:4"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "af33ad7e09dd2ee6720d0d4bee74538c8273ac33bcc744a6542794c62411d716",
+      "kind": "rubric-concern",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The dates are correct, but translating 'board' to 'Vorstand' may alter the source's organizational meaning.",
+      "evidenceIds": ["evidence:validation-resolved-questions:4"],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "985f6b62e4fde7538aa7badf29e8d91e735244526becb0a73f86d1093b9bfc24",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "Implementation candidate status may downgrade the explicit accepted commitment, but the question and risk still call it a commitment; the schema appears to mix commitment certainty with unresolved owner certainty.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "86c20f6bbd95125262cc54db34a7c5498a40689d187ea219d844261e823505ba",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The implementation is a candidate despite explicit acceptance, while prose clearly says there is a commitment; this may reflect the schema conflating commitment status with unresolved assignee status.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The question assumes a future migration task or owner will be agreed, although Omar says no migration task or owner is agreed and today is only record correction.",
+      "evidenceIds": ["evidence:validation-collective-change:9"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The explicit absence of migration agreement is strengthened into a presupposed future agreement in the open question.",
+      "evidenceIds": ["evidence:validation-collective-change:9"],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar did not raise 'what migration task or owner will be agreed'; he explicitly limited the meeting to correcting the record. Tess's preference and dissent are supported.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:2",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "8694e55d4304cb4884c26eadc1d5ada51b913e7be198cd83aa68d2f52a1c9e50",
+      "kind": "answer-error",
+      "rubricId": "important-recall",
+      "explanation": "Although both decision states and dissent are retained, the settled no-migration scope is replaced by an invented migration-planning question.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["recall", "clarification"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "7034614d26ab875ac57b8dd4b8e3acb2b7ed9b1a79c1c5c7a5f0c4ab9ed94169",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "The funding question shifts from 'is funding approved' to 'will funding be approved'; the source leaves present approval status unknown, though the risk and title retain unanswered financing, so the temporal implication is ambiguous.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "668caab5e18395bda8fcf86632cb21a6006136461d9dd3f784a20d7e6cca5ded",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The meeting-record title includes requirements documentation but cites only utterances 1 and 9, which concern export need and unidentified implementation ownership; documentation is supported by uncited 7 and 10.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:1",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:9",
+        "evidence:validation-owner-resolution:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar is listed as a supporter of CSV-only scope though the cited utterance asks whether the commitment stands without XML.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "56c278258143f5c96b37ed33f6ea1deb6ab7facb1832e38c409378962119eb97",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar's question does not establish endorsement; Tess's accepted ownership and Emil's question are supported.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The synthetic-only/no-fix decision lists Emil and Nora as supporters, but their cited utterances describe uncertainty rather than endorsing the adopted scope. The follow-up also adds a categorical no-repair-before-completion rule.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "kind": "rubric-concern",
+      "rubricId": "commitment-fidelity",
+      "explanation": "'Keine Reparatur vor Abschluss' can be read as a global sequencing prohibition, whereas Tess accepts investigation rather than repair; it may instead intend only the accepted task's scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "52c659a20fd327b9d24c73682f7536120805fcb6c5f0c5638c12558e61d802d1",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess explicitly accepts synthetic-only investigation, but Emil and Nora are not evidenced endorsers of that scope decision.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Tess is marked as supporting synthetic-only testing, but her cited contribution merely asks whether real employee data should be used.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "508667a9d4c2075c2f4e2477753c253045b522231cd62c899f0dae4d2c372622",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's data-use question does not establish endorsement of the synthetic-only decision; Emil's ownership and restriction are supported.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4d1f283f14c63f5c4ba86074e9c148fe64ca4bfe0c762c8d9ce3f49456c9657f",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The risk states 'funding is not yet approved', but the source only says the finance owner has not answered; approval status is unknown.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6",
+        "evidence:validation-resolved-questions:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4d1f283f14c63f5c4ba86074e9c148fe64ca4bfe0c762c8d9ce3f49456c9657f",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "An unanswered approval question becomes a definite negative approval state in the risk.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:5",
+        "evidence:validation-resolved-questions:6"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The code-fix question says it remains open after the investigation, but Nora says they will only know after it; the answer changes the expected knowledge timing.",
+      "evidenceIds": ["evidence:validation-ledger-investigation:10"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "'Nach der Untersuchung noch offen' replaces uncertainty until the investigation with continued uncertainty afterward; the broad 'keine Reparatur durchführen' wording also risks strengthening the accepted scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4ce2e32328482932ba1bcd23f4b3ae7f01cca48ba3c0ff7fda5cf37607d90bd6",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The explicit November 20 date in the 2026 context is resolvable, but normalizedDate is null/ambiguous and the proposed due date is null.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4b6a0dd0255b953a6e8947f1fd1e1500fa19cd8cd8fe9f929a5e0677329febfa",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up claims Nora refused implementation and owns documentation, but its evidence list omits utterances 2 and 7, the sources for those specific claims.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:4",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:7",
+        "evidence:validation-owner-resolution:8",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4b6a0dd0255b953a6e8947f1fd1e1500fa19cd8cd8fe9f929a5e0677329febfa",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "Implementation candidate status and repeated acceptance confirmation may downgrade the clear commitment, although prose repeatedly calls it a commitment; a single status mixes acceptance and unidentified ownership.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "kind": "rubric-concern",
+      "rubricId": "source-support",
+      "explanation": "Nora is a supporter of a compound synthetic-scope/no-fix decision; she supports uncertainty about a fix but does not explicitly endorse synthetic scope. The follow-up adds a no-repair-before-cause-known rule whose breadth is unclear.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "kind": "rubric-concern",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The no-repair-until-cause-known phrasing may impose a sequencing rule beyond Tess's investigation-only acceptance, though it can also be read as the accepted task's scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4b43e8983c5bfcd024aa001138a1108a705bbfdedaaf50fad4ec5263cf95829f",
+      "kind": "rubric-concern",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess is correctly assigned, but Nora's supporter membership only clearly supports the no-fix-yet part of the compound decision, not its synthetic-data restriction.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "4a82575b31b3666784cf64889767d6316ad0ef7a58aca9cc5dedeb610c0484b0",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The meeting instant provides 2026, so November 23 should resolve to 2026-11-23; null ambiguous action and follow-up dates unnecessarily lose it.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "41198f5430093857ebe06f6657e4c85c19d67e243d494a169cf9fd3dba61c86d",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The rationale says synthetic-data restriction was agreed because cause and component are unclear; the source supplies both facts but never that causal rationale.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:3",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "41079f567e9ad8e71ad6c58fff131c5f9d131e730331ca9ed4c50f7a3bb0aa42",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The Cedar supporter list assigns Nora and Emil personal support, but Nora explicitly only reports the resolution and Emil merely states dissent does not invalidate it.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "41079f567e9ad8e71ad6c58fff131c5f9d131e730331ca9ed4c50f7a3bb0aa42",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Nora's neutral report and Emil's recognition of validity do not establish personal support for Cedar; Tess's objection is correctly attributed.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar is recorded as a supporter of CSV-only scope without an endorsement; he only asks whether Tess's commitment holds without XML.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "3dcab601000addd173ab24a8a14cd0ff8fdd0b56ce18d3c32861f8a794f8f95a",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's ownership is supported, but Omar's scope question does not evidence support for the decision.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:2",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Emil is included as a scope-decision supporter without any Emil utterance in its citations; his source contributions ask about scope and state cause uncertainty rather than endorse synthetic-only scope.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "kind": "rubric-concern",
+      "rubricId": "commitment-fidelity",
+      "explanation": "The decision's 'vorab erfolgt keine Reparatur' could describe Tess's investigation-only scope or impose a broader ban on repair before investigation; the source only clearly establishes the former.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:9",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "388147bd25f81615c13c5710aaf63891e9bf09375ea9c9eba3ad934490f1fbf5",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's ownership is clear, but Emil's supporter membership is not established; Nora's statements address uncertainty rather than expressly endorsing the synthetic-data restriction.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:8",
+        "evidence:validation-ledger-investigation:10"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "37dfdcc4422280d6fe0f182389d8d9565be76339f472ffa640c993acb806b8e5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up claims Nora explicitly declined implementation this week, but its citations omit utterance 2, the only source of that specific refusal.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The migration question assumes a future task or owner will be agreed, while Omar only states no migration agreement exists and today is record correction.",
+      "evidenceIds": ["evidence:validation-collective-change:9"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "commitment-fidelity",
+      "explanation": "No migration task/owner agreed is converted into presumed future migration planning.",
+      "evidenceIds": ["evidence:validation-collective-change:9"],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Omar did not ask which task or owner will be agreed; his utterance limits scope to correcting the record. Tess's preference and dissent are correctly attributed.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:2",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "31dae29c0a9b1142220b36e991a8f211effcc7b6b1114f101f53d8b1a433c6e5",
+      "kind": "answer-error",
+      "rubricId": "important-recall",
+      "explanation": "Both decisions and dissent are retained, but the explicit no-migration meeting scope is replaced by an invented planning question.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8",
+        "evidence:validation-collective-change:9"
+      ],
+      "principleIds": ["recall", "clarification"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "2f8bf09c9b0be704dcd8f5d4fa67da5ea51ba9bd6e116388aa50f94afc23d796",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The decision rationale asserts safety and privacy reasons for synthetic-only testing; the cited question/answer establishes the restriction but does not state those reasons.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "2640a15511790f5f2d7a3cca0421178289f048b7b5af3c83b6baadb2e25e9e3a",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Nora is listed as supporting Cedar even though she explicitly says she only reads the steering resolution and her personal position was not asked.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "2640a15511790f5f2d7a3cca0421178289f048b7b5af3c83b6baadb2e25e9e3a",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Nora's role as reporter does not establish support for Cedar; Tess's explicit objection is supported.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "25f6ae2012c05908b0c32fce10d1b6501a9edebe2406c3113529ad8be903e750",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The supporter list turns Nora's neutral reporting, Omar's supersession statement and Emil's validity clarification into personal support for Cedar.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:8"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "25f6ae2012c05908b0c32fce10d1b6501a9edebe2406c3113529ad8be903e750",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "No cited speaker establishes personal endorsement of Cedar; Nora expressly disclaims that her personal position was asked, and the others report status. Tess's objection is supported.",
+      "evidenceIds": [
+        "evidence:validation-collective-change:3",
+        "evidence:validation-collective-change:5",
+        "evidence:validation-collective-change:6",
+        "evidence:validation-collective-change:7",
+        "evidence:validation-collective-change:8"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "1b379e56b6fc6e8a64055d1d7d28d90e51f02ee41ed0245c7dc601aeccfe315b",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "November 23 is resolvable from the 2026 source instant; null ambiguous dates and the transcript-only year caveat fail to use the supplied context.",
+      "evidenceIds": [
+        "evidence:validation-resolved-questions:2",
+        "evidence:validation-resolved-questions:8"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Emil is a supporter of a decision cited only to Tess's statements, and his source question does not endorse its scope. The risk's mitigation claims Tess's future investigation while citing only the historical log guess.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:7",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess explicitly owns investigation, but Emil's scope question does not establish his supporter membership.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:4",
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:6",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "181487da9dea5108c485139dfe85fd492e0340a9882a69f4637cfddbbcd68772",
+      "kind": "answer-error",
+      "rubricId": "language-dates-identifiers",
+      "explanation": "The 2026 meeting context and explicit Friday November 20 permit normalization, but action and work-item dates remain null/ambiguous.",
+      "evidenceIds": [
+        "evidence:validation-ledger-investigation:5",
+        "evidence:validation-ledger-investigation:9"
+      ],
+      "principleIds": ["dates", "evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "Omar is marked as a CSV-only supporter although he merely clarifies the date and asks whether Tess's commitment holds without XML.",
+      "evidenceIds": ["evidence:validation-scope-negotiation:5"],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "158385d29325d2b68ab504a1d84fd766cdca183be40c61cee4fcc5e05fae5d1e",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Tess's ownership is supported, but Omar's question does not establish endorsement. Nora's offer does support the attributed unresolved acceptance issue.",
+      "evidenceIds": [
+        "evidence:validation-scope-negotiation:3",
+        "evidence:validation-scope-negotiation:5",
+        "evidence:validation-scope-negotiation:6",
+        "evidence:validation-scope-negotiation:7"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The rejected unnecessary-replacement decision lists Emil as a supporter, but his source utterance is a question asking whether such a decision occurred, not endorsement.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:4",
+        "evidence:validation-undecided-need:5"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "130f75a74c7946c446aa969d60bdecfa22218bd058ddb16bc7661b9a359244eb",
+      "kind": "answer-error",
+      "rubricId": "participant-attribution",
+      "explanation": "Emil's question does not establish support for the unnecessary-replacement proposition; Nora's objection and her raising actual need are supported.",
+      "evidenceIds": [
+        "evidence:validation-undecided-need:3",
+        "evidence:validation-undecided-need:4",
+        "evidence:validation-undecided-need:5"
+      ],
+      "principleIds": ["ownership", "decisions"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "0fdd32968f7f6717d2d6ffa964089479ae116b996d2ca3165ec05412ee47a699",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The synthetic-data decision supplies prevention of employee-data exposure as its rationale, but the cited utterances state only the question and synthetic-only answer, not a reason for adopting it.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:6",
+        "evidence:validation-quoted-instructions:7"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "0be8db017f3ed53cc3c7713a1646122386f7b4067b7d05ae36c29a3ea032feff",
+      "kind": "answer-error",
+      "rubricId": "source-support",
+      "explanation": "The implementation follow-up says Nora and Omar explicitly declined/disputed ownership, but cites only utterances 3 and 9; those participant-specific claims require utterances 2 and 5.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:2",
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:5",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["evidence"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "0be8db017f3ed53cc3c7713a1646122386f7b4067b7d05ae36c29a3ea032feff",
+      "kind": "capability-gap",
+      "rubricId": "commitment-fidelity",
+      "explanation": "Candidate/low-confidence implementation may downgrade an explicit clear commitment, although the description and question preserve it; the schema may conflate unknown owner identity with acceptance state.",
+      "evidenceIds": [
+        "evidence:validation-owner-resolution:3",
+        "evidence:validation-owner-resolution:6",
+        "evidence:validation-owner-resolution:9"
+      ],
+      "principleIds": ["modality", "corrections"]
+    },
+    {
+      "reviewer": "prompt-reviewer-b",
+      "answerId": "15188af2a8c07c10457448c2a315d579f4b114aa2cf733120efe1cad65f4105b",
+      "kind": "capability-gap",
+      "rubricId": "source-support",
+      "explanation": "The follow-up relatedMeetingItemIds contain evidence IDs instead of the emitted meeting-item stable keys. Semantic extraction remains grounded; reference integrity needs deterministic pipeline validation beyond these six semantic criteria. The supplied schema accepts arbitrary strings and does not define reference resolution.",
+      "evidenceIds": [
+        "evidence:validation-quoted-instructions:5",
+        "evidence:validation-quoted-instructions:7"
+      ],
+      "principleIds": ["evidence", "systems"]
+    }
+  ],
+  "interpretation": "AI semantic opinions, not human labels or an automatic winner. Calibration is agent-authored and limited; do not hide a failed control. Fresh sessions and metadata blinding are procedural attestations, not access isolation or statistical independence. Same-family reviewers can share bias. Agreement is descriptive across correlated rubric judgments, not an accuracy estimate. Operational failures remain separate, and product/pipeline gaps do not by themselves establish answer errors."
+}

@@ -31,17 +31,12 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "description",
                   "op": "includes-any",
-                  "values": [
-                    "use-auth-session"
-                  ]
+                  "values": ["use-auth-session"]
                 }
               ],
               "min": 1,
@@ -55,10 +50,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "ownerId",
@@ -175,9 +167,7 @@
                 {
                   "field": "statement",
                   "op": "includes-any",
-                  "values": [
-                    "Beacon"
-                  ]
+                  "values": ["Beacon"]
                 }
               ],
               "min": 1,
@@ -337,10 +327,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 1,
@@ -364,10 +351,7 @@
               {
                 "field": "status",
                 "op": "not-in",
-                "values": [
-                  "cancelled",
-                  "completed"
-                ]
+                "values": ["cancelled", "completed"]
               }
             ],
             "every": [
@@ -389,9 +373,7 @@
               {
                 "field": "evidenceIds",
                 "op": "contains-all",
-                "values": [
-                  "evidence:conditional-rollout-accepted:17"
-                ]
+                "values": ["evidence:conditional-rollout-accepted:17"]
               }
             ],
             "min": 1,
@@ -494,10 +476,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 0,
@@ -634,25 +613,18 @@
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:1",
-              "evidence:revised-decision:2"
-            ],
+            "evidenceIds": ["evidence:revised-decision:1", "evidence:revised-decision:2"],
             "confidence": "high"
           },
           {
             "stableKey": "dec_tool_beacon",
             "statement": "Verbindliche Entscheidung für Tool Beacon",
-            "rationale": [
-              "Atlas wurde nach gemeinsamer Abstimmung verworfen"
-            ],
+            "rationale": ["Atlas wurde nach gemeinsamer Abstimmung verworfen"],
             "status": "confirmed",
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:2"
-            ],
+            "evidenceIds": ["evidence:revised-decision:2"],
             "confidence": "high"
           }
         ],
@@ -661,14 +633,8 @@
         "followUpIntentions": [
           {
             "id": "fui_record_meeting",
-            "relatedMeetingItemIds": [
-              "dec_tool_atlas",
-              "dec_tool_beacon"
-            ],
-            "evidenceIds": [
-              "evidence:revised-decision:1",
-              "evidence:revised-decision:2"
-            ],
+            "relatedMeetingItemIds": ["dec_tool_atlas", "dec_tool_beacon"],
+            "evidenceIds": ["evidence:revised-decision:1", "evidence:revised-decision:2"],
             "confidence": "high",
             "type": "record-meeting",
             "title": "Meeting-Entscheidung zu Tool Beacon protokollieren"
@@ -880,9 +846,7 @@
             },
             "status": "confirmed",
             "relatedDecisionIds": [],
-            "evidenceIds": [
-              "evidence:mixed-code-uncertainty:2"
-            ],
+            "evidenceIds": ["evidence:mixed-code-uncertainty:2"],
             "confidence": "high"
           }
         ],
@@ -892,9 +856,7 @@
             "stableKey": "question-use-auth-session-cause",
             "question": "Liegt der Fehler in use-auth-session?",
             "raisedBy": "person_alex",
-            "evidenceIds": [
-              "evidence:mixed-code-uncertainty:1"
-            ],
+            "evidenceIds": ["evidence:mixed-code-uncertainty:1"],
             "confidence": "high"
           }
         ],
@@ -916,12 +878,8 @@
           },
           {
             "id": "intent-create-work-item-investigation",
-            "relatedMeetingItemIds": [
-              "action-investigate-use-auth-session"
-            ],
-            "evidenceIds": [
-              "evidence:mixed-code-uncertainty:2"
-            ],
+            "relatedMeetingItemIds": ["action-investigate-use-auth-session"],
+            "evidenceIds": ["evidence:mixed-code-uncertainty:2"],
             "confidence": "high",
             "type": "create-work-item",
             "title": "use-auth-session untersuchen",

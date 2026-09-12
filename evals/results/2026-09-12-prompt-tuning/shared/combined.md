@@ -6,12 +6,12 @@ Automated checks, human semantic review, and operational reliability are separat
 
 Cases: 4; scenario groups: 4; held-out cases: 0. Group counts do not establish representative sampling.
 
-| Candidate | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures | Known token cost |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| openai-shared-v1 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.007601 (4/4 attempts) |
-| anthropic-shared-v1 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.086012 (4/4 attempts) |
-| deepseek-shared-v1 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.025577 (4/4 attempts) |
-| google-shared-v1 | 3/4 | 1 | 3/4 | 0/4 | 3 | 0 | $0.042384 (3/4 attempts) |
+| Candidate           | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures |         Known token cost |
+| ------------------- | --------------: | ---------------------: | ---------------: | --------------: | -------------: | -------------------------: | -----------------------: |
+| openai-shared-v1    |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.007601 (4/4 attempts) |
+| anthropic-shared-v1 |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.086012 (4/4 attempts) |
+| deepseek-shared-v1  |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.025577 (4/4 attempts) |
+| google-shared-v1    |             3/4 |                      1 |              3/4 |             0/4 |              3 |                          0 | $0.042384 (3/4 attempts) |
 
 Missing usage is unknown, not free. Semantic dimensions without completed reviews are unassessed, not zero-error. JSON includes dimension/cohort summaries and latency; no overall model-quality winner is inferred.
 

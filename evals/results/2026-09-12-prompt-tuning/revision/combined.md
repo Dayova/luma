@@ -6,12 +6,12 @@ Automated checks, human semantic review, and operational reliability are separat
 
 Cases: 4; scenario groups: 4; held-out cases: 0. Group counts do not establish representative sampling.
 
-| Candidate | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures | Known token cost |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| openai-revision-v2 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.007089 (4/4 attempts) |
-| anthropic-revision-v2 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.094860 (4/4 attempts) |
-| deepseek-revision-v2 | 3/4 | 1 | 3/4 | 0/4 | 3 | 0 | $0.026301 (4/4 attempts) |
-| google-revision-v2 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.069142 (4/4 attempts) |
+| Candidate             | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures |         Known token cost |
+| --------------------- | --------------: | ---------------------: | ---------------: | --------------: | -------------: | -------------------------: | -----------------------: |
+| openai-revision-v2    |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.007089 (4/4 attempts) |
+| anthropic-revision-v2 |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.094860 (4/4 attempts) |
+| deepseek-revision-v2  |             3/4 |                      1 |              3/4 |             0/4 |              3 |                          0 | $0.026301 (4/4 attempts) |
+| google-revision-v2    |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.069142 (4/4 attempts) |
 
 Missing usage is unknown, not free. Semantic dimensions without completed reviews are unassessed, not zero-error. JSON includes dimension/cohort summaries and latency; no overall model-quality winner is inferred.
 

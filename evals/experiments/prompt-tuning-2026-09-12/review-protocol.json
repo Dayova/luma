@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "packetHash": "f034f0aa3002de4f8e0d4e6f8ec7c7533de709d22197f810f4d8214470664b9b",
+  "contextHash": "14eb20f71d1a72b212cfddaf1713b8ce146ef28b3fe0df7faa1932ce33cc97a4",
+  "benchmarkHash": "98774ca7dea6538bc62be498745d7cbcf99fca795b1c7e332aabf1ab8c18f3c2",
+  "evaluatedAnswers": 105,
+  "calibrationAnswers": 6,
+  "judgmentsPerReviewer": 666,
+  "expectedCalibrationLabels": 18,
+  "reviewers": [
+    {
+      "id": "prompt-reviewer-a",
+      "order": "ascending answerId"
+    },
+    {
+      "id": "prompt-reviewer-b",
+      "order": "descending answerId"
+    }
+  ],
+  "instructionsSha256": "5d934e2d65adbc569f595950fbd9e47481cedd8ae91390545fe21c0d4adb11ea",
+  "modelIdentity": "Both fresh Codex agents inherit the coordinating task model; exact API model identifier is not exposed. This is session independence, not independent provider families.",
+  "blinding": "Only packet, instructions and AGENTS.md permitted. Candidate identities, prompt variants, automatic scores, runtime/cost metadata, reference notes, calibration labels and the other review withheld. Procedural restriction on a shared filesystem, not access isolation.",
+  "controls": "Six newly authored answers in three source pairs, with eighteen fixed expected checks. They are agent-authored sanity checks, not human gold. Preserve mismatches and review disagreements, including concerns about an expected label; do not revise labels after seeing judgments.",
+  "reviewScope": "Every valid validation answer, every field, all six rubric criteria; no valid answer is excluded because it fails automatic checks. Operational failures have no valid output to review.",
+  "dataFiles": "The ignored packet and controller are reproducible with eval:ai-review from the committed validation run, context brief and review-controls.json."
+}

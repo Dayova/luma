@@ -31,17 +31,12 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "description",
                   "op": "includes-any",
-                  "values": [
-                    "use-auth-session"
-                  ]
+                  "values": ["use-auth-session"]
                 }
               ],
               "min": 1,
@@ -55,10 +50,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "ownerId",
@@ -175,9 +167,7 @@
                 {
                   "field": "statement",
                   "op": "includes-any",
-                  "values": [
-                    "Beacon"
-                  ]
+                  "values": ["Beacon"]
                 }
               ],
               "min": 1,
@@ -337,10 +327,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 1,
@@ -364,10 +351,7 @@
               {
                 "field": "status",
                 "op": "not-in",
-                "values": [
-                  "cancelled",
-                  "completed"
-                ]
+                "values": ["cancelled", "completed"]
               }
             ],
             "every": [
@@ -389,9 +373,7 @@
               {
                 "field": "evidenceIds",
                 "op": "contains-all",
-                "values": [
-                  "evidence:conditional-rollout-accepted:17"
-                ]
+                "values": ["evidence:conditional-rollout-accepted:17"]
               }
             ],
             "min": 1,
@@ -494,10 +476,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 0,
@@ -634,25 +613,18 @@
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:1",
-              "evidence:revised-decision:2"
-            ],
+            "evidenceIds": ["evidence:revised-decision:1", "evidence:revised-decision:2"],
             "confidence": "high"
           },
           {
             "stableKey": "decision-tool-beacon",
             "statement": "Korrektur nach gemeinsamer Abstimmung: Atlas ist verworfen. Wir entscheiden uns verbindlich für Tool Beacon.",
-            "rationale": [
-              "Korrektur nach gemeinsamer Abstimmung"
-            ],
+            "rationale": ["Korrektur nach gemeinsamer Abstimmung"],
             "status": "confirmed",
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:2"
-            ],
+            "evidenceIds": ["evidence:revised-decision:2"],
             "confidence": "high"
           }
         ],
@@ -661,14 +633,8 @@
         "followUpIntentions": [
           {
             "id": "followup-record-meeting-revised-decision",
-            "relatedMeetingItemIds": [
-              "decision-tool-atlas",
-              "decision-tool-beacon"
-            ],
-            "evidenceIds": [
-              "evidence:revised-decision:1",
-              "evidence:revised-decision:2"
-            ],
+            "relatedMeetingItemIds": ["decision-tool-atlas", "decision-tool-beacon"],
+            "evidenceIds": ["evidence:revised-decision:1", "evidence:revised-decision:2"],
             "confidence": "high",
             "type": "record-meeting",
             "title": "Meeting-Notiz: Tool Atlas verworfen, Tool Beacon verbindlich gewählt"
@@ -799,9 +765,7 @@
               "Die Freigabe wurde im Meeting ausdrücklich vorgetragen und die Bedingung damit als erfüllt festgestellt."
             ],
             "status": "confirmed",
-            "supportingParticipantIds": [
-              "person_sam"
-            ],
+            "supportingParticipantIds": ["person_sam"],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
             "evidenceIds": [
@@ -821,10 +785,7 @@
               "Sams Zusage umfasst ausdrücklich nur das Schreiben der Checkliste."
             ],
             "status": "confirmed",
-            "supportingParticipantIds": [
-              "person_alex",
-              "person_jo"
-            ],
+            "supportingParticipantIds": ["person_alex", "person_jo"],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
             "evidenceIds": [
@@ -854,9 +815,7 @@
             "statement": "Die Verfügbarkeit des Support-Teams am 18. September ist nicht zugesagt.",
             "severity": "unknown",
             "mitigation": null,
-            "evidenceIds": [
-              "evidence:conditional-rollout-accepted:8"
-            ],
+            "evidenceIds": ["evidence:conditional-rollout-accepted:8"],
             "confidence": "high"
           },
           {
@@ -1055,9 +1014,7 @@
             "statement": "Derzeit gibt es keinen beschlossenen Migrationsbedarf.",
             "rationale": [],
             "status": "confirmed",
-            "supportingParticipantIds": [
-              "person_jo"
-            ],
+            "supportingParticipantIds": ["person_jo"],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
             "evidenceIds": [
@@ -1218,9 +1175,7 @@
             },
             "status": "confirmed",
             "relatedDecisionIds": [],
-            "evidenceIds": [
-              "evidence:mixed-code-uncertainty:2"
-            ],
+            "evidenceIds": ["evidence:mixed-code-uncertainty:2"],
             "confidence": "high"
           }
         ],
@@ -1254,9 +1209,7 @@
             "title": "use-auth-session untersuchen",
             "description": "use-auth-session untersuchen, ohne schon eine Ursache zu behaupten; die Fehlerursache ist bislang nicht verifiziert.",
             "assigneeId": "person_sam",
-            "mentionPersonIds": [
-              "person_sam"
-            ],
+            "mentionPersonIds": ["person_sam"],
             "dueDate": null
           },
           {

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "checkedAt": "2026-09-12",
+  "policy": "Frozen manifests retain September 10 uncached comparison rates. Public rates were rechecked during validation; no prompts, outputs, grades or frozen rate fields were changed. These are estimates, not billing records.",
+  "providers": [
+    {
+      "provider": "openai",
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "inputUsdPerMillion": 0.2,
+      "outputUsdPerMillion": 1.2,
+      "finding": "Matches the frozen standard uncached rates for these short inputs."
+    },
+    {
+      "provider": "anthropic",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "inputUsdPerMillion": 2,
+      "outputUsdPerMillion": 10,
+      "finding": "Matches the frozen standard Sonnet 5 rates."
+    },
+    {
+      "provider": "google",
+      "source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+      "inputUsdPerMillion": 0.75,
+      "outputUsdPerMillion": 3.75,
+      "finding": "Matches global standard Gemini 3.8 Flash promotional rates through December 31, 2026, including response and reasoning output."
+    },
+    {
+      "provider": "deepseek",
+      "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "inputUsdPerMillion": 0.3,
+      "outputUsdPerMillion": 1.2,
+      "finding": "Frozen estimates use conservative peak uncached rates. September 12 is Saturday, so published applicable off-peak rates are half these values: 0.15 input / 0.60 output. Cached input can lower the invoice further. Preserve saved peak-rate estimates and disclose this difference."
+    }
+  ]
+}

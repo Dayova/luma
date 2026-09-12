@@ -31,17 +31,12 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "description",
                   "op": "includes-any",
-                  "values": [
-                    "use-auth-session"
-                  ]
+                  "values": ["use-auth-session"]
                 }
               ],
               "min": 1,
@@ -55,10 +50,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 },
                 {
                   "field": "ownerId",
@@ -175,9 +167,7 @@
                 {
                   "field": "statement",
                   "op": "includes-any",
-                  "values": [
-                    "Beacon"
-                  ]
+                  "values": ["Beacon"]
                 }
               ],
               "min": 1,
@@ -337,10 +327,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 1,
@@ -364,10 +351,7 @@
               {
                 "field": "status",
                 "op": "not-in",
-                "values": [
-                  "cancelled",
-                  "completed"
-                ]
+                "values": ["cancelled", "completed"]
               }
             ],
             "every": [
@@ -389,9 +373,7 @@
               {
                 "field": "evidenceIds",
                 "op": "contains-all",
-                "values": [
-                  "evidence:conditional-rollout-accepted:17"
-                ]
+                "values": ["evidence:conditional-rollout-accepted:17"]
               }
             ],
             "min": 1,
@@ -494,10 +476,7 @@
                 {
                   "field": "status",
                   "op": "not-in",
-                  "values": [
-                    "cancelled",
-                    "completed"
-                  ]
+                  "values": ["cancelled", "completed"]
                 }
               ],
               "min": 0,
@@ -634,24 +613,18 @@
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:1"
-            ],
+            "evidenceIds": ["evidence:revised-decision:1"],
             "confidence": "high"
           },
           {
             "stableKey": "decision-tool-beacon",
             "statement": "Wir entscheiden uns verbindlich für Tool Beacon.",
-            "rationale": [
-              "Korrektur nach gemeinsamer Abstimmung; Atlas ist verworfen."
-            ],
+            "rationale": ["Korrektur nach gemeinsamer Abstimmung; Atlas ist verworfen."],
             "status": "confirmed",
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:revised-decision:2"
-            ],
+            "evidenceIds": ["evidence:revised-decision:2"],
             "confidence": "high"
           }
         ],
@@ -784,9 +757,7 @@
             "supportingParticipantIds": [],
             "objectingParticipantIds": [],
             "relatedTopicIds": [],
-            "evidenceIds": [
-              "evidence:conditional-rollout-accepted:16"
-            ],
+            "evidenceIds": ["evidence:conditional-rollout-accepted:16"],
             "confidence": "high"
           },
           {
@@ -852,9 +823,7 @@
           },
           {
             "id": "create-deployment-checklist-work-item",
-            "relatedMeetingItemIds": [
-              "write-deployment-checklist"
-            ],
+            "relatedMeetingItemIds": ["write-deployment-checklist"],
             "evidenceIds": [
               "evidence:conditional-rollout-accepted:17",
               "evidence:conditional-rollout-accepted:18"
@@ -1080,9 +1049,7 @@
             "stableKey": "question:use-auth-session-cause",
             "question": "Ist die Ursache in use-auth-session?",
             "raisedBy": "person_alex",
-            "evidenceIds": [
-              "evidence:mixed-code-uncertainty:1"
-            ],
+            "evidenceIds": ["evidence:mixed-code-uncertainty:1"],
             "confidence": "high"
           }
         ],
@@ -1102,9 +1069,7 @@
         "followUpIntentions": [
           {
             "id": "followup:create-investigation-work-item",
-            "relatedMeetingItemIds": [
-              "action:investigate-use-auth-session"
-            ],
+            "relatedMeetingItemIds": ["action:investigate-use-auth-session"],
             "evidenceIds": [
               "evidence:mixed-code-uncertainty:1",
               "evidence:mixed-code-uncertainty:2"

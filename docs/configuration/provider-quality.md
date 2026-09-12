@@ -80,7 +80,11 @@ Missing usage is unknown, not free; recorded estimates are not provider invoices
 When a new model appears, copy this file to an ignored `.luma/quality/models.json`
 and retain the incumbent plus the challenger. Multiple entries may use the same
 provider. Use a distinct label for each configuration. Labels do not affect the
-prompt. No additional API keys are needed for models accessible under the existing
+prompt; the optional `promptInstructions` field explicitly overrides the shared
+instruction for that candidate. It must be nonblank and at most 20,000 characters.
+The complete output schema is still appended by the adapter. The manifest, plan
+and per-row request hashes bind the exact instruction to its saved outputs.
+Omitting the field preserves the original prompt and historical hashes. No additional API keys are needed for models accessible under the existing
 four provider credentials.
 
 ```bash
@@ -91,8 +95,8 @@ pnpm eval:quality --live --models=.luma/quality/models.json --max-requests=144 -
 The second command assumes two models and 24 cases. Preflight validates input
 and coverage but cannot establish provider access or new-model API compatibility.
 Run a bounded smoke test first. All models use the existing
-`provider-comparison-v1` adapter profile: identical task Evidence, prompt, and
-schema, with provider-specific reasoning/output controls. A future model that
+`provider-comparison-v1` adapter profile: identical task Evidence and
+schema, and the same prompt unless an explicit prompt variant is supplied, with provider-specific reasoning/output controls. A future model that
 needs another API or reasoning control needs a separately versioned adapter
 profile and validation, not just a renamed ID. These settings are not equal
 reasoning-compute budgets. Changing the profile, output cap, timeout, or prompt
@@ -115,6 +119,44 @@ A live run exits 2 for any unfinished/failed attempt or failed automated check;
 exit 0 still does **not** mean semantic quality passed. Preflight, offline regrade,
 and review imports exit 0 when processing succeeds, even when the resulting
 report contains failures or pending reviews. Invalid setup or artifacts exit 1.
+
+## Controlled prompt tuning
+
+The [September 12 experiment](../evaluations/prompt-tuning-2026-09-12.md) compares
+four models before and after bounded prompt tuning. Its committed protocol,
+development and validation cases, prompt snapshots, selection explanations and
+manifests live in `evals/experiments/prompt-tuning-2026-09-12/`. These are synthetic
+validation scenarios, not independent human holdout.
+
+After `pnpm build`, the experiment-specific coordinator can validate a frozen
+stage without dispatching requests:
+
+```sh
+node --env-file=.env dist/src/evaluation/quality/prompt-tuning-main.js validation
+```
+
+`shared`, `revision`, and `validation` are the three stages. Adding `--live`
+dispatches the fixed stage only if its result directory does not already exist.
+The committed experiment has already run; do not delete its results to rerun it.
+For new research, create a separately versioned protocol and new output paths,
+or use the general `eval:quality` CLI with a fresh model manifest. Do not rewrite
+published fixtures, prompts, scores, or selections.
+
+The coordinator runs one sequential lane per provider, at most four lanes at
+once, and interleaves original/selected candidates in seeded order. Its fixed
+limits are 8,192 output tokens, 60 seconds, 64,000 serialized request bytes and no
+retries. It journals each dispatch and saves lane checkpoints before merging
+validated rows without dropping failures. A coordinator exit of zero means
+artifact processing finished, not that every response or semantic check passed.
+Check the summaries. Interrupted stages require inspecting their journals;
+never infer that an unrecorded response was unbilled.
+
+Freeze prompts using development results before dispatching validation. Give each
+model the same number of permitted revisions and calls; preserve rejected
+variants and explain selection. Compare each selected prompt with a fresh original
+arm under the same limits. Keep operational failures in the denominator and AI
+review separate from human labels. The AI packet withholds prompt-variant text
+and identities, judging both arms under the same source-grounding contract.
 
 ## Reviewing actual answers
 

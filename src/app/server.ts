@@ -117,6 +117,7 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  aiUsageBudget?: AiUsageBudget;
   createNativeNotionReviewResources?: typeof createNativeNotionReviewResources;
   createStructuredWorkRuntime?: typeof createStructuredWorkRuntime;
   createWorkProvider?: typeof createLinearWorkProviderFromEnv;
@@ -297,17 +298,19 @@ export async function startServer(
     // A database initialization already in flight must finish before we can
     // close its owned resources; never race away from an unreturned handle.
     startupSignal?.throwIfAborted();
-    const aiUsage = createAiUsageBudget({
-      ...aiBudgetSettings,
-      database,
-      configured:
-        isAiModelPriced(openAIReasoningModelName) &&
-        hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
-        (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
-          discordContextAskConfig !== undefined ||
-          decisionRecordConfig !== undefined ||
-          structuredWorkConfig !== undefined)
-    });
+    const aiUsage =
+      dependencies.aiUsageBudget ??
+      createAiUsageBudget({
+        ...aiBudgetSettings,
+        database,
+        configured:
+          isAiModelPriced(openAIReasoningModelName) &&
+          hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
+          (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
+            discordContextAskConfig !== undefined ||
+            decisionRecordConfig !== undefined ||
+            structuredWorkConfig !== undefined)
+      });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
         requestedWorkspaceId === workspaceId

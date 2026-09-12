@@ -19,7 +19,12 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "local": "pnpm build && node dist/src/local-sandbox/main.js",
+    "local:ai": "pnpm build && node dist/src/local-sandbox/live-main.js",
+    "local:up": "pnpm build && node dist/src/local-sandbox/control.js up",
+    "local:down": "node dist/src/local-sandbox/control.js down",
+    "local:status": "node dist/src/local-sandbox/control.js status"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.12",

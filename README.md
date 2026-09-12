@@ -95,7 +95,38 @@ The `packageManager` field in `package.json` lets Corepack select the correct pn
 
 ## Local Environment
 
-Start from:
+To try Luma without accounts, hosting, API charges or external writes:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm local
+```
+
+Open the loopback URL printed in the terminal. The interactive sandbox runs the
+real Meeting Intelligence core with synthetic AI proposals and an isolated
+in-memory database. You can inspect sample evidence, correct ownership, confirm
+or reject decisions, ask scoped questions, replay events and run the offline
+corpus with visible expected/actual results. It does not load `.env` or connect
+to Discord. Ctrl+C stops it and clears the sandbox. See the
+[local testing guide](docs/operations/local-testing.md) for a short walkthrough
+and the distinction between offline correctness and live AI/provider quality.
+
+To test with **real AI responses** locally:
+
+```bash
+pnpm local:ai
+```
+
+Open the printed local URL and enter your OpenAI API key in its password field.
+Paste a conversation, analyze it, and ask questions about its evidence. The key
+stays in memory. Submitted text and the initial USD 1/month local test allowance
+persist across restarts in `~/.luma/local-ai/store`. AI API usage may cost money;
+hosting is unnecessary. Notion and Linear are not connected. Discord is opt-in from the development bot
+panel.
+On macOS, `pnpm local:up` keeps both pages running at stable addresses;
+`pnpm local:down` stops them. See the [live local test guide](docs/operations/local-testing.md#real-ai-mode).
+
+For a development instance connected to Discord and the other providers, start from:
 
 ```bash
 cp .env.example .env

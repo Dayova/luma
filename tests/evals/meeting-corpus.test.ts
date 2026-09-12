@@ -17,6 +17,22 @@ afterEach(() => {
 });
 
 describe("versioned Meeting product evaluation", () => {
+  it("applies changed Human action text through the public statement correction field", async () => {
+    const { corpus, samples } = await load();
+    const fixture = corpus.fixtures.find(
+      (f) => f.id === "jakob-owns-luma-human-judgment"
+    )!;
+    const correction = fixture.steps.find((s) => s.type === "judge");
+    if (!correction || correction.type !== "judge")
+      throw new Error("Missing Human fixture");
+    correction.correction.description = "Human revised Luma task.";
+    const report = await evaluateCorpus(corpus, samples);
+    const output = report.fixtures.find((f) => f.id === fixture.id)!;
+    expect(output.outputs["after"]).toMatchObject({
+      state: { actionItems: [{ description: "Human revised Luma task." }] }
+    });
+  });
+
   it("detects missing imported source content, Human authority and revocation in real prior Meeting recall", async () => {
     const { corpus } = await load();
     const fixture = structuredClone(corpus.importedMeetingFixtures[0]!);

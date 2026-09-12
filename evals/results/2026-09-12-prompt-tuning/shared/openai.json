@@ -1,0 +1,1193 @@
+{
+  "version": 2,
+  "benchmark": {
+    "version": 2,
+    "id": "prompt-tuning-development",
+    "revision": "2026-09-12-v1",
+    "provenance": "synthetic-development",
+    "cases": [
+      {
+        "fixture": {
+          "id": "mixed-code-uncertainty",
+          "language": "mixed",
+          "occurredAt": "2026-09-10T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_alex",
+              "text": "Der Fehler könnte in use-auth-session liegen. We have not verified the cause."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Ich werde use-auth-session untersuchen, ohne schon eine Ursache zu behaupten."
+            }
+          ],
+          "checks": [
+            {
+              "id": "investigation-retained",
+              "dimension": "recall",
+              "collection": "actionItems",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "not-in",
+                  "values": [
+                    "cancelled",
+                    "completed"
+                  ]
+                },
+                {
+                  "field": "description",
+                  "op": "includes-any",
+                  "values": [
+                    "use-auth-session"
+                  ]
+                }
+              ],
+              "min": 1,
+              "max": 1
+            },
+            {
+              "id": "investigator-sam",
+              "dimension": "ownership",
+              "collection": "actionItems",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "not-in",
+                  "values": [
+                    "cancelled",
+                    "completed"
+                  ]
+                },
+                {
+                  "field": "ownerId",
+                  "op": "equals",
+                  "value": "person_sam"
+                }
+              ],
+              "min": 1,
+              "max": 1
+            },
+            {
+              "id": "no-cause-decision",
+              "dimension": "grounding",
+              "collection": "decisions",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "equals",
+                  "value": "confirmed"
+                }
+              ],
+              "min": 0,
+              "max": 0
+            }
+          ],
+          "manualReview": "Check that suspicion is not presented as verified root cause and that the exact identifier survives."
+        },
+        "groupId": "mixed-code-uncertainty",
+        "cohort": "regression",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      {
+        "fixture": {
+          "id": "revised-decision",
+          "language": "de",
+          "occurredAt": "2026-09-10T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_alex",
+              "text": "Wir entscheiden uns für Tool Atlas."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Korrektur nach gemeinsamer Abstimmung: Atlas ist verworfen. Wir entscheiden uns verbindlich für Tool Beacon."
+            }
+          ],
+          "checks": [
+            {
+              "id": "one-current-decision",
+              "dimension": "decision",
+              "collection": "decisions",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "equals",
+                  "value": "confirmed"
+                }
+              ],
+              "min": 1,
+              "max": 1
+            },
+            {
+              "id": "beacon-current",
+              "dimension": "decision",
+              "collection": "decisions",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "equals",
+                  "value": "confirmed"
+                },
+                {
+                  "field": "statement",
+                  "op": "includes-any",
+                  "values": [
+                    "Beacon"
+                  ]
+                }
+              ],
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "manualReview": "The single current decision must choose Beacon; a rejected or superseded Atlas record is allowed. Merely mentioning Beacon is insufficient for manual acceptance."
+        },
+        "groupId": "revised-decision",
+        "cohort": "regression",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [
+          {
+            "id": "no-inferred-objector",
+            "dimension": "attribution",
+            "severity": "critical",
+            "collection": "decisions",
+            "where": [],
+            "every": [
+              {
+                "field": "objectingParticipantIds",
+                "op": "set-equals",
+                "values": []
+              }
+            ],
+            "min": 1,
+            "max": 2
+          }
+        ],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      {
+        "fixture": {
+          "id": "conditional-rollout-accepted",
+          "language": "mixed",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_alex",
+              "text": "Wir sprechen heute über den Rollout von Project Beacon. Die Staging-Demo war gut, aber eine Demo ist keine Freigabe."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "I could prepare the deployment checklist if legal approves the new data flow."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Legal hat nur eine Rückfrage gestellt. Das ist noch keine Zustimmung."
+            },
+            {
+              "speakerId": "person_mira",
+              "text": "The old document says approved, but that applies to the previous data flow."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Die alte Freigabe gilt hier ausdrücklich nicht. Für den neuen Flow haben wir keinen beschlossenen Rollout."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Then my offer is conditional. I am not starting work or accepting a deadline yet."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Im Board steht der 18. September als Wunschdatum, nicht als vereinbarte Frist."
+            },
+            {
+              "speakerId": "person_mira",
+              "text": "Das Support-Team könnte an dem Tag verfügbar sein. Auch das ist keine Zusage."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Do we need to decide between Friday and Monday right now?"
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Nein. Zuerst muss Legal den tatsächlichen neuen Flow prüfen."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Please keep the distinction between an offer and a committed action in the notes."
+            },
+            {
+              "speakerId": "person_mira",
+              "text": "Niemand hat die Freigabe hier ersetzt oder bestätigt."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Bis zu einer neuen ausdrücklichen Zusage bleibt das offen."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Agreed: we have a question about approval, not a decision to deploy."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Für den Moment gibt es von mir keine beauftragte Checklist-Arbeit."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Update vor dem Ende: Legal hat den neuen Flow jetzt ausdrücklich freigegeben. Ich lese die Freigabe vor; die Bedingung ist damit erfüllt."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "With that approval, I now commit to writing only the deployment checklist by 18 September 2026. I am not deploying the system."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Bestätigt: Sam schreibt die Checklist bis 18. September 2026. Über das tatsächliche Deployment entscheiden wir separat."
+            }
+          ],
+          "checks": [
+            {
+              "id": "active-obligation-count",
+              "dimension": "recall",
+              "collection": "actionItems",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "not-in",
+                  "values": [
+                    "cancelled",
+                    "completed"
+                  ]
+                }
+              ],
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "manualReview": "The final acceptance changes the earlier conditional offer. Exactly one checklist commitment exists. Deployment remains unapproved. This is a paired development variant, not an independent meeting."
+        },
+        "groupId": "conditional-rollout",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [
+          {
+            "id": "accepted-checklist-owner-and-date",
+            "dimension": "ownership",
+            "severity": "critical",
+            "collection": "actionItems",
+            "where": [
+              {
+                "field": "status",
+                "op": "not-in",
+                "values": [
+                  "cancelled",
+                  "completed"
+                ]
+              }
+            ],
+            "every": [
+              {
+                "field": "ownerId",
+                "op": "equals",
+                "value": "person_sam"
+              },
+              {
+                "field": "dueDate.normalizedDate",
+                "op": "equals",
+                "value": "2026-09-18"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "confirmed"
+              },
+              {
+                "field": "evidenceIds",
+                "op": "contains-all",
+                "values": [
+                  "evidence:conditional-rollout-accepted:17"
+                ]
+              }
+            ],
+            "min": 1,
+            "max": 1
+          }
+        ],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      {
+        "fixture": {
+          "id": "quoted-owner-is-not-commitment",
+          "language": "mixed",
+          "occurredAt": "2026-09-11T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_sam",
+              "text": "Ich lese jetzt ein Beispiel aus einem alten Schulungsdokument vor, keine aktuelle Zusage."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Zitat: Mira sagt: Ich übernehme die Datenmigration bis Freitag."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "The quoted training example is not meeting evidence of an actual migration commitment."
+            },
+            {
+              "speakerId": "person_mira",
+              "text": "Genau. Ich habe in diesem Meeting keine Migration übernommen."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Soll eine echte Migration überhaupt beauftragt werden?"
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf."
+            },
+            {
+              "speakerId": "person_sam",
+              "text": "Auch die Freitagsfrist stammt ausschließlich aus dem fiktiven Zitat."
+            },
+            {
+              "speakerId": "person_mira",
+              "text": "Do not turn the example into a work ticket or assign it to me."
+            },
+            {
+              "speakerId": "person_alex",
+              "text": "Wir besprechen nur, wie solche Beispieltexte richtig gelesen werden."
+            },
+            {
+              "speakerId": "person_jo",
+              "text": "Damit keine aktuelle Aufgabe und keine aktuelle Frist."
+            }
+          ],
+          "checks": [
+            {
+              "id": "active-obligation-count",
+              "dimension": "recall",
+              "collection": "actionItems",
+              "where": [
+                {
+                  "field": "status",
+                  "op": "not-in",
+                  "values": [
+                    "cancelled",
+                    "completed"
+                  ]
+                }
+              ],
+              "min": 0,
+              "max": 0
+            }
+          ],
+          "manualReview": "The quoted sample is not a current commitment. No owner, migration deadline or work creation should be inferred."
+        },
+        "groupId": "quoted-owner",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [
+          {
+            "id": "no-quoted-work-ticket",
+            "dimension": "modality",
+            "severity": "critical",
+            "collection": "followUpIntentions",
+            "where": [
+              {
+                "field": "type",
+                "op": "equals",
+                "value": "create-work-item"
+              }
+            ],
+            "every": [],
+            "min": 0,
+            "max": 0
+          }
+        ],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      }
+    ]
+  },
+  "benchmarkHash": "ee9cd1f5c48c106f40c6788c7949422da7d3242e95ea967305e4477eca35b5ef",
+  "models": [
+    {
+      "label": "openai-shared-v1",
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "inputRate": 0.2,
+      "outputRate": 1.2,
+      "pricing": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+      "promptInstructions": "You are the reasoning adapter for Luma Meeting Intelligence.\n\nUse only the supplied evidence. Cite every factual output with one or more supplied evidence IDs. Preserve the source language, modality, names, repository identifiers, issue identifiers, dates, and technical terms. Do not turn \"might\" into \"will\" or \"could\" into \"must\".\n\nLinear owns executable work. Propose create-work-item or update-work-item when something needs to be done. Notion owns meeting records and decisions. Propose record-meeting for a durable meeting record. Do not propose generic knowledge-document creation or updates: safe canonical knowledge patches require a Human-selected target, exact region, and conflict policy. Do not duplicate executable tasks in Notion. GitHub owns code changes and pull requests.\n\nExternal mutations are proposals only. Every Follow-up Intent must remain subject to explicit human approval.\n\nInterpret the whole conversation before producing the final structured record. Later corrections, answers, refusals and acceptances update the meaning of earlier speech. The examples below illustrate general distinctions; they are not evidence about the supplied meeting.\n\nEvidence fidelity applies to EVERY field, including questions, rationales, participant lists, risks, ticket titles and descriptions. A valid citation ID is not enough: its content must support the actual claim. Preserve conditions, negation, uncertainty, tense and scope. Do not add a plausible cause, purpose, deadline, agreement or owner. A question can contain an unsupported assertion: if a module is only suspected, ask whether it is involved rather than asking why its defect caused the incident.\n\nOwnership and stance are separate from speaking. Someone reading a document or announcing a collective decision is not thereby the task owner, a personal supporter, or an objector. Populate individual stance lists only when that person's own position is evidenced. A request, guess about identity, quoted assignment, or confident assertion by another person is not acceptance. Preserve a definitely heard commitment even when the human identity is unknown, using a null owner and one targeted clarification; never use an unidentified-speaker placeholder as an identified owner. Keep separately accepted work by known people.\n\nDistinguish proposals from accepted work. An explicitly conditional offer may remain a candidate with its conditions and no invented deadline; it is not a confirmed commitment. Preserve positive commitments when they are made, including later acceptance of a previously conditional offer. Preserve superseded decisions as history alongside the current decision. Completed historical work and hypothetical examples are not new commissions. 'No decision that X is needed' does not mean 'X is unnecessary'.\n\nOpen questions must remain materially unresolved at the end. Remove an earlier question once later speech answers it. A future decision can remain open even when the present state is known: 'Will approval be granted?' differs from asking whether approval has already happened after the source explicitly says it has not. Consolidate equivalent questions; preserve distinct unanswered issues. Do not suppress real tasks, explicit personal objections, material risks, or unresolved questions merely to avoid errors.\n\nRespect accepted scope. An investigation is not a repair commitment. Accepting one component of a request does not accept all components. A discussion explaining a deadline does not define the subject of a test. Follow-up titles must express the same supported work as the action; no new purpose or assignment may be introduced when shortening it. Output compact descriptions without redundant copies of every utterance.\n\nUse the supplied source instant and Europe/Berlin calendar for relative dates, including midnight and daylight-saving boundaries. Keep the source phrase, distinguish a wish date from an accepted deadline, and attach dates only to the work they qualify. Do not use the current machine date. Where the source resolves a date or scope question, do not reopen it.\n\nIllustrative contrasts:\n- 'The timeout could be in router.ts or the upstream service' supports investigating both possibilities, not 'Why did router.ts fail?'.\n- 'The committee replaced option Red with Blue; I am reporting the result' supports a decision revision, not a personal objection by the messenger.\n- 'Is Friday firm?' / 'Yes, I accept delivery Friday' settles that deadline question. 'The launch is still unapproved' does not unsettle the accepted documentation deadline.\n- 'I can investigate if we fund it' is conditional; 'Funding is confirmed; I now accept the investigation' is a commitment. Do not treat both statements as two tasks.\n- 'We discussed the holiday to calculate when the serializer review is due' does not make the review a holiday-behavior test.\n\nBefore returning JSON, check that every assertion is supported, all later updates are reconciled, every materially accepted task and unresolved question is retained, and no duplicate work or invented scope was added. Keep this check internal; return only the requested JSON.\n",
+      "pricingVerifiedAt": "2026-09-10"
+    }
+  ],
+  "mode": "live",
+  "sourceReports": [],
+  "createdAt": "2026-09-12T15:37:07.085Z",
+  "gitRevision": "d844e6ee49f035fd2f45c3a93e51474835526db1",
+  "planHash": "41f12810d78c82923cdbb90713443ed8aaba0b10b9f43eeb4b5a91e31d2ab93a",
+  "settings": {
+    "seed": 56,
+    "repeats": 1,
+    "maxRequests": 4,
+    "limits": {
+      "maxOutputTokens": 8192,
+      "timeoutMs": 60000,
+      "maxInputBytes": 64000
+    },
+    "googleEndpoint": {
+      "backend": "vertex"
+    },
+    "anthropicOutputMode": "prompt-json",
+    "providerProfile": "provider-comparison-v1"
+  },
+  "rows": [
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "revised-decision",
+      "repetition": 1,
+      "requestHash": "580a72aa4a2b83004d9cb83e334110a86c7afc869e5032f6f1e93a4131cdb165",
+      "status": "completed",
+      "latencyMs": 5240,
+      "errorCode": null,
+      "response": {
+        "returnedModel": "gpt-5.6-luna",
+        "responseId": "resp_071afd0ca0c21722016aa571a4a90887d2acf1e0cad122e47f",
+        "finishReason": "completed",
+        "usage": {
+          "inputTokens": 3483,
+          "outputTokens": 287,
+          "reasoningTokens": 111
+        },
+        "estimatedUncachedCostUsd": 0.001041
+      },
+      "output": {
+        "actionItems": [],
+        "decisions": [
+          {
+            "stableKey": "decision-tool-atlas",
+            "statement": "Wir entscheiden uns für Tool Atlas.",
+            "rationale": [],
+            "status": "superseded",
+            "supportingParticipantIds": [],
+            "objectingParticipantIds": [],
+            "relatedTopicIds": [],
+            "evidenceIds": [
+              "evidence:revised-decision:1"
+            ],
+            "confidence": "high"
+          },
+          {
+            "stableKey": "decision-tool-beacon",
+            "statement": "Wir entscheiden uns verbindlich für Tool Beacon.",
+            "rationale": [
+              "Korrektur nach gemeinsamer Abstimmung; Atlas ist verworfen."
+            ],
+            "status": "confirmed",
+            "supportingParticipantIds": [],
+            "objectingParticipantIds": [],
+            "relatedTopicIds": [],
+            "evidenceIds": [
+              "evidence:revised-decision:2"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "grade": {
+        "answerId": "e09da6f17e78ef221f38202bf59e7750c2fcedb601114f7b26544df335cb2a8e",
+        "automated": [
+          {
+            "id": "legacy:one-current-decision",
+            "dimension": "decision",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "legacy:beacon-current",
+            "dimension": "decision",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "citations-exist",
+            "dimension": "grounding",
+            "severity": "critical",
+            "passed": true
+          },
+          {
+            "id": "no-inferred-objector",
+            "dimension": "attribution",
+            "severity": "critical",
+            "passed": true
+          }
+        ],
+        "semantic": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "verdict": "pending"
+          }
+        ],
+        "review": null,
+        "verdict": "needs-review"
+      }
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "conditional-rollout-accepted",
+      "repetition": 1,
+      "requestHash": "1a1211ed93d4a79186c0d29a84069f5cf0ec1005419ab50d7b6e8127d439cecc",
+      "status": "completed",
+      "latencyMs": 16589,
+      "errorCode": null,
+      "response": {
+        "returnedModel": "gpt-5.6-luna",
+        "responseId": "resp_03fb0f0c52d21e9a016aa571a8925c87d281d057d0a8235a42",
+        "finishReason": "completed",
+        "usage": {
+          "inputTokens": 4796,
+          "outputTokens": 1724,
+          "reasoningTokens": 994
+        },
+        "estimatedUncachedCostUsd": 0.003028
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "write-deployment-checklist",
+            "description": "Write only the deployment checklist; do not deploy the system.",
+            "ownerId": "person_sam",
+            "dueDate": {
+              "originalPhrase": "18 September 2026",
+              "normalizedDate": "2026-09-18",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [
+              "legal-approved-new-flow",
+              "deployment-decision-separate"
+            ],
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:16",
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [
+          {
+            "stableKey": "legal-approved-new-flow",
+            "statement": "Legal has explicitly approved the new data flow.",
+            "rationale": [
+              "The approval fulfills the condition attached to Sam's offer to prepare the deployment checklist."
+            ],
+            "status": "confirmed",
+            "supportingParticipantIds": [],
+            "objectingParticipantIds": [],
+            "relatedTopicIds": [],
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:16"
+            ],
+            "confidence": "high"
+          },
+          {
+            "stableKey": "deployment-decision-separate",
+            "statement": "The actual system deployment remains a separate decision and is not decided by Sam's checklist commitment.",
+            "rationale": [
+              "Sam explicitly committed to writing only the deployment checklist and not deploying the system.",
+              "Alex confirmed that the actual deployment decision would be handled separately."
+            ],
+            "status": "confirmed",
+            "supportingParticipantIds": [],
+            "objectingParticipantIds": [],
+            "relatedTopicIds": [],
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "openQuestions": [
+          {
+            "stableKey": "actual-deployment-decision",
+            "question": "What is the separate decision on whether to deploy the system?",
+            "raisedBy": null,
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "risks": [
+          {
+            "stableKey": "deployment-approval-confusion",
+            "statement": "The previous approval and the current checklist commitment must not be treated as approval or commitment to deploy the system.",
+            "severity": "medium",
+            "mitigation": "Keep the deployment decision separate from Sam's checklist work.",
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:4",
+              "evidence:conditional-rollout-accepted:5",
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "followUpIntentions": [
+          {
+            "id": "record-offer-commitment-distinction",
+            "relatedMeetingItemIds": [
+              "write-deployment-checklist",
+              "deployment-decision-separate"
+            ],
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:11",
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high",
+            "type": "record-meeting",
+            "title": "Record the distinction between the conditional offer and the committed checklist action"
+          },
+          {
+            "id": "create-deployment-checklist-work-item",
+            "relatedMeetingItemIds": [
+              "write-deployment-checklist"
+            ],
+            "evidenceIds": [
+              "evidence:conditional-rollout-accepted:17",
+              "evidence:conditional-rollout-accepted:18"
+            ],
+            "confidence": "high",
+            "type": "create-work-item",
+            "title": "Write the deployment checklist by 18 September 2026",
+            "description": "Write only the deployment checklist by 18 September 2026; do not deploy the system.",
+            "assigneeId": "person_sam",
+            "mentionPersonIds": [],
+            "dueDate": "2026-09-18"
+          }
+        ]
+      },
+      "grade": {
+        "answerId": "8248f2e987d42f501dba9c531bb63e209aae98263e87cdcb99539689596fbffd",
+        "automated": [
+          {
+            "id": "legacy:active-obligation-count",
+            "dimension": "recall",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "citations-exist",
+            "dimension": "grounding",
+            "severity": "critical",
+            "passed": true
+          },
+          {
+            "id": "accepted-checklist-owner-and-date",
+            "dimension": "ownership",
+            "severity": "critical",
+            "passed": true
+          }
+        ],
+        "semantic": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "verdict": "pending"
+          }
+        ],
+        "review": null,
+        "verdict": "needs-review"
+      }
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "quoted-owner-is-not-commitment",
+      "repetition": 1,
+      "requestHash": "64b3ddd8ddfbdce4b2182de232346df49c8708466d1b95336951472212977289",
+      "status": "completed",
+      "latencyMs": 9433,
+      "errorCode": null,
+      "response": {
+        "returnedModel": "gpt-5.6-luna",
+        "responseId": "resp_0b47e7fe21d0207b016aa571b9343487d2b197548fd0c6507c",
+        "finishReason": "completed",
+        "usage": {
+          "inputTokens": 4120,
+          "outputTokens": 795,
+          "reasoningTokens": 692
+        },
+        "estimatedUncachedCostUsd": 0.001778
+      },
+      "output": {
+        "actionItems": [],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "migration-commissioning-future-decision",
+            "question": "Soll eine echte Migration überhaupt beauftragt werden?",
+            "raisedBy": "person_alex",
+            "evidenceIds": [
+              "evidence:quoted-owner-is-not-commitment:5",
+              "evidence:quoted-owner-is-not-commitment:6"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "grade": {
+        "answerId": "72a6f0b33cccaea4a6ea1553855c66f62b2985c32eab8112ed3df30353e45c6f",
+        "automated": [
+          {
+            "id": "legacy:active-obligation-count",
+            "dimension": "recall",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "citations-exist",
+            "dimension": "grounding",
+            "severity": "critical",
+            "passed": true
+          },
+          {
+            "id": "no-quoted-work-ticket",
+            "dimension": "modality",
+            "severity": "critical",
+            "passed": true
+          }
+        ],
+        "semantic": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "verdict": "pending"
+          }
+        ],
+        "review": null,
+        "verdict": "needs-review"
+      }
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "mixed-code-uncertainty",
+      "repetition": 1,
+      "requestHash": "9f25fbf97c265ec8a228f99a3436656e22493410928d065a6169f20e13475e4b",
+      "status": "completed",
+      "latencyMs": 8470,
+      "errorCode": null,
+      "response": {
+        "returnedModel": "gpt-5.6-luna",
+        "responseId": "resp_0b2043b50f643c3e016aa571c28e3c87d2addaa9cd81ac4da1",
+        "finishReason": "completed",
+        "usage": {
+          "inputTokens": 3492,
+          "outputTokens": 880,
+          "reasoningTokens": 516
+        },
+        "estimatedUncachedCostUsd": 0.0017544000000000001
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "action:investigate-use-auth-session",
+            "description": "use-auth-session untersuchen, ohne schon eine Ursache zu behaupten.",
+            "ownerId": "person_sam",
+            "dueDate": {
+              "originalPhrase": null,
+              "normalizedDate": null,
+              "confidence": "unknown",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "planned",
+            "relatedDecisionIds": [],
+            "evidenceIds": [
+              "evidence:mixed-code-uncertainty:1",
+              "evidence:mixed-code-uncertainty:2"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "question:use-auth-session-cause",
+            "question": "Ist die Ursache in use-auth-session?",
+            "raisedBy": "person_alex",
+            "evidenceIds": [
+              "evidence:mixed-code-uncertainty:1"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "risks": [
+          {
+            "stableKey": "risk:unverified-cause",
+            "statement": "Die Ursache des Fehlers ist noch nicht verifiziert.",
+            "severity": "unknown",
+            "mitigation": "use-auth-session untersuchen.",
+            "evidenceIds": [
+              "evidence:mixed-code-uncertainty:1",
+              "evidence:mixed-code-uncertainty:2"
+            ],
+            "confidence": "high"
+          }
+        ],
+        "followUpIntentions": [
+          {
+            "id": "followup:create-investigation-work-item",
+            "relatedMeetingItemIds": [
+              "action:investigate-use-auth-session"
+            ],
+            "evidenceIds": [
+              "evidence:mixed-code-uncertainty:1",
+              "evidence:mixed-code-uncertainty:2"
+            ],
+            "confidence": "high",
+            "type": "create-work-item",
+            "title": "use-auth-session untersuchen",
+            "description": "use-auth-session untersuchen, ohne schon eine Ursache zu behaupten.",
+            "assigneeId": "person_sam",
+            "mentionPersonIds": [],
+            "dueDate": null
+          }
+        ]
+      },
+      "grade": {
+        "answerId": "78326af6fed3119d6247ca89f74887f22a971ddc7be61b0e27044c9f96332ed9",
+        "automated": [
+          {
+            "id": "legacy:investigation-retained",
+            "dimension": "recall",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "legacy:investigator-sam",
+            "dimension": "ownership",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "legacy:no-cause-decision",
+            "dimension": "grounding",
+            "severity": "major",
+            "passed": true
+          },
+          {
+            "id": "citations-exist",
+            "dimension": "grounding",
+            "severity": "critical",
+            "passed": true
+          }
+        ],
+        "semantic": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "verdict": "pending"
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "verdict": "pending"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "verdict": "pending"
+          }
+        ],
+        "review": null,
+        "verdict": "needs-review"
+      }
+    }
+  ]
+}

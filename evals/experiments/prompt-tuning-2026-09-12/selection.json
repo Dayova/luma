@@ -1,0 +1,584 @@
+{
+  "version": 1,
+  "selectedAt": "2026-09-12T15:44:00.242698+00:00",
+  "protocol": "protocol.json",
+  "reviewKind": "coordinator-development-review-not-blinded-not-human",
+  "uncertaintyPolicy": "Count definite failed rubric criteria after operational/automatic failures; retain uncertain judgments separately. Never turn ambiguous development wording into a definite error. Ties retain shared v1.",
+  "selected": [
+    {
+      "provider": "openai",
+      "candidate": "openai-shared-v1",
+      "promptSha256": "c38dc77075c235475cb6ccb420e16c5ad2575248acf4e0e44a43f73711133ada",
+      "reason": "Both variants complete all four cases and pass automatic checks. The revision restores support availability but adds unsupported personal stance attribution. Shared has one failed criterion; revision has two. Retain shared. The ambiguous quoted-example recall judgment does not decide selection."
+    },
+    {
+      "provider": "anthropic",
+      "candidate": "anthropic-shared-v1",
+      "promptSha256": "c38dc77075c235475cb6ccb420e16c5ad2575248acf4e0e44a43f73711133ada",
+      "reason": "Both variants complete all cases and pass automatic checks. Shared has four failed criteria across two cases; revision has five across two cases and an overlapping-question concern. The revision fixes short collective-decision attribution but introduces another stance error and reopens an answered support-promise question. Retain shared."
+    },
+    {
+      "provider": "deepseek",
+      "candidate": "deepseek-shared-v1",
+      "promptSha256": "c38dc77075c235475cb6ccb420e16c5ad2575248acf4e0e44a43f73711133ada",
+      "reason": "Shared completes all four cases; revision exhausts its 8192-token allowance entirely on reasoning in the long case. The first selection criterion retains shared despite the revision fixing several semantic errors in its three completed cases."
+    },
+    {
+      "provider": "google",
+      "candidate": "google-revision-v2",
+      "promptSha256": "69284411bccefce658c751be1e04bf308d1ba45e5a8144be33f52fc391bb3cec",
+      "reason": "Revision has zero operational/automatic failures versus one HTTP 429 in shared, so the preregistered first criterion selects revision. This is not evidence that prompting fixes rate limits. The revision retains the future-need question, but unsupported personal stance remains in the long case."
+    }
+  ],
+  "developmentReviews": [
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "revised-decision",
+      "requestHash": "580a72aa4a2b83004d9cb83e334110a86c7afc869e5032f6f1e93a4131cdb165",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "1a1211ed93d4a79186c0d29a84069f5cf0ec1005419ab50d7b6e8127d439cecc",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "fail",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The distinct unresolved Support-Team availability in utterance 8 is absent from questions and risks; a broad deployment-decision question does not retain it."
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "64b3ddd8ddfbdce4b2182de232346df49c8708466d1b95336951472212977289",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "openai-shared-v1",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "9f25fbf97c265ec8a228f99a3436656e22493410928d065a6169f20e13475e4b",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "anthropic-shared-v1",
+      "caseId": "revised-decision",
+      "requestHash": "580a72aa4a2b83004d9cb83e334110a86c7afc869e5032f6f1e93a4131cdb165",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "Alex and Sam appear as personal supporters solely from collective decision announcements (1,2)."
+    },
+    {
+      "candidate": "anthropic-shared-v1",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "1a1211ed93d4a79186c0d29a84069f5cf0ec1005419ab50d7b6e8127d439cecc",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "Jo reads Legal approval (16), but is recorded as personally supporting that approval. Other factual clarifications also become individual stances."
+    },
+    {
+      "candidate": "anthropic-shared-v1",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "64b3ddd8ddfbdce4b2182de232346df49c8708466d1b95336951472212977289",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "anthropic-shared-v1",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "9f25fbf97c265ec8a228f99a3436656e22493410928d065a6169f20e13475e4b",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "google-shared-v1",
+      "caseId": "revised-decision",
+      "requestHash": "580a72aa4a2b83004d9cb83e334110a86c7afc869e5032f6f1e93a4131cdb165",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "google-shared-v1",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "1a1211ed93d4a79186c0d29a84069f5cf0ec1005419ab50d7b6e8127d439cecc",
+      "status": "error",
+      "errorCode": "http-429",
+      "automaticPassed": false,
+      "judgments": {
+        "source-support": "not-assessed",
+        "commitment-fidelity": "not-assessed",
+        "participant-attribution": "not-assessed",
+        "important-recall": "not-assessed",
+        "duplicate-items": "not-assessed",
+        "language-dates-identifiers": "not-assessed"
+      },
+      "explanation": "Operational failure; no valid answer to judge. Retained without retry."
+    },
+    {
+      "candidate": "google-shared-v1",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "64b3ddd8ddfbdce4b2182de232346df49c8708466d1b95336951472212977289",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "google-shared-v1",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "9f25fbf97c265ec8a228f99a3436656e22493410928d065a6169f20e13475e4b",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "uncertain",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The meeting title says Fehleruntersuchung in use-auth-session. This can denote the investigation target without asserting a confirmed defect; mark concern uncertain rather than force a failure."
+    },
+    {
+      "candidate": "deepseek-shared-v1",
+      "caseId": "revised-decision",
+      "requestHash": "580a72aa4a2b83004d9cb83e334110a86c7afc869e5032f6f1e93a4131cdb165",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "deepseek-shared-v1",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "1a1211ed93d4a79186c0d29a84069f5cf0ec1005419ab50d7b6e8127d439cecc",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "Sam is listed as personally supporting Legal approval because he accepts subsequent checklist work (16,17). This is evidence of a task acceptance, not his stance on the approval decision."
+    },
+    {
+      "candidate": "deepseek-shared-v1",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "64b3ddd8ddfbdce4b2182de232346df49c8708466d1b95336951472212977289",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The quote disclaimer and current-state explanation become decisions with broad personal supporter lists; factual clarification does not establish individual stance. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "deepseek-shared-v1",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "9f25fbf97c265ec8a228f99a3436656e22493410928d065a6169f20e13475e4b",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The record-meeting title describes a non-verified cause in use-auth-session, presupposing the suspected location; the source says the fault could be there and cause is unverified (1). The main action correctly preserves uncertainty."
+    },
+    {
+      "candidate": "openai-revision-v2",
+      "caseId": "revised-decision",
+      "requestHash": "a2d4ebc68bfa75a0fc7689560693a01667fa9790e91c136a733c244eea5ce415",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "openai-revision-v2",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "989ab72c02ad64926210adf95599ed6f62433a169e65133338875629e69b5d85",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The separate availability question is restored. The decision now lists Alex and Jo as personal supporters from reporting/confirming meeting state (14,18), without explicit individual stance on this decision. This strict stance interpretation is coordinator judgment, not human gold."
+    },
+    {
+      "candidate": "openai-revision-v2",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "4ef60198ab1d465b8c6567d196af918ffd185100bc46f863ea76e1a7dfccee29",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "openai-revision-v2",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "2faa317d3683524068077db8421244b2d917cae2899e48fc09ff8dc1d905a410",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "anthropic-revision-v2",
+      "caseId": "revised-decision",
+      "requestHash": "15ff2ec58963d2bafbfc429f846a07cf6d321ff2df3fa3e428ef4e30e985fbde",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "anthropic-revision-v2",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "2e752350baa64d88be4f6c3a96a382264dbe4b0e80a4b7271ea23b25d9c3b34f",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "fail",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "uncertain",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "Reading Legal approval still becomes personal support (16). The support question asks whether availability is actually promised, although utterance 8 explicitly says it is not; future availability itself remains unknown. Two deployment questions overlap in timing, but whether consolidation is required is uncertain."
+    },
+    {
+      "candidate": "anthropic-revision-v2",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "42fdc703427e5901d295c7ea21c5c9dd758cbfd2b959aeaa03f7f22f77f16807",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "The output now retains a future need question, but assigns personal supporters from factual clarifications and quote disclaimers (1,3,4,6). The future-question wording goes beyond the ambiguous present-state answer; do not score this ambiguity as a definite recall error."
+    },
+    {
+      "candidate": "anthropic-revision-v2",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "9bb64c504bc08afb9c0c50b2366bc7752dda7a07fb757575512ab11cb93ed8be",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "google-revision-v2",
+      "caseId": "revised-decision",
+      "requestHash": "fc59d03453fb1270b1b4af6eee68d251ae861d603fcc4ed7bed178c63f7feea4",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "google-revision-v2",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "5d30960f55d014a62460aa8b22d207b28dc95d7da3ac8af0edf281621a6a9b90",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "fail",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "fail",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "Mira and Alex are labeled personal supporters of the old-approval-inapplicability decision based on factual clarifications (4,5). Availability and checklist scope are retained."
+    },
+    {
+      "candidate": "google-revision-v2",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "5afb302cf86eab6d88bcb33297dfad13857d86b3ee630586649283618d49a900",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "google-revision-v2",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "d8ec0a5628bbd32c48229b4f8dafdad0db5075f8830a21cd3dc55809064cabd4",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "deepseek-revision-v2",
+      "caseId": "revised-decision",
+      "requestHash": "ee6dc4b08e2d48e115d0b2efd32d24fe5e3594c4f41682ae38f43f251171ae04",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    },
+    {
+      "candidate": "deepseek-revision-v2",
+      "caseId": "conditional-rollout-accepted",
+      "requestHash": "6347e8560071ed9abcc7f951caa874907e34599e303749f42c4a4e23b6f5d089",
+      "status": "error",
+      "errorCode": "incomplete-or-refused",
+      "automaticPassed": false,
+      "judgments": {
+        "source-support": "not-assessed",
+        "commitment-fidelity": "not-assessed",
+        "participant-attribution": "not-assessed",
+        "important-recall": "not-assessed",
+        "duplicate-items": "not-assessed",
+        "language-dates-identifiers": "not-assessed"
+      },
+      "explanation": "Operational failure; no valid answer to judge. Retained without retry."
+    },
+    {
+      "candidate": "deepseek-revision-v2",
+      "caseId": "quoted-owner-is-not-commitment",
+      "requestHash": "d5f3d6e47f37289490ffba51af24816edbacaae12401e89374f69eff600755ca",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "uncertain",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria. The source answers Nein, derzeit gibt es keinen beschlossenen Migrationsbedarf; whether this settles the future-need question is ambiguous. Do not use that ambiguity to select a prompt."
+    },
+    {
+      "candidate": "deepseek-revision-v2",
+      "caseId": "mixed-code-uncertainty",
+      "requestHash": "83dfd2e2938a4351d7ec484b645074f24a9b240be2ece615e2a21c48a86539fa",
+      "status": "completed",
+      "errorCode": null,
+      "automaticPassed": true,
+      "judgments": {
+        "source-support": "pass",
+        "commitment-fidelity": "pass",
+        "participant-attribution": "pass",
+        "important-recall": "pass",
+        "duplicate-items": "pass",
+        "language-dates-identifiers": "pass"
+      },
+      "explanation": "No definite semantic error found by the coordinator across the six criteria."
+    }
+  ],
+  "limitations": [
+    "Four development cases and one generation per prompt are a small tuning budget, not a best-prompt search.",
+    "Selection is sensitive to generation randomness and operational incidents; validation does not retroactively change selection.",
+    "Coordinator sees model identity, authors prompts and validation sources, and is not an independent or human judge."
+  ]
+}

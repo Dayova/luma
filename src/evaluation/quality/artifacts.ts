@@ -142,7 +142,13 @@ export function parseQualityRun(input: unknown): QualityRun {
     )
       throw new Error("Unknown or duplicate attempt");
     seen.add(identity);
-    if (row.requestHash !== comparisonPayload(requestForFixture(c.fixture)).hash)
+    if (
+      row.requestHash !==
+      comparisonPayload(
+        requestForFixture(c.fixture),
+        run.models.find((m) => m.label === row.candidate)!.promptInstructions
+      ).hash
+    )
       throw new Error("Request hash mismatch");
     if (row.status === "completed") {
       if (!row.output || row.errorCode !== null || row.latencyMs === null)

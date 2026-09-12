@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "id": "lum-56-prompt-tuning",
+  "createdAt": "2026-09-12T15:29:39.267854+00:00",
+  "sourceBase": "81500056ae02a5a27dee42ec845f369cc998158d",
+  "provenance": "agent-authored-synthetic-not-human-gold",
+  "development": {
+    "cases": 4,
+    "variantsPerProvider": 2,
+    "repetitions": 1,
+    "selection": "Minimize operational or automatic failures first; then coordinator source-grounded semantic errors and omissions across six existing rubric dimensions; ties retain shared v1. One adaptive revision per provider, maximum 250 added words, no model-specific test answer patches."
+  },
+  "validation": {
+    "cases": 8,
+    "repetitions": 2,
+    "arms": ["original", "selected"],
+    "freeze": "Commit validation cases and protocol before development dispatch. Commit selected prompts before any validation dispatch. No tuning or case/rubric edits after validation outputs are seen.",
+    "limitations": [
+      "Same agent authors validation and prompts; separation prevents tuning on validation outputs but is not independent human holdout.",
+      "Related capability families are intentionally shared with development; do not estimate production accuracy from these synthetic cases."
+    ]
+  },
+  "limits": {
+    "maxRequestsTotal": 160,
+    "maxOutputTokens": 8192,
+    "timeoutMs": 60000,
+    "maxInputBytes": 64000,
+    "retries": 0,
+    "providerConcurrency": 4
+  },
+  "profile": "Same provider controls as provider-comparison-v1, Vertex Express, Anthropic prompt-json. Each provider is sequential; up to four providers in parallel. Both validation arms have identical limits and task input; seeded order interleaves arms.",
+  "credentials": "Use existing local credentials; no keys in artifacts.",
+  "pricing": "Record estimates using dated public uncached rates. Unknown response usage is not zero; prices are not invoices.",
+  "review": "Keep automatic and independent AI judgments separate from human labels. Review original and selected answers together anonymously with frozen Notion context and calibration labels hidden."
+}

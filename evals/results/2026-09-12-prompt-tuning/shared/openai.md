@@ -6,14 +6,13 @@ Automated checks, human semantic review, and operational reliability are separat
 
 Cases: 4; scenario groups: 4; held-out cases: 0. Group counts do not establish representative sampling.
 
-| Candidate | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures | Known token cost |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| openai-shared-v1 | 4/4 | 0 | 4/4 | 0/4 | 4 | 0 | $0.007601 (4/4 attempts) |
+| Candidate        | Valid / planned | API/transport failures | Automated passes | Reviewed passes | Pending review | Observed critical failures |         Known token cost |
+| ---------------- | --------------: | ---------------------: | ---------------: | --------------: | -------------: | -------------------------: | -----------------------: |
+| openai-shared-v1 |             4/4 |                      0 |              4/4 |             0/4 |              4 |                          0 | $0.007601 (4/4 attempts) |
 
 Missing usage is unknown, not free. Semantic dimensions without completed reviews are unassessed, not zero-error. JSON includes dimension/cohort summaries and latency; no overall model-quality winner is inferred.
 
 ## Matched comparisons
-
 
 Intervals resample whole scenario groups rather than individual repetitions. Reviewed intervals require complete human judgments for all valid paired answers. A saturated checklist can produce a zero-width interval while still missing real errors. Synthetic development data and historical regrades cannot establish a production-quality ranking.
 

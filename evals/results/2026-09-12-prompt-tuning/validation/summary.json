@@ -1,0 +1,730 @@
+[
+  {
+    "candidate": "openai-original",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 16,
+    "operationalErrors": 0,
+    "unrun": 0,
+    "automaticPasses": 13,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 16,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.0356044,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 11272,
+    "p95AttemptLatencyMs": 29061,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 6,
+        "automaticAssessed": 6,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "recall": {
+        "automaticPassed": 18,
+        "automaticAssessed": 18,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 32
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 16,
+        "automaticAssessed": 16,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "deadline": {
+        "automaticPassed": 5,
+        "automaticAssessed": 8,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "ownership": {
+        "automaticPassed": 18,
+        "automaticAssessed": 18,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 13,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "openai-selected",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 16,
+    "operationalErrors": 0,
+    "unrun": 0,
+    "automaticPasses": 16,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 16,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.0371692,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 11118,
+    "p95AttemptLatencyMs": 19914,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 6,
+        "automaticAssessed": 6,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "recall": {
+        "automaticPassed": 18,
+        "automaticAssessed": 18,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 32
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 16,
+        "automaticAssessed": 16,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "deadline": {
+        "automaticPassed": 8,
+        "automaticAssessed": 8,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "ownership": {
+        "automaticPassed": 18,
+        "automaticAssessed": 18,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 16,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "anthropic-original",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 12,
+    "operationalErrors": 4,
+    "unrun": 0,
+    "automaticPasses": 8,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 12,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.40837,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 17273,
+    "p95AttemptLatencyMs": 28524,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 6,
+        "automaticAssessed": 6,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 12
+      },
+      "recall": {
+        "automaticPassed": 12,
+        "automaticAssessed": 14,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 24
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 12,
+        "automaticAssessed": 12,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 12
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 12
+      },
+      "deadline": {
+        "automaticPassed": 2,
+        "automaticAssessed": 5,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 12
+      },
+      "ownership": {
+        "automaticPassed": 13,
+        "automaticAssessed": 13,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 8,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "anthropic-selected",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 8,
+    "operationalErrors": 8,
+    "unrun": 0,
+    "automaticPasses": 7,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 8,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.45032599999999995,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 15313.5,
+    "p95AttemptLatencyMs": 28450,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 8
+      },
+      "recall": {
+        "automaticPassed": 9,
+        "automaticAssessed": 9,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 16
+      },
+      "decision": {
+        "automaticPassed": 1,
+        "automaticAssessed": 1,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 8,
+        "automaticAssessed": 8,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 8
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 8
+      },
+      "deadline": {
+        "automaticPassed": 4,
+        "automaticAssessed": 5,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 8
+      },
+      "ownership": {
+        "automaticPassed": 9,
+        "automaticAssessed": 9,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 7,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "deepseek-original",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 13,
+    "operationalErrors": 3,
+    "unrun": 0,
+    "automaticPasses": 12,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 13,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.133899,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 25937,
+    "p95AttemptLatencyMs": 34383,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 5,
+        "automaticAssessed": 5,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 13
+      },
+      "recall": {
+        "automaticPassed": 14,
+        "automaticAssessed": 15,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 26
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 13,
+        "automaticAssessed": 13,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 13
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 13
+      },
+      "deadline": {
+        "automaticPassed": 7,
+        "automaticAssessed": 7,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 13
+      },
+      "ownership": {
+        "automaticPassed": 13,
+        "automaticAssessed": 13,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 12,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "deepseek-selected",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 14,
+    "operationalErrors": 2,
+    "unrun": 0,
+    "automaticPasses": 14,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 14,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.13520339999999997,
+    "knownCostAttempts": 16,
+    "medianValidLatencyMs": 24798.5,
+    "p95AttemptLatencyMs": 36650,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 5,
+        "automaticAssessed": 5,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 14
+      },
+      "recall": {
+        "automaticPassed": 16,
+        "automaticAssessed": 16,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 28
+      },
+      "decision": {
+        "automaticPassed": 1,
+        "automaticAssessed": 1,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 14,
+        "automaticAssessed": 14,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 14
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 14
+      },
+      "deadline": {
+        "automaticPassed": 7,
+        "automaticAssessed": 7,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 14
+      },
+      "ownership": {
+        "automaticPassed": 17,
+        "automaticAssessed": 17,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 14,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "google-original",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 15,
+    "operationalErrors": 1,
+    "unrun": 0,
+    "automaticPasses": 15,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 15,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.18727575,
+    "knownCostAttempts": 15,
+    "medianValidLatencyMs": 14476,
+    "p95AttemptLatencyMs": 23714,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 6,
+        "automaticAssessed": 6,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 15
+      },
+      "recall": {
+        "automaticPassed": 17,
+        "automaticAssessed": 17,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 30
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 15,
+        "automaticAssessed": 15,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 15
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 15
+      },
+      "deadline": {
+        "automaticPassed": 8,
+        "automaticAssessed": 8,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 15
+      },
+      "ownership": {
+        "automaticPassed": 15,
+        "automaticAssessed": 15,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 15,
+        "reviewedPasses": 0
+      }
+    ]
+  },
+  {
+    "candidate": "google-selected",
+    "planned": 16,
+    "dispatched": 16,
+    "validOutputs": 11,
+    "operationalErrors": 5,
+    "unrun": 0,
+    "automaticPasses": 11,
+    "reviewedPasses": 0,
+    "reviewedOutputs": 0,
+    "pendingReview": 11,
+    "criticalFailures": 0,
+    "knownCostUsd": 0.35782349999999996,
+    "knownCostAttempts": 14,
+    "medianValidLatencyMs": 29835,
+    "p95AttemptLatencyMs": 48995,
+    "dimensions": {
+      "modality": {
+        "automaticPassed": 4,
+        "automaticAssessed": 4,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 11
+      },
+      "recall": {
+        "automaticPassed": 12,
+        "automaticAssessed": 12,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 22
+      },
+      "decision": {
+        "automaticPassed": 2,
+        "automaticAssessed": 2,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      },
+      "grounding": {
+        "automaticPassed": 11,
+        "automaticAssessed": 11,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 11
+      },
+      "attribution": {
+        "automaticPassed": 0,
+        "automaticAssessed": 0,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 11
+      },
+      "deadline": {
+        "automaticPassed": 6,
+        "automaticAssessed": 6,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 11
+      },
+      "ownership": {
+        "automaticPassed": 12,
+        "automaticAssessed": 12,
+        "semanticPassed": 0,
+        "semanticFailed": 0,
+        "semanticPending": 0
+      }
+    },
+    "cohorts": [
+      {
+        "cohort": "regression",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "representative",
+        "cases": 0,
+        "planned": 0,
+        "automaticPasses": 0,
+        "reviewedPasses": 0
+      },
+      {
+        "cohort": "challenge",
+        "cases": 8,
+        "planned": 16,
+        "automaticPasses": 11,
+        "reviewedPasses": 0
+      }
+    ]
+  }
+]

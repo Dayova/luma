@@ -1,4 +1,7 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { createAIReviewPacket } from "../../src/evaluation/quality/ai-review.js";
 import { expect, it } from "vitest";
 import { benchmarkSchema, digest } from "../../src/evaluation/quality/grading.js";
 import {
@@ -107,4 +110,43 @@ it("keeps validation scenarios disjoint and refuses blank experimental instructi
   expect(() =>
     modelSpecsSchema.parse([{ ...model, promptInstructions: "  " }])
   ).toThrow();
+});
+
+it("reproduces frozen selections and blinds prompt variants in semantic review", () => {
+  const root = "evals/experiments/prompt-tuning-2026-09-12";
+  const selected = modelSpecsSchema.parse(json(`${root}/validation-models.json`));
+  const selection = z
+    .object({
+      selected: z.array(
+        z.object({
+          provider: z.string(),
+          candidate: z.string(),
+          promptSha256: z.string()
+        })
+      )
+    })
+    .parse(json(`${root}/selection.json`));
+  const developmentRuns = ["shared", "revision"].map((stage) =>
+    parseQualityRun(json(`evals/results/2026-09-12-prompt-tuning/${stage}/combined.json`))
+  );
+  for (const entry of selection.selected) {
+    const source = developmentRuns
+      .flatMap((r) => r.models)
+      .find((m) => m.label === entry.candidate)!;
+    const target = selected.find((m) => m.label === `${entry.provider}-selected`)!;
+    expect(target.promptInstructions).toBe(source.promptInstructions);
+    expect(createHash("sha256").update(target.promptInstructions!).digest("hex")).toBe(
+      entry.promptSha256
+    );
+  }
+  const { packet } = createAIReviewPacket(
+    developmentRuns[0]!,
+    json("evals/context/luma-ai-review-2026-09-11.json"),
+    json(`${root}/review-controls.json`)
+  );
+  // Two providers returned the same empty answer to one case; review it once.
+  expect(packet.entries.length).toBe(20);
+  expect(JSON.stringify(packet)).not.toContain("promptInstructions");
+  expect(JSON.stringify(packet)).not.toContain("shared-v1");
+  expect(JSON.stringify(packet)).not.toContain("expectations");
 });

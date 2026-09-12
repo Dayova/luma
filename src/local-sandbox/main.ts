@@ -1,3 +1,4 @@
+import { runLocalServer } from "./lifecycle.js";
 import { resolve } from "node:path";
 import { loadCorpus } from "../../evals/corpus.js";
 import { evaluateCorpus } from "../../evals/runner.js";
@@ -16,6 +17,7 @@ async function main() {
   try {
     server = await startSandboxServer({
       session,
+      port: 58099,
       evaluate: () => evaluateCorpus(corpus, samples)
     });
   } catch (error) {
@@ -26,19 +28,7 @@ async function main() {
   console.log(
     `\nLuma local sandbox: ${running.origin}\nFree offline mode. Real Luma core; synthetic AI and provider fixtures.\nNo .env or production store loaded. Ctrl+C stops and clears the sandbox.\n`
   );
-  let stopping = false;
-  const stop = () => {
-    if (stopping) return;
-    stopping = true;
-    void running.close().catch(() => {
-      process.exitCode = 1;
-    });
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  return running;
 }
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Local sandbox failed");
-  process.exitCode = 1;
-});
+runLocalServer(main);

@@ -12,8 +12,7 @@ pnpm install --frozen-lockfile
 pnpm local
 ```
 
-Open the `http://127.0.0.1:<port>` address printed in the terminal. A free port is
-chosen automatically. Keep the terminal running. Ctrl+C closes the server and
+Open `http://127.0.0.1:58099`. Keep the terminal running. Ctrl+C closes the server and
 discards its temporary database. Restarting begins with an empty sandbox.
 Dependency installation may download packages; the running sandbox uses no
 external service and has no paid mode or credential configuration.
@@ -23,6 +22,30 @@ commands, or construct a live AI or external write adapter. Every fresh sample
 gets a separate Meeting within the sandbox. Switching samples retains previous
 sandbox records until exit; this ephemeral test data is separate from Luma's
 production history-retention policy. All browser tabs share this local session.
+
+## Keep the pages available on macOS
+
+```bash
+pnpm local:up
+pnpm local:status
+# When finished:
+pnpm local:down
+```
+
+`local:up` builds and starts both pages through the current user's launchd session:
+free offline mode at `http://127.0.0.1:58099` and real AI/Discord testing at
+`http://127.0.0.1:59383`. Closing this chat, a browser tab, or the launching terminal
+does not stop them. Stop with `local:down`. After logout or reboot, run `local:up`
+again; these services are not installed to start automatically at login. They do
+not keep the Mac awake, and a sleeping Mac cannot answer Discord messages.
+
+Stop existing foreground servers before `local:up`. Ports are fixed and never
+silently change. Running `local:up` again checks the existing services; it does not
+restart them or change their keys. To apply code changes, use `local:down`, then
+`local:up`. Logs and service definitions live in `~/.luma/local-services`.
+A crashed service is deliberately not restarted automatically. Inspect the log,
+preserve any store lease for recovery, then use down/up after recovery. Do not
+delete a lease based on a missing PID alone.
 
 ## Five-minute walkthrough
 
@@ -54,7 +77,7 @@ Confirming an item cannot execute external work in this sandbox.
 pnpm local:ai
 ```
 
-Open its printed loopback URL. Enter an OpenAI API key in the password field and
+Open `http://127.0.0.1:59383`. Enter an OpenAI API key in the password field and
 click **Use key for this session**. Connecting loads the key but makes no provider
 request. **Analyze with real AI** sends your pasted text to the production OpenAI
 ReasoningModel adapter; **Ask with real AI** uses real Context Intelligence and
@@ -100,7 +123,8 @@ This isolated local ledger does not aggregate a future separate production
 instance or another app. Count its usage within the agreed USD 30 total when
 production is enabled; do not run two independent USD 30 budgets. The USD 1
 local allowance is a conservative initial test allocation, not an increase of
-the overall allowance. No external write/provider account adapters are composed.
+the overall allowance. Discord testing below shares this same budget; Linear and
+Notion write adapters are not composed.
 Opening a stored meeting, replaying accepted source Evidence and concluding
 operate on retained state without paid AI; replay does not retry failed analysis.
 
@@ -118,8 +142,8 @@ provider-side costs.
 
 ## What still needs a connected test
 
-This is an interactive core test harness, not the production Discord interface
-or an open-ended local AI assistant. Model proposals and provider responses in
+The offline mode is an interactive core test harness, not an open-ended local AI
+assistant. The opt-in Discord mode below uses the production command handlers. Model proposals and provider responses in
 the broader corpus are synthetic; correct replay does not prove a real model
 will understand your meetings. The freeform field uses the existing bounded
 Meeting query interpreter, not the live organizational Context Ask model.
@@ -151,3 +175,60 @@ The first command covers the declared deterministic corpus. The second runs
 formatting, lint, type checks and the behavioral suite. Opt-in live tests remain
 skipped unless their explicit prerequisites are supplied. A green offline result
 is a reason to proceed to controlled live testing, not a deployment claim.
+
+## Test in Discord from the local AI page
+
+This is an opt-in connection to the existing development application, using the
+same runtime and Discord command handlers as deployment. It is not a simulated
+Discord bot. The page never connects automatically, including after a restart.
+The founders' general agreement is already recorded; this setup still verifies
+the actual current channel audience on every admitted interaction.
+
+Create `~/.luma/local-ai/discord.env` with private file permissions (0600):
+
+```dotenv
+DISCORD_TOKEN=<development bot token>
+DISCORD_CLIENT_ID=<development application ID>
+DISCORD_GUILD_ID=<server ID>
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=<founder-only text channel ID>
+```
+
+The local launcher reads only these four settings. Production credentials,
+feature flags and database paths from another `.env` are never inherited.
+Do not commit this private file. This Mac is configured for **Dayova Luma Dev**
+(application `1526147284822392952`) and **team-chat-development**
+(`1519252320343425135`), not `allgemein`, guests, or voice channels.
+
+1. In the development application's **Bot** settings enable **Server Members
+   Intent** and **Message Content Intent**. Member access establishes which
+   humans can read the channel; Message Content enables bounded mentioned questions.
+2. Give that development bot View Channel, Send Messages, Read Message History,
+   Create Public Threads, and Send Messages in Threads in the configured channel.
+   The four founders must be the only human readers. No Administrator grant is needed.
+3. On the local page, click **Check Discord setup**. It checks credentials,
+   intents and current founder-only audience before registering any commands.
+4. Load your OpenAI key and click **Start Discord bot**. The key stays in memory;
+   Discord and browser AI calls share one durable **$1 monthly budget**. Without
+   a key, slash commands can retain notes and report deferred analysis; mentioned
+   AI questions are disabled. Loading/removing a key stops the bot; start again
+   to apply the new configuration.
+5. In `team-chat-development`, use `/meeting start` with a test title. In the
+   resulting thread use `/meeting note` with a short test note, then begin a
+   message with `@Dayova Luma Dev` followed by a question. Use `/meeting usage`
+   for usage and `/meeting stop` to conclude. The browser's **Refresh status and
+   usage** button shows updated shared accounting. Discord meetings remain in
+   Discord; the browser meeting picker lists pasted local meetings only.
+6. Click **Stop Discord bot** when finished. Closing the tab alone leaves it
+   running. `pnpm local:down` stops both pages and the bot cleanly.
+
+The bot can post replies and meeting threads in the selected channel. No Notion,
+Linear, Granola or GitHub connections are loaded; canonical external writes,
+continuous chat collection and voice capture are not enabled. A mentioned question
+reads its bounded thread through that mention. Stored Discord meeting/evidence
+state lives in `~/.luma/local-ai/discord-store`; its shared AI accounting remains
+in `~/.luma/local-ai/store`. Preserve both stores together for backup/recovery.
+Limit errors use the normal Discord status responses rather than silent failure.
+
+Live acceptance still requires the Discord permission setup and an API key. A
+passing offline or programmable-adapter test does not establish successful live
+Discord delivery or real model quality.

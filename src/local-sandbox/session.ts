@@ -127,7 +127,7 @@ export async function createSandboxSession(
           query: {
             type: "freeform",
             text: step.text,
-            participantId: step.participantId ?? "person_jakob"
+            ...(step.participantId ? { participantId: step.participantId } : {})
           }
         });
         break;

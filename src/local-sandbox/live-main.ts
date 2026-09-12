@@ -1,3 +1,4 @@
+import { runLocalServer } from "./lifecycle.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -21,33 +22,23 @@ async function main() {
     delete process.env["LUMA_LOCAL_OPENAI_API_KEY"];
     const session = await createLiveSandboxSession({
       database,
+      discordDirectory: directory,
       ...(apiKey ? { apiKey } : {})
     });
     const server = await startSandboxServer({
       session,
+      port: 59383,
       page: livePage,
       maxBodyBytes: 65536
     });
     console.log(
-      `\nLuma with real AI: ${server.origin}\nInitial local allowance: USD 1 per Berlin calendar month; no external writes.\nText and accounting persist in ${directory}. Keys stay in memory.\nNothing is sent to OpenAI until you submit an AI request. Ctrl+C stops the server.\n`
+      `\nLuma with real AI: ${server.origin}\nInitial local allowance: USD 1 per Berlin calendar month; Discord is opt-in; no Linear or Notion writes.\nText and accounting persist in ${directory}. Keys stay in memory.\nNothing is sent to OpenAI until you submit an AI request. Ctrl+C stops the server.\n`
     );
-    let stopping = false;
-    const stop = () => {
-      if (stopping) return;
-      stopping = true;
-      void server.close().catch(() => {
-        process.exitCode = 1;
-      });
-    };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    return server;
   } catch (error) {
     await database.close();
     throw error;
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Local AI startup failed");
-  process.exitCode = 1;
-});
+runLocalServer(main);

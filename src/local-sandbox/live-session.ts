@@ -1,3 +1,4 @@
+import { createLocalDiscord } from "./discord.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AiServiceError } from "../ai/ai-service-error.js";
@@ -33,6 +34,7 @@ const commandSchema = z.discriminatedUnion("type", [
     .object({ type: z.literal("connect"), apiKey: z.string().trim().min(20).max(512) })
     .strict(),
   z.object({ type: z.literal("disconnect") }).strict(),
+  z.object({ type: z.enum(["discord-check", "discord-start", "discord-stop"]) }).strict(),
   z
     .object({
       type: z.literal("analyze"),
@@ -62,9 +64,10 @@ type MeetingRow = {
 };
 class LocalInputError extends Error {}
 
-/** The live local transport owns pasted sources; no external source/write adapters exist here. */
+/** Owns pasted sources and the optional development Discord runtime; canonical writes stay disabled. */
 export async function createLiveSandboxSession(options: {
   database: LumaDatabase;
+  discordDirectory?: string;
   apiKey?: string;
   /** Only deterministic tests supply response clients. The launcher always uses native adapters. */
   clients?: {
@@ -79,6 +82,9 @@ export async function createLiveSandboxSession(options: {
     id TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,
     created_at TEXT NOT NULL, judgments_json TEXT NOT NULL DEFAULT '[]'
   )`);
+  await database.exec(`CREATE TABLE IF NOT EXISTS local_ai_questions (
+    id TEXT PRIMARY KEY, asked_at TEXT NOT NULL
+  )`);
   const budget = createAiUsageBudget({
     database,
     monthlyLimitUsd: 1,
@@ -87,6 +93,9 @@ export async function createLiveSandboxSession(options: {
     timezone: "Europe/Berlin",
     now
   });
+  const discord = options.discordDirectory
+    ? createLocalDiscord({ directory: options.discordDirectory, budget })
+    : undefined;
   let apiKey = options.apiKey?.trim() || "";
   delete options.apiKey;
   let selected = (
@@ -188,6 +197,7 @@ export async function createLiveSandboxSession(options: {
     const row = selected ? await meeting() : undefined;
     return {
       mode: "live-ai",
+      discord: discord?.status() ?? null,
       model: DEFAULT_OPENAI_REASONING_MODEL,
       connected: !!apiKey || !!options.clients,
       meetings,
@@ -205,6 +215,7 @@ export async function createLiveSandboxSession(options: {
     view,
     async close() {
       apiKey = "";
+      await discord?.stop();
       await database.close();
     },
     async execute(input: unknown) {
@@ -217,13 +228,25 @@ export async function createLiveSandboxSession(options: {
             "Invalid input. Use a key of 20–512 characters, source text up to 12,000 characters, and questions up to 2,000 characters."
           );
         const command = parsed.data;
-        if (command.type === "connect") {
+        if (
+          command.type === "discord-check" ||
+          command.type === "discord-start" ||
+          command.type === "discord-stop"
+        ) {
+          if (!discord)
+            throw new LocalInputError("Discord testing is unavailable in this session.");
+          if (command.type === "discord-check") await discord.check();
+          else if (command.type === "discord-start") await discord.start(apiKey);
+          else await discord.stop();
+        } else if (command.type === "connect") {
+          await discord?.stop();
           apiKey = command.apiKey;
           result = {
             message:
               "Key loaded in memory. Provider access is checked on your first AI request."
           };
         } else if (command.type === "disconnect") {
+          await discord?.stop();
           apiKey = "";
           result = { message: "Key removed from the session." };
         } else if (command.type === "select") {
@@ -332,7 +355,16 @@ export async function createLiveSandboxSession(options: {
             const questionId = createHash("sha256")
               .update(JSON.stringify([row.id, row.judgments_json, command.text]))
               .digest("hex");
-            const questionAt = humanInstructions.at(-1)?.at ?? row.created_at;
+            await database.query(
+              "INSERT INTO local_ai_questions(id, asked_at) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+              [questionId, now().toISOString()]
+            );
+            const questionAt = (
+              await database.query<{ asked_at: string }>(
+                "SELECT asked_at FROM local_ai_questions WHERE id = $1",
+                [questionId]
+              )
+            ).rows[0]!.asked_at;
             const message: RawConversationMessage = {
               id: "source",
               ordinal: 0,

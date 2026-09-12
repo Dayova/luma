@@ -66,12 +66,25 @@ function clients() {
         create: (request: OpenAIResponseRequest) => {
           requests.push(request);
           if (failure) return Promise.reject(failure);
-          const evidence = inputSchema.parse(JSON.parse(request.input)).evidence;
+          const evidence = z
+            .object({
+              evidence: z.array(
+                z.object({ evidenceId: z.string(), text: z.string().nullable() })
+              )
+            })
+            .parse(JSON.parse(request.input)).evidence;
+          const correction = evidence.find((e) =>
+            e.text?.includes('"ownerId":"person_julius"')
+          );
           return Promise.resolve(
             response({
               answer: {
-                text: "Hosting is still undecided.",
-                evidenceIds: [badCitation ? "invented" : evidence[0]!.evidenceId]
+                text: correction
+                  ? "Julius owns Luma after Jakob’s correction."
+                  : "Hosting is still undecided.",
+                evidenceIds: [
+                  badCitation ? "invented" : (correction ?? evidence[0])!.evidenceId
+                ]
               },
               facts: [],
               inferences: [],
@@ -104,10 +117,11 @@ describe("real-AI local mode with deterministic external response clients", () =
     const directory = await mkdtemp(join(tmpdir(), "luma-live-local-test-"));
     const path = join(directory, "store");
     const mock = clients();
+    let at = now();
     let session = await createLiveSandboxSession({
       database: await createPgliteDatabase(path),
       clients: mock.ports,
-      now
+      now: () => at
     });
     try {
       const analyzed = await session.execute(analysisInput);
@@ -124,21 +138,26 @@ describe("real-AI local mode with deterministic external response clients", () =
       expect(owner.error).toBeNull();
       expect(owner.state).toMatchObject({ actionItems: [{ ownerId: "person_julius" }] });
       expect(mock.requests).toHaveLength(1);
+      at = new Date("2026-09-14T07:00:00Z");
       const answer = await session.execute({ type: "ask", text: "What is decided?" });
       expect(answer.error).toBeNull();
       expect(answer.result).toMatchObject({
         type: "answer",
-        answer: { text: "Hosting is still undecided." }
+        answer: { text: "Julius owns Luma after Jakob’s correction." }
       });
       expect(mock.requests).toHaveLength(2);
-      expect(mock.requests[1]?.input).toContain("person_julius");
 
       expect(answer.usage.requestCount).toBe(2);
       await session.close();
+      const reopened = await createPgliteDatabase(path);
+      expect(
+        (await reopened.query("SELECT asked_at FROM local_ai_questions")).rows
+      ).toEqual([{ asked_at: at.toISOString() }]);
+      at = new Date("2026-09-15T07:00:00Z");
       session = await createLiveSandboxSession({
-        database: await createPgliteDatabase(path),
+        database: reopened,
         clients: mock.ports,
-        now
+        now: () => at
       });
       const cached = await session.execute({ type: "ask", text: "What is decided?" });
       expect(cached.error).toBeNull();

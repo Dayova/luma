@@ -1,0 +1,4 @@
+{"at":"2026-09-12T15:39:55.764Z","candidate":"openai-revision-v2","caseId":"revised-decision","repetition":1,"requestHash":"a2d4ebc68bfa75a0fc7689560693a01667fa9790e91c136a733c244eea5ce415"}
+{"at":"2026-09-12T15:40:00.483Z","candidate":"openai-revision-v2","caseId":"conditional-rollout-accepted","repetition":1,"requestHash":"989ab72c02ad64926210adf95599ed6f62433a169e65133338875629e69b5d85"}
+{"at":"2026-09-12T15:40:16.477Z","candidate":"openai-revision-v2","caseId":"quoted-owner-is-not-commitment","repetition":1,"requestHash":"4ef60198ab1d465b8c6567d196af918ffd185100bc46f863ea76e1a7dfccee29"}
+{"at":"2026-09-12T15:40:21.647Z","candidate":"openai-revision-v2","caseId":"mixed-code-uncertainty","repetition":1,"requestHash":"2faa317d3683524068077db8421244b2d917cae2899e48fc09ff8dc1d905a410"}

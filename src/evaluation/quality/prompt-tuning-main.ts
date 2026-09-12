@@ -1,24 +1,21 @@
 // Run from the repository root after pnpm build. Credentials stay in process.env.
 // Each stage has a new output directory and an append-only dispatch journal.
+import { z } from "zod";
+import type { ModelSpec } from "./runner.js";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { parseQualityRun } from "../../../dist/src/evaluation/quality/artifacts.js";
-import {
-  runQualityEvaluation,
-  modelSpecsSchema
-} from "../../../dist/src/evaluation/quality/runner.js";
-import { benchmarkSchema, digest } from "../../../dist/src/evaluation/quality/grading.js";
-import {
-  renderQualityReport,
-  summarizeRun
-} from "../../../dist/src/evaluation/quality/report.js";
+import { parseQualityRun } from "./artifacts.js";
+import { runQualityEvaluation, modelSpecsSchema } from "./runner.js";
+import { benchmarkSchema, digest } from "./grading.js";
+import { renderQualityReport, summarizeRun } from "./report.js";
 
 const root = "evals/experiments/prompt-tuning-2026-09-12";
 const resultRoot = "evals/results/2026-09-12-prompt-tuning";
-const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
-const writeJson = async (path, value) =>
+const readJson = async (path: string): Promise<unknown> =>
+  JSON.parse(await readFile(path, "utf8")) as unknown;
+const writeJson = async (path: string, value: unknown) =>
   writeFile(path, JSON.stringify(value, null, 2) + "\n");
-const stage = process.argv[2];
+const stage = z.enum(["shared", "revision", "validation"]).parse(process.argv[2]);
 const live = process.argv[3] === "--live";
 if (
   !["shared", "revision", "validation"].includes(stage) ||
@@ -26,7 +23,7 @@ if (
   (process.argv[3] && !live)
 ) {
   throw new Error(
-    "Usage: node --env-file=.env evals/experiments/prompt-tuning-2026-09-12/run.mjs shared|revision|validation [--live]"
+    "Usage: node --env-file=.env dist/src/evaluation/quality/prompt-tuning-main.js shared|revision|validation [--live]"
   );
 }
 const manifest =
@@ -42,7 +39,17 @@ for (const path of frozen) {
   execFileSync("git", ["ls-files", "--error-unmatch", path], { stdio: "pipe" });
   execFileSync("git", ["diff", "--exit-code", "HEAD", "--", path], { stdio: "pipe" });
 }
-const protocol = await readJson(`${root}/protocol.json`);
+const protocol = z
+  .object({
+    development: z.object({ repetitions: z.number().int().min(1).max(5) }),
+    validation: z.object({ repetitions: z.number().int().min(1).max(5) }),
+    limits: z.object({
+      maxOutputTokens: z.number(),
+      timeoutMs: z.number(),
+      maxInputBytes: z.number()
+    })
+  })
+  .parse(await readJson(`${root}/protocol.json`));
 const benchmark = benchmarkSchema.parse(await readJson(`${root}/${corpus}`));
 const models = modelSpecsSchema.parse(await readJson(`${root}/${manifest}`));
 const providers = ["openai", "anthropic", "google", "deepseek"];
@@ -59,10 +66,8 @@ if (
 const gitRevision = execFileSync("git", ["rev-parse", "HEAD"], {
   encoding: "utf8"
 }).trim();
-const limits = Object.fromEntries(
-  ["maxOutputTokens", "timeoutMs", "maxInputBytes"].map((k) => [k, protocol.limits[k]])
-);
-const options = (laneModels) => ({
+const limits = protocol.limits;
+const options = (laneModels: ModelSpec[]) => ({
   benchmark,
   models: laneModels,
   env: process.env,
@@ -120,19 +125,19 @@ if (live) {
     throw new Error(
       "One or more lanes could not finish; inspect saved checkpoints without replaying calls"
     );
-  const runs = settled.map((r) => r.value);
+  const runs = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
   // Lanes are constructed above from identical inputs/settings, differing only in models/cap.
   const settings = {
-    ...runs[0].settings,
+    ...runs[0]!.settings,
     maxRequests: runs.reduce((n, r) => n + r.settings.maxRequests, 0)
   };
   const combined = parseQualityRun({
-    ...runs[0],
+    ...runs[0]!,
     models,
     settings,
     mode: "historical-regrade",
     sourceReports: runs.map(digest),
-    planHash: digest({ benchmarkHash: runs[0].benchmarkHash, models, settings }),
+    planHash: digest({ benchmarkHash: runs[0]!.benchmarkHash, models, settings }),
     rows: runs.flatMap((r) => r.rows)
   });
   await writeJson(`${out}/combined.json`, combined);

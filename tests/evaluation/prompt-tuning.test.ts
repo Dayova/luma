@@ -74,9 +74,10 @@ it.each(candidates)(
       limits: defaultLimits,
       promptInstructions: prompt,
       onResponse: () => {},
-      transport: async (_url, init) => {
-        captured = JSON.parse(String(init.body)) as unknown;
-        return new Response(null, { status: 503 });
+      transport: (_url, init) => {
+        if (typeof init.body !== "string") throw new Error("Expected JSON body");
+        captured = JSON.parse(init.body) as unknown;
+        return Promise.resolve(new Response(null, { status: 503 }));
       }
     });
     await expect(adapter.generateStructured(request)).rejects.toThrow("http-503");

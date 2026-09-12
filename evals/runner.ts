@@ -155,7 +155,7 @@ async function runFixture(
                     ? { ownerId: step.correction.ownerId }
                     : {}),
                   ...(step.correction.description !== undefined
-                    ? { description: step.correction.description }
+                    ? { statement: step.correction.description }
                     : {})
                 }
               }

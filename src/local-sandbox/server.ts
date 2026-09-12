@@ -1,23 +1,29 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { once } from "node:events";
-import type { createSandboxSession } from "./session.js";
 import { page } from "./page.js";
 
-type Session = Awaited<ReturnType<typeof createSandboxSession>>;
+type Session = {
+  view(): Promise<unknown>;
+  execute(input: unknown): Promise<unknown>;
+  close(): Promise<void>;
+};
 
-async function readCommand(request: IncomingMessage): Promise<unknown> {
+async function readCommand(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   request.setEncoding("utf8");
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
-    if (Buffer.byteLength(body) > 8192) throw new Error("Request exceeds 8 KiB");
+    if (Buffer.byteLength(body) > maxBytes)
+      throw new Error("Request exceeds the local input limit");
   }
   return JSON.parse(body) as unknown;
 }
 
 export async function startSandboxServer(options: {
   session: Session;
-  evaluate: () => Promise<unknown>;
+  evaluate?: () => Promise<unknown>;
+  page?: string;
+  maxBodyBytes?: number;
   port?: number;
 }) {
   let origin = "";
@@ -44,7 +50,7 @@ export async function startSandboxServer(options: {
     }
     if (request.method === "GET" && request.url === "/") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      response.end(page);
+      response.end(options.page ?? page);
       return;
     }
     if (
@@ -68,10 +74,12 @@ export async function startSandboxServer(options: {
     busy = true;
     active = (async () => {
       try {
-        const input = await readCommand(request);
+        const input = await readCommand(request, options.maxBodyBytes ?? 8192);
         const result =
           request.url === "/api/checks"
-            ? await options.evaluate()
+            ? options.evaluate
+              ? await options.evaluate()
+              : { error: "Offline checks are available in pnpm local" }
             : request.url === "/api/state"
               ? await options.session.view()
               : await options.session.execute(input);

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "reviewKind": "coordinator-development-review-not-blinded-not-human",
-  "sourceReport": "../../../results/2026-09-12-prompt-tuning/shared/combined.json",
+  "sourceReport": "evals/results/2026-09-12-prompt-tuning/shared/combined.json",
   "addedWords": {
     "openai": 93,
     "anthropic": 97,

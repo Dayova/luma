@@ -74,8 +74,8 @@ it("answers founder thread mentions without an API key, before capture or paid w
       occurredAt: "2026-09-13T15:05:00Z"
     };
     const reply = await ask(mention);
-    expect(reply?.content).toContain("API key");
-    expect(reply?.content).toContain("No AI call");
+    expect(reply?.content).toContain("AI setup or access");
+    expect(reply?.content).toContain("A founder should check");
     expect(
       await ask({
         ...mention,

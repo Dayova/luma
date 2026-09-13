@@ -28,7 +28,7 @@ The same four stress cases (`long-owner-handoff`, `long-decision-correction`, `b
 
 Google passed 8/12 attempts on these same four stress cases in the 4,096-token main run and 7/12 at 8,192. The larger-budget run had 4 `timeout-usage-unknown`, 1 `http-429`. These sequential, stochastic trials do not isolate the cause of rate-limit or timeout variation.
 
-Do not extrapolate this four-case check to all truncated baseline cases. Higher limits can improve completion at greater latency/cost; they do not guarantee semantic correctness. The combined known token-cost estimate for the 240 scored attempts is **$1.614601**. Setup/diagnostic calls, including the deliberately reduced Anthropic schema probe, are excluded from that figure and all scores.
+Do not extrapolate this four-case check to all truncated baseline cases. Higher limits can improve completion at greater latency/cost; they do not guarantee semantic correctness. The combined known token-cost estimate across 240 attempted requests is **$1.614601**, including only reported usage. Failed or invalid outputs are not semantically assessed. Setup/diagnostic calls, including the deliberately reduced Anthropic schema probe, are excluded from that figure and all scores.
 
 ## Findings beyond the automated scores
 
@@ -102,9 +102,15 @@ Each cell is the number of repetitions with valid output and all fixed predicate
 
 ## Reproduction and limits
 
+The OpenAI 8k `berlin-midnight-deadline` output also contains a dangling follow-up
+reference: `relatedMeetingItemIds` names `meeting_berlin-midnight-deadline` rather
+than an extracted item. The original fixed predicates did not assess this relation.
+Its recorded predicate pass is not semantic completeness; keep the raw output as
+negative evidence for the cross-item reconciliation evaluation under LUM-46.
+
 - Main source commit: `b5998c891d414517779add1c2c95e213c0af1168`; corpus SHA-256: `3f0adba97a0c467bde225e58fe0a3497dbead5241707a32f41dcdd0a9e57db18`.
 - Sensitivity source commit: `e5a968a9a8274c803754061f300529298fe9e375`; subset SHA-256: `9e68da63016ffddb0646ff135d105bc8753b029bb58ddd3d12f712cbedf7c397`.
-- Google main source: `65c84e97891f89d42315da1c30cda78e46f374ea`; sensitivity source: `65c84e97891f89d42315da1c30cda78e46f374ea-dirty`. Evaluation code and corpus are unchanged from the earlier sensitivity source; any dirty marker reflects documentation edits. Google was run later, after correcting local authentication, so its latency was measured in a different time window.
+- Google main source: `65c84e97891f89d42315da1c30cda78e46f374ea`; sensitivity source: `65c84e97891f89d42315da1c30cda78e46f374ea-dirty`. No immutable patch or tree was saved for that dirty working state, so its execution source cannot be reconstructed or verified. The Google sensitivity results are retained as descriptive historical observations, not reproducible benchmark evidence or a basis for model promotion. Google was run later, after correcting local authentication, so its latency was measured in a different time window.
 - Prompt version: `provider-comparison-v1`. Fixture/repetition request hashes match across every provider and across the two token-budget conditions.
 - Each provider ran sequentially within its own process; the original three providers ran concurrently. Google ran separately afterward. Sensitivity began for each provider after its main process finished. These are observed API latencies under that schedule, not controlled infrastructure benchmarks.
 - OpenAI medium reasoning/native JSON Schema; Anthropic adaptive medium reasoning/prompt JSON; DeepSeek enabled/high reasoning/JSON object mode; Google medium thinking/native JSON Schema through Vertex Express. These are not equal reasoning-compute budgets. No retries or output repairs were used in scored runs.

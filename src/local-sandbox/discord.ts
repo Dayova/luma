@@ -54,6 +54,10 @@ export function createLocalDiscord(options: {
   let aiEnabled = false;
   let channelsReady = false;
   let channels: string[] = [];
+  let verifiedChannels: string[] = [];
+  let blockedChannels: string[] = [];
+  let activeChannels: string[] = [];
+  let channelNames: Record<string, string> = {};
   let applicationId: string | null = null;
   async function configuration() {
     const raw = options.readConfig
@@ -71,6 +75,9 @@ export function createLocalDiscord(options: {
       const value: unknown = await response.json();
       return value;
     };
+    verifiedChannels = [];
+    blockedChannels = [];
+    channelsReady = false;
     const application = z
       .object({ id: z.string(), flags: z.number().int() })
       .parse(await get("/oauth2/applications/@me", AbortSignal.timeout(15000)));
@@ -84,7 +91,22 @@ export function createLocalDiscord(options: {
       problem = "Remove duplicate channel IDs from discord.env.";
       return false;
     }
-    channelsReady = false;
+    try {
+      const inventory = z
+        .array(z.object({ id: z.string(), name: z.string() }))
+        .parse(
+          await get(
+            `/guilds/${env.DISCORD_GUILD_ID}/channels`,
+            AbortSignal.timeout(15000)
+          )
+        );
+      channelNames = Object.fromEntries(
+        inventory.filter((c) => channels.includes(c.id)).map((c) => [c.id, c.name])
+      );
+    } catch {
+      channelNames = {};
+    }
+    const label = (id: string) => (channelNames[id] ? `#${channelNames[id]}` : id);
     const missing = [];
     if (!(application.flags & ((1 << 14) | (1 << 15))))
       missing.push("Server Members Intent");
@@ -111,18 +133,18 @@ export function createLocalDiscord(options: {
     });
     for (const channelId of channels) {
       if (
-        !(await audience.resolveChannel(
+        await audience.resolveChannel(
           channelId,
           lumaTeamPeople.map((p) => p.discordUserId!)
-        ))
+        )
       ) {
-        problem = `DMs are ready. Channel commands remain off: cannot verify founder-only access for ${channelId}. Grant the development bot View Channel there, then stop, check setup and restart to enable channel testing.`;
-        return true;
+        verifiedChannels.push(channelId);
+      } else {
+        blockedChannels.push(channelId);
       }
     }
-    channelsReady = true;
-    problem =
-      "DMs and channel setup verified. Start the bot, then use /meeting start in the configured channel.";
+    channelsReady = verifiedChannels.length > 0;
+    problem = `DMs are ready. ${channelsReady ? `Verified channels: ${verifiedChannels.map(label).join(", ")}.` : "No channel access verified."}${blockedChannels.length ? ` Access not verified for ${blockedChannels.map(label).join(", ")}; check bot permissions and founder-only readers there. Other verified channels remain available.` : ""} Stop and start the bot to apply setup changes.`;
     return true;
   }
   async function check() {
@@ -131,7 +153,7 @@ export function createLocalDiscord(options: {
       ready = await verify(await configuration());
     } catch {
       problem =
-        "Could not verify Discord setup. Check the private discord.env file, token, guild installation and network connection. No bot was started.";
+        "Could not verify Discord setup. Check the private discord.env file, token, guild installation and network connection. This check does not start or stop the bot.";
     }
     return ready;
   }
@@ -146,6 +168,9 @@ export function createLocalDiscord(options: {
         channelsReady,
         message: problem,
         channels,
+        activeChannels,
+        blockedChannels,
+        channelNames,
         applicationId
       };
     },
@@ -160,17 +185,22 @@ export function createLocalDiscord(options: {
           {
             ...env,
             LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: channelsReady
-              ? env.LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS
+              ? verifiedChannels.join(",")
               : "",
+            LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: verifiedChannels.join(","),
             LUMA_DISCORD_CONTEXT_ASK_ENABLED: apiKey && channelsReady ? "1" : "0",
             ...(apiKey ? { OPENAI_API_KEY: apiKey } : {})
           },
           { aiUsageBudget: options.budget }
         );
+        activeChannels = [...verifiedChannels];
         aiEnabled = !!apiKey;
-        problem = apiKey
-          ? `Development bot running with real AI. Send it a DM without tagging it. Discord and this page share the $1 monthly allowance.${channelsReady ? " Channels are enabled." : " Channel access remains disabled."}`
-          : "Development bot running. DMs support usage and /help now. Load an API key here, then start again for real AI answers. Channel access depends on the setup check.";
+        const setup = problem;
+        problem =
+          (apiKey
+            ? `Development bot running with real AI. Send it a DM without tagging it. Discord and this page share the $1 monthly allowance.${channelsReady ? " Channels are enabled." : " Channel access remains disabled."}`
+            : "Development bot running. DMs support usage and /help now. Load an API key here, then start again for real AI answers. Channel access depends on the setup check.") +
+          (blockedChannels.length ? ` ${setup}` : "");
       } catch {
         ready = false;
         problem =
@@ -182,6 +212,7 @@ export function createLocalDiscord(options: {
       await app.stop();
       app = undefined;
       aiEnabled = false;
+      activeChannels = [];
       problem = "Development bot stopped. Discord messages and local state are retained.";
     }
   };

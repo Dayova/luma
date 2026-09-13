@@ -222,13 +222,15 @@ not a live permission audit or an instruction to ingest all channel history.
 | `team-chat`             | Founders and bots                         | Candidate work threads                   |
 | `team-chat-development` | Founders and bots                         | Candidate work threads                   |
 | `resources`             | Founders and bots                         | Candidate work threads                   |
-| `team-off-topic`        | Founders and bots                         | Excluded initially                       |
+| `team-off-topic`        | Founders and bots                         | Candidate work threads                   |
 | `team-voice`            | Founders and bots                         | Future candidate; voice is unimplemented |
 | `gäste`                 | Also people with the Gäste role           | Excluded                                 |
 
-Resolve the selected parents to verified IDs during rollout. The three work
-channels are the initial pilot candidates; actual collection remains disabled
-until the source notice, retention, and reader-permission gates are satisfied.
+Resolve the selected parents to verified IDs during rollout. All four founder text
+channels are in the requested scope, including `team-off-topic`. Do not narrow local
+testing to `team-chat-development` alone. Jakob confirmed the four founders
+consented; per-channel reader and bot-access checks still apply at runtime.
+This does not enable continuous background collection.
 The indented thread titles in the supplied screenshot are examples, not fixed
 source bindings. Context Ask currently works in selected public threads under
 these parents, not in parent-channel conversations. Here, a public thread can

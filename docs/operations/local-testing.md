@@ -190,24 +190,37 @@ Create `~/.luma/local-ai/discord.env` with private file permissions (0600):
 DISCORD_TOKEN=<development bot token>
 DISCORD_CLIENT_ID=<development application ID>
 DISCORD_GUILD_ID=<server ID>
-LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=<founder-only text channel ID>
+LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS=1507049196006408352,1519252320343425135,1531388089824706652,1535755557774950440
 ```
 
 The local launcher reads only these four settings. Production credentials,
 feature flags and database paths from another `.env` are never inherited.
 Do not commit this private file. This Mac is configured for **Dayova Luma Dev**
-(application `1526147284822392952`) and **team-chat-development**
-(`1519252320343425135`), not `allgemein`, guests, or voice channels.
+(application `1526147284822392952`) and all four founder text channels requested by Jakob:
+
+| Channel                 | ID                    |
+| ----------------------- | --------------------- |
+| `team-chat`             | `1507049196006408352` |
+| `team-chat-development` | `1519252320343425135` |
+| `resources`             | `1531388089824706652` |
+| `team-off-topic`        | `1535755557774950440` |
+
+`allgemein` and `gäste` are excluded. `team-voice` belongs to the intended internal
+scope, but voice transport is not implemented. The four text-channel bindings
+survive renames; new or replacement channels need their IDs added. This scope
+replaces the earlier single-channel test restriction, which did not reflect Jakob's request.
 
 1. In the development application's **Bot** settings enable **Server Members
    Intent** and **Message Content Intent**. Member access establishes which
    humans can read the channel; Message Content enables bounded mentioned questions.
 2. Give that development bot View Channel, Send Messages, Read Message History,
-   Create Public Threads, and Send Messages in Threads in the configured channel.
+   Create Public Threads, and Send Messages in Threads in each configured channel.
    The four founders must be the only human readers. No Administrator grant is needed.
 3. On the local page, click **Check Discord setup**. It checks credentials and
-   intents. Channel access is checked separately: if unavailable, the bot can
-   still start for founder-only DMs with all channel capabilities disabled.
+   intents. Each channel is checked independently. Verified channels are enabled;
+   blocked channels are named in the setup result and excluded from the runtime.
+   A blocked channel does not disable the other channels. DMs remain available
+   even when no channel can be verified. Stop and start to apply scope changes.
 4. Load your OpenAI key and click **Start Discord bot**. The key stays in memory;
    Discord and browser AI calls share one durable **$1 monthly budget**. Without
    a key, DM help/usage work and AI answers report missing configuration; mentioned
@@ -216,7 +229,7 @@ Do not commit this private file. This Mac is configured for **Dayova Luma Dev**
 5. For private testing, send **Dayova Luma Dev** a DM without a mention. Send
    `/help`, `usage`, or a text question. Each founder has isolated private context;
    `/new` starts fresh without deleting earlier history. The same $1 budget applies.
-   For channel testing, in `team-chat-development`, use `/meeting start` with a test title. In the
+   For channel testing, use `/meeting start` with a test title in any enabled founder text channel. In the
    resulting thread use `/meeting note` with a short test note, then begin a
    message with `@Dayova Luma Dev` followed by a question. Use `/meeting usage`
    for usage and `/meeting stop` to conclude. The browser's **Refresh status and
@@ -225,7 +238,7 @@ Do not commit this private file. This Mac is configured for **Dayova Luma Dev**
 6. Click **Stop Discord bot** when finished. Closing the tab alone leaves it
    running. `pnpm local:down` stops both pages and the bot cleanly.
 
-The bot can post replies and meeting threads in the selected channel. No Notion,
+The bot can post replies and meeting threads in the verified channels. No Notion,
 Linear, Granola or GitHub connections are loaded; canonical external writes,
 continuous chat collection and voice capture are not enabled. A mentioned question
 reads its bounded thread through that mention. Stored Discord meeting/evidence

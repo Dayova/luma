@@ -32,7 +32,7 @@ function renderDiscord(discord){discordKnown=!!discord;
 if(!discord){botState('unavailable','unknown');el('discord-runtime').textContent='Discord testing is unavailable in this session.';return;}
 botState(!discord.started?'Stopped':discord.connected?'Running · connected':'Running · disconnected',!discord.started?'stopped':discord.connected?'running':'pending');
 el('discord-runtime').textContent=(!discord.started?'The bot is not receiving or answering messages.':!discord.connected?'The bot process is running but is not connected to Discord.':discord.aiEnabled?'Connected to Discord · Real AI enabled.':'Connected to Discord · AI off; usage and /help are available.')+' Status refreshes every 5 seconds.';
-el('discord-status').textContent='Setup: '+discord.message+(discord.channels.length?' Configured channels: '+discord.channels.join(', '):'');
+const channelLabel=id=>discord.channelNames?.[id]?'#'+discord.channelNames[id]:id;el('discord-status').textContent='Setup: '+discord.message+(discord.channels.length?' Configured channels: '+discord.channels.map(channelLabel).join(', '):'')+(discord.started?' · Active channels: '+((discord.activeChannels||[]).map(channelLabel).join(', ')||'none'):'');
 if(discord.applicationId)el('discord-settings').href='https://discord.com/developers/applications/'+discord.applicationId+'/bot';
 }
 function unknownDiscord(){discordKnown=false;botState('unknown','unknown');el('discord-runtime').textContent='Cannot verify the bot state. The local server may be busy or unavailable; checking again automatically.';}

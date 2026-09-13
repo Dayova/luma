@@ -21,12 +21,14 @@ const founders = lumaTeamPeople.map((p) => ({
   user: { id: p.discordUserId!, bot: false },
   roles: [team]
 }));
-function api(flags: number, guest = false): typeof fetch {
+function api(flags: number, guest = false, blocked: string[] = []): typeof fetch {
   return (input) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input : input.url
     );
     const route = url.pathname.replace("/api/v10", "");
+    if (blocked.some((id) => route === `/channels/${id}`))
+      return Promise.resolve(new Response("Forbidden", { status: 403 }));
     const data =
       route === "/oauth2/applications/@me"
         ? { id: bot, flags }
@@ -46,7 +48,7 @@ function api(flags: number, guest = false): typeof fetch {
                     : [])
                 ]
               : {
-                  id: parent,
+                  id: route.split("/").at(-1),
                   guild_id: guild,
                   type: 0,
                   permission_overwrites: [{ id: team, type: 0, allow: "1024", deny: "0" }]
@@ -173,3 +175,53 @@ describe("local Discord testing", () => {
     }
   });
 });
+
+it.each([false, true])(
+  "enables all accessible configured founder channels (partial access: %s)",
+  async (partial) => {
+    const database = await createPgliteDatabase();
+    const teamChat = "1507049196006408352";
+    const resources = "1531388089824706652";
+    const offTopic = "1535755557774950440";
+    const configured = [teamChat, parent, resources, offTopic];
+    const blocked = partial ? [resources, offTopic] : [];
+    const active = configured.filter((id) => !blocked.includes(id));
+    try {
+      const discord = createLocalDiscord({
+        directory: "/local",
+        budget: createAiUsageBudget({ database }),
+        readConfig: () =>
+          Promise.resolve({
+            ...env,
+            LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: configured.join(",")
+          }),
+        fetch: api((1 << 15) | (1 << 19), false, blocked),
+        startRuntime: (config) => {
+          expect(config?.["LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS"]).toBe(
+            active.join(",")
+          );
+          expect(config?.["LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS"]).toBe(
+            active.join(",")
+          );
+          expect(config?.["LUMA_DISCORD_CONTEXT_ASK_ENABLED"]).toBe("1");
+          return Promise.resolve({
+            gatewayConnected: () => true,
+            stop: () => Promise.resolve()
+          });
+        }
+      });
+      await discord.start("memory-key");
+      expect(discord.status()).toMatchObject({
+        started: true,
+        channelsReady: true,
+        channels: configured,
+        activeChannels: active,
+        blockedChannels: blocked
+      });
+      await discord.stop();
+      expect(discord.status()).toMatchObject({ activeChannels: [] });
+    } finally {
+      await database.close();
+    }
+  }
+);

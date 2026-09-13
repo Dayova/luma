@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ModelSpec } from "./runner.js";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { promptTuningEnvironment } from "./prompt-tuning-profile.js";
 import { parseQualityRun } from "./artifacts.js";
 import { runQualityEvaluation, modelSpecsSchema } from "./runner.js";
 import { benchmarkSchema, digest } from "./grading.js";
@@ -70,7 +71,7 @@ const limits = protocol.limits;
 const options = (laneModels: ModelSpec[]) => ({
   benchmark,
   models: laneModels,
-  env: process.env,
+  env: promptTuningEnvironment(process.env),
   live: false,
   maxRequests: benchmark.cases.length * repeats * laneModels.length,
   repeats,

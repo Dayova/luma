@@ -504,7 +504,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
   });
 
-  it("uses the existing safe fallback instead of truncating fact or inference claims", () => {
+  it("retains long grounded claims and sources for attachment delivery", () => {
     const result = contextInquiryResult();
     result.facts = [
       {
@@ -513,9 +513,10 @@ describe("Discord Context Ask runtime boundary", () => {
       }
     ];
 
-    expect(renderDiscordContextAskResult(result)).toBe(
-      "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
-    );
+    const rendered = renderDiscordContextAskResult(result);
+    expect(rendered).toContain("A".repeat(1_501));
+    expect(rendered).toContain("https://discord.com/channels/1/2/3");
+    expect(rendered).not.toContain("Please ask a narrower question");
   });
 });
 

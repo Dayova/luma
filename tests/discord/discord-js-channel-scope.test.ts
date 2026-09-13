@@ -433,7 +433,7 @@ describe("Discord production channel resolution and delivery", () => {
       );
       const handler = vi.fn(() =>
         Promise.resolve({
-          content: "Old organizational claim",
+          content: "Old organizational claim" + " context".repeat(300),
           idempotencyKey: "context-result",
           requireCurrent: fence
         })
@@ -447,9 +447,19 @@ describe("Discord production channel resolution and delivery", () => {
       expect(sent).toHaveProperty(
         "content",
         current
-          ? expect.stringContaining("Old organizational claim")
+          ? expect.stringContaining("attached luma-answer.txt")
           : expect.stringContaining("organizational context changed")
       );
+      if (current) {
+        expect(sent).toHaveProperty("files", [
+          {
+            attachment: Buffer.from("Old organizational claim" + " context".repeat(300)),
+            name: "luma-answer.txt"
+          }
+        ]);
+      } else {
+        expect(sent).not.toHaveProperty("files");
+      }
       if (!current)
         expect(sent).not.toHaveProperty(
           "content",

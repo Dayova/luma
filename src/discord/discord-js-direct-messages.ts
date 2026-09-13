@@ -1,3 +1,4 @@
+import { discordAnswerDelivery } from "./discord-answer-delivery.js";
 import { createHash } from "node:crypto";
 import { ChannelType, MessageType, Routes, type Client, type Message } from "discord.js";
 import { z } from "zod";
@@ -100,10 +101,22 @@ export function createDiscordJsDirectMessages(input: {
     async send(request) {
       if ((await recipient(request.channelId)) !== request.recipientId)
         throw new Error("DM recipient changed");
+      const delivery = discordAnswerDelivery(request.content);
       const sent = await client.rest.post(Routes.channelMessages(request.channelId), {
         signal,
+        ...(delivery.attachment
+          ? {
+              files: [
+                {
+                  data: delivery.attachment,
+                  name: "luma-answer.txt",
+                  contentType: "text/plain; charset=utf-8"
+                }
+              ]
+            }
+          : {}),
         body: {
-          content: request.content.slice(0, 2000),
+          content: delivery.content,
           allowed_mentions: { parse: [] },
           flags: 4,
           nonce: createHash("sha256")

@@ -226,3 +226,26 @@ it("edits and removes only the acknowledged bot-owned status message", async () 
     await transport.disconnect();
   }
 });
+
+it("delivers a long DM in one reply with its complete UTF-8 answer attached", async () => {
+  const transport = await start();
+  const content = "Grounded answer: " + "Ä🙂 evidence and limitations. ".repeat(150);
+  try {
+    await transport.directMessages!.send({
+      channelId: channel,
+      recipientId: founder,
+      content,
+      idempotencyKey: "long-answer"
+    });
+    const request = sdk.post.mock.calls[0]?.[1] as {
+      body: { content: string };
+      files?: { data: Buffer; name: string }[];
+    };
+    expect(request.body.content.length).toBeLessThanOrEqual(2000);
+    expect(request.files?.[0]?.data.toString("utf8")).toBe(content);
+    expect(request.files?.[0]?.name).toBe("luma-answer.txt");
+    expect(sdk.post).toHaveBeenCalledTimes(1);
+  } finally {
+    await transport.disconnect();
+  }
+});

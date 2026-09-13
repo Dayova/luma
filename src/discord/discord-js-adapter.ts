@@ -1,3 +1,4 @@
+import { discordAnswerDelivery } from "./discord-answer-delivery.js";
 import { startDiscordRequestProgress } from "./discord-request-progress.js";
 import { z } from "zod";
 import { createDiscordJsDirectMessages } from "./discord-js-direct-messages.js";
@@ -974,8 +975,12 @@ async function replyToContextAskMessage(
   // Discord deduplicates an enforced nonce for the same author within its
   // bounded deduplication window. Do not scan later thread history merely to
   // discover an earlier Context reply.
+  const delivery = discordAnswerDelivery(response.content);
   return message.reply({
-    content: renderDiscordMessage(response.content, discordMessageMarker(nonce)),
+    content: renderDiscordMessage(delivery.content, discordMessageMarker(nonce)),
+    ...(delivery.attachment
+      ? { files: [{ attachment: delivery.attachment, name: "luma-answer.txt" }] }
+      : {}),
     allowedMentions: {
       parse: [],
       repliedUser: false

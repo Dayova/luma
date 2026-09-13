@@ -414,7 +414,7 @@ export function renderDiscordContextAskResult(
     lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
   }
 
-  return renderDiscordResponse(lines);
+  return lines.join("\n");
 }
 
 /**
@@ -450,7 +450,7 @@ function renderInsufficientEvidenceResult(result: ContextInquiryResult): string 
 
 function renderDiscordResponse(
   lines: readonly string[],
-  tooLongResponse = "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
+  tooLongResponse: string
 ): string {
   const rendered = lines.join("\n");
 

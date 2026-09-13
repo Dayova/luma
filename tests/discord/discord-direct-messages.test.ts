@@ -137,10 +137,15 @@ describe("private founder conversations", () => {
     async (user) => {
       await withRuntime(async (f, r) => {
         f.recipients.set(channel, user);
+        f.during(() => {
+          expect(f.sent).toHaveLength(1);
+          expect(f.sent[0]?.content).toContain("Nachricht erhalten");
+        });
         await r.handle(f.message("I will test Luma tomorrow. What will I do?", user));
         expect(f.calls()).toBe(1);
-        expect(f.sent).toHaveLength(1);
-        expect(f.sent[0]).toMatchObject({
+        expect(f.sent).toHaveLength(2);
+        expect(f.sent[0]?.content).toContain("Nachricht erhalten");
+        expect(f.sent[1]).toMatchObject({
           channelId: channel,
           recipientId: user,
           content: expect.stringContaining("test Luma") as unknown
@@ -215,10 +220,22 @@ describe("private founder conversations", () => {
       });
       await restarted.handle(event);
       expect(f.calls()).toBe(1);
-      expect(f.sent[1]?.content).toBe(f.sent[0]?.content);
-      expect(f.sent[1]?.idempotencyKey).toBe(f.sent[0]?.idempotencyKey);
+      expect(f.sent[3]?.content).toBe(f.sent[1]?.content);
+      expect(f.sent[3]?.idempotencyKey).toBe(f.sent[1]?.idempotencyKey);
     });
   });
+  it("sends a concrete failure after its receipt when reading the DM fails, without calling AI", async () => {
+    await withRuntime(async (f, r) => {
+      f.transport.read = () => Promise.reject(new Error("Discord unavailable"));
+      await r.handle(f.message("Can you answer?"));
+      expect(f.sent).toHaveLength(2);
+      expect(f.sent[0]?.content).toContain("Nachricht erhalten");
+      expect(f.sent[1]?.content).not.toContain("Discord unavailable");
+      expect(f.sent[1]?.content).not.toContain("Nachricht erhalten");
+      expect(f.calls()).toBe(0);
+    });
+  });
+
   it("explains budget failure and keeps usage available without another model call", async () => {
     await withRuntime(async (f, r) => {
       f.fail(

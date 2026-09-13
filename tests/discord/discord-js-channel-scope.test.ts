@@ -177,13 +177,15 @@ describe("Discord production channel resolution and delivery", () => {
       expect(command).toHaveBeenCalledTimes(entrypoint === "command" ? 1 : 0);
       expect(ask).toHaveBeenCalledTimes(entrypoint === "context-ask" ? 1 : 0);
       expect(stopped).toBe(false);
-      expect(interaction.editReply).not.toHaveBeenCalled();
-      expect(message.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledTimes(
+        entrypoint === "command" ? 1 : 0
+      );
+      expect(message.reply).toHaveBeenCalledTimes(entrypoint === "command" ? 0 : 1);
       finishProof();
       await stopping;
       expect(
         entrypoint === "command" ? interaction.editReply : message.reply
-      ).toHaveBeenCalledOnce();
+      ).toHaveBeenCalledTimes(2);
     }
   );
 
@@ -242,7 +244,7 @@ describe("Discord production channel resolution and delivery", () => {
       editReply: vi.fn(async () => {})
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledTimes(2));
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "consultation-start",
@@ -438,10 +440,10 @@ describe("Discord production channel resolution and delivery", () => {
       );
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       sdk.emit(Events.MessageCreate, message);
-      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
       expect(fence).toHaveBeenCalledOnce();
       expect(handler).toHaveBeenCalledOnce();
-      const sent = message.reply.mock.calls[0]?.[0];
+      const sent = message.reply.mock.calls[1]?.[0];
       expect(sent).toHaveProperty(
         "content",
         current
@@ -547,12 +549,16 @@ describe("Discord production channel resolution and delivery", () => {
       });
       if (change === "audience-expanded") {
         await new Promise<void>((resolve) => setImmediate(resolve));
-        expect(anchor.reply).not.toHaveBeenCalled();
+        expect(anchor.reply).toHaveBeenCalledTimes(1);
+        expect(anchor.reply.mock.calls[0]?.[0]).toHaveProperty(
+          "content",
+          expect.stringContaining("Nachricht erhalten")
+        );
         await live.disconnect();
         return;
       }
-      await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledOnce());
-      const sent = anchor.reply.mock.calls[0]?.[0];
+      await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledTimes(2));
+      const sent = anchor.reply.mock.calls[1]?.[0];
       if (change === "unchanged")
         expect(sent).toHaveProperty(
           "content",
@@ -636,7 +642,7 @@ describe("Discord production channel resolution and delivery", () => {
       const handler = vi.fn(() => Promise.resolve(retainedResponse));
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       sdk.emit(Events.MessageCreate, message);
-      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
       contextFence.mockImplementationOnce(() => {
         audience.state.members.push({
           user: { id: "outsider", bot: false },
@@ -655,7 +661,11 @@ describe("Discord production channel resolution and delivery", () => {
       await vi.waitFor(() => expect(contextFence).toHaveBeenCalledTimes(2));
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(handler).toHaveBeenCalledTimes(2);
-      expect(message.reply).toHaveBeenCalledOnce();
+      expect(message.reply).toHaveBeenCalledTimes(3);
+      expect(message.reply.mock.calls[2]?.[0]).toHaveProperty(
+        "content",
+        expect.stringContaining("Nachricht erhalten")
+      );
       await live.disconnect();
     }
   );
@@ -741,7 +751,11 @@ describe("Discord production channel resolution and delivery", () => {
       await vi.waitFor(() =>
         expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything())
       );
-      expect(message.reply).not.toHaveBeenCalled();
+      expect(message.reply).toHaveBeenCalledTimes(1);
+      expect(message.reply.mock.calls[0]?.[0]).toHaveProperty(
+        "content",
+        expect.stringContaining("Nachricht erhalten")
+      );
       await live.disconnect();
     }
   );
@@ -770,7 +784,7 @@ describe("Discord production channel resolution and delivery", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledTimes(2));
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: "Luma is not enabled in this Discord channel.",
       allowedMentions: { parse: [] }
@@ -880,7 +894,7 @@ describe("Discord explicit Decision Record entry", () => {
     for (const excluded of [question, quote, guest, bot, foreign, negated])
       sdk.emit(Events.MessageCreate, excluded);
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         question: "record this decision",
@@ -929,7 +943,7 @@ describe("Discord explicit Decision Record entry", () => {
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       const candidate = mention();
       sdk.emit(Events.MessageCreate, candidate);
-      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ question: "usage" })
       );
@@ -962,7 +976,7 @@ describe("Discord explicit Decision Record entry", () => {
     await live.connect(() => Promise.resolve({ content: "unused" }), handler);
     const candidate = mention();
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ purpose: "decision-record", question: "usage" })
     );
@@ -992,7 +1006,7 @@ describe("Discord explicit Decision Record entry", () => {
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       const candidate = { ...mention(), content: `<@bot> ${question}` };
       sdk.emit(Events.MessageCreate, candidate);
-      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ question })
       );
@@ -1033,7 +1047,7 @@ describe("Discord explicit Decision Record entry", () => {
     const candidate = mention();
     candidate.content = "<@bot> record this decision";
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(JSON.stringify(candidate.reply.mock.calls)).not.toContain(
       "private old decision"
     );
@@ -1074,7 +1088,7 @@ describe("Discord explicit Decision Record entry", () => {
         editReply: vi.fn(() => Promise.resolve())
       };
       sdk.emit(Events.InteractionCreate, interaction);
-      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           type: `decision-record-${subcommand}`,

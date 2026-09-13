@@ -481,9 +481,9 @@ async function setup(
     sdk.emit(Events.InteractionCreate, request);
     await expect
       .poll(() => request.editReply.mock.calls.length, { timeout: 15000 })
-      .toBe(1);
+      .toBe(2);
     expect(request.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-    return request.editReply.mock.calls[0]![0].content;
+    return request.editReply.mock.calls[1]![0].content;
   };
   if (importedObservation) {
     const bound = await command(
@@ -562,11 +562,21 @@ describe("native structured work runtime", () => {
     const original = f.messages.at(-1)!.content;
     const sent = f.mention();
     sdk.emit(Events.MessageCreate, sent.message);
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    const content = sent.reply.mock.calls[0]![0].content;
+    await expect
+      .poll(
+        () =>
+          sent.reply.mock.calls.some(([value]) =>
+            value.content.includes("Notion record: created")
+          ),
+        { timeout: 15000 }
+      )
+      .toBe(true);
+    const content = sent.reply.mock.calls.find(([value]) =>
+      value.content.includes("Notion record: created")
+    )![0].content;
     expect(content).toContain("Notion record: created");
     expect(content).toContain("Linear task: created");
-    expect(sent.reply.mock.calls[0]![0].allowedMentions).toEqual({
+    expect(sent.reply.mock.calls[1]![0].allowedMentions).toEqual({
       parse: [],
       repliedUser: false
     });
@@ -583,8 +593,8 @@ describe("native structured work runtime", () => {
     // A reconstructed owned MI/bot facade uses the persisted operation identity.
     await f.replay();
     const replayed = f.mention();
-    await expect.poll(() => replayed.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(replayed.reply.mock.calls[0]![0].content).toContain(requestId(content));
+    await expect.poll(() => replayed.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(replayed.reply.mock.calls[1]![0].content).toContain(requestId(content));
     expect(await f.command()).toContain(requestId(content));
     expect(f.interpret).toHaveBeenCalledTimes(1);
     expect(f.external.createRecord).toHaveBeenCalledTimes(1);
@@ -600,8 +610,8 @@ describe("native structured work runtime", () => {
     f.messages.at(-1)!.content =
       "<@bot_luma> Update this hypothesis in our Hypotheses table and create a Linear task to validate it.";
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    const content = sent.reply.mock.calls[0]![0].content;
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    const content = sent.reply.mock.calls[1]![0].content;
     expect(content).toContain("manual-application-required");
     expect(content).toContain("<https://notion.so/existing-hypothesis>");
     expect(content).toContain("not set →");
@@ -625,8 +635,8 @@ describe("native structured work runtime", () => {
     f.messages.at(-1)!.content =
       "<@bot_luma> Add the hypothesis “flexible learning times improve engagement” to our Hypotheses table and create a Linear task to validate it.";
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain("completed");
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain("completed");
     expect(f.interpret.mock.calls[0]![0].instruction).toContain(
       "“flexible learning times improve engagement”"
     );
@@ -639,8 +649,8 @@ describe("native structured work runtime", () => {
     f.messages.at(-1)!.content =
       "<@bot_luma> Add this hypothesis to Product Experiments & Validation and create a Linear task to validate it.";
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain("completed");
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain("completed");
     expect(f.interpret.mock.calls[0]![0].records.schema.targetKey).toBe("hypotheses");
     expect(f.external.createRecord).toHaveBeenCalledTimes(1);
   });
@@ -651,8 +661,8 @@ describe("native structured work runtime", () => {
       "<@bot_luma> Add this hypothesis to our table and create a Linear task to validate it.";
     sdk.fetch.mockClear();
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain("Name exactly one target");
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain("Name exactly one target");
     expect(sdk.fetch).not.toHaveBeenCalled();
     expect(f.interpret).not.toHaveBeenCalled();
     expect(f.external.createRecord).not.toHaveBeenCalled();
@@ -665,8 +675,8 @@ describe("native structured work runtime", () => {
       "<@bot_luma> Add this to Hypotheses or Experiments and create a Linear task to validate it.";
     sdk.fetch.mockClear();
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain(
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain(
       "more than one configured table"
     );
     expect(sdk.fetch).not.toHaveBeenCalled();
@@ -683,8 +693,8 @@ describe("native structured work runtime", () => {
     f.messages.at(-1)!.content = `<@bot_luma> ${instruction}`;
     sdk.fetch.mockClear();
     const sent = f.mention();
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain("Name exactly one target");
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain("Name exactly one target");
     expect(sdk.fetch).not.toHaveBeenCalled();
     expect(f.interpret).not.toHaveBeenCalled();
     expect(f.external.createRecord).not.toHaveBeenCalled();
@@ -730,8 +740,8 @@ describe("native structured work runtime", () => {
     f.messages.at(-1)!.content =
       "<@bot_luma> Add a different hypothesis to our Hypotheses table and create a Linear task to validate it.";
     const sent = f.mention({ content: original });
-    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(1);
-    expect(sent.reply.mock.calls[0]![0].content).toContain("changed before admission");
+    await expect.poll(() => sent.reply.mock.calls.length, { timeout: 15000 }).toBe(2);
+    expect(sent.reply.mock.calls[1]![0].content).toContain("changed before admission");
     expect(f.interpret).not.toHaveBeenCalled();
     expect(f.external.createRecord).not.toHaveBeenCalled();
   });
@@ -752,7 +762,8 @@ describe("native structured work runtime", () => {
       .poll(() => f.external.createIssue.mock.calls.length, { timeout: 15000 })
       .toBe(1);
     await f.runtime.bot.stop();
-    expect(sent.reply).not.toHaveBeenCalled();
+    expect(sent.reply).toHaveBeenCalledTimes(1);
+    expect(sent.reply.mock.calls[0]![0].content).toContain("Nachricht erhalten");
     expect(f.external.createRecord).toHaveBeenCalledTimes(1);
     expect(f.external.createIssue).toHaveBeenCalledTimes(1);
   });

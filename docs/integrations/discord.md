@@ -518,3 +518,20 @@ It has no path to Meeting Intelligence, Follow-up Execution, WorkProvider, or
 KnowledgeProvider operations. A later Discord Verify, Reconcile, or Execute
 capability must reuse the shared Luma core rather than bypassing it from the
 Discord Adapter.
+
+## Fast text feedback
+
+Admitted thread mentions and founder DMs receive an immediate text receipt:
+“Nachricht erhalten. Ich prüfe deine Anfrage.” This acknowledges receipt, not
+completion, a model call, a search, or reading all related knowledge. If work
+is still pending after 15 seconds, Luma sends a short elapsed-time update,
+then at most once every 30 seconds until the request finishes. Slash commands
+use the same text in their ephemeral response, which the final result replaces.
+
+Thread/DM status messages are separate from the final answer or concrete
+operational failure. They cost no AI tokens, use distinct deterministic Discord
+nonces, suppress mentions, and remain excluded from human Evidence. Founder and
+channel checks run before receipts; later channel updates and DM sends recheck
+access. Pending updates are drained before the final response, and timers stop
+on success, failure, or suppressed delivery. A failed status send never retries
+an ambiguous message or prevents the underlying request from being handled.

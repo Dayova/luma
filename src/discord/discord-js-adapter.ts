@@ -1,3 +1,4 @@
+import { startDiscordRequestProgress } from "./discord-request-progress.js";
 import { z } from "zod";
 import { createDiscordJsDirectMessages } from "./discord-js-direct-messages.js";
 import {
@@ -802,18 +803,32 @@ async function handleInteraction(
   await interaction.deferReply({
     flags: MessageFlags.Ephemeral
   });
-  const response = await commandHandler(toDiscordCommand(interaction));
-  let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
-  if (admitted && response.requireCurrent) {
-    await response.requireCurrent();
-    admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
-  }
-  await interaction.editReply({
-    allowedMentions: { parse: [] },
-    content: admitted
-      ? truncateDiscordMessage(response.content)
-      : "Luma is not enabled in this Discord channel."
+  const progress = startDiscordRequestProgress({
+    async send(update) {
+      await interaction.editReply({
+        content: update.content,
+        allowedMentions: { parse: [] }
+      });
+    }
   });
+  await progress.ready;
+  try {
+    const response = await commandHandler(toDiscordCommand(interaction));
+    await progress.stop();
+    let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+    if (admitted && response.requireCurrent) {
+      await response.requireCurrent();
+      admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+    }
+    await interaction.editReply({
+      allowedMentions: { parse: [] },
+      content: admitted
+        ? truncateDiscordMessage(response.content)
+        : "Luma is not enabled in this Discord channel."
+    });
+  } finally {
+    await progress.stop();
+  }
 }
 
 async function handleContextAskMention(input: {
@@ -831,52 +846,68 @@ async function handleContextAskMention(input: {
     );
   };
   if (!(await mayReply())) return;
-  let response: DiscordContextAskResponse | null;
+  const progress = startDiscordRequestProgress({
+    async send(update) {
+      if (update.sequence > 0 && !(await mayReply())) return;
+      await replyToContextAskMessage(input.message, {
+        content: update.content,
+        idempotencyKey: `discord:${input.message.id}:progress:${update.sequence}`
+      });
+    }
+  });
+  await progress.ready;
   try {
-    response = await input.handler(input.ask);
-  } catch {
-    response = {
-      content: "Luma could not answer this thread right now. Please try again later.",
-      idempotencyKey: `discord:${input.message.id}:context-ask:reply`
-    };
-  }
-  // A failed or ambiguous send must not trigger a second, contradictory reply.
-  if (!response || !(await mayReply())) return;
-  if (response.sourceProof) {
-    const proof = response.sourceProof;
-    if (
-      !input.conversationEvidenceSource ||
-      proof.subject.providerId !== "discord" ||
-      proof.subject.conversationObjectId !== input.ask.channelId ||
-      proof.subject.anchorMessageId !== input.ask.messageId ||
-      proof.question !== input.ask.question
-    )
-      return;
+    let response: DiscordContextAskResponse | null;
     try {
-      await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
-    } catch {
-      // Retain the old result for audit, but do not republish its old claims.
-      response = {
-        content:
-          "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
-        idempotencyKey: response.idempotencyKey
-      };
-    }
-    if (!(await mayReply())) return;
-  }
-  if (response.requireCurrent) {
-    try {
-      await response.requireCurrent();
+      response = await input.handler(input.ask);
     } catch {
       response = {
-        content:
-          "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
-        idempotencyKey: response.idempotencyKey
+        content: "Luma could not answer this thread right now. Please try again later.",
+        idempotencyKey: `discord:${input.message.id}:context-ask:reply`
       };
     }
-    if (!(await mayReply())) return;
+    // Drain status delivery before the final source and audience checks.
+    await progress.stop();
+    // A failed or ambiguous send must not trigger a second, contradictory reply.
+    if (!response || !(await mayReply())) return;
+    if (response.sourceProof) {
+      const proof = response.sourceProof;
+      if (
+        !input.conversationEvidenceSource ||
+        proof.subject.providerId !== "discord" ||
+        proof.subject.conversationObjectId !== input.ask.channelId ||
+        proof.subject.anchorMessageId !== input.ask.messageId ||
+        proof.question !== input.ask.question
+      )
+        return;
+      try {
+        await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
+      } catch {
+        // Retain the old result for audit, but do not republish its old claims.
+        response = {
+          content:
+            "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+          idempotencyKey: response.idempotencyKey
+        };
+      }
+      if (!(await mayReply())) return;
+    }
+    if (response.requireCurrent) {
+      try {
+        await response.requireCurrent();
+      } catch {
+        response = {
+          content:
+            "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
+          idempotencyKey: response.idempotencyKey
+        };
+      }
+      if (!(await mayReply())) return;
+    }
+    await replyToContextAskMessage(input.message, response);
+  } finally {
+    await progress.stop();
   }
-  await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(

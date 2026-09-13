@@ -152,7 +152,7 @@ describe("Discord SDK budget entry points", () => {
     candidate.mentions.users.clear();
     candidate.mentions.roles.set("role_luma", {});
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
         question: "Reflected der State im Linear Issue die Angaben von Philipp?"
@@ -198,6 +198,36 @@ describe("Discord SDK budget entry points", () => {
     }
   );
 
+  it("sends a text receipt while the real handler is still pending, then the final answer", async () => {
+    const live = transport();
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const handler = vi.fn(async () => {
+      await pending;
+      return { content: "Actual answer", idempotencyKey: "answer" };
+    });
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = message("pending");
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => handler.mock.calls.length).toBe(1);
+    expect(candidate.reply).toHaveBeenCalledTimes(1);
+    expect(candidate.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Nachricht erhalten") as unknown
+      })
+    );
+    release();
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
+    expect(candidate.reply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Actual answer") as unknown
+      })
+    );
+    await live.disconnect();
+  });
+
   it("registers and routes /meeting usage as a deterministic command", async () => {
     const live = transport();
     const handler = vi.fn<(command: DiscordCommand) => Promise<DiscordCommandResponse>>(
@@ -218,7 +248,7 @@ describe("Discord SDK budget entry points", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ type: "usage", actorDiscordUserId: "founder" })
     );
@@ -236,8 +266,8 @@ describe("Discord SDK budget entry points", () => {
     const second = message("two");
     sdk.emit(Events.MessageCreate, first);
     sdk.emit(Events.MessageCreate, second);
-    await expect.poll(() => second.reply.mock.calls.length).toBe(1);
-    expect(first.reply).toHaveBeenCalledOnce();
+    await expect.poll(() => second.reply.mock.calls.length).toBe(2);
+    expect(first.reply).toHaveBeenCalledTimes(2);
     expect(handler).toHaveBeenCalledTimes(2);
     expect(second.reply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -259,9 +289,9 @@ describe("Discord SDK budget entry points", () => {
     const candidate = message("one");
     candidate.reply.mockRejectedValue(new Error("Discord send outcome unknown"));
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(candidate.reply).toHaveBeenCalledOnce();
+    expect(candidate.reply).toHaveBeenCalledTimes(2);
     expect(operationalLog).toHaveBeenCalledWith("Luma Discord delivery failed", {
       code: "discord-context-ask-reply-failed",
       channelId: "thread",
@@ -309,7 +339,7 @@ describe("Discord SDK founder review entry points", () => {
         editReply: vi.fn(() => Promise.resolve())
       };
       sdk.emit(Events.InteractionCreate, interaction);
-      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledWith(
         expect.objectContaining({ type: command, actorDiscordUserId: "founder" })
       );
@@ -361,7 +391,7 @@ describe("Discord SDK founder review entry points", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
     expect(JSON.stringify(interaction.editReply.mock.calls)).not.toContain(
       "Private source wording"
     );

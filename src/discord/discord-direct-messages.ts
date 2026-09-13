@@ -1,3 +1,4 @@
+import { startDiscordRequestProgress } from "./discord-request-progress.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
 import type { ContextInquiry } from "../context-intelligence/interface.js";
@@ -87,13 +88,17 @@ export async function createDiscordDirectMessages(input: {
       return null;
     return personId;
   }
-  async function send(event: DirectMessageEvent, content: string) {
+  async function send(
+    event: DirectMessageEvent,
+    content: string,
+    idempotencyKey = `discord-dm:${event.messageId}:reply`
+  ) {
     if (!(await admit(event))) return;
     await transport.send({
       channelId: event.channelId,
       recipientId: event.authorId,
       content,
-      idempotencyKey: `discord-dm:${event.messageId}:reply`
+      idempotencyKey
     });
   }
   async function anchor(event: DirectMessageEvent) {
@@ -258,22 +263,28 @@ export async function createDiscordDirectMessages(input: {
       return;
     const personId = await admit(event);
     if (!personId) return;
-    // Bound concurrent model work; status remains available during an AI request.
-    const message = await anchor(event);
-    const command = message.text.trim().toLowerCase();
-    if (command === "usage" || command === "/usage" || command === "status") {
-      await send(event, renderAiUsageStatus(await input.budget.getStatus(workspaceId)));
-      return;
-    }
-    if (busy.has(event.channelId)) {
-      await send(
-        event,
-        "I am still answering your previous DM. Please wait before sending more context. You can send usage to check the budget."
-      );
-      return;
-    }
-    busy.add(event.channelId);
-    try {
+    const progress = startDiscordRequestProgress({
+      send: (update) =>
+        send(
+          event,
+          update.content,
+          `discord-dm:${event.messageId}:progress:${update.sequence}`
+        )
+    });
+    await progress.ready;
+    let held = false;
+    async function respond(personId: string): Promise<string> {
+      // Bound concurrent model work; status remains available during an AI request.
+      const message = await anchor(event);
+      const command = message.text.trim().toLowerCase();
+      if (command === "usage" || command === "/usage" || command === "status") {
+        return renderAiUsageStatus(await input.budget.getStatus(workspaceId));
+      }
+      if (busy.has(event.channelId)) {
+        return "I am still answering your previous DM. Please wait before sending more context. You can send usage to check the budget.";
+      }
+      busy.add(event.channelId);
+      held = true;
       if (message.unsupported || !message.text.trim())
         throw new DirectMessageInputError(
           "Please send a text message. Attachments, voice messages and polls are not supported in DMs yet."
@@ -283,26 +294,14 @@ export async function createDiscordDirectMessages(input: {
           "INSERT INTO discord_dm_resets(workspace_id,channel_id,author_id,message_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
           [workspaceId, event.channelId, event.authorId, event.messageId]
         );
-        await send(
-          event,
-          "Started a fresh private conversation. Earlier history is retained but excluded from this conversation. Send your context and question; no mention is needed."
-        );
-        return;
+        return "Started a fresh private conversation. Earlier history is retained but excluded from this conversation. Send your context and question; no mention is needed.";
       }
       if (command === "/help" || command === "help") {
-        await send(
-          event,
-          "Send me a text question; no @mention is needed. Your conversation stays in this DM. Send usage for the shared AI budget, or /new to start fresh without deleting history. I use your text as evidence and do not automatically change Linear or Notion."
-        );
-        return;
+        return "Send me a text question; no @mention is needed. Your conversation stays in this DM. Send usage for the shared AI budget, or /new to start fresh without deleting history. I use your text as evidence and do not automatically change Linear or Notion.";
       }
       const time = now().getTime();
       if (time - (lastRequest.get(event.authorId) ?? -Infinity) < 10000) {
-        await send(
-          event,
-          "Please wait 10 seconds between AI questions. No AI call was made. You can still send usage."
-        );
-        return;
+        return "Please wait 10 seconds between AI questions. No AI call was made. You can still send usage.";
       }
       lastRequest.set(event.authorId, time);
       const source = evidenceSource(event);
@@ -330,6 +329,7 @@ export async function createDiscordDirectMessages(input: {
         audience: { workspaceId, personIds: [personId] }
       };
       const result = await context.inquire(inquiry);
+      await progress.stop();
       await requireCurrentConversationEvidence(source, {
         workspaceId,
         subject: inquiry.subject,
@@ -337,17 +337,26 @@ export async function createDiscordDirectMessages(input: {
         contentHash: result.boundary.contentHash
       });
       await context.requireCurrent?.(inquiry);
-      await send(event, renderDiscordContextAskResult(result, "direct-message"));
-    } catch (error) {
-      await send(
-        event,
-        error instanceof DirectMessageInputError
-          ? error.message
-          : renderAiServiceFailure(error).replaceAll("/meeting usage", "usage")
-      );
+      return renderDiscordContextAskResult(result, "direct-message");
+    }
+    try {
+      let content: string;
+      try {
+        content = await respond(personId);
+      } catch (error) {
+        content =
+          error instanceof DirectMessageInputError
+            ? error.message
+            : renderAiServiceFailure(error).replaceAll("/meeting usage", "usage");
+      }
+      await progress.stop();
+      // Do not turn an ambiguous final send into a contradictory fallback.
+      await send(event, content);
     } finally {
-      busy.delete(event.channelId);
+      await progress.stop();
+      if (held) busy.delete(event.channelId);
     }
   }
+
   return { handle };
 }

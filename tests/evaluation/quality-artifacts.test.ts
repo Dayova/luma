@@ -90,3 +90,19 @@ it("regrades the first challenge run without penalizing Sonnet's conditional can
     { operationalErrors: 6, validOutputs: 2 }
   );
 });
+
+it("preserves large aggregate historical ceilings without increasing live dispatch limits", async () => {
+  const sources = JSON.parse(JSON.stringify(reports)) as {
+    limits: { maxRequests: number };
+  }[];
+  for (const report of sources) report.limits.maxRequests = 200;
+  const run = await regradeHistorical(benchmark, sources, "test");
+  expect(run.settings.maxRequests).toBe(800);
+  expect(parseQualityRun(run)).toEqual(run);
+  const replay = await regradeQuality(benchmark, run, "replay");
+  expect(replay.settings.maxRequests).toBe(800);
+  expect(replay.rows.map((row) => row.output)).toEqual(run.rows.map((row) => row.output));
+  expect(() => parseQualityRun({ ...run, mode: "live", sourceReports: [] })).toThrow(
+    /ceiling/
+  );
+});

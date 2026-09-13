@@ -122,7 +122,8 @@ Paste a conversation, analyze it, and ask questions about its evidence. The key
 stays in memory. Submitted text and the initial USD 1/month local test allowance
 persist across restarts in `~/.luma/local-ai/store`. AI API usage may cost money;
 hosting is unnecessary. Notion and Linear are not connected. Discord is opt-in from the development bot
-panel.
+panel, including founder-only DMs without an @mention. DM testing does not require
+access to a private server channel.
 On macOS, `pnpm local:up` keeps both pages running at stable addresses;
 `pnpm local:down` stops them. See the [live local test guide](docs/operations/local-testing.md#real-ai-mode).
 

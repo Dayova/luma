@@ -29,6 +29,7 @@ export function localDiscordEnvironment(
     LUMA_PGLITE_DATA_DIR: join(directory, "discord-store"),
     LUMA_AI_MONTHLY_LIMIT_USD: "1",
     LUMA_AI_WORKFLOW_LIMIT_USD: "0.05",
+    LUMA_DISCORD_DM_ENABLED: "1",
     LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
     LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS:
       config.LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS,
@@ -51,6 +52,7 @@ export function createLocalDiscord(options: {
   let problem = "Check setup before starting the development bot.";
   let ready = false;
   let aiEnabled = false;
+  let channelsReady = false;
   let channels: string[] = [];
   let applicationId: string | null = null;
   async function configuration() {
@@ -82,14 +84,19 @@ export function createLocalDiscord(options: {
       problem = "Remove duplicate channel IDs from discord.env.";
       return false;
     }
+    channelsReady = false;
     const missing = [];
     if (!(application.flags & ((1 << 14) | (1 << 15))))
       missing.push("Server Members Intent");
-    if (!(application.flags & ((1 << 18) | (1 << 19))))
-      missing.push("Message Content Intent");
+
     if (missing.length) {
       problem = `Enable ${missing.join(" and ")} in the development application's Bot settings, then check again.`;
       return false;
+    }
+    if (!(application.flags & ((1 << 18) | (1 << 19)))) {
+      problem =
+        "DMs are ready. Channel questions remain off until Message Content Intent is enabled.";
+      return true;
     }
     const audience = createDiscordLiveAudience({
       guildId: env.DISCORD_GUILD_ID,
@@ -109,12 +116,13 @@ export function createLocalDiscord(options: {
           lumaTeamPeople.map((p) => p.discordUserId!)
         ))
       ) {
-        problem = `Cannot verify founder-only access and bot permissions for channel ${channelId}. Give the development bot View Channel, Send Messages, Read Message History, Create Public Threads and Send Messages in Threads there. All four founders must have access; other human readers are refused.`;
-        return false;
+        problem = `DMs are ready. Channel commands remain off: cannot verify founder-only access for ${channelId}. Grant the development bot View Channel there, then stop, check setup and restart to enable channel testing.`;
+        return true;
       }
     }
+    channelsReady = true;
     problem =
-      "Setup verified. Start the bot, then use /meeting start in the configured channel.";
+      "DMs and channel setup verified. Start the bot, then use /meeting start in the configured channel.";
     return true;
   }
   async function check() {
@@ -135,6 +143,7 @@ export function createLocalDiscord(options: {
         started: !!app,
         ready,
         aiEnabled,
+        channelsReady,
         message: problem,
         channels,
         applicationId
@@ -150,15 +159,18 @@ export function createLocalDiscord(options: {
         app = await (options.startRuntime ?? startServer)(
           {
             ...env,
-            LUMA_DISCORD_CONTEXT_ASK_ENABLED: apiKey ? "1" : "0",
+            LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS: channelsReady
+              ? env.LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS
+              : "",
+            LUMA_DISCORD_CONTEXT_ASK_ENABLED: apiKey && channelsReady ? "1" : "0",
             ...(apiKey ? { OPENAI_API_KEY: apiKey } : {})
           },
           { aiUsageBudget: options.budget }
         );
         aiEnabled = !!apiKey;
         problem = apiKey
-          ? "Development bot running with real AI. Discord and this page share the $1 monthly allowance."
-          : "Development bot running without AI. Notes are retained and analysis is deferred. Load an API key, then start again for real answers.";
+          ? `Development bot running with real AI. Send it a DM without tagging it. Discord and this page share the $1 monthly allowance.${channelsReady ? " Channels are enabled." : " Channel access remains disabled."}`
+          : "Development bot running. DMs support usage and /help now. Load an API key here, then start again for real AI answers. Channel access depends on the setup check.";
       } catch {
         ready = false;
         problem =

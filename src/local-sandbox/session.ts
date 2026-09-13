@@ -218,6 +218,11 @@ export async function createSandboxSession(
                 !snapshot.state.actionItems.some((item) => item.id === command.itemId))
             )
               throw new Error("An action and owner are required");
+            if (
+              command.action === "supersede" &&
+              !snapshot.state.decisions.some((item) => item.id === command.itemId)
+            )
+              throw new Error("Only a current decision can be superseded");
             result = await judge(
               command.action === "confirm" || command.action === "reject"
                 ? { kind: command.action, meetingItemId: command.itemId }

@@ -177,6 +177,36 @@ describe("real-AI local mode with deterministic external response clients", () =
     }
   });
 
+  it("excludes staged corrections that Meeting Intelligence did not accept", async () => {
+    const database = await createPgliteDatabase();
+    const mock = clients();
+    const session = await createLiveSandboxSession({
+      database,
+      clients: mock.ports,
+      now
+    });
+    try {
+      const analyzed = await session.execute(analysisInput);
+      await database.query("UPDATE local_ai_meetings SET judgments_json=$1 WHERE id=$2", [
+        JSON.stringify([
+          {
+            id: "not-accepted",
+            at: now().toISOString(),
+            text: 'Jakob instructed Luma: {"ownerId":"person_julius"}'
+          }
+        ]),
+        analyzed.selected
+      ]);
+      const answer = await session.execute({ type: "ask", text: "Who owns it?" });
+      expect(answer.result).toMatchObject({
+        type: "answer",
+        answer: { text: "Hosting is still undecided." }
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
   it("blocks calls without a key and never reflects or persists the supplied key", async () => {
     const database = await createPgliteDatabase();
     const session = await createLiveSandboxSession({ database, now });

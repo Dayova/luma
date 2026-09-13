@@ -93,7 +93,8 @@ In the [Discord Developer Portal](https://discord.com/developers/applications):
    production preflight rejects a missing approval even when Context Ask is off.
 7. If the optional Context Ask configuration is deliberately enabled, also turn
    on **Message Content Intent** and obtain any required approval. Presence,
-   reaction, and DM intents are not required.
+   and reaction intents are not required. The optional DM capability requests
+   Direct Messages and partial DM channels in the SDK.
 
 Discord identifies Server Members approval using application flags
 `GATEWAY_GUILD_MEMBERS` (`1 << 14`) or `GATEWAY_GUILD_MEMBERS_LIMITED`
@@ -387,6 +388,43 @@ canonical writes require its current standing recording permission and normal
 source, authority and execution checks. See [Decision Records in Discord](discord-decision-records.md).
 
 Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
+
+### Private messages (opt-in)
+
+Set `LUMA_DISCORD_DM_ENABLED=1` to enable **one-to-one text DMs** from the four
+uniquely mapped founders. The local AI page enables this for the development bot.
+Send the bot a normal DM; no mention, slash-command registration or founder-channel
+visibility is needed to ask privately. Group DMs, bots, webhooks and other people
+are ignored before capture or model use. This does not enable server-channel Ask.
+
+- `usage` or `/usage`: show the shared AI budget without a model call.
+- `/help`: show private conversation instructions.
+- `/new`: establish a new conversation boundary without deleting earlier history.
+- Any other text: ask using the current private conversation's Human evidence.
+
+DM history is bounded to 50 messages including Luma replies and 32,000 Human text
+characters. Replies are excluded from Human evidence. If the boundary is too long,
+missing, edited, or includes unsupported attachments/polls/voice content, Luma
+explains how to start fresh with `/new` and paste relevant text. An accepted `/new`
+boundary is retained durably and rechecked against Discord. Context does not merge
+between founders. DM captures use a separate `discord-dm` source namespace and are
+not published to shared channels or registered as a shared retrieval catalog.
+
+When organizational retrieval is configured, it uses the single DM recipient as
+its audience and the existing source grants/currentness checks. DM handling has no
+Follow-up execution path: requests to publish or edit external records do not grant
+write authority. Without an API key, help and usage work and AI questions receive a
+configuration message. Budget, quota and provider failures produce private status
+responses; the bot never silently falls back to invented answers.
+
+The Gateway needs Direct Messages and `Partials.Channel` to receive uncached DMs.
+The shared bot still requests its normal Guilds/Server Members intents. Message
+Content intent is not added for DMs alone. Before every answer, Luma rechecks the
+exact one-to-one recipient and the captured source; source changes withhold old
+claims. Current retained answers prevent another paid interpretation on replay.
+Replies use Discord's enforced nonce deduplication window; arbitrarily delayed
+Gateway replay may still repeat a cached reply. AI questions are limited to one
+active request per DM and a 10-second per-founder interval; status remains free.
 
 ### Catch Up
 

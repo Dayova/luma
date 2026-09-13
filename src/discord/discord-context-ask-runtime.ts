@@ -319,8 +319,16 @@ export function createDiscordContextAskRateLimiter(config: {
  * captured Discord Evidence. Facts and inferences remain visibly distinct.
  * A too-long answer is not truncated into a claim.
  */
-export function renderDiscordContextAskResult(result: ContextInquiryResult): string {
-  const capturedEvidence = capturedDiscordEvidenceById(result.evidence);
+export function renderDiscordContextAskResult(
+  result: ContextInquiryResult,
+  surface: "thread" | "direct-message" = "thread"
+): string {
+  const capturedEvidence = capturedDiscordEvidenceById(
+    result.evidence,
+    surface === "direct-message" ? result.subject.conversationObjectId : undefined
+  );
+  const scopeName =
+    surface === "direct-message" ? "this private conversation" : "this thread";
   const organizationalEvidence = capturedOrganizationalEvidenceById(result);
   const answerOrganizationalEvidence = organizationalCitations(
     result.answer,
@@ -342,8 +350,8 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
   const lines = [
     "Luma Ask",
     result.organizationalContext
-      ? `Scope: this thread and ${result.organizationalContext.coverage.selected} organizational source(s); coverage ${result.organizationalContext.coverage.complete ? "complete within configured catalogs" : "partial"}.`
-      : "Scope: this thread only.",
+      ? `Scope: ${scopeName} and ${result.organizationalContext.coverage.selected} organizational source(s); coverage ${result.organizationalContext.coverage.complete ? "complete within configured catalogs" : "partial"}.`
+      : `Scope: ${scopeName} only.`,
     "",
     escapeDiscordInlineText(result.answer.text)
   ];
@@ -478,12 +486,21 @@ function renderEvidenceLines(
 }
 
 function capturedDiscordEvidenceById(
-  evidence: readonly ContextEvidence[]
+  evidence: readonly ContextEvidence[],
+  privateChannelId?: string
 ): ReadonlyMap<string, ContextEvidence> {
   const capturedEvidence = new Map<string, ContextEvidence>();
 
   for (const item of evidence) {
-    if (item.state === "available" && isDiscordMessageUrl(item.url)) {
+    if (
+      item.state === "available" &&
+      (privateChannelId
+        ? item.providerId === "discord-dm" &&
+          item.conversationObjectId === privateChannelId &&
+          item.url ===
+            `https://discord.com/channels/@me/${privateChannelId}/${item.messageId}`
+        : isDiscordMessageUrl(item.url))
+    ) {
       capturedEvidence.set(item.evidenceId, item);
     }
   }

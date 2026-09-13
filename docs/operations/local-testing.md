@@ -205,14 +205,18 @@ Do not commit this private file. This Mac is configured for **Dayova Luma Dev**
 2. Give that development bot View Channel, Send Messages, Read Message History,
    Create Public Threads, and Send Messages in Threads in the configured channel.
    The four founders must be the only human readers. No Administrator grant is needed.
-3. On the local page, click **Check Discord setup**. It checks credentials,
-   intents and current founder-only audience before registering any commands.
+3. On the local page, click **Check Discord setup**. It checks credentials and
+   intents. Channel access is checked separately: if unavailable, the bot can
+   still start for founder-only DMs with all channel capabilities disabled.
 4. Load your OpenAI key and click **Start Discord bot**. The key stays in memory;
    Discord and browser AI calls share one durable **$1 monthly budget**. Without
-   a key, slash commands can retain notes and report deferred analysis; mentioned
+   a key, DM help/usage work and AI answers report missing configuration; mentioned
    AI questions are disabled. Loading/removing a key stops the bot; start again
    to apply the new configuration.
-5. In `team-chat-development`, use `/meeting start` with a test title. In the
+5. For private testing, send **Dayova Luma Dev** a DM without a mention. Send
+   `/help`, `usage`, or a text question. Each founder has isolated private context;
+   `/new` starts fresh without deleting earlier history. The same $1 budget applies.
+   For channel testing, in `team-chat-development`, use `/meeting start` with a test title. In the
    resulting thread use `/meeting note` with a short test note, then begin a
    message with `@Dayova Luma Dev` followed by a question. Use `/meeting usage`
    for usage and `/meeting stop` to conclude. The browser's **Refresh status and
@@ -229,6 +233,7 @@ state lives in `~/.luma/local-ai/discord-store`; its shared AI accounting remain
 in `~/.luma/local-ai/store`. Preserve both stores together for backup/recovery.
 Limit errors use the normal Discord status responses rather than silent failure.
 
-Live acceptance still requires the Discord permission setup and an API key. A
+DMs do not require the private channel visibility grant; channel testing does.
+Live AI acceptance still requires an API key. A
 passing offline or programmable-adapter test does not establish successful live
 Discord delivery or real model quality.

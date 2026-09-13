@@ -1,3 +1,8 @@
+import { createDiscordJsDirectMessages } from "./discord-js-direct-messages.js";
+import {
+  discordDirectMessagesEnabled,
+  type DiscordDirectMessageTransport
+} from "./discord-direct-messages.js";
 import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
 import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
@@ -37,6 +42,7 @@ import {
   Events,
   GatewayIntentBits,
   MessageFlags,
+  Partials,
   MessageType,
   PermissionFlagsBits,
   REST,
@@ -90,12 +96,14 @@ export type DiscordJsTransportConfig = {
   decisionRecords?: DiscordContextAskConfig;
   structuredWork?: DiscordContextAskConfig;
   granola?: boolean;
+  directMessages?: boolean;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
 export type DiscordJsTransport = DiscordTransport &
   ConversationEvidenceSource & {
     gatewayConnected?(): boolean;
+    directMessages?: DiscordDirectMessageTransport;
     createConsultationProvider?(input: {
       resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
     }): ConsultationProvider;
@@ -131,7 +139,10 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
-    ...(config.consultations || config.decisionRecords || config.structuredWork
+    ...(config.consultations ||
+    config.decisionRecords ||
+    config.structuredWork ||
+    config.directMessages
       ? { retries: 0 }
       : {}),
     makeRequest: (
@@ -148,10 +159,19 @@ export function createDiscordJsTransport(
       config.contextAsk ??
         config.consultations?.capture ??
         config.decisionRecords ??
-        config.structuredWork
+        config.structuredWork,
+      config.directMessages
     ),
+    ...(config.directMessages ? { partials: [Partials.Channel] } : {}),
     rest: restOptions
   });
+  const directMessages = config.directMessages
+    ? createDiscordJsDirectMessages({
+        client,
+        signal: lifetime.signal,
+        authorize: config.authorizeHumanReader
+      })
+    : undefined;
   const liveAudience = createDiscordLiveAudience({
     reader: { get: (route, options) => client.rest.get(route, options) },
     guildId: config.guildId,
@@ -188,6 +208,7 @@ export function createDiscordJsTransport(
       // transport for final source/audience proofs and their replies.
       commandHandler = null;
       contextAskHandler = null;
+      directMessages?.stopAdmission();
       const pending = [...admittedDeliveries];
       if (!pending.length) lifetime.abort();
       disconnecting = (async () => {
@@ -313,6 +334,18 @@ export function createDiscordJsTransport(
   });
 
   client.on(Events.MessageCreate, (message) => {
+    if (directMessages && !disconnected && message.guildId === null) {
+      trackDelivery(
+        directMessages.deliver(message).catch(() => {
+          reportDiscordDeliveryFailure({
+            code: "discord-dm-reply-failed",
+            channelId: message.channelId,
+            sourceId: message.id
+          });
+        })
+      );
+      return;
+    }
     const handler = contextAskHandler;
     const botUserId = client.user?.id;
 
@@ -395,6 +428,7 @@ export function createDiscordJsTransport(
 
   return {
     gatewayConnected: () => !disconnected && client.isReady(),
+    ...(directMessages ? { directMessages: directMessages.port } : {}),
     ...(config.consultations
       ? {
           createConsultationProvider: ({
@@ -610,6 +644,7 @@ export function createDiscordJsTransportFromEnv(
   });
   return createDiscordJsTransport({
     granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
+    directMessages: discordDirectMessagesEnabled(env),
     authorizeHumanReader: async (providerUserId) =>
       Boolean(
         await accessPolicy.authorize({
@@ -636,9 +671,10 @@ export function createDiscordJsTransportFromEnv(
 }
 
 export function discordGatewayIntentsForContextAsk(
-  contextAsk: DiscordContextAskConfig | undefined
+  contextAsk: DiscordContextAskConfig | undefined,
+  directMessages = false
 ): GatewayIntentBits[] {
-  return contextAsk
+  const intents = contextAsk
     ? [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
@@ -646,6 +682,7 @@ export function discordGatewayIntentsForContextAsk(
         GatewayIntentBits.MessageContent
       ]
     : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers];
+  return directMessages ? [...intents, GatewayIntentBits.DirectMessages] : intents;
 }
 
 async function registerMeetingCommand(
@@ -2135,7 +2172,10 @@ const meetingCommand = new SlashCommandBuilder()
   );
 
 function reportDiscordDeliveryFailure(event: {
-  code: "discord-command-reply-failed" | "discord-context-ask-reply-failed";
+  code:
+    | "discord-command-reply-failed"
+    | "discord-context-ask-reply-failed"
+    | "discord-dm-reply-failed";
   channelId: string;
   sourceId: string;
 }): void {

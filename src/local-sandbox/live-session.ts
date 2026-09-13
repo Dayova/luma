@@ -349,11 +349,22 @@ export async function createLiveSandboxSession(options: {
             if (snapshot.type !== "snapshot")
               throw new LocalInputError("No meeting state is available.");
             // Persisted user commands are original Human input, explicitly described as instructions.
+            const accepted = new Set(
+              (
+                await database.query<{ observation_id: string }>(
+                  "SELECT observation_id FROM meeting_observations WHERE workspace_id=$1 AND meeting_id=$2 AND type='human-judgment-recorded'",
+                  [workspaceId, row.id]
+                )
+              ).rows.map((entry) => entry.observation_id)
+            );
             const humanInstructions = z
               .array(z.object({ id: z.string(), at: z.string(), text: z.string() }))
-              .parse(JSON.parse(row.judgments_json));
+              .parse(JSON.parse(row.judgments_json))
+              .filter((entry) => accepted.has(entry.id));
             const questionId = createHash("sha256")
-              .update(JSON.stringify([row.id, row.judgments_json, command.text]))
+              .update(
+                JSON.stringify([row.id, JSON.stringify(humanInstructions), command.text])
+              )
               .digest("hex");
             await database.query(
               "INSERT INTO local_ai_questions(id, asked_at) VALUES ($1,$2) ON CONFLICT DO NOTHING",

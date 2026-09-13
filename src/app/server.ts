@@ -1,4 +1,8 @@
 import {
+  createDiscordDirectMessages,
+  discordDirectMessagesEnabled
+} from "../discord/discord-direct-messages.js";
+import {
   nativeNotionReviewConfig,
   createNativeNotionReviewResources
 } from "./native-notion-review-config.js";
@@ -836,6 +840,43 @@ export async function startServer(
         : {})
     });
 
+    if (discordDirectMessagesEnabled(env)) {
+      if (!discordTransport.directMessages)
+        throw new Error("Discord transport does not support DMs");
+      const directMessages = await createDiscordDirectMessages({
+        workspaceId,
+        database,
+        transport: discordTransport.directMessages,
+        budget: aiUsage,
+        authorize: async (providerUserId) =>
+          (
+            await accessPolicy.authorize({
+              workspaceId,
+              providerId: "discord",
+              providerUserId
+            })
+          )?.personId ?? null,
+        answerer: hasAnyEnv(env, ["OPENAI_API_KEY"])
+          ? createContextAnswerer({
+              apiKey: requireEnv(env, "OPENAI_API_KEY"),
+              model: openAIReasoningModelName,
+              budget: aiUsage,
+              limits: aiRequestLimits
+            })
+          : {
+              answer: () =>
+                Promise.reject(
+                  new AiServiceError(
+                    "not-configured",
+                    "Load an API key before asking Luma.",
+                    { requestDispatched: false }
+                  )
+                )
+            },
+        ...(organizationalContext ? { organizationalContext } : {})
+      });
+      discordTransport.directMessages.onMessage(directMessages.handle);
+    }
     transportOwnedByBot = true;
     startupAdmissionStops.push(() => bot.stop());
     startupCleanup.push(() => bot.stop());

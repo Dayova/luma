@@ -103,7 +103,7 @@ describe("local Discord testing", () => {
       await database.close();
     }
   });
-  it("refuses a channel containing an additional human reader", async () => {
+  it("keeps channel admission disabled while allowing private DMs", async () => {
     const database = await createPgliteDatabase();
     try {
       const discord = createLocalDiscord({
@@ -111,16 +111,23 @@ describe("local Discord testing", () => {
         budget: createAiUsageBudget({ database }),
         readConfig: () => Promise.resolve(env),
         fetch: api((1 << 15) | (1 << 19), true),
-        startRuntime: () => {
-          throw new Error("Must not start");
+        startRuntime: (config) => {
+          expect(config?.["LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS"]).toBe("");
+          expect(config?.["LUMA_DISCORD_CONTEXT_ASK_ENABLED"]).toBe("0");
+          expect(config?.["LUMA_DISCORD_DM_ENABLED"]).toBe("1");
+          return Promise.resolve({
+            gatewayConnected: () => true,
+            stop: () => Promise.resolve()
+          });
         }
       });
       await discord.start("secret");
       expect(discord.status()).toMatchObject({
-        started: false,
-        ready: false,
-        message: expect.stringContaining("Cannot verify founder-only") as unknown
+        started: true,
+        ready: true,
+        channelsReady: false
       });
+      await discord.stop();
     } finally {
       await database.close();
     }

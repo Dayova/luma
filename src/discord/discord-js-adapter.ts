@@ -1,7 +1,32 @@
+import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
+import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
+import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
+import {
+  DiscordDecisionPermissionInputError,
+  DiscordDecisionPermissionUnavailableError
+} from "./discord-decision-standing-runtime.js";
+import {
+  DiscordDecisionAddressInputError,
+  discordDecisionRecordConfigFromEnv,
+  isExplicitDecisionRecordInstruction
+} from "./discord-decision-record-runtime.js";
+import {
+  discordConsultationConfigFromEnv,
+  type DiscordConsultationConfig
+} from "./discord-consultation-runtime.js";
+import type {
+  ConsultationProvider,
+  ConsultationSourceProof
+} from "../consultation/interface.js";
+import { consultationSourceAuthorizationHash } from "../consultation/source-proof.js";
+import { createDiscordLiveAudience } from "./discord-live-audience.js";
+import { discordPollEvidence } from "./discord-poll-evidence.js";
+import { createWorkspaceAccessPolicy } from "../access/workspace-access-policy.js";
+import { createIdentityDirectoryFromEnv } from "../identity/static-identity-directory.js";
+import { dayovaFounderPersonIds } from "../app/founder-access.js";
 import {
   createDiscordChannelScope,
-  discordAllowedParentChannelIdsFromEnv,
-  type DiscordChannelSurface
+  discordAllowedParentChannelIdsFromEnv
 } from "./discord-channel-scope.js";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -19,6 +44,7 @@ import {
   SlashCommandBuilder,
   ThreadAutoArchiveDuration,
   type ChatInputCommandInteraction,
+  type SlashCommandSubcommandBuilder,
   type Message,
   type SendableChannels,
   type TextChannel,
@@ -38,6 +64,7 @@ import {
 import {
   discordContextAskConfigFromEnv,
   discordContextAskMentionFromCandidate,
+  questionAfterLeadingDiscordBotMention,
   type DiscordContextAskConfig,
   type DiscordContextAskMessageCandidate,
   type DiscordContextAskMention
@@ -57,11 +84,22 @@ export type DiscordJsTransportConfig = {
   clientId: string;
   guildId: string;
   allowedParentChannelIds: readonly string[];
+  authorizeHumanReader: (discordUserId: string) => Promise<boolean>;
   contextAsk?: DiscordContextAskConfig;
+  consultations?: DiscordConsultationConfig;
+  decisionRecords?: DiscordContextAskConfig;
+  structuredWork?: DiscordContextAskConfig;
+  granola?: boolean;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
-export type DiscordJsTransport = DiscordTransport & ConversationEvidenceSource;
+export type DiscordJsTransport = DiscordTransport &
+  ConversationEvidenceSource & {
+    gatewayConnected?(): boolean;
+    createConsultationProvider?(input: {
+      resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
+    }): ConsultationProvider;
+  };
 
 export class DiscordJsAdapterError extends Error {
   readonly code: string;
@@ -77,8 +115,13 @@ export function createDiscordJsTransport(
   config: DiscordJsTransportConfig
 ): DiscordJsTransport {
   if (
-    config.contextAsk?.parentChannelIds.some(
-      (id) => !config.allowedParentChannelIds.includes(id)
+    [
+      config.contextAsk,
+      config.consultations?.capture,
+      config.decisionRecords,
+      config.structuredWork
+    ].some((capture) =>
+      capture?.parentChannelIds.some((id) => !config.allowedParentChannelIds.includes(id))
     )
   ) {
     throw new Error(
@@ -88,6 +131,9 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
+    ...(config.consultations || config.decisionRecords || config.structuredWork
+      ? { retries: 0 }
+      : {}),
     makeRequest: (
       url: string,
       init: Parameters<typeof DefaultRestOptions.makeRequest>[1]
@@ -98,13 +144,26 @@ export function createDiscordJsTransport(
       })
   };
   const client = new Client({
-    intents: discordGatewayIntentsForContextAsk(config.contextAsk),
+    intents: discordGatewayIntentsForContextAsk(
+      config.contextAsk ??
+        config.consultations?.capture ??
+        config.decisionRecords ??
+        config.structuredWork
+    ),
     rest: restOptions
   });
+  const liveAudience = createDiscordLiveAudience({
+    reader: { get: (route, options) => client.rest.get(route, options) },
+    guildId: config.guildId,
+    allowedParentChannelIds: config.allowedParentChannelIds,
+    botUserId: () => client.user?.id ?? null,
+    authorizeHumanReader: config.authorizeHumanReader
+  });
+  const resolveChannel = liveAudience.resolveChannel;
   const channelScope = createDiscordChannelScope({
     guildId: config.guildId,
     allowedParentChannelIds: config.allowedParentChannelIds,
-    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId)
+    resolveChannel: ({ channelId }) => resolveChannel(channelId)
   });
   let commandHandler:
     ((command: DiscordCommand) => Promise<DiscordCommandResponse>) | null = null;
@@ -113,97 +172,267 @@ export function createDiscordJsTransport(
     | null = null;
   let disconnected = false;
   let disconnecting: Promise<void> | undefined;
+  const admittedDeliveries = new Set<Promise<void>>();
+  function trackDelivery(operation: Promise<void>): void {
+    admittedDeliveries.add(operation);
+    const finished = () => admittedDeliveries.delete(operation);
+    void operation.then(finished, finished);
+  }
   function assertConnectedLifetime(): void {
     lifetime.signal.throwIfAborted();
   }
   function disconnect(): Promise<void> {
     if (!disconnected) {
       disconnected = true;
-      // Remove admission before aborting any asynchronous initialization. All
-      // client REST, including gateway discovery inside login, shares this
-      // signal, so a stopped client cannot later discover/spawn a new Gateway.
+      // Remove admission first. Already admitted deliveries still need the
+      // transport for final source/audience proofs and their replies.
       commandHandler = null;
       contextAskHandler = null;
-      lifetime.abort();
-      disconnecting = client.destroy();
+      const pending = [...admittedDeliveries];
+      if (!pending.length) lifetime.abort();
+      disconnecting = (async () => {
+        await Promise.allSettled(pending);
+        // Startup and every REST request share this signal. In the absence of
+        // admitted work it is aborted synchronously to cancel startup promptly.
+        lifetime.abort();
+        await client.destroy();
+      })();
     }
     return disconnecting ?? Promise.resolve();
   }
-  const conversationEvidenceSource = config.contextAsk
+  const rawConversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
-        reader: createDiscordJsConversationReader(client),
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
         guildId: config.guildId,
         config: config.contextAsk,
         botUserId: () => client.user?.id ?? null
       })
     : null;
+  const rawConsultationEvidenceSource = config.consultations
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.consultations.capture,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
+  const rawDecisionEvidenceSource = config.decisionRecords
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.decisionRecords,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
+  const rawStructuredWorkEvidenceSource = config.structuredWork
+    ? createDiscordConversationEvidenceSource({
+        reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
+        guildId: config.guildId,
+        config: config.structuredWork,
+        botUserId: () => client.user?.id ?? null
+      })
+    : null;
+  const conversationEvidenceSource: ConversationEvidenceSource | null =
+    rawConversationEvidenceSource ||
+    rawConsultationEvidenceSource ||
+    rawDecisionEvidenceSource ||
+    rawStructuredWorkEvidenceSource
+      ? {
+          async capture(input) {
+            await channelScope.requireChannel(
+              input.subject.conversationObjectId,
+              "public-thread"
+            );
+            const source =
+              input.purpose === "consultation"
+                ? rawConsultationEvidenceSource
+                : input.purpose === "decision-record"
+                  ? rawDecisionEvidenceSource
+                  : input.purpose === "structured-work"
+                    ? rawStructuredWorkEvidenceSource
+                    : rawConversationEvidenceSource;
+            if (!source)
+              throw new Error(
+                "The requested Conversation capture purpose is not enabled"
+              );
+            const captured = await source.capture(input);
+            // Check once around the bounded capture, not once per message. No
+            // captured content escapes if the channel gained another reader.
+            await channelScope.requireChannel(
+              input.subject.conversationObjectId,
+              "public-thread"
+            );
+            return captured;
+          }
+        }
+      : null;
 
   client.on(Events.InteractionCreate, (interaction) => {
     if (disconnected) return;
-    if (!interaction.isChatInputCommand() || interaction.commandName !== "meeting") {
+    if (
+      !interaction.isChatInputCommand() ||
+      ![
+        "meeting",
+        "consultation",
+        "decision-record",
+        "granola",
+        "structured-work"
+      ].includes(interaction.commandName)
+    ) {
       return;
     }
 
-    void handleInteraction(interaction, config.guildId, commandHandler, channelScope)
-      .catch(async () => {
-        const content =
-          "Luma could not process the command right now. Please try again later.";
+    trackDelivery(
+      handleInteraction(interaction, config.guildId, commandHandler, channelScope)
+        .catch(async (error: unknown) => {
+          const content =
+            error instanceof DiscordDecisionAddressInputError ||
+            error instanceof DiscordDecisionPermissionInputError ||
+            error instanceof DiscordDecisionPermissionUnavailableError
+              ? error.message
+              : "Luma could not process the command right now. Please try again later.";
 
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ content });
-          return;
-        }
+          if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content });
+            return;
+          }
 
-        await interaction.reply({
-          content,
-          flags: MessageFlags.Ephemeral
-        });
-      })
-      .catch(() => {
-        reportDiscordDeliveryFailure({
-          code: "discord-command-reply-failed",
-          channelId: interaction.channelId,
-          sourceId: interaction.id
-        });
-      });
+          await interaction.reply({
+            content,
+            flags: MessageFlags.Ephemeral
+          });
+        })
+        .catch(() => {
+          reportDiscordDeliveryFailure({
+            code: "discord-command-reply-failed",
+            channelId: interaction.channelId,
+            sourceId: interaction.id
+          });
+        })
+    );
   });
 
   client.on(Events.MessageCreate, (message) => {
     const handler = contextAskHandler;
-    const contextAsk = config.contextAsk;
     const botUserId = client.user?.id;
 
-    if (!handler || !contextAsk || !botUserId) {
+    if (!handler || !botUserId) {
       return;
     }
 
-    const ask = discordContextAskMentionFromCandidate({
-      candidate: discordContextAskMessageCandidate(message),
+    const originalInstruction =
+      questionAfterLeadingDiscordBotMention(message.content, botUserId) ?? "";
+    const usageRequest = /^(?:usage|status)$/iu.test(originalInstruction.trim());
+    let structuredRequest = Boolean(
+      config.structuredWork &&
+      (isExplicitStructuredWorkInstruction(originalInstruction) || usageRequest)
+    );
+    let decisionRequest =
+      !structuredRequest &&
+      Boolean(
+        config.decisionRecords &&
+        (isExplicitDecisionRecordInstruction(originalInstruction) || usageRequest)
+      );
+    const captureConfig = structuredRequest
+      ? config.structuredWork
+      : decisionRequest
+        ? config.decisionRecords
+        : config.contextAsk;
+    if (!captureConfig) return;
+
+    const candidate = discordContextAskMessageCandidate(message);
+    let ask = discordContextAskMentionFromCandidate({
+      candidate,
       botUserId,
       guildId: config.guildId,
-      config: contextAsk
+      config: captureConfig
     });
+
+    // Usage is a deterministic shared service and may use any separately
+    // enabled scope without granting that scope another capability's writes.
+    if (!ask && usageRequest) {
+      for (const fallback of [
+        { config: config.decisionRecords, decision: true },
+        { config: config.contextAsk, decision: false }
+      ]) {
+        if (!fallback.config) continue;
+        ask = discordContextAskMentionFromCandidate({
+          candidate,
+          botUserId,
+          guildId: config.guildId,
+          config: fallback.config
+        });
+        if (ask) {
+          decisionRequest = fallback.decision;
+          structuredRequest = false;
+          break;
+        }
+      }
+    }
 
     if (!ask) {
       return;
     }
+    if (structuredRequest) ask.purpose = "structured-work";
+    else if (decisionRequest) ask.purpose = "decision-record";
 
-    void handleContextAskMention({
-      message,
-      handler,
-      ask,
-      channelScope,
-      conversationEvidenceSource
-    }).catch(() => {
-      reportDiscordDeliveryFailure({
-        code: "discord-context-ask-reply-failed",
-        channelId: message.channelId,
-        sourceId: message.id
-      });
-    });
+    trackDelivery(
+      handleContextAskMention({
+        message,
+        handler,
+        ask,
+        channelScope,
+        conversationEvidenceSource
+      }).catch(() => {
+        reportDiscordDeliveryFailure({
+          code: "discord-context-ask-reply-failed",
+          channelId: message.channelId,
+          sourceId: message.id
+        });
+      })
+    );
   });
 
   return {
+    gatewayConnected: () => !disconnected && client.isReady(),
+    ...(config.consultations
+      ? {
+          createConsultationProvider: ({
+            resolveRecipients
+          }: {
+            resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
+          }) => {
+            const requireSourceCurrent = async (proof: ConsultationSourceProof) => {
+              if (!conversationEvidenceSource || proof.capturePurpose !== "consultation")
+                throw new Error("The original consultation source is not configured");
+              const captured = await conversationEvidenceSource.capture({
+                workspaceId: proof.workspaceId,
+                subject: proof.subject,
+                question: proof.question,
+                purpose: "consultation"
+              });
+              if (
+                consultationSourceAuthorizationHash(captured.snapshot) !==
+                proof.authorizationHash
+              )
+                throw new Error("The original consultation source changed");
+            };
+            return createDiscordConsultationProvider({
+              rest: {
+                get: (route, options) => client.rest.get(route, options),
+                post: (route, options) => client.rest.post(route, options)
+              },
+              guildId: config.guildId,
+              allowedParentChannelIds: config.consultations!.capture.parentChannelIds,
+              botUserId: () => client.user?.id ?? null,
+              teamRoleId: config.consultations!.teamRoleId,
+              resolveRecipients,
+              authorizeHumanReader: config.authorizeHumanReader,
+              requireSourceCurrent
+            });
+          }
+        }
+      : {}),
     async connect(handler, contextHandler, startupSignal) {
       startupSignal?.throwIfAborted();
       assertConnectedLifetime();
@@ -218,7 +447,7 @@ export function createDiscordJsTransport(
         // signal is aborted. Stop waiting at this already-owned boundary; the
         // shared request signal prevents a later HTTP attempt, and the lifetime
         // fence below prevents any late completion from continuing into login.
-        await waitForStartupOperation(
+        await waitForDiscordOperation(
           registerMeetingCommand(config, restOptions, lifetime.signal),
           lifetime.signal
         );
@@ -238,8 +467,10 @@ export function createDiscordJsTransport(
       }
     },
     disconnect,
-    resolveChannel: ({ channelId }) => resolveDiscordChannel(client, channelId),
+    resolveChannel: ({ channelId, requiredHumanReaderIds }) =>
+      resolveChannel(channelId, requiredHumanReaderIds),
     async createThread(input): Promise<DiscordThread> {
+      await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const channel = await client.channels.fetch(input.parentChannelId, { force: true });
 
       if (
@@ -268,12 +499,14 @@ export function createDiscordJsTransport(
       }
 
       if (existingThread) {
+        await channelScope.requireChannel(existingThread.id, "public-thread");
         return {
           id: existingThread.id,
           url: existingThread.url
         };
       }
 
+      await channelScope.requireChannel(input.parentChannelId, "text-channel");
       const thread = await channel.threads.create({
         name: input.name,
         autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
@@ -286,6 +519,7 @@ export function createDiscordJsTransport(
       };
     },
     async sendMessage(input) {
+      await channelScope.requireChannel(input.channelId, "public-thread");
       const channel = await client.channels.fetch(input.channelId, { force: true });
       if (
         !channel ||
@@ -353,46 +587,6 @@ export function createDiscordJsTransport(
   };
 }
 
-async function resolveDiscordChannel(
-  client: Client,
-  channelId: string
-): Promise<DiscordChannelSurface | null> {
-  const channel = await client.channels.fetch(channelId, { force: true });
-  if (
-    !channel ||
-    !("guildId" in channel) ||
-    !client.user ||
-    !channel.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
-  )
-    return null;
-  if (channel.type === ChannelType.GuildText) {
-    return {
-      id: channel.id,
-      guildId: channel.guildId,
-      kind: "text-channel",
-      parentChannelId: null
-    };
-  }
-  if (channel.type === ChannelType.PublicThread) {
-    if (!channel.parentId) return null;
-    const parent = await client.channels.fetch(channel.parentId, { force: true });
-    if (
-      !parent ||
-      parent.type !== ChannelType.GuildText ||
-      parent.guildId !== channel.guildId ||
-      !parent.permissionsFor(client.user)?.has(PermissionFlagsBits.ViewChannel)
-    )
-      return null;
-    return {
-      id: channel.id,
-      guildId: channel.guildId,
-      kind: "public-thread",
-      parentChannelId: channel.parentId
-    };
-  }
-  return null;
-}
-
 export function createDiscordJsTransportFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env)
@@ -408,12 +602,36 @@ export function createDiscordJsTransportFromEnv(
     );
   }
 
+  const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
+  const accessPolicy = createWorkspaceAccessPolicy({
+    workspaceId,
+    identityDirectory: createIdentityDirectoryFromEnv(env),
+    authorizedPersonIds: dayovaFounderPersonIds
+  });
   return createDiscordJsTransport({
+    granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
+    authorizeHumanReader: async (providerUserId) =>
+      Boolean(
+        await accessPolicy.authorize({
+          workspaceId,
+          providerId: "discord",
+          providerUserId
+        })
+      ),
     token,
     clientId,
     guildId,
     allowedParentChannelIds: discordAllowedParentChannelIdsFromEnv(env),
-    ...(contextAsk ? { contextAsk } : {})
+    ...(contextAsk ? { contextAsk } : {}),
+    ...(discordConsultationConfigFromEnv(env)
+      ? { consultations: discordConsultationConfigFromEnv(env)! }
+      : {}),
+    ...(discordStructuredWorkConfigFromEnv(env)
+      ? { structuredWork: discordStructuredWorkConfigFromEnv(env)! }
+      : {}),
+    ...(discordDecisionRecordConfigFromEnv(env)
+      ? { decisionRecords: discordDecisionRecordConfigFromEnv(env)! }
+      : {})
   });
 }
 
@@ -423,26 +641,33 @@ export function discordGatewayIntentsForContextAsk(
   return contextAsk
     ? [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
       ]
-    : [GatewayIntentBits.Guilds];
+    : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers];
 }
 
 async function registerMeetingCommand(
   config: DiscordJsTransportConfig,
-  restOptions: typeof DefaultRestOptions,
+  restOptions: Omit<typeof DefaultRestOptions, "retries"> & { retries: number },
   signal: AbortSignal
 ): Promise<void> {
   const rest = new REST({ ...restOptions, version: "10" }).setToken(config.token);
 
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {
-    body: [meetingCommand.toJSON()],
+    body: [
+      meetingCommand.toJSON(),
+      ...(config.granola ? [granolaCommand.toJSON()] : []),
+      ...(config.consultations ? [consultationCommand.toJSON()] : []),
+      ...(config.decisionRecords ? [decisionRecordCommand.toJSON()] : []),
+      ...(config.structuredWork ? [structuredWorkCommand.toJSON()] : [])
+    ],
     signal
   });
 }
 
-function waitForStartupOperation<T>(
+function waitForDiscordOperation<T>(
   operation: Promise<T>,
   signal: AbortSignal
 ): Promise<T> {
@@ -451,7 +676,7 @@ function waitForStartupOperation<T>(
       reject(
         signal.reason instanceof Error
           ? signal.reason
-          : new DOMException("Discord startup cancelled", "AbortError")
+          : new DOMException("Discord operation cancelled", "AbortError")
       );
     if (signal.aborted) aborted();
     else signal.addEventListener("abort", aborted, { once: true });
@@ -463,7 +688,7 @@ function waitForStartupOperation<T>(
       },
       (error: unknown) => {
         signal.removeEventListener("abort", aborted);
-        reject(error instanceof Error ? error : new Error("Discord startup failed"));
+        reject(error instanceof Error ? error : new Error("Discord operation failed"));
       }
     );
   });
@@ -494,8 +719,13 @@ async function handleInteraction(
     flags: MessageFlags.Ephemeral
   });
   const response = await commandHandler(toDiscordCommand(interaction));
-  const admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  if (admitted && response.requireCurrent) {
+    await response.requireCurrent();
+    admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+  }
   await interaction.editReply({
+    allowedMentions: { parse: [] },
     content: admitted
       ? truncateDiscordMessage(response.content)
       : "Luma is not enabled in this Discord channel."
@@ -545,6 +775,18 @@ async function handleContextAskMention(input: {
       response = {
         content:
           "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+        idempotencyKey: response.idempotencyKey
+      };
+    }
+    if (!(await mayReply())) return;
+  }
+  if (response.requireCurrent) {
+    try {
+      await response.requireCurrent();
+    } catch {
+      response = {
+        content:
+          "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
         idempotencyKey: response.idempotencyKey
       };
     }
@@ -615,7 +857,10 @@ async function replyToContextAskMessage(
   });
 }
 
-function createDiscordJsConversationReader(client: Client): DiscordConversationReader {
+function createDiscordJsConversationReader(
+  client: Client,
+  authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"]
+): DiscordConversationReader {
   return {
     async readThread({
       conversationObjectId
@@ -640,7 +885,11 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
 
       try {
         const message = await thread.messages.fetch({ message: messageId, force: true });
-        return discordConversationMessage(message);
+        return await discordConversationMessageWithPoll(
+          client,
+          message,
+          authorizeHumanReader
+        );
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
           return null;
@@ -664,8 +913,20 @@ function createDiscordJsConversationReader(client: Client): DiscordConversationR
         limit
       });
 
+      let pollsRead = 0;
       return {
-        messages: [...messages.values()].map(discordConversationMessage),
+        messages: await Promise.all(
+          [...messages.values()].map((message) => {
+            if (message.poll) pollsRead += 1;
+            // Bound added poll reads to ten per already-bounded history page.
+            return discordConversationMessageWithPoll(
+              client,
+              message,
+              authorizeHumanReader,
+              pollsRead <= 10
+            );
+          })
+        ),
         hasMore: messages.size === limit
       };
     }
@@ -750,6 +1011,93 @@ function discordConversationMessage(message: Message): DiscordConversationMessag
   };
 }
 
+async function discordConversationMessageWithPoll(
+  client: Client,
+  message: Message,
+  authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"],
+  readPoll = true
+): Promise<DiscordConversationMessage> {
+  const mapped = discordConversationMessage(message);
+  if (
+    !message.poll ||
+    !readPoll ||
+    (mapped.authorKind !== "human" &&
+      !(mapped.authorKind === "bot" && message.author.id === client.user?.id))
+  )
+    return mapped;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    if (
+      mapped.authorKind === "human" &&
+      !(await waitForDiscordOperation(
+        authorizeHumanReader(message.author.id),
+        controller.signal
+      ))
+    )
+      return mapped;
+    const raw: unknown = await waitForDiscordOperation(
+      client.rest.get(Routes.channelMessage(message.channelId, message.id), {
+        signal: controller.signal
+      }),
+      controller.signal
+    );
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      !("id" in raw) ||
+      raw.id !== message.id ||
+      !("channel_id" in raw) ||
+      raw.channel_id !== message.channelId ||
+      !("author" in raw) ||
+      !raw.author ||
+      typeof raw.author !== "object" ||
+      !("id" in raw.author) ||
+      raw.author.id !== message.author.id ||
+      ("bot" in raw.author && raw.author.bot === true) !== message.author.bot ||
+      !("content" in raw) ||
+      raw.content !== message.content ||
+      !("edited_timestamp" in raw) ||
+      (raw.edited_timestamp !== null &&
+        (typeof raw.edited_timestamp !== "string" ||
+          Date.parse(raw.edited_timestamp) !== message.editedAt?.getTime())) ||
+      (raw.edited_timestamp === null && message.editedAt !== null) ||
+      ("webhook_id" in raw && !!raw.webhook_id) ||
+      !("poll" in raw)
+    )
+      return mapped;
+    const poll = discordPollEvidence(
+      raw.poll,
+      mapped.authorKind === "human" ? "human" : "luma-generated"
+    );
+    if (!poll) return mapped;
+    if (
+      mapped.authorKind === "human" &&
+      !(await waitForDiscordOperation(
+        authorizeHumanReader(message.author.id),
+        controller.signal
+      ))
+    )
+      return mapped;
+    return {
+      ...mapped,
+      poll,
+      hasUnsupportedContent:
+        message.attachments.size > 0 ||
+        message.embeds.length > 0 ||
+        message.stickers.size > 0 ||
+        message.components.length > 0 ||
+        message.messageSnapshots.size > 0 ||
+        message.flags.has(MessageFlags.IsVoiceMessage)
+    };
+  } catch {
+    return mapped;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
 function discordApiErrorCode(error: unknown): number | null {
   if (
     typeof error === "object" &&
@@ -772,8 +1120,360 @@ function toDiscordCommand(interaction: ChatInputCommandInteraction): DiscordComm
     occurredAt: interaction.createdAt.toISOString()
   };
   const subcommand = interaction.options.getSubcommand(true);
+  if (interaction.commandName === "granola") {
+    if (subcommand === "connect" || subcommand === "disconnect")
+      return { ...base, type: `granola-${subcommand}` };
+    if (subcommand === "status")
+      return {
+        ...base,
+        type: "granola-status",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand === "inspect")
+      return {
+        ...base,
+        type: "granola-inspect",
+        page: interaction.options.getInteger("page") ?? 1
+      };
+    if (subcommand !== "attest" && subcommand !== "configure")
+      throw new Error("Unknown Granola command");
+    const sharing = interaction.options.getString("sharing", true);
+    if (sharing !== "four-founders") throw new Error("Unknown Granola sharing choice");
+    const automaticInternalMeetings = interaction.options.getBoolean("internal_meetings"),
+      includeUrls = interaction.options.getString("include_urls"),
+      excludeUrls = interaction.options.getString("exclude_urls"),
+      founderEmails = interaction.options.getString("founder_emails");
+    const choice = {
+      ...base,
+      sharing: "four-founders" as const,
+      ...(automaticInternalMeetings === null ? {} : { automaticInternalMeetings }),
+      ...(includeUrls === null ? {} : { includeUrls }),
+      ...(excludeUrls === null ? {} : { excludeUrls }),
+      ...(founderEmails === null ? {} : { founderEmails })
+    };
+    return subcommand === "attest"
+      ? {
+          ...choice,
+          type: "granola-attest",
+          confirmAccount: interaction.options.getBoolean("confirm_account", true)
+        }
+      : { ...choice, type: "granola-configure" };
+  }
+  if (interaction.commandName === "structured-work") {
+    const address = {
+      ...base,
+      sourceMessageId: interaction.options.getString("source_message", true),
+      meeting: interaction.options.getBoolean("meeting") ?? false
+    };
+    if (subcommand === "request") {
+      const workItemId = interaction.options.getString("work_item");
+      return {
+        ...address,
+        type: "structured-work-request",
+        targetKey: interaction.options.getString("target", true),
+        ...(workItemId ? { workItemId } : {})
+      };
+    }
+    if (subcommand !== "status" && subcommand !== "recover")
+      throw new Error("Unknown structured work command");
+    return {
+      ...address,
+      type: `structured-work-${subcommand}`,
+      requestId: interaction.options.getString("request_id", true),
+      page: interaction.options.getInteger("page") ?? 1
+    };
+  }
+  if (interaction.commandName === "decision-record") {
+    const meetingId =
+      subcommand === "automatic" ? null : interaction.options.getString("meeting_id");
+    const selectedSource =
+      subcommand === "automatic" ? null : interaction.options.getString("source_message");
+    if (meetingId && selectedSource) throw new DiscordDecisionAddressInputError();
+    const meetingAddress = meetingId ? { meetingId } : {};
+    if (subcommand === "candidates") {
+      const sourceMessageId = interaction.options.getString("source_message"),
+        candidate = interaction.options.getInteger("candidate"),
+        page = interaction.options.getInteger("page");
+      return {
+        ...base,
+        type: "decision-record-candidates",
+        ...(interaction.options.getBoolean("retry") ? { retry: true } : {}),
+        ...meetingAddress,
+        ...(sourceMessageId ? { sourceMessageId } : {}),
+        ...(candidate ? { candidate } : {}),
+        ...(page ? { page } : {})
+      };
+    }
+    if (subcommand === "automatic") {
+      const action = interaction.options.getString("action", true);
+      const scopeId = interaction.options.getString("scope", true);
+      const permissionClass = interaction.options.getString("class");
+      const sharing = interaction.options.getString("sharing");
+      if (action === "enable") {
+        if (
+          (permissionClass !== "new-decisions" &&
+            permissionClass !== "decisions-and-corrections") ||
+          sharing !== "four-founders"
+        )
+          throw new DiscordDecisionPermissionInputError();
+        return {
+          ...base,
+          type: "decision-record-automatic",
+          scopeId,
+          choice: { action, permissionClass, sharing }
+        };
+      }
+      if (
+        (action !== "status" && action !== "disable") ||
+        permissionClass !== null ||
+        sharing !== null
+      )
+        throw new DiscordDecisionPermissionInputError();
+      return { ...base, type: "decision-record-automatic", scopeId, choice: { action } };
+    }
+    if (subcommand === "meeting") {
+      const targetRecordId = interaction.options.getString("target_record");
+      return {
+        ...base,
+        type: "decision-record-meeting",
+        ...meetingAddress,
+        instruction: interaction.options.getString("instruction", true),
+        ...(targetRecordId ? { targetRecordId } : {})
+      };
+    }
+    const sourceMessageId = interaction.options.getString("source_message");
+    const address = {
+      ...base,
+      ...meetingAddress,
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+      requestId: interaction.options.getString("request_id", true)
+    };
+    if (subcommand === "accept")
+      return {
+        ...address,
+        type: "decision-record-accept",
+        reviewToken: interaction.options.getString("review_token", true),
+        instruction: interaction.options.getString("confirmation", true)
+      };
+    if (subcommand !== "status" && subcommand !== "recover")
+      throw new Error("Unknown Decision Record command");
+    const page = subcommand === "status" ? interaction.options.getInteger("page") : null;
+    return {
+      ...address,
+      type: `decision-record-${subcommand}`,
+      ...(page ? { page } : {})
+    };
+  }
+  if (interaction.commandName === "consultation") {
+    const sourceMessageId = interaction.options.getString("source_message", true);
+    if (subcommand === "start") {
+      const ownerDiscordUserId = interaction.options.getUser("owner")?.id;
+      const replacesConsultationId = interaction.options.getString("replaces");
+      return {
+        ...base,
+        sourceMessageId,
+        type: "consultation-start",
+        purpose: interaction.options.getString("purpose", true),
+        question: interaction.options.getString("question", true),
+        options: interaction.options
+          .getString("options", true)
+          .split("|")
+          .map((option) => option.trim()),
+        durationHours: interaction.options.getInteger("hours") ?? 24,
+        ...(ownerDiscordUserId ? { ownerDiscordUserId } : {}),
+        ...(replacesConsultationId ? { replacesConsultationId } : {})
+      };
+    }
+    const consultationId = interaction.options.getString("consultation_id", true);
+    if (subcommand === "judgment")
+      return {
+        ...base,
+        sourceMessageId,
+        consultationId,
+        type: "consultation-judgment",
+        choice: interaction.options.getString("choice", true),
+        rationale: interaction.options.getString("rationale", true)
+      };
+    if (subcommand === "status" || subcommand === "close" || subcommand === "recover")
+      return {
+        ...base,
+        sourceMessageId,
+        consultationId,
+        type: `consultation-${subcommand}`,
+        ...(subcommand === "recover"
+          ? {
+              recovery:
+                interaction.options.getString("operation") === "closure"
+                  ? ("closure" as const)
+                  : ("publication" as const)
+            }
+          : {})
+      };
+    throw new Error("Unknown consultation command");
+  }
 
   switch (subcommand) {
+    case "captures":
+    case "synthesis": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: subcommand,
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "actions": {
+      const choice = interaction.options.getString("choice") ?? "review";
+      if (
+        !["review", "accept", "reject", "refresh", "execute", "recover"].includes(choice)
+      )
+        throw new Error("Unknown capture action operation");
+      const meetingId = interaction.options.getString("meeting_id"),
+        reviewId = interaction.options.getString("review_id"),
+        intentId = interaction.options.getString("intent_id"),
+        revision = interaction.options.getInteger("revision");
+      return {
+        ...base,
+        type: "capture-actions",
+        choice: choice as
+          "review" | "accept" | "reject" | "refresh" | "execute" | "recover",
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(meetingId ? { meetingId } : {}),
+        ...(reviewId ? { reviewId } : {}),
+        ...(intentId ? { intentId } : {}),
+        ...(revision !== null ? { revision } : {})
+      };
+    }
+    case "judge": {
+      const choice = interaction.options.getString("choice", true);
+      if (
+        choice !== "confirm" &&
+        choice !== "correct" &&
+        choice !== "reject" &&
+        choice !== "resolve-action"
+      )
+        throw new Error("Unknown synthesis judgment");
+      const meetingId = interaction.options.getString("meeting_id"),
+        text = interaction.options.getString("text");
+      const modality = interaction.options.getString("modality"),
+        dueDate = interaction.options.getString("due_date"),
+        owner = choice === "resolve-action" ? interaction.options.getUser("owner") : null,
+        intentionallyUnassigned = interaction.options.getBoolean(
+          "intentionally_unassigned"
+        );
+      if (modality !== null && modality !== "commitment" && modality !== "request")
+        throw new Error("Unknown action modality");
+      return {
+        ...base,
+        type: "judge",
+        ...(modality ? { modality } : {}),
+        ...(dueDate ? { dueDate } : {}),
+        ...(owner ? { ownerDiscordUserId: owner.id } : {}),
+        ...(intentionallyUnassigned !== null ? { intentionallyUnassigned } : {}),
+        revision: interaction.options.getInteger("revision", true),
+        claimId: interaction.options.getString("claim_id", true),
+        choice,
+        ...(meetingId ? { meetingId } : {}),
+        ...(text ? { text } : {})
+      };
+    }
+    case "publish": {
+      const meetingId = interaction.options.getString("meeting_id");
+      return {
+        ...base,
+        type: "publish",
+        revision: interaction.options.getInteger("revision", true),
+        recover: interaction.options.getBoolean("recover") ?? false,
+        ...(meetingId ? { meetingId } : {})
+      };
+    }
+    case "capture-link": {
+      const choice = interaction.options.getString("choice", true);
+      if (choice !== "bind" && choice !== "separate")
+        throw new Error("Unknown capture binding judgment");
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "capture-link",
+        meetingId: interaction.options.getString("meeting_id", true),
+        captureId: interaction.options.getString("capture_id", true),
+        revision: interaction.options.getInteger("revision", true),
+        choice,
+        ...(reason ? { reason } : {})
+      };
+    }
+    case "bind": {
+      return {
+        ...base,
+        type: "bind",
+        sourcePage: interaction.options.getString("source_page", true)
+      };
+    }
+    case "review": {
+      const reviewId = interaction.options.getString("review_id");
+      return {
+        ...base,
+        type: "review",
+        page: interaction.options.getInteger("page") ?? 1,
+        ...(reviewId ? { reviewId } : {})
+      };
+    }
+    case "owner": {
+      const ownership = interaction.options.getString("choice", true);
+      if (
+        ownership !== "confirm-owner" &&
+        ownership !== "intentionally-unassigned" &&
+        ownership !== "keep-unresolved"
+      )
+        throw new Error("Unknown ownership choice");
+      const ownerDiscordUserId = interaction.options.getUser("owner")?.id;
+      return {
+        ...base,
+        type: "owner",
+        claimId: interaction.options.getString("claim_id", true),
+        ownership,
+        ...(ownerDiscordUserId ? { ownerDiscordUserId } : {})
+      };
+    }
+    case "reconcile": {
+      const choice = interaction.options.getString("choice", true);
+      if (
+        choice !== "accept-proposal" &&
+        choice !== "reject-proposal" &&
+        choice !== "select-create-new" &&
+        choice !== "select-needs-clarification" &&
+        choice !== "link-existing" &&
+        choice !== "update-existing"
+      )
+        throw new Error("Unknown reconciliation choice");
+      const externalId = interaction.options.getString("target_id");
+      const reason = interaction.options.getString("reason");
+      return {
+        ...base,
+        type: "reconcile",
+        reviewId: interaction.options.getString("review_id", true),
+        choice,
+        execute: interaction.options.getBoolean("execute") ?? false,
+        ...(externalId ? { externalId } : {}),
+        ...(reason ? { reason } : {})
+      };
+    }
+    case "patch":
+      return {
+        ...base,
+        type: "patch",
+        intentId: interaction.options.getString("intent_id", true),
+        pageId: interaction.options.getString("page_id", true),
+        expectedMarkdown: interaction.options.getString("expected", true),
+        replacementMarkdown: interaction.options.getString("replacement", true)
+      };
+    case "refresh":
+      return {
+        ...base,
+        type: "refresh",
+        reviewId: interaction.options.getString("review_id", true)
+      };
     case "start":
       return {
         ...base,
@@ -942,6 +1642,380 @@ function renderDiscordMessage(content: string, marker: string | undefined): stri
 const meetingCommand = new SlashCommandBuilder()
   .setName("meeting")
   .setDescription("Run a Luma Meeting in Discord")
+
+  .addSubcommand((command) =>
+    command
+      .setName("captures")
+      .setDescription(
+        "List shared logical meetings or inspect original capture capabilities"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise this bound thread or the shared list"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("synthesis")
+      .setDescription(
+        "Review derived claims, contradictions and canonical publication status"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting ID; otherwise resolve this imported Meeting thread"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page, starting at 1").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("actions")
+      .setDescription(
+        "Review or explicitly execute derived actions from captured meetings"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Operation (defaults to review)")
+          .addChoices(
+            ...["review", "accept", "reject", "refresh", "execute", "recover"].map(
+              (value) => ({ name: value, value })
+            )
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting from /meeting captures")
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Current synthesis revision, required for changes")
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact action review to accept, reject or refresh")
+          .setMaxLength(2000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Exact action intent to approve and execute, or recover")
+          .setMaxLength(2000)
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page").setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("judge")
+      .setDescription("Confirm, correct or reject one exact synthesis claim as a founder")
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact synthesis revision from /meeting synthesis")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("claim_id")
+          .setDescription("Exact claim ID from /meeting synthesis")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Human judgment")
+          .setRequired(true)
+          .addChoices(
+            { name: "Confirm claim", value: "confirm" },
+            { name: "Correct claim", value: "correct" },
+            { name: "Reject claim", value: "reject" },
+            { name: "Resolve action details", value: "resolve-action" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("modality")
+          .setDescription("Explicit Human commitment or request for resolve-action")
+          .addChoices(
+            { name: "Commitment", value: "commitment" },
+            { name: "Request", value: "request" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("due_date")
+          .setDescription("YYYY-MM-DD, or none for explicitly no deadline")
+          .setMaxLength(10)
+      )
+      .addUserOption((option) =>
+        option
+          .setName("owner")
+          .setDescription("Founder explicitly responsible for this action")
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("intentionally_unassigned")
+          .setDescription(
+            "Explicitly leave responsibility unassigned instead of selecting an owner"
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("text")
+          .setDescription("Full replacement claim text when correcting")
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("publish")
+      .setDescription(
+        "Approve this synthesis revision for canonical publication, or recover an uncertain write"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact reviewed synthesis revision")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription("Logical meeting ID; otherwise this imported Meeting thread")
+          .setMaxLength(512)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("recover")
+          .setDescription(
+            "Only check the result of an uncertain publication; never resend"
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("capture-link")
+      .setDescription(
+        "Explicitly bind a capture to a logical meeting or keep it separate; retain originals"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("capture_id")
+          .setDescription("Exact capture ID from /meeting captures")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Logical meeting to join, or the logical meeting to remain separate from"
+          )
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("revision")
+          .setDescription("Exact source revision from /meeting captures")
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Explicit Human capture binding")
+          .setRequired(true)
+          .addChoices(
+            { name: "Bind to this logical meeting", value: "bind" },
+            { name: "Keep separate from this logical meeting", value: "separate" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason for this binding judgment")
+          .setMaxLength(1000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("bind")
+      .setDescription("Attach an imported Notion Meeting to this founder thread")
+      .addStringOption((option) =>
+        option
+          .setName("source_page")
+          .setDescription("Exact Notion Meeting Note page URL or UUID")
+          .setRequired(true)
+          .setMaxLength(1000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("review")
+      .setDescription(
+        "Inspect original Action Items, ownership, canonical matches and follow-ups"
+      )
+      .addIntegerOption((option) =>
+        option.setName("page").setDescription("Review page (starts at 1)").setMinValue(1)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Show only this exact review")
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("owner")
+      .setDescription("Record a Human ownership decision for a source Action Item")
+      .addStringOption((option) =>
+        option
+          .setName("claim_id")
+          .setDescription("Exact ownership claim ID from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Ownership decision")
+          .setRequired(true)
+          .addChoices(
+            { name: "Confirm selected founder", value: "confirm-owner" },
+            { name: "Intentionally unassigned", value: "intentionally-unassigned" },
+            { name: "Keep unresolved", value: "keep-unresolved" }
+          )
+      )
+      .addUserOption((option) =>
+        option
+          .setName("owner")
+          .setDescription("Founder to confirm (only for Confirm selected founder)")
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("reconcile")
+      .setDescription(
+        "Resolve an exact review; execute=true also authorizes its described writes"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact review ID from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Decision for this source Action Item")
+          .setRequired(true)
+          .addChoices(
+            { name: "Accept proposed outcome", value: "accept-proposal" },
+            { name: "Not work / reject proposal", value: "reject-proposal" },
+            { name: "Create genuinely new work", value: "select-create-new" },
+            { name: "Needs clarification", value: "select-needs-clarification" },
+            { name: "Link displayed existing work", value: "link-existing" },
+            { name: "Apply displayed existing-work update", value: "update-existing" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target_id")
+          .setDescription("Exact displayed canonical work ID, for link/update only")
+          .setMaxLength(256)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason for rejection or clarification")
+          .setMaxLength(1000)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("execute")
+          .setDescription(
+            "Also execute this decision and write its outcome to the original Meeting Note"
+          )
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("patch")
+      .setDescription(
+        "Approve an exact canonical Notion patch and execute its selected source settlement"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("intent_id")
+          .setDescription("Current suggested settlement Intent from /meeting review")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("page_id")
+          .setDescription("Explicit existing canonical Notion page ID")
+          .setRequired(true)
+          .setMaxLength(36)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("expected")
+          .setDescription("Exact existing Markdown region; must occur once")
+          .setRequired(true)
+          .setMaxLength(6000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("replacement")
+          .setDescription("Exact approved replacement Markdown; cannot be empty")
+          .setRequired(true)
+          .setMaxLength(6000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("refresh")
+      .setDescription("Refresh canonical work evidence for an exact current review")
+      .addStringOption((option) =>
+        option
+          .setName("review_id")
+          .setDescription("Exact current review ID")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+  )
   .addSubcommand((command) =>
     command.setName("usage").setDescription("Show shared AI usage, budget and reset time")
   )
@@ -1000,7 +2074,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
   )
   .addSubcommand((command) =>
@@ -1012,7 +2086,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
   )
   .addSubcommand((command) =>
@@ -1024,7 +2098,7 @@ const meetingCommand = new SlashCommandBuilder()
           .setName("intent_id")
           .setDescription("Follow-up Intent ID")
           .setRequired(true)
-          .setMaxLength(200)
+          .setMaxLength(512)
       )
       .addStringOption((option) =>
         option
@@ -1067,4 +2141,520 @@ function reportDiscordDeliveryFailure(event: {
 }): void {
   // Operational IDs aid delivery diagnosis; never log exceptions or message text.
   console.error("Luma Discord delivery failed", event);
+}
+
+const consultationCommand = new SlashCommandBuilder()
+  .setName("consultation")
+  .setDescription("Advisory founder polls in this discussion")
+  .addSubcommand((command) =>
+    command
+      .setName("start")
+      .setDescription(
+        "Authorize this exact advisory poll from an existing founder message"
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Exact founder source message ID in this thread")
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("purpose")
+          .setDescription("Why consultation is needed")
+          .setMaxLength(500)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("question")
+          .setDescription("Exact advisory question")
+          .setMaxLength(300)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("options")
+          .setDescription(
+            "2–10 real alternatives separated by |; each at most 55 characters"
+          )
+          .setMaxLength(559)
+          .setRequired(true)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("hours")
+          .setDescription("Duration, default 24 hours")
+          .setMinValue(1)
+          .setMaxValue(768)
+      )
+      .addUserOption((option) =>
+        option.setName("owner").setDescription("Accountable founder, if established")
+      )
+      .addStringOption((option) =>
+        option
+          .setName("replaces")
+          .setDescription("Original consultation ID when explicitly replacing it")
+      )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("status")
+        .setDescription("Read the original stored poll and advisory results")
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("recover")
+        .setDescription(
+          "Recover an uncertain original operation without another poll or mention"
+        )
+    ).addStringOption((option) =>
+      option
+        .setName("operation")
+        .setDescription("Original operation to recover")
+        .addChoices(
+          { name: "Publication", value: "publication" },
+          { name: "Closure", value: "closure" }
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("close")
+        .setDescription("Authorize closure of the positively recorded Luma poll")
+    )
+  )
+  .addSubcommand((command) =>
+    consultationAddressOptions(
+      command
+        .setName("judgment")
+        .setDescription("Retain a Human choice and reason, separately from poll results")
+    )
+      .addStringOption((option) =>
+        option
+          .setName("choice")
+          .setDescription("Human choice")
+          .setMaxLength(300)
+          .setRequired(true)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("rationale")
+          .setDescription("Reasoning, including objections and departures from the tally")
+          .setMaxLength(2000)
+          .setRequired(true)
+      )
+  );
+function consultationAddressOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("source_message")
+        .setDescription("Original founder source message ID")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("consultation_id")
+        .setDescription("Canonical consultation ID returned by Luma")
+        .setRequired(true)
+    );
+}
+
+const decisionRecordCommand = new SlashCommandBuilder()
+  .setName("decision-record")
+  .setDescription("Record or review a decision from its original source")
+  .addSubcommand((command) =>
+    command
+      .setName("candidates")
+      .setDescription(
+        "Review automatic decisions from this Meeting or a captured conversation"
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("retry")
+          .setDescription("Retry only a proved unsent AI attempt after fixing its cause")
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("candidate")
+          .setDescription("Retained candidate number")
+          .setMinValue(1)
+          .setMaxValue(20)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Candidate detail page")
+          .setMinValue(1)
+          .setMaxValue(10000)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("automatic")
+      .setDescription("Set your own scope-specific automatic recording permission")
+      .addStringOption((option) =>
+        option
+          .setName("action")
+          .setDescription("Enable, inspect or disable your own permission")
+          .setRequired(true)
+          .addChoices(
+            { name: "Enable my permission", value: "enable" },
+            { name: "Read my permission", value: "status" },
+            { name: "Disable my permission", value: "disable" }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("scope")
+          .setDescription("Exact documented responsibility scope, for example luma")
+          .setRequired(true)
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("class")
+          .setDescription(
+            "Required for enable: precisely which recording actions you authorize"
+          )
+          .addChoices(
+            {
+              name: "Create or link my final decisions; no existing record changes",
+              value: "new-decisions"
+            },
+            {
+              name: "Also amend, replace or reverse my explicitly corrected decisions",
+              value: "decisions-and-corrections"
+            }
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("sharing")
+          .setDescription("Required for enable: original recipients of this permission")
+          .addChoices({ name: "All four Dayova founders", value: "four-founders" })
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("meeting")
+      .setDescription("Record a decision from a LogicalMeeting or this imported Meeting")
+      .addStringOption((option) =>
+        option
+          .setName("instruction")
+          .setDescription("Your literal recording instruction or decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target_record")
+          .setDescription("Exact existing record ID when requesting an update")
+          .setMaxLength(512)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("status")
+        .setDescription("Read the retained result of an explicit recording request")
+    ).addIntegerOption((option) =>
+      option
+        .setName("page")
+        .setDescription("Candidate review page")
+        .setMinValue(1)
+        .setMaxValue(10000)
+    )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("recover")
+        .setDescription("Check for an existing uncertain write without resending it")
+    )
+  )
+  .addSubcommand((command) =>
+    decisionRecordAddress(
+      command
+        .setName("accept")
+        .setDescription(
+          "Confirm the exact reviewed candidate as your decision and record it"
+        ),
+      true
+    )
+      .addStringOption((option) =>
+        option
+          .setName("review_token")
+          .setDescription("Token from the final candidate review page")
+          .setRequired(true)
+          .setMaxLength(64)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("confirmation")
+          .setDescription("Your literal confirmation of this decision")
+          .setRequired(true)
+          .setMaxLength(4000)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("Original @Luma message ID; omit for this bound Meeting")
+          .setMaxLength(22)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("meeting_id")
+          .setDescription(
+            "Exact LogicalMeeting ID from /meeting captures; excludes source_message"
+          )
+          .setMaxLength(512)
+      )
+  );
+function decisionRecordAddress(
+  command: SlashCommandSubcommandBuilder,
+  omitSource = false
+) {
+  const addressed = command.addStringOption((option) =>
+    option
+      .setName("request_id")
+      .setDescription("Request ID returned by Luma")
+      .setRequired(true)
+      .setMaxLength(512)
+  );
+  return omitSource
+    ? addressed
+    : addressed
+        .addStringOption((option) =>
+          option
+            .setName("source_message")
+            .setDescription("Original @Luma message ID; omit for this bound Meeting")
+            .setMaxLength(22)
+        )
+        .addStringOption((option) =>
+          option
+            .setName("meeting_id")
+            .setDescription(
+              "Exact LogicalMeeting ID returned by Luma; excludes source_message"
+            )
+            .setMaxLength(512)
+        );
+}
+
+function granolaSharingOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("sharing")
+        .setDescription("Explicit recipients for eligible meetings")
+        .setRequired(true)
+        .addChoices({
+          name: "Share with all four Dayova founders",
+          value: "four-founders"
+        })
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("internal_meetings")
+        .setDescription(
+          "Opt in to internal meetings with only explicitly mapped founders; default off"
+        )
+    )
+    .addStringOption((option) =>
+      option
+        .setName("include_urls")
+        .setDescription(
+          "Exact Granola /d/ meeting URLs, comma separated; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("exclude_urls")
+        .setDescription(
+          "Exact private/excluded Granola meeting URLs; 'none' clears; omitted keeps current"
+        )
+        .setMaxLength(4000)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("founder_emails")
+        .setDescription(
+          "Explicit founder mappings, e.g. Jakob=jakob@example.com,Fabius=fabius@example.com"
+        )
+        .setMaxLength(2000)
+    );
+}
+const granolaCommand = new SlashCommandBuilder()
+  .setName("granola")
+  .setDescription("Manage your own Granola connection and founder sharing")
+  .addSubcommand((command) =>
+    command
+      .setName("connect")
+      .setDescription("Start a private browser login for your own Granola account")
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("status")
+      .setDescription("Show your connection state and sharing scope without any AI call")
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Sharing status page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("inspect")
+      .setDescription(
+        "Privately review your actual account and workspace before attesting"
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("page")
+          .setDescription("Account review page, starting at 1")
+          .setMinValue(1)
+      )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("attest")
+        .setDescription(
+          "Confirm your reviewed account and explicitly choose founder sharing"
+        )
+        .addBooleanOption((option) =>
+          option
+            .setName("confirm_account")
+            .setDescription("I confirm the inspected account and workspace are mine")
+            .setRequired(true)
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    granolaSharingOptions(
+      command
+        .setName("configure")
+        .setDescription(
+          "Change your own sharing choices; omitted lists and exclusions are preserved"
+        )
+    )
+  )
+  .addSubcommand((command) =>
+    command
+      .setName("disconnect")
+      .setDescription(
+        "Disable your Granola connection in Luma; retain original shared captures"
+      )
+  );
+
+const structuredWorkCommand = new SlashCommandBuilder()
+  .setName("structured-work")
+  .setDescription("Add an evidenced table record and validation task")
+  .addSubcommand((command) =>
+    command
+      .setName("request")
+      .setDescription("Execute your original explicit @Luma table-and-task instruction")
+      .addStringOption((option) =>
+        option
+          .setName("source_message")
+          .setDescription("ID of your original @Luma message in this thread")
+          .setRequired(true)
+          .setMinLength(17)
+          .setMaxLength(20)
+      )
+      .addStringOption((option) =>
+        option
+          .setName("target")
+          .setDescription("Configured table alias, such as hypotheses")
+          .setRequired(true)
+          .setMaxLength(50)
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("meeting")
+          .setDescription(
+            "Use this thread's bound imported Meeting as additional evidence"
+          )
+      )
+      .addStringOption((option) =>
+        option
+          .setName("work_item")
+          .setDescription(
+            "Explicit existing Linear issue ID, including an archived issue"
+          )
+          .setMaxLength(100)
+      )
+  )
+  .addSubcommand((command) =>
+    structuredWorkAddress(
+      command
+        .setName("status")
+        .setDescription("Read the full retained plan and each target receipt")
+    )
+  )
+  .addSubcommand((command) =>
+    structuredWorkAddress(
+      command
+        .setName("recover")
+        .setDescription("Check an uncertain write without sending it again")
+    )
+  );
+function structuredWorkAddress(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option) =>
+      option
+        .setName("source_message")
+        .setDescription("Original source message ID")
+        .setRequired(true)
+        .setMinLength(17)
+        .setMaxLength(20)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("request_id")
+        .setDescription("Exact request ID returned by Luma")
+        .setRequired(true)
+        .setMaxLength(160)
+    )
+    .addBooleanOption((option) =>
+      option
+        .setName("meeting")
+        .setDescription("True for a request using this thread's imported Meeting")
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("page")
+        .setDescription("Page of the complete preview and receipts")
+        .setMinValue(1)
+        .setMaxValue(1000)
+    );
 }

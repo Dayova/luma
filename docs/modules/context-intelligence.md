@@ -3,8 +3,16 @@
 ## Responsibility
 
 Context Intelligence answers a bounded question from immutable conversation
-evidence. It owns capture, durable source revisioning, Evidence validation,
+evidence and optionally governed organizational context. It owns capture, durable source revisioning, Evidence validation,
 answer generation, and idempotent replay beneath one read-only operation.
+
+Each answerable inquiry claims a durable attempt before invoking the model. A
+completed but invalid response, an interrupted attempt, or failure to persist
+the final answer cannot silently send that inquiry again after a restart. Only
+an explicit adapter proof that no provider request was dispatched releases the
+claim, so budget refusals before dispatch remain retryable. Discord explains
+when a new question is required. Usage settlement and retained source history
+remain independent of whether an answer is deliverable.
 
 It is adjacent to Meeting Intelligence, not an extension of it. A Discord
 thread does not become a synthetic Meeting merely because someone asks a
@@ -15,6 +23,7 @@ question about it.
 ```ts
 interface ContextIntelligence {
   inquire(input: ContextInquiry): Promise<ContextInquiryResult>;
+  requireCurrent?(input: ContextInquiry): Promise<void>;
 }
 ```
 
@@ -25,7 +34,8 @@ asking its owned `ContextAnswerer` port.
 
 ## Invariants
 
-- An inquiry ID is idempotent only for the exact original question and subject.
+- An inquiry ID is idempotent only for the exact original question, subject,
+  response audience and requested current/history mode.
 - A successful answer is bound to a specific immutable conversation revision
   and content hash. Replay revalidates the current bounded source before reusing
   that answer; it never reruns the Answerer for a completed inquiry.
@@ -43,7 +53,49 @@ asking its owned `ContextAnswerer` port.
   text is never sent to the answerer and they cannot support a claim.
 - A partial conversation boundary does not reach the answerer. It yields an
   insufficient-evidence result with the capture limitations made explicit.
-- Context Ask has no Knowledge, Work, Follow-up, or provider-write capability.
+- Context Ask has no Follow-up or provider-write capability. Its optional
+  Organizational Context port supplies read-only, audience-governed sources.
+
+## Organizational context
+
+A configured `OrganizationalContext` requires an explicit audience naming every
+response recipient. Discord supplies all configured founder recipients, even
+when only one founder asks the question. The actor's identity does not substitute
+for the shared response audience. Missing or mismatched audiences fail before
+capture or reasoning. The original Discord thread/anchor boundary is unchanged;
+partial conversation capture still refuses an answer before organizational reads.
+
+The module retrieves up to eight sources and 8,000 source characters by default,
+with configurable bounded limits. It checks the exact receipt before sending
+sources to the Answerer, before persisting a deliverable result, and at replay
+and delivery. Completed paid model work is retained even when a later source
+change prevents delivery. A result that failed its pre-persistence context fence
+is explicitly non-deliverable; retry cannot purchase another model answer for
+that inquiry. A new question is needed to analyze new evidence.
+
+Persisted inquiries bind the canonical retrieval request, receipt identity and
+full normalized source/coverage payload with a separate corruption hash.
+Organizational citations retain genuine source kind, title, reference, standing,
+authority and snapshot identity. They do not receive fabricated Discord authors,
+message IDs or Meeting identities. Claims can cite thread messages, organizational
+sources, or both; unknown citations and altered cached source payloads fail closed.
+
+Discord displays whether scope is just this thread or also configured catalogs,
+and whether coverage is partial. No configured catalogs produce an explicit
+limitation, not an organization-wide completeness claim. Context input bounds,
+source omissions and unavailable reads keep the answer qualified. Human-confirmed
+current decisions outrank later model proposals through the retrieval policy;
+retained history is never deleted merely to reduce prompt size.
+
+`requireCurrent` only checks an existing persisted inquiry and never invokes an
+Answerer. The Discord transport invokes this read-only fence immediately before
+send, after its original conversation proof. A source change or permission loss
+replaces old claims with a fixed recovery response. No external provider offers
+an atomic read-and-Discord-send transaction, so these are bounded final checks.
+
+The application must explicitly compose the Organizational Context dependency.
+Without it, existing constructor behavior remains thread-only and the response
+states that scope; provider credentials alone do not activate retrieval.
 
 ## Current Boundary
 
@@ -78,8 +130,8 @@ delivery; Discord offers no atomic snapshot-and-send transaction.
 Each new mention captures current history up to that mention. Approved captures
 and their history are retained by default; failed freshness checks do not delete
 them or infer deletion from an unavailable read. Continuous edit/delete event
-retention, organization-wide ranking, and cross-provider retrieval remain
-separate work. They are not required to ask about the current selected thread.
+retention remains separate work. Organizational retrieval can augment the selected
+thread through configured catalogs without extending that Discord capture boundary.
 The OpenAI adapter requests `store: false`; this does not replace participant
 notice or change Luma's durable evidence retention.
 
@@ -90,6 +142,7 @@ notice or change Luma's durable evidence retention.
   records are distinct from Meeting Notes and cannot be tombstoned or fenced.
 - `ContextAnswerer` is an owned read-only reasoning port. The OpenAI adapter is
   a boundary adapter and does not define Context state.
+- `OrganizationalContext` owns permission-filtered retrieval and receipt freshness.
 - Persistence is PostgreSQL-compatible PGlite in tests.
 
 ## Non-goals

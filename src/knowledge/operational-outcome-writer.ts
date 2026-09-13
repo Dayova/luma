@@ -15,6 +15,8 @@ export type OperationalOutcomeTarget = {
   sourceObjectId: string;
   sourceRevision: number;
   sourceContentHash: string;
+  /** Present only for an exact derived claim, never a raw Meeting Note head. */
+  synthesis?: { claimId: string; claimDigest: string };
 };
 
 /** One durable reconciliation result rendered inside a page-owned outcome. */

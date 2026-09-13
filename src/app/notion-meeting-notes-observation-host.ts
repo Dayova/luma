@@ -68,7 +68,7 @@ export interface NotionMeetingNotesObservationHost {
   receive(delivery: NotionWebhookDelivery): NotionMeetingNotesObservationHostReceipt;
   /** Content-free operational status only. */
   status(): NotionMeetingNotesObservationHostStatus;
-  /** Stops admissions, settles accepted work, then stops canonical recovery. */
+  /** Stops delivery and recurring admissions, then settles all accepted work. */
   stop(): Promise<void>;
 }
 
@@ -161,17 +161,20 @@ export function createNotionMeetingNotesObservationHost(
     },
     async stop() {
       acceptingDeliveries = false;
-
-      // A host adapter closes its listener first. This drains only work which
-      // was accepted before shutdown and then lets the existing sync own its
-      // own in-flight scheduled scan shutdown before persistence is closed.
-      try {
-        await (scheduledDrain ?? settleRuntimeDrain());
-      } finally {
-        // No failed wake-up drain may leave the recurring canonical recovery
-        // timer behind after its host has stopped accepting deliveries.
-        await runtime.stopCanonicalRecovery();
-      }
+      // Cancel the schedule synchronously, before a slow accepted refresh or
+      // analysis can admit another periodic scan during shutdown. The wake-up
+      // drain still owns explicit canonical work admitted before this stop,
+      // even if that work starts after the scheduled scan has settled.
+      const results = await Promise.allSettled([
+        runtime.stopCanonicalRecovery(),
+        scheduledDrain ?? settleRuntimeDrain()
+      ]);
+      const failures = results.filter((result) => result.status === "rejected");
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result): unknown => result.reason),
+          "Notion observation shutdown did not drain admitted work"
+        );
     }
   };
 }

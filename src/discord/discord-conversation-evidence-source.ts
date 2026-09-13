@@ -4,6 +4,7 @@ import type {
 } from "../context-intelligence/conversation-evidence-source.js";
 import type { ConversationContextSubject } from "../context-intelligence/interface.js";
 import type { WorkspaceId } from "../domain/model.js";
+import type { ConversationPoll } from "../domain/conversation-poll.js";
 import type {
   ConversationSourcePartialReason,
   RawConversationMessage
@@ -33,6 +34,7 @@ export type DiscordConversationMessage = {
   kind: "message" | "thread-starter";
   /** The adapter saw message content that this text-only capture does not retain. */
   hasUnsupportedContent: boolean;
+  poll?: ConversationPoll;
   author: {
     providerUserId: string;
     displayName: string;
@@ -105,7 +107,19 @@ export function createDiscordConversationEvidenceSource(
       validateDiscordSubject(captureInput.workspaceId, captureInput.subject);
       const subject = captureInput.subject;
       const thread = await readThread(input, subject);
-      const anchor = await readAnchor(input, subject, thread, captureInput.question);
+      const anchor = await readAnchor(
+        input,
+        subject,
+        thread,
+        captureInput.question,
+        captureInput.purpose
+      );
+      if (messageCharacters(anchor) > input.config.maxEvidenceChars) {
+        throw new DiscordConversationEvidenceError(
+          "discord-conversation-anchor-too-large",
+          "The triggering message and poll exceed the configured evidence limit"
+        );
+      }
       const capture = await readThreadThroughAnchor(input, thread.id, anchor);
       const botUserId = input.botUserId();
       const excludedMessages = capture.messages
@@ -119,11 +133,12 @@ export function createDiscordConversationEvidenceSource(
       const partialReasons = [
         ...capture.partialReasons,
         ...incompleteEvidenceReasons(
-          capture.messages.filter((message) => !isLumaOutput(message, botUserId))
+          capture.messages.filter((message) => !isLumaOutput(message, botUserId)),
+          botUserId
         )
       ];
       const messages = capture.messages
-        .filter(isReadableHumanTextMessage)
+        .filter((message) => isReadableMessage(message, botUserId))
         .sort(compareDiscordMessagesChronologically)
         .map((message, ordinal) => rawConversationMessage(message, ordinal));
 
@@ -263,7 +278,8 @@ async function readAnchor(
   input: CreateDiscordConversationEvidenceSourceInput,
   subject: ConversationContextSubject,
   thread: DiscordConversationThread,
-  question?: string
+  question?: string,
+  purpose?: "consultation" | "decision-record" | "structured-work"
 ): Promise<DiscordConversationMessage> {
   const anchor = await input.reader.readMessage({
     conversationObjectId: thread.id,
@@ -279,10 +295,12 @@ async function readAnchor(
     anchor.authorKind !== "human" ||
     !input.config.allowedDiscordUserIds.includes(anchor.author.providerUserId) ||
     !botUserId ||
-    !anchor.mentionedDiscordUserIds.includes(botUserId) ||
-    !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
-    (question !== undefined &&
-      questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question)
+    (purpose === "consultation"
+      ? !anchor.content.trim() || (question !== undefined && anchor.content !== question)
+      : !anchor.mentionedDiscordUserIds.includes(botUserId) ||
+        !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
+        (question !== undefined &&
+          questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question))
   ) {
     throw new DiscordConversationEvidenceError(
       "discord-conversation-anchor-unavailable",
@@ -302,7 +320,7 @@ async function readThreadThroughAnchor(
   partialReasons: ConversationSourcePartialReason[];
 }> {
   const messages = [anchor];
-  let evidenceCharacterCount = anchor.content.length;
+  let evidenceCharacterCount = messageCharacters(anchor);
   let beforeMessageId = anchor.id;
 
   while (true) {
@@ -345,13 +363,14 @@ async function readThreadThroughAnchor(
 
       if (
         messages.length >= input.config.maxMessages ||
-        evidenceCharacterCount + message.content.length > input.config.maxEvidenceChars
+        evidenceCharacterCount + messageCharacters(message) >
+          input.config.maxEvidenceChars
       ) {
         return historyTruncated(messages, input.config);
       }
 
       messages.push(message);
-      evidenceCharacterCount += message.content.length;
+      evidenceCharacterCount += messageCharacters(message);
     }
 
     if (!page.hasMore) {
@@ -429,10 +448,11 @@ function assertPageBelongsToConversation(
 }
 
 function incompleteEvidenceReasons(
-  messages: DiscordConversationMessage[]
+  messages: DiscordConversationMessage[],
+  botUserId: string | null
 ): ConversationSourcePartialReason[] {
   return messages.flatMap((message): ConversationSourcePartialReason[] => {
-    if (message.authorKind !== "human") {
+    if (message.authorKind !== "human" && !isLumaPoll(message, botUserId)) {
       return [
         {
           code: "unknown-provider-shape" as const,
@@ -449,12 +469,12 @@ function incompleteEvidenceReasons(
           code: "message-content-unavailable" as const,
           messageId: message.id,
           message:
-            "A Discord message contains attachment, embed, sticker, poll, component, voice, or forwarded content that this text-only capture does not retain."
+            "A Discord message contains unsupported attachment, embed, sticker, poll, component, voice, or forwarded content that this capture does not retain."
         }
       ];
     }
 
-    if (message.content.trim().length === 0) {
+    if (message.content.trim().length === 0 && !message.poll) {
       return [
         {
           code: "message-content-unavailable" as const,
@@ -469,8 +489,35 @@ function incompleteEvidenceReasons(
   });
 }
 
-function isReadableHumanTextMessage(message: DiscordConversationMessage): boolean {
-  return message.authorKind === "human" && message.content.trim().length > 0;
+function isReadableMessage(
+  message: DiscordConversationMessage,
+  botUserId: string | null
+): boolean {
+  return (
+    (message.authorKind === "human" &&
+      (message.content.trim().length > 0 || !!message.poll)) ||
+    isLumaPoll(message, botUserId)
+  );
+}
+
+function isLumaPoll(
+  message: DiscordConversationMessage,
+  botUserId: string | null
+): boolean {
+  return (
+    !!message.poll &&
+    message.poll.wordingOrigin === "luma-generated" &&
+    botUserId !== null &&
+    message.authorKind === "bot" &&
+    message.author.providerUserId === botUserId &&
+    message.kind === "message" &&
+    !message.hasUnsupportedContent
+  );
+}
+function messageCharacters(message: DiscordConversationMessage): number {
+  return (
+    message.content.length + (message.poll ? JSON.stringify(message.poll).length : 0)
+  );
 }
 
 function isLumaOutput(
@@ -483,6 +530,7 @@ function isLumaOutput(
     message.author.providerUserId === botUserId &&
     message.kind === "message" &&
     !message.hasUnsupportedContent &&
+    !message.poll &&
     message.content.trim().length > 0
   );
 }
@@ -500,7 +548,8 @@ function rawConversationMessage(
     replyToMessageId: message.replyToMessageId,
     url: message.url,
     state: "available",
-    text: message.content
+    text: message.content,
+    ...(message.poll ? { poll: structuredClone(message.poll) } : {})
   };
 }
 

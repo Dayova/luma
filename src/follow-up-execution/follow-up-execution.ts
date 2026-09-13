@@ -1,4 +1,35 @@
+import { synthesisSourceFence } from "./synthesis-source-fence.js";
+import {
+  releaseSynthesisActionFence,
+  ensureSynthesisActionFences
+} from "../meeting-intelligence/synthesis-action-state.js";
+import { decisionModuleFor } from "../decision-intelligence/module-binding.js";
+import { structuredWorkModuleFor } from "../structured-work/module-binding.js";
+import { createStructuredWorkExecution } from "./structured-work-execution.js";
+import type { ExecuteStructuredWork } from "../structured-work/interface.js";
+import type { StructuredWorkState } from "../domain/structured-work.js";
+import { createDecisionFollowUpExecution } from "./decision-execution.js";
+import type {
+  ExecuteDecisionFollowUpInput,
+  ExecuteDecisionFollowUpResult
+} from "./interface.js";
+import type { CanonicalKnowledgePatchWriter } from "../knowledge/canonical-knowledge-patch.js";
+import {
+  CanonicalPatchStageError,
+  settleCanonicalKnowledgePatch
+} from "./canonical-knowledge-patch-stage.js";
+import { withExecutionRunLock } from "./execution-run-lock.js";
+import { createConversationFollowUpExecution } from "./conversation-consultation-execution.js";
+import type { ConversationConsultations } from "../context-intelligence/conversation-consultations.js";
+import type { ConsultationProvider } from "../consultation/interface.js";
+import type {
+  ExecuteConversationFollowUpInput,
+  ExecuteConversationFollowUpResult,
+  ScopedFollowUpExecution
+} from "./interface.js";
 import { randomUUID } from "node:crypto";
+import { withSynthesisPublicationExecution } from "./synthesis-publication-execution.js";
+import type { MeetingSynthesisWriter } from "../knowledge/meeting-synthesis-writer.js";
 import type { KnowledgeProvider } from "../knowledge/interface.js";
 import type { OperationalOutcomeSourceCurrentnessVerifier } from "../knowledge/ledger-backed-operational-outcome-source-currentness.js";
 import type { OperationalOutcomeSourceExecutionFence } from "../knowledge/ledger-backed-operational-outcome-source-execution-fence.js";
@@ -62,10 +93,14 @@ import {
 } from "./operational-outcome-settlement.js";
 
 export type CreateFollowUpExecutionInput = {
+  meetingSynthesisWriter?: MeetingSynthesisWriter;
   database: LumaDatabase;
   meetingIntelligence: MeetingIntelligence;
+  conversationConsultations?: ConversationConsultations;
+  consultationProvider?: ConsultationProvider;
   identityDirectory?: IdentityDirectory;
   knowledgeProvider?: KnowledgeProvider;
+  canonicalKnowledgePatchWriter?: CanonicalKnowledgePatchWriter;
   operationalOutcomeWriter?: OperationalOutcomeWriter;
   /** Production ledger guard for source freshness before settlement mutation. */
   operationalOutcomeSourceCurrentnessVerifier?: OperationalOutcomeSourceCurrentnessVerifier;
@@ -73,6 +108,14 @@ export type CreateFollowUpExecutionInput = {
   operationalOutcomeSourceExecutionFence?: OperationalOutcomeSourceExecutionFence;
   workProvider?: WorkProvider;
   codeProvider?: CodeProvider;
+  /** Organizational evidence guard, separate from the source-page settlement fence. */
+  organizationalContextGuard?: {
+    requireIntentCurrent(input: {
+      workspaceId: string;
+      meetingId: string;
+      intentId: string;
+    }): Promise<void>;
+  };
   now?: () => Date;
 };
 
@@ -87,7 +130,8 @@ class NonRetryableExecutionError extends Error {
       | "operational-outcome-source-ledger-superseded"
       | "action-item-ownership-not-executable"
       | "legacy-generic-knowledge-update-disabled"
-      | "code-comment-write-not-supported",
+      | "code-comment-write-not-supported"
+      | "organizational-context-unavailable",
     message: string
   ) {
     super(message);
@@ -128,40 +172,244 @@ type ExecutionIdempotencyKeys = {
  * mutation. A process stop drops this memory-only guard; the durable
  * execution/stage recovery protocol then takes over after restart.
  */
-const activeExecutionKeysByDatabase = new WeakMap<LumaDatabase, Set<string>>();
-
-function activeExecutionKeysFor(database: LumaDatabase): Set<string> {
-  const existing = activeExecutionKeysByDatabase.get(database);
-
-  if (existing) {
-    return existing;
-  }
-
-  const created = new Set<string>();
-  activeExecutionKeysByDatabase.set(database, created);
-  return created;
-}
-
 export function createFollowUpExecution(
   input: CreateFollowUpExecutionInput
-): FollowUpExecution {
-  const executionLocks = activeExecutionKeysFor(input.database);
+): ScopedFollowUpExecution {
   const now = input.now ?? (() => new Date());
 
-  return {
+  const base: FollowUpExecution = {
     execute: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
-      return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
-        executeClaimedIntent(input, executeInput, idempotencyKeys, now)
+      return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
+        withCurrentExecutionContext(input, executeInput, (guarded) =>
+          executeClaimedIntent(guarded, executeInput, idempotencyKeys, now)
+        )
       );
     },
     recover: (executeInput) => {
       const idempotencyKeys = executionIdempotencyKeys(executeInput);
-      return withExecutionLock(executionLocks, idempotencyKeys.current, () =>
-        recoverClaimedIntent(input, executeInput, idempotencyKeys, now)
+      return withExecutionRunLock(input.database, idempotencyKeys.current, () =>
+        withCurrentExecutionContext(input, executeInput, (guarded) =>
+          recoverClaimedIntent(guarded, executeInput, idempotencyKeys, now)
+        )
       );
     }
   };
+  const meetingExecution = withSynthesisPublicationExecution({
+    base,
+    database: input.database,
+    meetingIntelligence: input.meetingIntelligence,
+    ...(input.meetingSynthesisWriter ? { writer: input.meetingSynthesisWriter } : {}),
+    now
+  });
+  const conversationExecution =
+    input.conversationConsultations && input.consultationProvider
+      ? createConversationFollowUpExecution({
+          database: input.database,
+          consultations: input.conversationConsultations,
+          provider: input.consultationProvider,
+          now
+        })
+      : undefined;
+  const decisionDependencies = decisionModuleFor(input.meetingIntelligence);
+  const structuredDependencies = structuredWorkModuleFor(input.meetingIntelligence);
+  const structuredExecution = structuredDependencies
+    ? createStructuredWorkExecution(structuredDependencies)
+    : undefined;
+  const decisionExecution = decisionDependencies
+    ? createDecisionFollowUpExecution(decisionDependencies)
+    : undefined;
+  function execute(request: ExecuteStructuredWork): Promise<StructuredWorkState>;
+  function execute(
+    request: ExecuteDecisionFollowUpInput
+  ): Promise<ExecuteDecisionFollowUpResult>;
+  function execute(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
+  function execute(
+    request: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  function execute(
+    request:
+      | ExecuteFollowUpInput
+      | ExecuteConversationFollowUpInput
+      | ExecuteStructuredWork
+      | ExecuteDecisionFollowUpInput
+  ): Promise<
+    | ExecuteFollowUpResult
+    | ExecuteConversationFollowUpResult
+    | StructuredWorkState
+    | ExecuteDecisionFollowUpResult
+  > {
+    if ("structuredWorkRequestId" in request) {
+      if (!structuredExecution)
+        return Promise.reject(new Error("Structured work execution is not configured"));
+      return structuredExecution.execute(request);
+    }
+    if ("decisionRequestId" in request) {
+      if (!decisionExecution)
+        return Promise.reject(new Error("Decision execution is not configured"));
+      return decisionExecution.execute(request);
+    }
+    if ("subject" in request) {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.execute(request);
+    }
+    return meetingExecution.execute(request);
+  }
+  function recover(request: ExecuteStructuredWork): Promise<StructuredWorkState>;
+  function recover(
+    request: ExecuteDecisionFollowUpInput
+  ): Promise<ExecuteDecisionFollowUpResult>;
+  function recover(request: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
+  function recover(
+    request: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  function recover(
+    request:
+      | ExecuteFollowUpInput
+      | ExecuteConversationFollowUpInput
+      | ExecuteStructuredWork
+      | ExecuteDecisionFollowUpInput
+  ): Promise<
+    | ExecuteFollowUpResult
+    | ExecuteConversationFollowUpResult
+    | StructuredWorkState
+    | ExecuteDecisionFollowUpResult
+  > {
+    if ("structuredWorkRequestId" in request) {
+      if (!structuredExecution)
+        return Promise.reject(new Error("Structured work execution is not configured"));
+      return structuredExecution.recover(request);
+    }
+    if ("decisionRequestId" in request) {
+      if (!decisionExecution)
+        return Promise.reject(new Error("Decision execution is not configured"));
+      return decisionExecution.recover(request);
+    }
+    if ("subject" in request) {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.recover(request);
+    }
+    return meetingExecution.recover(request);
+  }
+  return {
+    execute,
+    recover,
+    readConsultation: (request) => {
+      if (!conversationExecution)
+        return Promise.reject(
+          new Error("Conversation consultation execution is not configured")
+        );
+      return conversationExecution.readConsultation(request);
+    }
+  };
+}
+
+/** Rechecks before claim, every external provider call, and public receipt replay.
+ * Local outcome persistence always completes before the final delivery check.
+ */
+async function withCurrentExecutionContext(
+  dependencies: CreateFollowUpExecutionInput,
+  input: ExecuteFollowUpInput,
+  operation: (guarded: CreateFollowUpExecutionInput) => Promise<ExecuteFollowUpResult>
+): Promise<ExecuteFollowUpResult> {
+  await ensureSynthesisActionFences(dependencies.database);
+  const requireCurrent = async () => {
+    const rows = await dependencies.database.query<{ state_json: string }>(
+      "SELECT state_json FROM meetings WHERE workspace_id=$1 AND meeting_id=$2",
+      [input.workspace.workspaceId, input.meetingId]
+    );
+    const raw = rows.rows[0];
+    if (!raw) return; // The canonical claim owns the normal missing-Meeting error.
+    const state = JSON.parse(raw.state_json) as MeetingState;
+    const intent = state.followUpIntentions.find((item) => item.id === input.intentId);
+    if (!intent) return;
+    const related = new Set(intent.relatedMeetingItemIds);
+    const items = [
+      intent,
+      ...state.decisions,
+      ...state.actionItems,
+      ...state.openQuestions,
+      ...state.risks,
+      ...state.topics,
+      ...state.proposals,
+      ...state.followUpIntentions
+    ];
+    const contextDependent = items.some((item) => {
+      if (item !== intent && intent.type !== "record-meeting" && !related.has(item.id))
+        return false;
+      const receipts: unknown = Reflect.get(item.provenance, "contextReceiptIds");
+      return receipts !== undefined && (!Array.isArray(receipts) || receipts.length > 0);
+    });
+    if (!contextDependent && !dependencies.organizationalContextGuard) return;
+    try {
+      if (!dependencies.organizationalContextGuard) throw new Error("Missing guard");
+      await dependencies.organizationalContextGuard.requireIntentCurrent({
+        workspaceId: input.workspace.workspaceId,
+        meetingId: input.meetingId,
+        intentId: input.intentId
+      });
+    } catch {
+      throw new NonRetryableExecutionError(
+        "organizational-context-unavailable",
+        "Organizational sources changed or their access could not be verified. Review the current evidence before executing or displaying this follow-up."
+      );
+    }
+  };
+  await requireCurrent();
+  const guarded: CreateFollowUpExecutionInput = {
+    ...dependencies,
+    ...(dependencies.knowledgeProvider
+      ? {
+          knowledgeProvider: guardProvider(dependencies.knowledgeProvider, requireCurrent)
+        }
+      : {}),
+    ...(dependencies.canonicalKnowledgePatchWriter
+      ? {
+          canonicalKnowledgePatchWriter: guardProvider(
+            dependencies.canonicalKnowledgePatchWriter,
+            requireCurrent
+          )
+        }
+      : {}),
+    ...(dependencies.workProvider
+      ? { workProvider: guardProvider(dependencies.workProvider, requireCurrent) }
+      : {}),
+    ...(dependencies.operationalOutcomeWriter
+      ? {
+          operationalOutcomeWriter: guardProvider(
+            dependencies.operationalOutcomeWriter,
+            requireCurrent
+          )
+        }
+      : {})
+  };
+  const result = await operation(guarded);
+  await requireCurrent();
+  return result;
+}
+function guardProvider<T extends object>(provider: T, guard: () => Promise<void>): T {
+  return new Proxy(provider, {
+    get(target, property, receiver): unknown {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return async (...args: unknown[]): Promise<unknown> => {
+        await guard();
+        return Reflect.apply(value, target, args) as unknown;
+      };
+    }
+  });
+}
+function isContextRefusal(error: unknown): error is NonRetryableExecutionError {
+  return (
+    error instanceof NonRetryableExecutionError &&
+    error.code === "organizational-context-unavailable"
+  );
 }
 
 async function executeClaimedIntent(
@@ -555,6 +803,10 @@ async function runProviderMutation(
   const { intent } = input;
 
   switch (intent.type) {
+    case "publish-meeting-synthesis":
+      throw new Error(
+        "Synthesis publication requires its canonical capture execution route"
+      );
     case "settle-operational-outcome": {
       return settleOperationalOutcome(dependencies, input, idempotencyKey);
     }
@@ -792,16 +1044,36 @@ async function settleOperationalOutcome(
     );
   }
 
-  const receipt = await settleOperationalOutcomeWriteStage(
+  const knowledgeReferences = await settleKnowledgeStage(
     dependencies,
     input,
     durable,
-    writer,
+    false,
     work.externalReferences
   );
+  const settledReferences = uniqueExternalReferences([
+    ...work.externalReferences,
+    ...knowledgeReferences
+  ]);
+
+  let receipt: OperationalOutcomeReceipt;
+  try {
+    receipt = await settleOperationalOutcomeWriteStage(
+      dependencies,
+      input,
+      durable,
+      writer,
+      settledReferences
+    );
+  } catch (error) {
+    // Claiming the next stage can fail before its own provider-error handler.
+    // Keep already proven effects even if no further store read is possible.
+    throw failureWithEstablishedSettlementReferences(error, settledReferences);
+  }
 
   const externalReferences = uniqueExternalReferences([
     ...work.externalReferences,
+    ...knowledgeReferences,
     receipt.externalReference
   ]);
 
@@ -817,11 +1089,115 @@ async function settleOperationalOutcome(
   return externalReferences;
 }
 
+function failureWithEstablishedSettlementReferences(
+  error: unknown,
+  establishedReferences: ExternalReference[]
+): unknown {
+  if (!establishedReferences.length) return error;
+  if (error instanceof PartialOperationalOutcomeSettlementError) {
+    return new PartialOperationalOutcomeSettlementError(
+      uniqueExternalReferences([...establishedReferences, ...error.externalReferences]),
+      error.code,
+      error.message,
+      error.disposition
+    );
+  }
+  if (error instanceof NonRetryableExecutionError) {
+    return new PartialOperationalOutcomeSettlementError(
+      establishedReferences,
+      error.code,
+      error.message,
+      "failed"
+    );
+  }
+  if (error instanceof IndeterminateProviderMutationError) {
+    return new PartialOperationalOutcomeSettlementError(
+      establishedReferences,
+      "provider-outcome-unknown",
+      `${error.message} Luma cannot prove whether the provider applied this mutation; inspect the provider before creating a fresh Intent.`,
+      "manual"
+    );
+  }
+  return new PartialOperationalOutcomeSettlementError(
+    establishedReferences,
+    "operational-outcome-progress-unavailable",
+    "Luma retained completed provider references but could not establish the remaining settlement progress. Run recovery before creating a fresh Intent.",
+    "manual"
+  );
+}
+
+async function settleKnowledgeStage(
+  dependencies: CreateFollowUpExecutionInput,
+  input: CanonicalExecutionInput,
+  durable: OperationalOutcomeSettlement,
+  readOnly = false,
+  establishedReferences: ExternalReference[] = []
+): Promise<ExternalReference[]> {
+  try {
+    return await settleCanonicalKnowledgePatch({
+      database: dependencies.database,
+      workspaceId: input.workspace.workspaceId,
+      meetingId: input.meetingId,
+      executionLeaseId: input.executionLeaseId,
+      settlement: durable,
+      ...(dependencies.canonicalKnowledgePatchWriter
+        ? { writer: dependencies.canonicalKnowledgePatchWriter }
+        : {}),
+      readOnly,
+      async requireCurrent() {
+        await assertOperationalOutcomeSourceExecutionFenceHeldCurrent(
+          dependencies,
+          input,
+          durable.plan.target
+        );
+        await assertOperationalOutcomeSourceCurrentness(
+          dependencies,
+          durable.plan.target
+        );
+        const current = await canonicalMeetingStateForSettlement(dependencies, input);
+        if (
+          input.intent.type !== "settle-operational-outcome" ||
+          !settlementFromCanonicalState(current, input.intent)
+        ) {
+          throw new Error("The approved patch source is no longer current");
+        }
+      }
+    });
+  } catch (error) {
+    let current = durable;
+    try {
+      current =
+        (await readOperationalOutcomeSettlement({
+          database: dependencies.database,
+          workspaceId: input.workspace.workspaceId,
+          meetingId: input.meetingId,
+          intentId: input.intent.id
+        })) ?? durable;
+    } catch {
+      /* Preserve already established receipts even when the store is unavailable. */
+    }
+    throw new PartialOperationalOutcomeSettlementError(
+      uniqueExternalReferences([
+        ...establishedReferences,
+        ...(error instanceof CanonicalPatchStageError ? error.externalReferences : []),
+        ...settlementDurableExternalReferences(current)
+      ]),
+      "canonical-knowledge-patch-unresolved",
+      error instanceof CanonicalPatchStageError
+        ? error.message
+        : "Canonical patch state could not be established durably.",
+      error instanceof CanonicalPatchStageError ? error.disposition : "manual"
+    );
+  }
+}
+
 async function assertOperationalOutcomeSourceCurrentness(
   dependencies: CreateFollowUpExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const verifier = dependencies.operationalOutcomeSourceCurrentnessVerifier;
+  const verifier = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceCurrentnessVerifier;
 
   if (!verifier) {
     return;
@@ -848,7 +1224,9 @@ async function acquireOperationalOutcomeSourceExecutionFence(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -894,7 +1272,9 @@ async function assertOperationalOutcomeSourceExecutionFenceHeldCurrent(
   input: CanonicalExecutionInput,
   target: OperationalOutcomeTarget
 ): Promise<void> {
-  const sourceExecutionFence = dependencies.operationalOutcomeSourceExecutionFence;
+  const sourceExecutionFence = target.synthesis
+    ? synthesisSourceFence(dependencies)
+    : dependencies.operationalOutcomeSourceExecutionFence;
 
   if (!sourceExecutionFence) {
     return;
@@ -936,18 +1316,38 @@ async function recoverOperationalOutcomeSettlement(
   now: () => Date
 ): Promise<FollowUpExecutionRecorded> {
   const occurredAt = now().toISOString();
+  let establishedReferences: ExternalReference[] = [];
 
   try {
     if (input.intent.type !== "settle-operational-outcome") {
       throw new Error("expected an Operational Outcome settlement Intent");
     }
 
-    const durable = await readOperationalOutcomeSettlement({
+    let durable = await readOperationalOutcomeSettlement({
       database: dependencies.database,
       workspaceId: input.workspace.workspaceId,
       meetingId: input.meetingId,
       intentId: input.intent.id
     });
+    if (durable) establishedReferences = settlementDurableExternalReferences(durable);
+    if (durable?.plan.canonicalKnowledgePatch) {
+      const knowledgeReferences = await settleKnowledgeStage(
+        dependencies,
+        input,
+        durable,
+        true
+      );
+      establishedReferences = uniqueExternalReferences([
+        ...establishedReferences,
+        ...knowledgeReferences
+      ]);
+      durable = await readOperationalOutcomeSettlement({
+        database: dependencies.database,
+        workspaceId: input.workspace.workspaceId,
+        meetingId: input.meetingId,
+        intentId: input.intent.id
+      });
+    }
     const state = await canonicalMeetingStateForSettlement(dependencies, input);
     const canonical = settlementFromCanonicalState(state, input.intent);
 
@@ -1104,7 +1504,11 @@ async function recoverOperationalOutcomeSettlement(
       );
     }
 
-    if (durable.plan.intentId !== expectedPlan.intentId) {
+    if (
+      durable.plan.intentId !== expectedPlan.intentId ||
+      JSON.stringify(durable.plan.canonicalKnowledgePatch) !==
+        JSON.stringify(expectedPlan.canonicalKnowledgePatch)
+    ) {
       throw new IndeterminateProviderMutationError(
         "Luma found a conflicting Operational Outcome settlement identity"
       );
@@ -1126,6 +1530,10 @@ async function recoverOperationalOutcomeSettlement(
         "Operational Outcome settlement disappeared during recovery"
       );
     }
+    establishedReferences = uniqueExternalReferences([
+      ...establishedReferences,
+      ...settlementDurableExternalReferences(afterWork)
+    ]);
 
     if (afterWork.outcome.status === "executing") {
       const executingKnownNotApplied =
@@ -1182,6 +1590,10 @@ async function recoverOperationalOutcomeSettlement(
         "Operational Outcome settlement disappeared after recovery"
       );
     }
+    establishedReferences = uniqueExternalReferences([
+      ...establishedReferences,
+      ...settlementDurableExternalReferences(afterOutput)
+    ]);
 
     const finalizedAfterRecovery = finalizedOperationalOutcomeSettlementObservation(
       input,
@@ -1270,7 +1682,15 @@ async function recoverOperationalOutcomeSettlement(
       );
     }
 
-    if (input.intent.status === "requires-manual-recovery") {
+    if (
+      input.intent.status === "requires-manual-recovery" &&
+      !(
+        afterOutput.knowledge?.status === "succeeded" &&
+        afterOutput.outcome.status === "pending" &&
+        afterOutput.outcome.attempts === 0 &&
+        afterOutput.outcome.error === null
+      )
+    ) {
       return executionFailureObservation(
         input,
         new IndeterminateProviderMutationError(
@@ -1282,15 +1702,19 @@ async function recoverOperationalOutcomeSettlement(
 
     return await executeIntent(dependencies, input, idempotencyKey, now);
   } catch (error) {
+    const failure = failureWithEstablishedSettlementReferences(
+      error,
+      establishedReferences
+    );
     return executionFailureObservation(
       input,
-      error instanceof PartialOperationalOutcomeSettlementError ||
-        error instanceof IndeterminateProviderMutationError ||
-        error instanceof NonRetryableExecutionError
-        ? error
+      failure instanceof PartialOperationalOutcomeSettlementError ||
+        failure instanceof IndeterminateProviderMutationError ||
+        failure instanceof NonRetryableExecutionError
+        ? failure
         : new IndeterminateProviderMutationError(
             `Luma could not safely inspect the durable Operational Outcome recovery state: ${
-              error instanceof Error ? error.message : "unknown error"
+              failure instanceof Error ? failure.message : "unknown error"
             }`
           ),
       occurredAt
@@ -1772,6 +2196,7 @@ function finalizedOperationalOutcomeSettlementObservation(
 
   const externalReferences = uniqueExternalReferences([
     ...work.externalReferences,
+    ...(settlement.knowledge?.externalReferences ?? []),
     ...settlement.outcome.externalReferences
   ]);
 
@@ -1881,6 +2306,8 @@ function operationalOutcomeEntryForSettlement(
   currentExecutingIntentId: string
 ): OperationalOutcomeEntry | null {
   const { plan, work } = settlement;
+  if (plan.canonicalKnowledgePatch && settlement.knowledge?.status !== "succeeded")
+    return null;
 
   // The current writer is allowed to publish only its own work result. Other
   // pending settlements have not revalidated their sources at this mutation
@@ -1931,7 +2358,10 @@ function operationalOutcomeEntryForSettlement(
     ownership: plan.ownership,
     resolution: plan.resolution.outcome,
     workReferences,
-    knowledgeReferences: [],
+    knowledgeReferences:
+      settlement.knowledge?.status === "succeeded"
+        ? settlement.knowledge.externalReferences
+        : [],
     githubReferences: plan.sourceBoundImplementationReferences,
     unresolved: [
       ...(plan.resolution.outcome.type === "needs-clarification"
@@ -1949,6 +2379,9 @@ function operationalOutcomeSettlementPlan(
   return {
     version: 3,
     intentId: intent.id,
+    ...(intent.canonicalKnowledgePatch
+      ? { canonicalKnowledgePatch: structuredClone(intent.canonicalKnowledgePatch) }
+      : {}),
     binding: intent.reconciliation,
     target: settlement.target,
     candidate: settlement.review.candidate,
@@ -2073,11 +2506,16 @@ function settlementFromCanonicalState(
   }
 
   const source = review.candidate.source.source;
-  const page = source.externalReference;
+  const page =
+    source.sourceKind === "capture-synthesis"
+      ? state.captureSynthesisActionSource?.canonicalAnchorRef
+      : source.externalReference;
 
   if (
-    source.completeness !== "complete" ||
+    (source.completeness !== "complete" &&
+      !(source.sourceKind === "capture-synthesis" && source.humanActionReviewed)) ||
     source.actionItemsAvailability !== "available" ||
+    !page ||
     !isDocumentReference(page)
   ) {
     return null;
@@ -2086,7 +2524,10 @@ function settlementFromCanonicalState(
   return {
     target: {
       workspaceId: state.workspaceId,
-      providerId: source.providerId,
+      providerId: page.providerId,
+      ...(source.sourceKind === "capture-synthesis"
+        ? { synthesis: { claimId: source.claimId, claimDigest: source.claimDigest } }
+        : {}),
       page,
       sourceObjectId: source.sourceObjectId,
       sourceRevision: source.sourceRevision,
@@ -2202,6 +2643,9 @@ async function settleOperationalOutcomeWorkStage(
 
     return { externalReferences: result.externalReferences, unresolved: [] };
   } catch (error) {
+    // This owned refusal occurs only before a guarded call starts. A failed
+    // real mutation remains indeterminate even if its recovery probe is blocked.
+    const contextRefusal = isContextRefusal(error);
     const message =
       error instanceof Error
         ? error.message
@@ -2215,9 +2659,11 @@ async function settleOperationalOutcomeWorkStage(
         intentId: plan.intentId,
         stage: "work",
         executionLeaseId: input.executionLeaseId,
-        status: "requires-manual-recovery",
+        status: contextRefusal ? "unresolved" : "requires-manual-recovery",
         error: {
-          code: "work-outcome-unknown",
+          code: contextRefusal
+            ? "organizational-context-unavailable"
+            : "work-outcome-unknown",
           message
         },
         now: new Date()
@@ -2225,7 +2671,9 @@ async function settleOperationalOutcomeWorkStage(
     } catch (terminalizationError) {
       throw new PartialOperationalOutcomeSettlementError(
         knownWorkReferences,
-        "work-outcome-terminalization-unknown",
+        contextRefusal
+          ? "work-no-write-terminalization-unknown"
+          : "work-outcome-terminalization-unknown",
         `${message} Luma could not durably mark the work-stage boundary: ${
           terminalizationError instanceof Error
             ? terminalizationError.message
@@ -2234,6 +2682,8 @@ async function settleOperationalOutcomeWorkStage(
         "manual"
       );
     }
+
+    if (contextRefusal) throw error;
 
     throw new PartialOperationalOutcomeSettlementError(
       knownWorkReferences,
@@ -2372,6 +2822,7 @@ async function executeOperationalOutcomeWorkStage(
         assertUpdateWorkProvider(updateIntent, provider);
         await assertCurrentWorkItemVersion(updateIntent, provider);
       } catch (error) {
+        if (isContextRefusal(error)) throw error;
         return {
           externalReferences: [canonicalReference],
           unresolved: {
@@ -2635,6 +3086,19 @@ async function settleOperationalOutcomeWriteStage(
       throw error;
     }
 
+    if (isContextRefusal(error)) {
+      // providerWriteStarted is set before invoking the provider facade, whose
+      // guard can still refuse dispatch. The owned error proves upsert itself
+      // never ran; retain settled work and release only this pending page stage.
+      return resetOperationalOutcomePrewriteFailure(
+        dependencies,
+        input,
+        plan,
+        externalReferences,
+        error
+      );
+    }
+
     if (!providerWriteStarted && writerInput === null) {
       return resetOperationalOutcomePrewriteFailure(
         dependencies,
@@ -2849,6 +3313,9 @@ async function resetOperationalOutcomePrewriteFailure(
       ? error.message
       : "Luma could not prepare the Operational Outcome provider write";
   const providerConfirmedCode = "operational-outcome-prewrite-provider-not-started";
+  const failureCode = isContextRefusal(error)
+    ? "organizational-context-unavailable"
+    : "operational-outcome-prewrite-failed";
 
   try {
     await recordOperationalOutcomeKnownNotAppliedWithReadback({
@@ -2880,7 +3347,7 @@ async function resetOperationalOutcomePrewriteFailure(
       executionLeaseId: input.executionLeaseId,
       target: plan.target,
       error: {
-        code: "operational-outcome-prewrite-failed",
+        code: failureCode,
         message
       },
       now: new Date()
@@ -2913,8 +3380,8 @@ async function resetOperationalOutcomePrewriteFailure(
 
   throw new PartialOperationalOutcomeSettlementError(
     externalReferences,
-    "operational-outcome-prewrite-failed",
-    `${message} No provider write was attempted; explicit recovery can safely resume the settlement.`
+    failureCode,
+    `${message} No page write was attempted; explicit recovery can safely resume the pending outcome.`
   );
 }
 
@@ -3295,6 +3762,7 @@ function settlementDurableExternalReferences(
 ): ExternalReference[] {
   return uniqueExternalReferences([
     ...settlement.work.externalReferences,
+    ...(settlement.knowledge?.externalReferences ?? []),
     ...settlement.outcome.externalReferences
   ]);
 }
@@ -3378,7 +3846,8 @@ async function providerCreateWithPositiveRecovery(
 
   try {
     existing = await recover();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     // A failed marker probe cannot prove an earlier create did not succeed.
     // Do not begin another mutation from an unknowable idempotency boundary.
     throw new IndeterminateProviderMutationError(indeterminateMessage);
@@ -3390,7 +3859,8 @@ async function providerCreateWithPositiveRecovery(
 
   try {
     return await mutate();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     // A response failure does not prove that the provider did not apply the
     // mutation. A positive marker match is success; every other result is
     // deliberately indeterminate and cannot be automatically retried.
@@ -3410,7 +3880,8 @@ async function providerMutationOutcome(
 ): Promise<ExternalReference | null> {
   try {
     return await mutate();
-  } catch {
+  } catch (error) {
+    if (isContextRefusal(error)) throw error;
     throw new IndeterminateProviderMutationError(indeterminateMessage);
   }
 }
@@ -3464,6 +3935,8 @@ async function recoverCreatedReferences(
 ): Promise<ExternalReference[] | null> {
   try {
     switch (input.intent.type) {
+      case "publish-meeting-synthesis":
+        return null;
       case "settle-operational-outcome":
         return null;
       case "record-meeting":
@@ -3819,6 +4292,12 @@ async function claimCanonicalExecution(
             `Execution receipt ${idempotencyKey} no longer owns its active reservation`
           );
         }
+        await releaseSynthesisActionFence({
+          database: transaction,
+          workspaceId: recovered.observation.workspaceId,
+          meetingId: recovered.observation.meetingId,
+          intentId: recovered.observation.intentId
+        });
         await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
           database: transaction,
           workspaceId: recovered.observation.workspaceId,
@@ -3980,6 +4459,7 @@ type KnownNotAppliedOperationalOutcome = {
     | "operational-outcome-not-written"
     | "operational-outcome-not-writable"
     | "operational-outcome-prewrite-failed"
+    | "organizational-context-unavailable"
     | "operational-outcome-prewrite-abandoned";
   message: string;
   disposition: "resumable" | "failed";
@@ -4050,6 +4530,7 @@ function knownNotAppliedPendingOperationalOutcome(
         disposition: "failed"
       };
     case "operational-outcome-prewrite-failed":
+    case "organizational-context-unavailable":
       return {
         outcomeErrorCode: stage.error.code,
         message: stage.error.message,
@@ -4374,6 +4855,12 @@ async function completeExecution(
       );
     }
 
+    await releaseSynthesisActionFence({
+      database: transaction,
+      workspaceId: result.observation.workspaceId,
+      meetingId: result.observation.meetingId,
+      intentId: result.observation.intentId
+    });
     await dependencies.operationalOutcomeSourceExecutionFence?.releaseAfterReceipt({
       database: transaction,
       workspaceId: result.observation.workspaceId,
@@ -4381,24 +4868,4 @@ async function completeExecution(
       intentId: result.observation.intentId
     });
   });
-}
-
-async function withExecutionLock<T>(
-  locks: Set<string>,
-  key: string,
-  operation: () => Promise<T>
-): Promise<T> {
-  if (locks.has(key)) {
-    throw new Error(
-      "Follow-up Intent already has an execution in progress; wait for it to finish before retrying."
-    );
-  }
-
-  locks.add(key);
-
-  try {
-    return await operation();
-  } finally {
-    locks.delete(key);
-  }
 }

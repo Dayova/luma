@@ -1,3 +1,47 @@
+import { projectCurrentSynthesisActions } from "./synthesis-action-state.js";
+import { withCaptureSynthesis } from "./capture-synthesis.js";
+import type { CaptureSynthesisConfiguration } from "./meeting-capture-access.js";
+import { createAutomaticDecisionIntelligence } from "../decision-intelligence/automatic-decisions.js";
+import {
+  createDecisionIntelligence,
+  type DecisionIntelligenceConfiguration
+} from "../decision-intelligence/decision-intelligence.js";
+import {
+  createMeetingDecisionEvidenceSource,
+  type MeetingDecisionSourceAudience
+} from "../decision-intelligence/meeting-evidence-source.js";
+import { bindDecisionModule } from "../decision-intelligence/module-binding.js";
+import {
+  createStructuredWorkIntelligence,
+  type StructuredWorkConfiguration
+} from "../structured-work/structured-work.js";
+import { bindStructuredWorkModule } from "../structured-work/module-binding.js";
+import {
+  scopeMeetingIntelligence,
+  type ScopedMeetingIntelligence
+} from "../decision-intelligence/scoped-meeting-intelligence.js";
+import {
+  prepareImportedSourceAnalysisReceipt,
+  readImportedSourceAnalysisReceipt,
+  sameImportedSourceRevision,
+  retainImportedSourceAnalysisReceipt,
+  ImportedSourceUnavailableError,
+  type ImportedSourceAnalysisConfiguration,
+  type ImportedSourceAnalysisReceipt
+} from "./imported-source-analysis.js";
+import {
+  createMeetingContextGuard,
+  MeetingContextUnavailableError,
+  contextItems,
+  contextReceiptIds,
+  type MeetingContextConfiguration
+} from "./context-guard.js";
+import { createHash } from "node:crypto";
+import { prepareMeetingAnalysisContext } from "./retrieval-context.js";
+import type {
+  ContextAudience,
+  OrganizationalContext
+} from "../organizational-context/interface.js";
 import { answerScopedMeetingQuestion } from "./meeting-question.js";
 import type {
   ActionItemReconciliationMatchSignal,
@@ -17,6 +61,7 @@ import type {
   ExternalReference,
   FollowUpIntent,
   HumanJudgment,
+  ActionItemCandidate,
   ImportedActionItemCandidate,
   ImportedActionItemSourceBlock,
   ImportedMeetingSource,
@@ -93,16 +138,25 @@ import {
 import type { LumaDatabase } from "../persistence/db.js";
 
 const ANALYSIS_VERSION = "meeting-analysis-v1";
-const PROMPT_VERSION = "meeting-intelligence-v2";
+const PROMPT_VERSION = "meeting-intelligence-v3";
 const CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION = "speaker-attribution-v1";
 
 export type CreateMeetingIntelligenceInput = {
   database: LumaDatabase;
   reasoningModel: ReasoningModel;
+  structuredWork?: StructuredWorkConfiguration;
+  decisionIntelligence?: DecisionIntelligenceConfiguration & {
+    meetingEvidenceSource?: DecisionIntelligenceConfiguration["evidenceSource"];
+    meetingSourceAudience?: MeetingDecisionSourceAudience;
+  };
+  captureSynthesis?: CaptureSynthesisConfiguration;
   /** Read-only catalogs; Meeting Intelligence cannot access WorkProvider writers. */
   workCatalogs?: readonly WorkCatalog[];
   /** Required for provider-backed source imports; normal observations need none. */
   importedSourceObservationVerifier?: ImportedSourceObservationVerifier;
+  importedSourceAnalysis?: ImportedSourceAnalysisConfiguration;
+  organizationalContext?: OrganizationalContext;
+  contextAudience?: (workspaceId: WorkspaceId) => Promise<ContextAudience | null>;
   now?: () => Date;
 };
 
@@ -167,7 +221,7 @@ type ReconciliationFlight = Promise<MeetingState>;
 type ReconciliationTrigger = ActionItemReconciliationReview["trigger"];
 
 type ReconciliationCandidateRequest = {
-  candidate: ImportedActionItemCandidate;
+  candidate: ActionItemCandidate;
   trigger: ReconciliationTrigger;
 };
 
@@ -194,28 +248,302 @@ function workCatalogsByProvider(
 }
 
 export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput & {
+    decisionIntelligence: DecisionIntelligenceConfiguration;
+  }
+): ScopedMeetingIntelligence;
+export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput & { structuredWork: StructuredWorkConfiguration }
+): ScopedMeetingIntelligence;
+export function createMeetingIntelligence(
   input: CreateMeetingIntelligenceInput
-): MeetingIntelligence {
+): MeetingIntelligence;
+export function createMeetingIntelligence(
+  input: CreateMeetingIntelligenceInput
+): ScopedMeetingIntelligence {
   const now = input.now ?? (() => new Date());
   const workCatalogs = workCatalogsByProvider(input.workCatalogs ?? []);
   const importedSourceObservationVerifier =
     input.importedSourceObservationVerifier ?? rejectUnverifiedImportedSource;
   const reconciliationFlights = new Map<string, ReconciliationFlight>();
-
-  return {
-    observe: (observeInput) =>
-      observeMeeting(
-        input.database,
-        input.reasoningModel,
-        workCatalogs,
-        importedSourceObservationVerifier,
-        reconciliationFlights,
-        now,
-        observeInput
-      ),
-    query: (queryInput) => queryMeeting(input.database, queryInput),
-    conclude: (concludeInput) => concludeMeeting(input.database, now, concludeInput)
+  const importedObservationFlights = new Map<string, Promise<MeetingUpdate>>();
+  let requireSynthesisCurrent = (state: MeetingState): Promise<void> =>
+    state.captureSynthesisActionSource
+      ? Promise.reject(new Error("Capture synthesis source is unavailable"))
+      : Promise.resolve();
+  const contextConfiguration: MeetingContextConfiguration = {
+    database: input.database,
+    requireSynthesisCurrent: (state) => requireSynthesisCurrent(state),
+    ...(input.importedSourceAnalysis
+      ? { importedSourceAnalysis: input.importedSourceAnalysis }
+      : {}),
+    ...(input.organizationalContext
+      ? { organizationalContext: input.organizationalContext }
+      : {}),
+    ...(input.contextAudience ? { contextAudience: input.contextAudience } : {})
   };
+  const contextGuard = createMeetingContextGuard(contextConfiguration);
+
+  const base: MeetingIntelligence = {
+    observe: (observeInput) => {
+      const bound = structuredClone(observeInput);
+      const run = () =>
+        observeMeeting(
+          input.database,
+          input.reasoningModel,
+          workCatalogs,
+          importedSourceObservationVerifier,
+          reconciliationFlights,
+          contextConfiguration,
+          contextGuard,
+          requireSynthesisCurrent,
+          now,
+          bound
+        );
+      // One process owns the store. Serialize source deliveries for a Meeting so
+      // an identical webhook cannot advance automatic reconciliation underneath
+      // its own paid analysis. Human Judgments remain concurrent and authoritative.
+      if (
+        !contextConfiguration.importedSourceAnalysis ||
+        !Array.isArray(bound.observations) ||
+        !bound.observations.length ||
+        bound.observations.some(
+          (observation) => observation.type !== "meeting-imported-from-source"
+        )
+      )
+        return run();
+      const key = JSON.stringify([
+        bound.workspace.workspaceId,
+        bound.observations[0]!.meetingId
+      ]);
+      const prior = importedObservationFlights.get(key);
+      const next = prior ? prior.catch(() => undefined).then(run) : run();
+      importedObservationFlights.set(key, next);
+      void next
+        .finally(() => {
+          if (importedObservationFlights.get(key) === next)
+            importedObservationFlights.delete(key);
+        })
+        .catch(() => undefined);
+      return next;
+    },
+    query: (queryInput) =>
+      freshContextOutput(
+        (guard) => queryMeeting(input.database, guard, queryInput),
+        (result) => result.receiptIds,
+        contextConfiguration,
+        contextGuard,
+        queryInput
+      ).then((result) => result.value),
+    conclude: (concludeInput) =>
+      freshContextOutput(
+        (guard) => concludeMeeting(input.database, guard, now, concludeInput),
+        (result) => result.provenance.contextReceiptIds ?? [],
+        contextConfiguration,
+        contextGuard,
+        concludeInput
+      )
+  };
+  const meeting = withCaptureSynthesis({
+    base,
+    database: input.database,
+    reasoningModel: input.reasoningModel,
+    ...(input.captureSynthesis ? { configuration: input.captureSynthesis } : {}),
+    workProviderId:
+      workCatalogs.size === 1 ? [...workCatalogs.keys()][0]! : "unconfigured",
+    actions: {
+      bindCurrent: (verify) => {
+        requireSynthesisCurrent = verify;
+      },
+      async accept({ synthesis, candidates, requireCurrent }) {
+        await requireCurrent();
+        const accepted = await input.database.transaction(async (transaction) => {
+          const state = await loadMeetingStateForMutation(
+            transaction,
+            synthesis.workspaceId,
+            synthesis.logicalMeetingId
+          );
+          const head = await transaction.query<{ revision: number }>(
+            "SELECT revision FROM meeting_capture_synthesis WHERE workspace_id=$1 AND meeting_id=$2",
+            [synthesis.workspaceId, synthesis.logicalMeetingId]
+          );
+          if (head.rows[0]?.revision !== synthesis.revision)
+            throw new Error("Synthesis advanced before Action Item admission");
+          if (
+            state.captureSynthesisActionSource?.revision === synthesis.revision &&
+            state.captureSynthesisActionSource.sourceSetDigest ===
+              synthesis.sourceSetDigest
+          )
+            return state;
+          for (const candidate of candidates)
+            for (const evidence of candidate.evidence)
+              await insertEvidence(
+                transaction,
+                state.workspaceId,
+                state.meetingId,
+                evidence,
+                now
+              );
+          const next = advanceRevision(
+            {
+              ...state,
+              lifecycle: "ended",
+              title: state.title || "Captured Meeting",
+              importedActionItemCandidates: appendCandidatesIfNew(
+                state.importedActionItemCandidates,
+                candidates
+              ),
+              currentImportedActionItemCandidateIds: [
+                ...state.currentImportedActionItemCandidateIds.filter((id) =>
+                  state.importedActionItemCandidates.some(
+                    (candidate) =>
+                      candidate.id === id &&
+                      candidate.source.source.sourceKind !== "capture-synthesis"
+                  )
+                ),
+                ...candidates.map((candidate) => candidate.id)
+              ],
+              captureSynthesisActionSource: {
+                revision: synthesis.revision,
+                sourceSetDigest: synthesis.sourceSetDigest,
+                canonicalAnchorRef: synthesis.canonicalAnchorRef
+              }
+            },
+            synthesis.producedAt
+          );
+          await saveMeetingState(
+            transaction,
+            next,
+            "capture-synthesis-actions-admitted",
+            now
+          );
+          return next;
+        });
+        await requireCurrent();
+        const requests = candidates
+          .filter((candidate) =>
+            candidateNeedsReconciliation(accepted, candidate, workCatalogs, now())
+          )
+          .map((candidate): ReconciliationCandidateRequest => ({
+            candidate,
+            trigger: "initial-source-import"
+          }));
+        await reconcileAndPersistActionItemCandidates(
+          input.database,
+          accepted,
+          requests,
+          synthesis.workspaceId,
+          workCatalogs,
+          reconciliationFlights,
+          now,
+          requireCurrent
+        );
+        await requireCurrent();
+      }
+    },
+    now
+  });
+  const structuredDependencies = input.structuredWork
+    ? { ...input.structuredWork, database: input.database }
+    : undefined;
+  const structured = structuredDependencies
+    ? createStructuredWorkIntelligence(structuredDependencies)
+    : undefined;
+  if (!input.decisionIntelligence) {
+    const facade = scopeMeetingIntelligence(meeting, undefined, structured);
+    if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
+    return facade;
+  }
+  const configuration = input.decisionIntelligence;
+  const meetingSource =
+    configuration.meetingEvidenceSource ??
+    (configuration.meetingSourceAudience
+      ? createMeetingDecisionEvidenceSource({
+          database: input.database,
+          audience: configuration.meetingSourceAudience,
+          requireContextCurrent: (state) =>
+            contextGuard.requireReceiptsCurrent({
+              workspaceId: state.workspaceId,
+              meetingId: state.meetingId,
+              receiptIds: contextReceiptIds(state)
+            }),
+          now
+        })
+      : undefined);
+  const dependencies = {
+    ...configuration,
+    database: input.database,
+    now,
+    evidenceSource: {
+      capture: (request: Parameters<typeof configuration.evidenceSource.capture>[0]) => {
+        if (request.subject.type !== "meeting")
+          return configuration.evidenceSource.capture(request);
+        if (!meetingSource)
+          throw new Error(
+            "Original and current Meeting source audience is not configured for Decision recording"
+          );
+        return meetingSource.capture(request);
+      },
+      requireCurrent: (
+        source: Parameters<typeof configuration.evidenceSource.requireCurrent>[0]
+      ) => {
+        if (source.subject.type !== "meeting")
+          return configuration.evidenceSource.requireCurrent(source);
+        if (!meetingSource)
+          throw new Error(
+            "Original and current Meeting source audience is not configured for Decision recording"
+          );
+        return meetingSource.requireCurrent(source);
+      }
+    }
+  };
+  const decision = createDecisionIntelligence(dependencies);
+  const facade = scopeMeetingIntelligence(
+    meeting,
+    decision,
+    structured,
+    configuration.automatic
+      ? createAutomaticDecisionIntelligence(dependencies, decision)
+      : undefined
+  );
+  bindDecisionModule(facade, dependencies);
+  if (structuredDependencies) bindStructuredWorkModule(facade, structuredDependencies);
+  return facade;
+}
+
+async function freshContextOutput<T>(
+  operation: (guard: ReturnType<typeof createMeetingContextGuard>) => Promise<T>,
+  receiptIds: (result: T) => string[],
+  config: MeetingContextConfiguration,
+  guard: ReturnType<typeof createMeetingContextGuard>,
+  scope: { workspaceId: string; meetingId: string }
+): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await operation(guard);
+      await guard.requireReceiptsCurrent({ ...scope, receiptIds: receiptIds(result) });
+      return result;
+    } catch (error) {
+      if (!(error instanceof MeetingContextUnavailableError)) throw error;
+    }
+  }
+  // Continued source churn cannot deadlock unrelated Meeting work. This guard
+  // withholds all external-dependent items and never substitutes cached text.
+  return operation(
+    createMeetingContextGuard({
+      database: config.database,
+      ...(config.importedSourceAnalysis
+        ? {
+            importedSourceAnalysis: {
+              audience: () => Promise.resolve(null),
+              access: {
+                requireCurrent: () => Promise.reject(new MeetingContextUnavailableError())
+              }
+            }
+          }
+        : {})
+    })
+  );
 }
 
 async function observeMeeting(
@@ -224,6 +552,9 @@ async function observeMeeting(
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   importedSourceObservationVerifier: ImportedSourceObservationVerifier,
   reconciliationFlights: Map<string, ReconciliationFlight>,
+  contextConfiguration: MeetingContextConfiguration,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
+  requireSynthesisCurrent: (state: MeetingState) => Promise<void>,
   now: () => Date,
   input: ObserveMeeting
 ): Promise<MeetingUpdate> {
@@ -246,6 +577,26 @@ async function observeMeeting(
     requestedWorkspace,
     importedSourceObservationVerifier
   );
+
+  const sourceAnalysisReceipts = new Map<string, ImportedSourceAnalysisReceipt>();
+  if (contextConfiguration.importedSourceAnalysis) {
+    for (const observation of input.observations.slice(0, 20)) {
+      if (
+        observation.type !== "meeting-imported-from-source" ||
+        sourceVerificationErrors.has(observation)
+      )
+        continue;
+      try {
+        const receipt = await prepareImportedSourceAnalysisReceipt(
+          contextConfiguration.importedSourceAnalysis,
+          observation
+        );
+        sourceAnalysisReceipts.set(observation.observationId, receipt);
+      } catch {
+        /* Retain accepted Evidence without treating a missing grant as permission. */
+      }
+    }
+  }
 
   const acceptance = await database.transaction(async (transaction) => {
     // Keep the configuration mutex until either a validated Observation claims
@@ -406,6 +757,22 @@ async function observeMeeting(
 
       acceptedObservationIds.push(observation.observationId);
       state = applied.state;
+      if (
+        observation.type === "meeting-imported-from-source" &&
+        contextConfiguration.importedSourceAnalysis
+      ) {
+        const receipt = sourceAnalysisReceipts.get(observation.observationId);
+        if (receipt) await retainImportedSourceAnalysisReceipt(transaction, receipt);
+        state = {
+          ...state,
+          importedSourceAnalysisReceiptIds: [
+            ...new Set([
+              ...(state.importedSourceAnalysisReceiptIds ?? []),
+              ...(receipt ? [receipt.id] : [])
+            ])
+          ]
+        };
+      }
       evidenceForAnalysis.push(...applied.evidenceForAnalysis);
       events.push(...applied.events);
     }
@@ -451,14 +818,166 @@ async function observeMeeting(
     events,
     evidenceForAnalysis
   } = acceptance;
+  const importedAnalysisObservations: MeetingImportedFromSource[] = [];
+  let sourceAdmissionUnavailable = false;
+  if (contextConfiguration.importedSourceAnalysis) {
+    try {
+      const admitted = await database.transaction(async (transaction) => {
+        let latest = await loadMeetingStateForMutation(
+          transaction,
+          workspaceId,
+          meetingId
+        );
+        let changed = false;
+        for (const observation of input.observations) {
+          if (
+            observation.type !== "meeting-imported-from-source" ||
+            ![...acceptedObservationIds, ...duplicateObservationIds].includes(
+              observation.observationId
+            )
+          )
+            continue;
+          const receipt = sourceAnalysisReceipts.get(observation.observationId);
+          if (!receipt) continue;
+          const attempts = await transaction.query(
+            `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+            [workspaceId, meetingId, observation.observationId]
+          );
+          if (attempts.rows.length) continue;
+          const priorReceipts = await Promise.all(
+            (latest.importedSourceAnalysisReceiptIds ?? []).map((id) =>
+              readImportedSourceAnalysisReceipt(transaction, workspaceId, meetingId, id)
+            )
+          );
+          const priorGrant = priorReceipts.find((item) =>
+            sameImportedSourceRevision(item.source, receipt.source)
+          );
+          if (priorGrant && priorGrant.id !== receipt.id) continue;
+          if (!priorGrant) {
+            await retainImportedSourceAnalysisReceipt(transaction, receipt);
+            latest = {
+              ...latest,
+              importedSourceAnalysisReceiptIds: [
+                ...(latest.importedSourceAnalysisReceiptIds ?? []),
+                receipt.id
+              ]
+            };
+            changed = true;
+          }
+          if (
+            observation.sourceSections.some(
+              (section) => section.section === "transcript" && section.excerpt.trim()
+            )
+          )
+            importedAnalysisObservations.push(observation);
+        }
+        if (changed) {
+          latest = advanceRevision(latest, now().toISOString());
+          await saveMeetingState(
+            transaction,
+            latest,
+            "imported-source-analysis-admitted",
+            now
+          );
+        }
+        return latest;
+      });
+      state = admitted;
+      evidenceForAnalysis.push(
+        ...importedAnalysisObservations.flatMap((observation) =>
+          observation.sourceSections.map((section) =>
+            importedSourceSectionEvidence(observation.source, section)
+          )
+        )
+      );
+    } catch (error) {
+      if (!(error instanceof ImportedSourceUnavailableError)) throw error;
+      // Acceptance already committed the original Evidence. A later receipt
+      // refusal rolls admission back, with no model dispatch or paid retry claim.
+      importedAnalysisObservations.length = 0;
+      sourceAdmissionUnavailable = true;
+    }
+  }
   const interventions: MeetingIntervention[] = [];
-  let analysisStatus: MeetingUpdate["analysisStatus"] = "not-needed";
+  const deniedSourceAnalysis =
+    sourceAdmissionUnavailable ||
+    (Boolean(contextConfiguration.importedSourceAnalysis) &&
+      input.observations.some(
+        (observation) =>
+          observation.type === "meeting-imported-from-source" &&
+          acceptedObservationIds.includes(observation.observationId) &&
+          !sourceAnalysisReceipts.has(observation.observationId) &&
+          observation.sourceSections.some(
+            (section) => section.section === "transcript" && section.excerpt.trim()
+          )
+      ));
+  let analysisStatus: MeetingUpdate["analysisStatus"] = deniedSourceAnalysis
+    ? "deferred"
+    : "not-needed";
+  if (deniedSourceAnalysis)
+    errors.push({
+      code: "context-unavailable",
+      retryable: true,
+      partialResultAvailable: true
+    });
 
-  if (evidenceForAnalysis.length > 0) {
+  if (evidenceForAnalysis.length > 0 && !sourceAdmissionUnavailable) {
+    let claimedImportedAnalysis = false;
+    let modelDispatched = false;
     try {
       // A model result is valid only for the exact canonical state it saw. It
       // must never reapply over a later utterance revision or Human Judgment.
       const analysisBaseRevision = state.revision;
+      const analysisContext = await prepareMeetingAnalysisContext(
+        contextConfiguration,
+        contextGuard,
+        state,
+        evidenceForAnalysis
+      );
+      if (importedAnalysisObservations.length)
+        analysisContext.context.push(
+          JSON.stringify({
+            type: "imported-meeting-captures",
+            sources: importedAnalysisObservations.map((observation) => ({
+              source: observation.source,
+              sections: observation.sourceSections.map((section) => ({
+                section: section.section,
+                evidenceId: importedSourceSectionEvidence(observation.source, section)
+                  .evidenceId
+              }))
+            })),
+            interpretation:
+              "Transcript Evidence preserves original speech. Summaries and notes are derived provider material, not exact speech or certain speaker identity. Preserve contradictory claims and German/English modality. A person's name in the transcript does not resolve who spoke or establish ownership. Human Judgment outranks source/model inference. This analysis neither edits provider captures nor authorizes external writes."
+          })
+        );
+      analysisContext.receiptIds = [
+        ...new Set([
+          ...analysisContext.receiptIds,
+          ...importedAnalysisObservations.flatMap((observation) => {
+            const receipt = sourceAnalysisReceipts.get(observation.observationId);
+            return receipt ? [receipt.id] : [];
+          })
+        ])
+      ];
+      if (analysisContext.unavailable)
+        errors.push({
+          code: "context-unavailable",
+          retryable: true,
+          partialResultAvailable: true
+        });
+      await contextGuard.requireReceiptsCurrent({
+        workspaceId,
+        meetingId,
+        receiptIds: analysisContext.receiptIds
+      });
+      claimedImportedAnalysis = await claimImportedAnalysisAttempts(
+        database,
+        state,
+        importedAnalysisObservations,
+        sourceAnalysisReceipts
+      );
+      if (!claimedImportedAnalysis) throw new MeetingContextUnavailableError();
+      modelDispatched = true;
       const analysis =
         await reasoningModel.generateStructured<MeetingAnalysisProposalBatch>({
           workspaceId,
@@ -466,8 +985,8 @@ async function observeMeeting(
           purpose: "understand-discussion",
           promptVersion: PROMPT_VERSION,
           schemaName: "MeetingAnalysisProposalBatch",
-          evidence: evidenceForAnalysis,
-          context: [],
+          evidence: analysisContext.evidence,
+          context: analysisContext.context,
           input: {
             revision: state.revision,
             timezone: workspace.timezone,
@@ -479,19 +998,26 @@ async function observeMeeting(
       // its exact canonical base revision is still current, so a concurrently
       // accepted receipt, Human Judgment, or source revision cannot be
       // overwritten by stale model output.
+      await contextGuard.requireReceiptsCurrent({
+        workspaceId,
+        meetingId,
+        receiptIds: analysisContext.receiptIds
+      });
       const persistedAnalysis = await persistRebasedAnalysis(
         database,
         workspaceId,
         meetingId,
-        evidenceForAnalysis,
+        analysisContext.evidence,
         analysis,
+        analysisContext.receiptIds,
+        analysisContext.complete,
         analysisBaseRevision,
         now
       );
       state = persistedAnalysis.state;
 
       if (persistedAnalysis.applied) {
-        interventions.push(...deriveInterventions(state));
+        interventions.push(...deriveInterventions(await contextGuard.project(state)));
         analysisStatus = "completed";
       } else {
         // A newer observation has already changed canonical state. Discard the
@@ -500,8 +1026,25 @@ async function observeMeeting(
         analysisStatus = "deferred";
       }
     } catch (error: unknown) {
+      if (
+        claimedImportedAnalysis &&
+        (!modelDispatched ||
+          (error instanceof AiServiceError && error.requestDispatched === false))
+      ) {
+        for (const observation of importedAnalysisObservations)
+          await database.query(
+            `DELETE FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+            [workspaceId, meetingId, observation.observationId]
+          );
+      }
       analysisStatus = "deferred";
-      if (error instanceof AiServiceError) {
+      if (error instanceof MeetingContextUnavailableError) {
+        errors.push({
+          code: "context-unavailable",
+          retryable: true,
+          partialResultAvailable: true
+        });
+      } else if (error instanceof AiServiceError) {
         errors.push({
           code: `analysis-${error.code}`,
           retryable: ["rate-limited", "timeout", "unavailable"].includes(error.code),
@@ -542,7 +1085,8 @@ async function observeMeeting(
       workspaceId,
       workCatalogs,
       reconciliationFlights,
-      now
+      now,
+      () => requireSynthesisCurrent(state)
     );
   }
 
@@ -557,6 +1101,41 @@ async function observeMeeting(
     events,
     errors
   };
+}
+
+async function claimImportedAnalysisAttempts(
+  database: LumaDatabase,
+  state: MeetingState,
+  observations: MeetingImportedFromSource[],
+  receipts: Map<string, ImportedSourceAnalysisReceipt>
+): Promise<boolean> {
+  if (!observations.length) return true;
+  return database.transaction(async (transaction) => {
+    const latest = await loadMeetingStateForMutation(
+      transaction,
+      state.workspaceId,
+      state.meetingId
+    );
+    if (latest.revision !== state.revision) return false;
+    for (const observation of observations) {
+      const existing = await transaction.query(
+        `SELECT 1 FROM meeting_imported_source_analysis_attempts WHERE workspace_id=$1 AND meeting_id=$2 AND observation_id=$3`,
+        [state.workspaceId, state.meetingId, observation.observationId]
+      );
+      if (existing.rows.length) return false;
+    }
+    for (const observation of observations)
+      await transaction.query(
+        `INSERT INTO meeting_imported_source_analysis_attempts (workspace_id,meeting_id,observation_id,receipt_id) VALUES ($1,$2,$3,$4)`,
+        [
+          state.workspaceId,
+          state.meetingId,
+          observation.observationId,
+          receipts.get(observation.observationId)!.id
+        ]
+      );
+    return true;
+  });
 }
 
 const RECONCILIATION_POLICY_VERSION = "v1";
@@ -691,7 +1270,7 @@ function candidatesNeedingReconciliationForObservations(
 
 function candidateNeedsReconciliation(
   state: MeetingState,
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   currentTime: Date
 ): boolean {
@@ -803,13 +1382,13 @@ function latestReconciliationReviewForCandidate(
   );
 }
 
-function actionItemOwnershipClaimId(candidate: ImportedActionItemCandidate): string {
+function actionItemOwnershipClaimId(candidate: ActionItemCandidate): string {
   return `attribution:ownership:${opaqueIdentifierSegment(candidate.lineageKey)}:${opaqueIdentifierSegment(JSON.stringify(candidate.sourceOwner))}`;
 }
 
 function acceptedOwnershipResolutionsForCandidate(
   resolutions: ActionItemOwnershipHumanResolution[],
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): ActionItemOwnershipHumanResolution | null {
   const claimId = actionItemOwnershipClaimId(candidate);
 
@@ -829,7 +1408,7 @@ function acceptedOwnershipResolutionsForCandidate(
 }
 
 function effectiveActionItemOwnershipForCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   resolution: ActionItemOwnershipHumanResolution | null
 ): ActionItemOwnershipAttribution {
   return resolution?.ownership ?? candidate.ownership;
@@ -853,7 +1432,8 @@ async function reconcileAndPersistActionItemCandidates(
   workspaceId: WorkspaceId,
   workCatalogs: ReadonlyMap<string, WorkCatalog>,
   flights: Map<string, ReconciliationFlight>,
-  now: () => Date
+  now: () => Date,
+  requireCurrent?: () => Promise<void>
 ): Promise<MeetingState> {
   const flightKey = [
     acceptedState.workspaceId,
@@ -867,6 +1447,20 @@ async function reconcileAndPersistActionItemCandidates(
   }
 
   const flight = (async () => {
+    await requireCurrent?.();
+    const guardedCatalogs = requireCurrent
+      ? new Map(
+          [...workCatalogs].map(([id, catalog]) => {
+            const guarded: WorkCatalog = {
+              ...catalog,
+              searchWorkItems: (query) => catalog.searchWorkItems(query),
+              getWorkItem: (key) => catalog.getWorkItem(key)
+            };
+            reconciliationSourceProofs.set(guarded, requireCurrent);
+            return [id, guarded];
+          })
+        )
+      : workCatalogs;
     const reviews = await reconcileImportedActionItemCandidates(
       requests,
       acceptedState.actionItemReconciliationReviews,
@@ -874,10 +1468,18 @@ async function reconcileAndPersistActionItemCandidates(
       acceptedState.actionItemOwnershipHumanResolutions,
       acceptedState.actionItemReconciliationCreatedWorkMappings,
       workspaceId,
-      workCatalogs,
+      guardedCatalogs,
       now
     );
-    return persistActionItemReconciliationReviews(database, acceptedState, reviews, now);
+    await requireCurrent?.();
+    const result = await persistActionItemReconciliationReviews(
+      database,
+      acceptedState,
+      reviews,
+      now
+    );
+    await requireCurrent?.();
+    return result;
   })();
 
   flights.set(flightKey, flight);
@@ -1045,7 +1647,7 @@ async function persistActionItemReconciliationReviews(
 }
 
 async function reconcileImportedActionItemCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   existingReviews: ActionItemReconciliationReview[],
   existingResolutions: ActionItemReconciliationHumanResolution[],
   existingCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[],
@@ -1056,7 +1658,11 @@ async function reconcileImportedActionItemCandidate(
   const catalogSelection = selectWorkCatalog(candidate, workCatalogs);
 
   if (
-    candidate.source.source.completeness !== "complete" ||
+    (candidate.source.source.completeness !== "complete" &&
+      !(
+        candidate.source.source.sourceKind === "capture-synthesis" &&
+        candidate.source.source.humanActionReviewed
+      )) ||
     candidate.source.source.actionItemsAvailability !== "available"
   ) {
     return reconciliationReview(
@@ -1113,7 +1719,11 @@ async function reconcileImportedActionItemCandidate(
 
   if (
     candidate.deadline.confidence !== "exact" &&
-    candidate.deadline.confidence !== "normalized"
+    candidate.deadline.confidence !== "normalized" &&
+    !(
+      candidate.source.source.sourceKind === "capture-synthesis" &&
+      candidate.source.source.humanNoDeadline
+    )
   ) {
     return reconciliationReview(
       candidate,
@@ -1428,7 +2038,7 @@ async function reconcileImportedActionItemCandidate(
 }
 
 function selectWorkCatalog(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workCatalogs: ReadonlyMap<string, WorkCatalog>
 ): CatalogSelection {
   const explicitReference = candidate.mentionedWorkItemReferences[0];
@@ -1483,7 +2093,7 @@ function selectWorkCatalog(
 async function searchCanonicalWork(
   catalog: WorkCatalog,
   workspaceId: WorkspaceId,
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): Promise<CatalogSearchResult> {
   const queries = uniqueStrings([
     candidate.mentionedWorkItemReferences[0]?.externalId,
@@ -1494,7 +2104,7 @@ async function searchCanonicalWork(
 
   for (const query of queries) {
     try {
-      const results = await withWorkCatalogDeadline(
+      const results = await readReconciliationCatalog(catalog, () =>
         catalog.searchWorkItems({
           workspaceId,
           text: query,
@@ -1512,7 +2122,9 @@ async function searchCanonicalWork(
         let snapshot = cachedWorkItems.get(key);
 
         if (!snapshot) {
-          const hydrated = await withWorkCatalogDeadline(catalog.getWorkItem(result.id));
+          const hydrated = await readReconciliationCatalog(catalog, () =>
+            catalog.getWorkItem(result.id)
+          );
 
           if (
             hydrated.providerId !== catalog.providerId ||
@@ -1603,7 +2215,7 @@ function uniqueWorkItemSnapshots(
 }
 
 function priorMappedWorkItems(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   reviews: ActionItemReconciliationReview[],
   resolutions: ActionItemReconciliationHumanResolution[],
   createdWorkMappings: ActionItemReconciliationCreatedWorkMapping[]
@@ -1647,7 +2259,7 @@ function uniqueWorkItemIdentities(workItems: WorkItemIdentity[]): WorkItemIdenti
 }
 
 function scoreWorkItem(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot,
   priorMappings: WorkItemIdentity[]
 ): ScoredWorkItem {
@@ -1766,14 +2378,18 @@ function scoreWorkItem(
 }
 
 function hasRecentWorkActivity(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot
 ): boolean {
   if (workItem.status !== "active" && workItem.status !== "blocked") {
     return false;
   }
 
-  const sourceAt = Date.parse(candidate.source.source.capturedAt);
+  const sourceAt = Date.parse(
+    candidate.source.source.sourceKind === "capture-synthesis"
+      ? candidate.source.source.producedAt
+      : candidate.source.source.capturedAt
+  );
   const updatedAt = Date.parse(workItem.updatedAt);
 
   return (
@@ -1865,7 +2481,7 @@ function semanticScoreForSignals(signals: ActionItemReconciliationMatchSignal[])
 }
 
 function outcomeForSelectedWorkItem(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot,
   supportsConditionalUpdates: boolean
 ): ActionItemReconciliationOutcome {
@@ -1905,7 +2521,7 @@ function outcomeForSelectedWorkItem(
 }
 
 function reconciliationReview(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string,
   input: {
     searches: ActionItemReconciliationSearchReceipt[];
@@ -1940,7 +2556,7 @@ function reconciliationReview(
 }
 
 function reconciliationWorkEvidence(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItem: ReconciliationWorkItemSnapshot
 ): EvidenceReference {
   return {
@@ -1970,7 +2586,7 @@ function outcomeWorkItem(
 }
 
 function reconciliationReviewId(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string,
   attempt: number
 ): string {
@@ -1987,6 +2603,20 @@ function sameWorkItemIdentity(left: WorkItemIdentity, right: WorkItemIdentity): 
 
 function uniqueStrings(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+const reconciliationSourceProofs = new WeakMap<WorkCatalog, () => Promise<void>>();
+async function readReconciliationCatalog<T>(
+  catalog: WorkCatalog,
+  operation: () => Promise<T>
+): Promise<T> {
+  // Source proofs are owned to real completion. Only the provider-only operation
+  // uses the legacy read deadline, so a late response cannot start DB work after drain.
+  const requireCurrent = reconciliationSourceProofs.get(catalog);
+  await requireCurrent?.();
+  const result = await withWorkCatalogDeadline(operation());
+  await requireCurrent?.();
+  return result;
 }
 
 async function withWorkCatalogDeadline<T>(operation: Promise<T>): Promise<T> {
@@ -2010,8 +2640,8 @@ async function withWorkCatalogDeadline<T>(operation: Promise<T>): Promise<T> {
 }
 
 function sameImportedCandidate(
-  left: ImportedActionItemCandidate,
-  right: ImportedActionItemCandidate
+  left: ActionItemCandidate,
+  right: ActionItemCandidate
 ): boolean {
   return (
     left.id === right.id &&
@@ -2021,16 +2651,60 @@ function sameImportedCandidate(
     left.completion === right.completion &&
     left.source.sourceBlockId === right.source.sourceBlockId &&
     left.source.sourceExcerpt === right.source.sourceExcerpt &&
-    sameImportedMeetingSource(left.source.source, right.source.source)
+    (left.source.source.sourceKind === "capture-synthesis" ||
+    right.source.source.sourceKind === "capture-synthesis"
+      ? JSON.stringify(left.source.source) === JSON.stringify(right.source.source)
+      : sameImportedMeetingSource(left.source.source, right.source.source))
   );
 }
 
 async function queryMeeting(
   database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
   input: QueryMeeting
+): Promise<{ value: MeetingQueryResult; receiptIds: string[] }> {
+  const state = projectCurrentSynthesisActions(
+    await contextGuard.project(
+      await requireMeetingState(database, input.workspaceId, input.meetingId)
+    )
+  );
+  return {
+    value: await queryProjectedMeeting(database, contextGuard, input, state),
+    receiptIds: contextReceiptIds(state)
+  };
+}
+
+function filterSynthesisActionEvidence(
+  state: MeetingState,
+  evidence: EvidenceReference[]
+): EvidenceReference[] {
+  if (!state.captureSynthesisActionSource) return evidence;
+  const allowed = new Set(
+    [
+      ...state.importedActionItemCandidates.flatMap((item) => item.evidence),
+      ...state.actionItemReconciliationReviews.flatMap((item) => item.evidence),
+      ...state.actionItemReconciliationHumanResolutions.map((item) => item.evidence),
+      ...state.actionItemOwnershipHumanResolutions.map((item) => item.evidence),
+      ...state.followUpIntentions.flatMap((item) => item.provenance.evidence)
+    ].map((item) => item.evidenceId)
+  );
+  return evidence.filter(
+    (item) =>
+      (!item.evidenceId.startsWith("evidence:synthesis-action:") &&
+        !item.evidenceId.startsWith("evidence:human-action:")) ||
+      allowed.has(item.evidenceId)
+  );
+}
+
+async function queryProjectedMeeting(
+  database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
+  input: QueryMeeting,
+  state: MeetingState
 ): Promise<MeetingQueryResult> {
-  const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
   const query = input.query;
+  const receiptIds = contextReceiptIds(state);
+  const answerContext = receiptIds.length ? { contextReceiptIds: receiptIds } : {};
 
   switch (query.type) {
     case "snapshot":
@@ -2045,26 +2719,65 @@ async function queryMeeting(
         input.meetingId,
         query.since
       );
-      const changes = deriveCatchUpChanges(previousState, state);
+      const changes = deriveCatchUpChanges(
+        previousState
+          ? projectCurrentSynthesisActions(
+              await contextGuard.project({
+                ...previousState,
+                ...(state.captureSynthesisActionSource
+                  ? { captureSynthesisActionSource: state.captureSynthesisActionSource }
+                  : {})
+              })
+            )
+          : null,
+        state
+      );
       return {
         type: "catch-up",
         answer: {
-          text: changes.text,
+          ...answerContext,
+          text: withContextAvailability(changes.text, state),
           evidence: changes.evidence,
-          uncertainty: changes.evidence.length > 0 ? "none" : "insufficient-evidence"
+          uncertainty:
+            state.contextAvailability?.status === "partial" ||
+            state.contextAvailability?.status === "unavailable"
+              ? "partial"
+              : changes.evidence.length > 0
+                ? "none"
+                : "insufficient-evidence"
         }
       };
     }
     case "freeform":
-    case "decision-history":
+    case "decision-history": {
+      const answer = answerScopedMeetingQuestion(
+        state,
+        query,
+        uniqueEvidence([
+          ...(await contextGuard.filterEvidence(
+            state,
+            filterSynthesisActionEvidence(
+              state,
+              await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
+            )
+          )),
+          ...contextItems(state).flatMap((item) => item.provenance.evidence)
+        ])
+      );
       return {
         type: query.type,
-        answer: answerScopedMeetingQuestion(
-          state,
-          query,
-          await loadEvidenceReferences(database, input.workspaceId, input.meetingId)
-        )
+        answer: {
+          ...answer,
+          ...answerContext,
+          text: withContextAvailability(answer.text, state),
+          uncertainty:
+            state.contextAvailability?.status === "partial" ||
+            state.contextAvailability?.status === "unavailable"
+              ? "partial"
+              : answer.uncertainty
+        }
       };
+    }
     case "participant-brief": {
       return {
         type: "participant-brief",
@@ -2311,17 +3024,28 @@ function uniqueEvidence(evidence: EvidenceReference[]): EvidenceReference[] {
   ];
 }
 
+function withContextAvailability(text: string, state: MeetingState): string {
+  return state.contextAvailability?.withheldItemCount
+    ? `${text}\nSome derived items are unavailable because their organizational sources changed or could not be verified. Original Meeting evidence and Human history are retained.`
+    : state.contextAvailability?.status === "partial"
+      ? `${text}\nOrganizational context retrieval is partial; additional relevant knowledge may be unavailable.`
+      : text;
+}
+
 async function concludeMeeting(
   database: LumaDatabase,
+  contextGuard: ReturnType<typeof createMeetingContextGuard>,
   now: () => Date,
   input: ConcludeMeeting
 ): Promise<MeetingConclusion> {
-  const state = await requireMeetingState(database, input.workspaceId, input.meetingId);
+  const state = await contextGuard.project(
+    await requireMeetingState(database, input.workspaceId, input.meetingId)
+  );
   const outputLanguage = await resolveConclusionOutputLanguage(database, input);
   // Older conclusions may have cached a legacy `speaker_id` as if it were a
   // verified attribution. Version this projection so a current read rebuilds
   // from the safe attribution overlay rather than replaying that cache.
-  const optionsHash = `${outputLanguage}:${CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION}`;
+  const optionsHash = `${outputLanguage}:${CONCLUSION_SPEAKER_ATTRIBUTION_PROJECTION_VERSION}:context-v1:${createHash("sha256").update(JSON.stringify(state)).digest("hex")}`;
   const existing = await database.query<ConclusionRow>(
     `SELECT conclusion_json FROM conclusions
      WHERE workspace_id = $1 AND meeting_id = $2 AND revision = $3 AND options_hash = $4`,
@@ -2339,8 +3063,11 @@ async function concludeMeeting(
     meetingId: state.meetingId,
     revision: state.revision,
     summary: {
-      brief: renderConclusionBrief(state, outputLanguage),
-      detailed: renderConclusionDetail(state, outputLanguage)
+      brief: withContextAvailability(renderConclusionBrief(state, outputLanguage), state),
+      detailed: withContextAvailability(
+        renderConclusionDetail(state, outputLanguage),
+        state
+      )
     },
     topics: state.topics,
     decisions: state.decisions,
@@ -2353,13 +3080,22 @@ async function concludeMeeting(
     ),
     outputLanguage,
     provenance: combineProvenance(state, state.revision),
-    createdAt: now().toISOString()
+    createdAt: now().toISOString(),
+    ...(state.contextAvailability
+      ? { contextAvailability: state.contextAvailability }
+      : {})
   };
+
+  await contextGuard.requireReceiptsCurrent({
+    workspaceId: state.workspaceId,
+    meetingId: state.meetingId,
+    receiptIds: conclusion.provenance.contextReceiptIds ?? []
+  });
 
   await database.query(
     `INSERT INTO conclusions (
       workspace_id, meeting_id, revision, options_hash, conclusion_json, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
     [
       conclusion.workspaceId,
       conclusion.meetingId,
@@ -3080,6 +3816,57 @@ async function applyObservation(
       };
     }
     case "human-judgment-recorded": {
+      if (observation.judgment.kind === "approve-canonical-knowledge-patch") {
+        const judgment = observation.judgment;
+        const approvalEvidence: EvidenceReference = {
+          evidenceId: `evidence:canonical-patch:${opaqueIdentifierSegment(observation.observationId)}`,
+          source: "human-judgment",
+          sourceObjectId: judgment.intentId,
+          sourceVersion: observation.observationId,
+          participantId: observation.participantId,
+          excerpt:
+            "Human Judgment approved one exact canonical knowledge patch and its source settlement."
+        };
+        await insertEvidence(
+          database,
+          state.workspaceId,
+          state.meetingId,
+          approvalEvidence,
+          now
+        );
+        return {
+          state: {
+            ...state,
+            followUpIntentions: state.followUpIntentions.map((intent) =>
+              intent.id === judgment.intentId &&
+              intent.type === "settle-operational-outcome"
+                ? {
+                    ...intent,
+                    status: "approved",
+                    provenance: {
+                      ...intent.provenance,
+                      evidence: [...intent.provenance.evidence, approvalEvidence]
+                    },
+                    canonicalKnowledgePatch: {
+                      id: `canonical-patch:${opaqueIdentifierSegment(observation.observationId)}`,
+                      target: { ...judgment.target },
+                      expectedMarkdown: judgment.expectedMarkdown,
+                      replacementMarkdown: judgment.replacementMarkdown,
+                      approvedBy: observation.participantId,
+                      approvedAt: observation.observedAt,
+                      evidence: structuredClone([
+                        ...intent.provenance.evidence,
+                        approvalEvidence
+                      ])
+                    }
+                  }
+                : intent
+            )
+          },
+          evidenceForAnalysis: [],
+          events: []
+        };
+      }
       if (observation.judgment.kind === "resolve-action-item-reconciliation") {
         return applyActionItemReconciliationHumanJudgment(
           database,
@@ -3167,6 +3954,11 @@ async function applyObservation(
         evidenceForAnalysis: [],
         events: []
       };
+    case "meeting-capture-set-observed":
+    case "capture-synthesis-judgment-recorded":
+      throw new Error(
+        "Capture Observations must pass through the owned synthesis implementation."
+      );
   }
 }
 
@@ -3346,6 +4138,45 @@ async function validateObservationBeforeAcceptance(
   }
 
   if (observation.type === "human-judgment-recorded") {
+    if (observation.judgment.kind === "approve-canonical-knowledge-patch") {
+      const judgment = observation.judgment;
+      const matching = state.followUpIntentions.filter(
+        (intent) => intent.id === judgment.intentId
+      );
+      const intent = matching[0];
+      const approvalError = validateFollowUpIntentApproval(state, {
+        ...observation,
+        type: "follow-up-intent-approved",
+        intentId: judgment.intentId,
+        approvedBy: observation.participantId
+      });
+      if (
+        approvalError ||
+        matching.length !== 1 ||
+        intent?.type !== "settle-operational-outcome" ||
+        intent.status !== "suggested" ||
+        intent.canonicalKnowledgePatch ||
+        !observation.participantId.trim() ||
+        !intent.provenance.evidence.length ||
+        judgment.target.objectType !== "document" ||
+        !judgment.target.providerId.trim() ||
+        !judgment.target.externalId.trim() ||
+        !judgment.expectedMarkdown.trim() ||
+        !judgment.replacementMarkdown.trim() ||
+        judgment.expectedMarkdown === judgment.replacementMarkdown ||
+        judgment.expectedMarkdown.length > 20_000 ||
+        judgment.replacementMarkdown.length > 20_000
+      ) {
+        return {
+          code: "invalid-observation",
+          observationId: observation.observationId,
+          retryable: false,
+          message:
+            "A canonical knowledge patch requires one current suggested settlement, an explicit existing document, and a bounded nonempty exact replacement. A changed proposal needs fresh review."
+        };
+      }
+      return null;
+    }
     if (observation.judgment.kind === "resolve-action-item-reconciliation") {
       return validateActionItemReconciliationHumanJudgment(state, observation);
     }
@@ -3702,7 +4533,7 @@ function validateImportedMeetingSourceObservation(
   }
 
   const candidateIds = new Set<string>();
-  const candidatesBySourceBlockId = new Map<string, ImportedActionItemCandidate>();
+  const candidatesBySourceBlockId = new Map<string, ActionItemCandidate>();
 
   for (const candidate of observation.candidates) {
     if (candidateIds.has(candidate.id)) {
@@ -4300,7 +5131,7 @@ function completedZeroResultSearch(review: ActionItemReconciliationReview): bool
 }
 
 function validateImportedCandidateDeadline(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   source: ImportedMeetingSource,
   workspaceTimezone: string
 ): string | null {
@@ -4383,7 +5214,7 @@ function validateImportedSourceExternalReference(
 }
 
 function validateImportedCandidateSourceSemantics(
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): string | null {
   const excerpt = candidate.source.sourceExcerpt;
   const expectedLanguage = importedActionItemLanguageFor(excerpt);
@@ -4436,7 +5267,7 @@ function isValidCalendarDate(value: string): boolean {
 }
 
 function validateImportedCandidateWorkItemReferences(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   workItemProviderId: string
 ): string | null {
   const references = candidate.mentionedWorkItemReferences;
@@ -4520,7 +5351,7 @@ function validateImportedCandidateWorkItemReferences(
 }
 
 function validateImportedCandidateImplementationReferences(
-  candidate: ImportedActionItemCandidate
+  candidate: ActionItemCandidate
 ): string | null {
   const references = candidate.sourceBoundImplementationReferences;
 
@@ -4596,9 +5427,7 @@ function compareImportedImplementationReference(left: string, right: string): nu
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function validateImportedCandidateHints(
-  candidate: ImportedActionItemCandidate
-): string | null {
+function validateImportedCandidateHints(candidate: ActionItemCandidate): string | null {
   for (const [kind, hints] of [
     ["project", candidate.projectHints],
     ["component", candidate.componentHints]
@@ -4844,6 +5673,7 @@ function upgradeLegacyImportedSourceAvailability(
   );
   const importedActionItemCandidates = state.importedActionItemCandidates.map(
     (candidate) =>
+      isImportedActionCandidate(candidate) &&
       importedSourceRevisionKey(candidate.source.source) === sourceKey
         ? {
             ...candidate,
@@ -4872,9 +5702,9 @@ function upgradeLegacyImportedSourceAvailability(
 }
 
 function appendCandidatesIfNew(
-  current: ImportedActionItemCandidate[],
-  next: ImportedActionItemCandidate[]
-): ImportedActionItemCandidate[] {
+  current: ActionItemCandidate[],
+  next: ActionItemCandidate[]
+): ActionItemCandidate[] {
   const byId = new Map(current.map((candidate) => [candidate.id, candidate]));
 
   for (const candidate of next) {
@@ -4890,7 +5720,7 @@ function currentCandidateIdsAfterImport(
   state: MeetingState,
   observation: MeetingImportedFromSource,
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): string[] {
   const currentIds =
     state.currentImportedActionItemCandidateIds ??
@@ -5220,7 +6050,7 @@ function normalizeActionItemReconciliationReviews(
 
 function deriveCurrentImportedActionItemCandidateIds(
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): string[] {
   const knownSources = knownImportedSourceRevisions(importedSources, importedCandidates);
 
@@ -5253,13 +6083,14 @@ function deriveCurrentImportedActionItemCandidateIds(
 
 function knownImportedSourceRevisions(
   importedSources: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): ImportedMeetingSource[] {
   const sourcesByRevision = new Map(
     importedSources.map((source) => [importedSourceRevisionKey(source), source])
   );
 
   for (const candidate of importedCandidates) {
+    if (!isImportedActionCandidate(candidate)) continue;
     const source = candidate.source.source;
     const key = importedSourceRevisionKey(source);
 
@@ -5273,7 +6104,7 @@ function knownImportedSourceRevisions(
 
 function latestEligibleCandidateSource(
   sourceRevisions: ImportedMeetingSource[],
-  importedCandidates: ImportedActionItemCandidate[]
+  importedCandidates: ActionItemCandidate[]
 ): ImportedMeetingSource | undefined {
   const newestFirst = [...sourceRevisions].sort(
     (left, right) => right.sourceRevision - left.sourceRevision
@@ -5315,9 +6146,10 @@ function normalizeImportedMeetingSource(
 }
 
 function normalizeImportedActionItemCandidate(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   source: ImportedMeetingSource | undefined
-): ImportedActionItemCandidate {
+): ActionItemCandidate {
+  if (!isImportedActionCandidate(candidate)) return candidate;
   const wasLegacyCompleted = isLegacyCompletedModality(candidate.modality);
   const completion =
     candidate.completion === "completed" || candidate.completion === "open"
@@ -5362,7 +6194,7 @@ function normalizeImportedActionItemCandidate(
 
 function normalizeLegacyImportedActionItemSourceOwner(
   value: unknown
-): ImportedActionItemCandidate["sourceOwner"] | null {
+): ActionItemCandidate["sourceOwner"] | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -5392,8 +6224,8 @@ function normalizeLegacyImportedActionItemSourceOwner(
 }
 
 function normalizeImportedWorkItemReferences(
-  candidate: ImportedActionItemCandidate
-): ImportedActionItemCandidate["mentionedWorkItemReferences"] {
+  candidate: ActionItemCandidate
+): ActionItemCandidate["mentionedWorkItemReferences"] {
   if (Array.isArray(candidate.mentionedWorkItemReferences)) {
     return candidate.mentionedWorkItemReferences;
   }
@@ -5418,9 +6250,9 @@ function normalizeImportedWorkItemReferences(
 }
 
 function normalizeImportedImplementationReferences(
-  candidate: ImportedActionItemCandidate,
+  candidate: ActionItemCandidate,
   providerId: string
-): ImportedActionItemCandidate["sourceBoundImplementationReferences"] {
+): ActionItemCandidate["sourceBoundImplementationReferences"] {
   return Array.isArray(candidate.sourceBoundImplementationReferences)
     ? candidate.sourceBoundImplementationReferences
     : mentionedGitHubImplementationReferencesFor(
@@ -5437,12 +6269,21 @@ function isLegacyCompletedModality(value: unknown): boolean {
   );
 }
 
-function importedSourceRevisionKey(source: ImportedMeetingSource): string {
+function importedSourceRevisionKey(
+  source: Pick<
+    ImportedMeetingSource,
+    "providerId" | "sourceObjectId" | "sourceRevision" | "contentHash"
+  > & { sourceKind: string }
+): string {
   return `${importedSourceIdentityKey(source)}:r${source.sourceRevision}`;
 }
 
-function importedSourceIdentityKey(source: ImportedMeetingSource): string {
-  return `${opaqueIdentifierSegment(source.providerId)}:${opaqueIdentifierSegment(source.sourceObjectId)}`;
+function importedSourceIdentityKey(
+  source: Pick<ImportedMeetingSource, "providerId" | "sourceObjectId"> & {
+    sourceKind: string;
+  }
+): string {
+  return `${source.sourceKind === "capture-synthesis" ? "capture-synthesis:" : ""}${opaqueIdentifierSegment(source.providerId)}:${opaqueIdentifierSegment(source.sourceObjectId)}`;
 }
 
 function advanceRevision(state: MeetingState, observedAt: string): MeetingState {
@@ -5499,6 +6340,8 @@ async function persistRebasedAnalysis(
   meetingId: MeetingId,
   evidence: EvidenceReference[],
   analysis: StructuredReasoningResult<MeetingAnalysisProposalBatch>,
+  receiptIds: string[],
+  coverageComplete: boolean,
   expectedRevision: number,
   now: () => Date
 ): Promise<{ state: MeetingState; applied: boolean }> {
@@ -5510,8 +6353,39 @@ async function persistRebasedAnalysis(
     }
 
     const timestamp = now().toISOString();
+    const reconciled = reconcileAnalysis(latest, evidence, analysis);
+    const changed = <T extends { id: string; provenance: Provenance }>(
+      items: T[],
+      before: T[]
+    ): T[] =>
+      items.map((item) => {
+        if (before.some((previous) => previous === item)) return item;
+        return receiptIds.length
+          ? {
+              ...item,
+              provenance: {
+                ...item.provenance,
+                contextReceiptIds: [...receiptIds],
+                contextCoverage: { complete: coverageComplete }
+              }
+            }
+          : item;
+      });
     const next = {
-      ...advanceRevision(reconcileAnalysis(latest, evidence, analysis), timestamp),
+      ...advanceRevision(
+        {
+          ...reconciled,
+          decisions: changed(reconciled.decisions, latest.decisions),
+          actionItems: changed(reconciled.actionItems, latest.actionItems),
+          openQuestions: changed(reconciled.openQuestions, latest.openQuestions),
+          risks: changed(reconciled.risks, latest.risks),
+          followUpIntentions: changed(
+            reconciled.followUpIntentions,
+            latest.followUpIntentions
+          )
+        },
+        timestamp
+      ),
       lastAnalyzedAt: timestamp
     };
 
@@ -5808,6 +6682,15 @@ function provenanceFromEvidenceIds(
   if (evidence.length === 0) {
     throw new Error("factual proposal requires evidence");
   }
+  if (
+    evidence.every((reference) =>
+      reference.evidenceId.startsWith("organizational-context:")
+    )
+  ) {
+    throw new Error(
+      "Meeting proposals require the Meeting's own Evidence in addition to any external references."
+    );
+  }
 
   return {
     evidence,
@@ -5828,6 +6711,11 @@ function combineProvenance(state: MeetingState, revision: number): Provenance {
 
   return {
     evidence,
+    contextReceiptIds: [
+      ...new Set(
+        contextItems(state).flatMap((item) => item.provenance.contextReceiptIds ?? [])
+      )
+    ],
     confidence: evidence.length > 0 ? "high" : "low",
     producedAtRevision: revision,
     analysisVersion: ANALYSIS_VERSION
@@ -6065,9 +6953,7 @@ function replaceEvidenceReferencesInState(
     ...provenance,
     evidence: provenance.evidence.map(replaceReference)
   });
-  const replaceCandidate = (
-    candidate: ImportedActionItemCandidate
-  ): ImportedActionItemCandidate => ({
+  const replaceCandidate = (candidate: ActionItemCandidate): ActionItemCandidate => ({
     ...candidate,
     evidence: candidate.evidence.map(replaceReference)
   });
@@ -6367,11 +7253,31 @@ function applyHumanJudgment(
           decision.id === meetingItemId
             ? {
                 ...decision,
+                ...(correction.statement !== undefined &&
+                decision.provenance.contextReceiptIds?.length &&
+                evidence
+                  ? {
+                      rationale: [],
+                      supportingParticipantIds: [],
+                      objectingParticipantIds: [],
+                      relatedTopicIds: [],
+                      supersedesDecisionId: null,
+                      supersededByDecisionId: null
+                    }
+                  : {}),
                 statement: correction.statement ?? decision.statement,
                 status: isDecisionStatus(correction.status)
                   ? correction.status
-                  : decision.status,
-                provenance: humanJudgmentProvenance(state, decision.provenance, evidence)
+                  : correction.statement !== undefined &&
+                      decision.provenance.contextReceiptIds?.length
+                    ? "candidate"
+                    : decision.status,
+                provenance: independentCorrectionProvenance(
+                  state,
+                  decision.provenance,
+                  evidence,
+                  correction.statement
+                )
               }
             : decision
         ),
@@ -6390,10 +7296,39 @@ function applyHumanJudgment(
                 ),
                 dueDate:
                   correction.dueDate === undefined ? item.dueDate : correction.dueDate,
+                ...(correction.statement !== undefined &&
+                item.provenance.contextReceiptIds?.length &&
+                evidence
+                  ? {
+                      ownership: ownershipForHumanActionItemCorrection(
+                        {
+                          status: "unresolved",
+                          reason: "no-owner-stated",
+                          likelyOwnerPersonId: null
+                        },
+                        correction.ownerId
+                      ),
+                      ownerId: correction.ownerId ?? null,
+                      dueDate: correction.dueDate ?? null,
+                      dueDateConfidence: correction.dueDate
+                        ? ("exact" as const)
+                        : ("unknown" as const),
+                      relatedDecisionIds: [],
+                      externalReferences: []
+                    }
+                  : {}),
                 status: isActionItemStatus(correction.status)
                   ? correction.status
-                  : item.status,
-                provenance: humanJudgmentProvenance(state, item.provenance, evidence)
+                  : correction.statement !== undefined &&
+                      item.provenance.contextReceiptIds?.length
+                    ? "candidate"
+                    : item.status,
+                provenance: independentCorrectionProvenance(
+                  state,
+                  item.provenance,
+                  evidence,
+                  correction.statement
+                )
               }
             : item
         )
@@ -6405,8 +7340,28 @@ function applyHumanJudgment(
     case "resolve-action-item-ownership":
     case "resolve-speaker-attribution":
     case "refresh-action-item-reconciliation":
+    case "approve-canonical-knowledge-patch":
       return state;
   }
+}
+
+function independentCorrectionProvenance(
+  state: MeetingState,
+  existing: Provenance,
+  evidence: EvidenceReference | null,
+  statement: string | undefined
+): Provenance {
+  // A complete Human replacement is independently usable, but it cannot launder
+  // retained external excerpts, inferred owner/date, or rationale into that view.
+  if (statement !== undefined && existing.contextReceiptIds?.length && evidence) {
+    return {
+      evidence: [evidence],
+      confidence: "high",
+      producedAtRevision: state.revision + 1,
+      analysisVersion: "human-judgment"
+    };
+  }
+  return humanJudgmentProvenance(state, existing, evidence);
 }
 
 function humanJudgmentEvidenceForMeetingItem(
@@ -6447,6 +7402,10 @@ function humanJudgmentProvenance(
 
   return {
     evidence: [...byId.values()],
+    ...(existing.contextReceiptIds
+      ? { contextReceiptIds: existing.contextReceiptIds }
+      : {}),
+    ...(existing.contextCoverage ? { contextCoverage: existing.contextCoverage } : {}),
     confidence: "high",
     producedAtRevision: state.revision + 1,
     analysisVersion: "human-judgment"
@@ -7254,6 +8213,9 @@ function buildParticipantBrief(
     unresolvedQuestions: state.openQuestions.filter(
       (question) => question.status === "open"
     ),
+    ...(state.contextAvailability
+      ? { contextAvailability: state.contextAvailability }
+      : {}),
     outputLanguage
   };
 }
@@ -7346,4 +8308,10 @@ export async function loadActiveEvidenceForMeeting(
   return evidence.map(
     (reference) => projection.evidenceById.get(reference.evidenceId) ?? reference
   );
+}
+
+function isImportedActionCandidate(
+  candidate: ActionItemCandidate
+): candidate is ImportedActionItemCandidate {
+  return candidate.source.source.sourceKind !== "capture-synthesis";
 }

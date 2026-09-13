@@ -33,6 +33,22 @@ _Avoid_: Automatic merge, source rewrite, deduplication guess
 An ordered, bounded, provider-native discussion that Luma can preserve as Evidence without treating it as a Meeting or creating a Meeting Note.
 _Avoid_: Meeting, transcript dump, chat log
 
+**Advisory Consultation**:
+A source-bound request for Human input on a choice. A Conversation consultation retains its exact authorized plan, original recipients, approved Follow-up Intent and execution history without becoming a Meeting. Poll results are advisory Evidence; explicit Human choices and rationales are retained separately and do not themselves authorize external work.
+_Avoid_: Decision Record, winning decision, automatic approval
+
+**Decision Candidate**:
+An evidence-linked interpretation of a possible Human choice, retaining its modality, accountable scope, objections and unresolved facts. A proposal, preference or advisory tally cannot establish a confirmed decision.
+_Avoid_: Binding vote, inferred authority, final decision
+
+**Decision Record**:
+A canonical knowledge artifact documenting an evidenced Human decision and its source-backed authority. Recording permission is separate from decision authority. Exact Follow-up Intents govern creation or amendments; supersession/reversal preserves the predecessor and links a pending successor before activation.
+_Avoid_: Poll result, Meeting summary, executable work item
+
+**Standing Recording Policy**:
+An original authenticated Human instruction that grants Luma bounded permission to record clear decisions automatically, with explicit scope, decision classes, audience and current-source proof. It never supplies missing decision authority or Human acceptance.
+_Avoid_: Model confidence, job title, poll result, implicit approval
+
 **Observation**:
 An idempotently ingestible fact that may affect Meeting understanding.
 _Avoid_: Event, webhook, transcript row
@@ -97,6 +113,14 @@ _Avoid_: Automatic task creation, duplicate detector
 The current, revisable understanding of a Meeting at a specific Revision.
 _Avoid_: Projection, snapshot
 
+**Synthesis Action Candidate**:
+A reviewable action interpretation tied to an exact Luma Synthesis revision, claim
+and capture set. It retains derived provenance and partial source capability;
+Human action details are separate authenticated evidence. It is never an Imported
+Meeting Note or a transcript. Reconciliation and approved execution use the same
+canonical WorkProvider and positively published Logical Meeting anchor.
+_Avoid_: Fabricated source action, merged transcript, automatic assignment
+
 **Luma Synthesis**:
 A provider-neutral, Evidence-grounded understanding of a Logical Meeting that retains each contributing capture's provenance, capability gaps, and uncertainty rather than fabricating a combined raw transcript.
 _Avoid_: Transcript merge, source replacement, Operational Outcome
@@ -117,9 +141,21 @@ _Avoid_: Tool call, provider request
 The recorded outcome of attempting an approved Follow-up Intent.
 _Avoid_: Result, receipt
 
+**Canonical Knowledge Patch**:
+An immutable Human-approved replacement of one exact region in one explicitly selected existing knowledge document, grounded in source Evidence and bound to a Follow-up Intent. It preserves unrelated content and conflicts rather than guessing when the region changes.
+_Avoid_: Generic document update, whole-page replacement, automatic merge
+
 **Operational Outcome**:
 A compact Luma-owned record of authorized reconciliation and execution against canonical organizational surfaces, distinct from raw Meeting Captures and a Luma Synthesis.
 _Avoid_: Meeting Notes, source evidence, synthesis
+
+**Structured Record**:
+A canonical knowledge entry in a configured structured collection, with named fields and traceable source Evidence. A hypothesis remains a hypothesis until Human Evidence establishes a decision.
+_Avoid_: Ad-hoc page, Decision Record, task
+
+**Compound Operation**:
+One explicit, source-bound request for coordinated changes to structured knowledge and canonical work. Each output retains its own reconciliation and execution outcome while sharing the original Evidence and authorization.
+_Avoid_: Distributed transaction, independent automation, implicit approval
 
 **External Activity**:
 A provider-normalized event connected to a Meeting Item, external object, or Follow-up.

@@ -4,21 +4,24 @@
 > The original findings below describe that foundation slice, not the current
 > implementation or production readiness.
 
-## Current-state Clarification — 2026-09-08
+## Current-state Clarification — 2026-09-11
 
 Follow-up Execution now persists reservations, staged settlement outcomes,
 and recovery state; its original in-instance-only idempotency finding below
 is historical. Production provider and Discord SDKs now live behind owned
 Adapters, so the original repository-wide import scan is also historical.
-Bounded read-only Context Ask and a provider-neutral Logical Meeting binding
-foundation have since been added. Granola ingestion and multi-capture
-synthesis remain incomplete.
+Governed organizational retrieval is now wired into Meeting analysis and
+Context Ask. The shared runtime also implements provider-neutral LogicalMeeting
+bindings, per-founder Granola OAuth and source ingestion, multi-capture synthesis,
+Human review, approved publication and derived Action Item reconciliation.
+These changes establish implemented capabilities with deterministic verification;
+they do not establish live account consent, provider access or production readiness.
 
-Use the [current delivery boundary](../../README.md#current-delivery-boundary),
+Use the [delivery and activation guidance](../../README.md#delivery-and-activation),
 [Follow-up Execution](../modules/follow-up-execution.md),
 [Context Intelligence](../modules/context-intelligence.md), and
-[Logical Meeting ADR](../adr/0008-provider-neutral-logical-meetings.md) for
-current scope and limitations. The original review is preserved below.
+[shared meeting capture runtime](../integrations/shared-meeting-capture-runtime.md)
+for current scope and limitations. The original review is preserved below.
 
 ## Scope
 

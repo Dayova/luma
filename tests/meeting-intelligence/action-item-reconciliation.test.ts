@@ -1,3 +1,4 @@
+import type { CanonicalKnowledgePatchWriter } from "../../src/knowledge/canonical-knowledge-patch.js";
 import { describe, expect, it } from "vitest";
 import type {
   ActionItemReconciliationResolution,
@@ -47,6 +48,274 @@ import type {
   StructuredReasoningRequest,
   StructuredReasoningResult
 } from "../../src/ai/reasoning-model.js";
+
+async function prepareContextSettlement(input: {
+  suffix: string;
+  contextAvailable: () => boolean;
+  workProvider: WorkProvider;
+  writer: OperationalOutcomeWriter;
+}) {
+  const catalog = new ProgrammableWorkCatalog();
+  const observation = sourceObservation({
+    sourceObjectId: `notion-context-settlement-${input.suffix}`,
+    description: "Jakob will prepare the Luma launch briefing by Friday.",
+    mentionedWorkItemReferences: []
+  });
+  const description = observation.candidates[0]?.description;
+  if (!description) throw new Error("expected an imported Action Item");
+  catalog.respondToSearch(description, []);
+  const { database, meetingIntelligence } = await createHarness(catalog);
+  try {
+    const reviewed = await observeAndReview(meetingIntelligence, observation);
+    const reviewId = reviewed.reviews[0]?.proposal.id;
+    if (!reviewId) throw new Error("expected a create reconciliation review");
+    const intent = await resolveAndApproveOperationalOutcome({
+      meetingIntelligence,
+      meetingId: observation.meetingId,
+      reviewId,
+      observationSuffix: `context-settlement-${input.suffix}`
+    });
+    const execution = createFollowUpExecution({
+      database,
+      meetingIntelligence,
+      identityDirectory: createLumaTeamIdentityDirectory(),
+      workProvider: input.workProvider,
+      operationalOutcomeWriter: input.writer,
+      organizationalContextGuard: {
+        requireIntentCurrent() {
+          return input.contextAvailable()
+            ? Promise.resolve()
+            : Promise.reject(new Error("Organizational evidence was revoked"));
+        }
+      },
+      now: () => new Date("2026-08-08T10:02:00.000Z")
+    });
+    return {
+      database,
+      meetingIntelligence,
+      execution,
+      executeInput: { workspace, meetingId: observation.meetingId, intentId: intent.id },
+      async stages() {
+        const result = await database.query<{
+          stage: "work" | "outcome";
+          status: string;
+          reference_json: string | null;
+          last_error_code: string | null;
+          execution_lease_id: string | null;
+          prepared_outcome_json: string | null;
+        }>(
+          `SELECT stage, status, reference_json, last_error_code,
+                  execution_lease_id, prepared_outcome_json
+             FROM operational_outcome_settlement_stages
+            WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3`,
+          [workspace.workspaceId, observation.meetingId, intent.id]
+        );
+        return new Map(result.rows.map((row) => [row.stage, row]));
+      },
+      async pageLeases() {
+        return (
+          await database.query(
+            `SELECT intent_id FROM operational_outcome_page_leases
+              WHERE workspace_id=$1 AND meeting_id=$2 AND intent_id=$3`,
+            [workspace.workspaceId, observation.meetingId, intent.id]
+          )
+        ).rows;
+      }
+    };
+  } catch (error) {
+    await database.close();
+    throw error;
+  }
+}
+
+describe("Operational Outcome context settlement", () => {
+  it("records a pre-create context refusal as unresolved work that was never dispatched", async () => {
+    let available = true;
+    class RevokedBeforeCreate extends RecordingCreateWorkProvider {
+      override async findCreatedWorkItemByIdempotencyKey(key: string) {
+        const reference = await super.findCreatedWorkItemByIdempotencyKey(key);
+        available = false;
+        return reference;
+      }
+    }
+    const workProvider = new RevokedBeforeCreate();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "before-create",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toEqual([]);
+      expect(writer.writes).toEqual([]);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "unresolved",
+        last_error_code: "organizational-context-unavailable",
+        execution_lease_id: null
+      });
+      expect(stages.get("work")?.reference_json).toBeNull();
+      expect(await test.pageLeases()).toEqual([]);
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence: test.meetingIntelligence,
+          meetingId: test.executeInput.meetingId,
+          intentId: test.executeInput.intentId
+        })
+      ).not.toBe("requires-manual-recovery");
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("preserves successful work and recovers only the pending outcome after a prewrite context refusal", async () => {
+    let available = true;
+    class RevokedAfterCreate extends RecordingCreateWorkProvider {
+      override async createWorkItem(input: CreateWorkItemInput) {
+        const reference = await super.createWorkItem(input);
+        available = false;
+        return reference;
+      }
+    }
+    const workProvider = new RevokedAfterCreate();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "before-outcome",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toEqual([]);
+      const beforeRecovery = await test.stages();
+      expect(beforeRecovery.get("work")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(beforeRecovery.get("work")?.reference_json).toContain("LUM-99");
+      expect(beforeRecovery.get("outcome")).toMatchObject({
+        status: "pending",
+        last_error_code: "organizational-context-unavailable",
+        execution_lease_id: null,
+        prepared_outcome_json: null
+      });
+      expect(await test.pageLeases()).toEqual([]);
+
+      available = true;
+      const recovered = await test.execution.recover(test.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      const afterRecovery = await test.stages();
+      expect(afterRecovery.get("work")?.reference_json).toBe(
+        beforeRecovery.get("work")?.reference_json
+      );
+      expect(afterRecovery.get("outcome")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(await test.pageLeases()).toEqual([]);
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("keeps a dispatched create with a lost acknowledgement manual when context blocks its recovery probe", async () => {
+    let available = true;
+    class LostCreateAcknowledgement extends RecordingCreateWorkProvider {
+      override async createWorkItem(
+        input: CreateWorkItemInput
+      ): Promise<ExternalReference> {
+        await super.createWorkItem(input);
+        available = false;
+        throw new Error("The provider created work but its acknowledgement was lost");
+      }
+    }
+    const workProvider = new LostCreateAcknowledgement();
+    const writer = new RecordingOperationalOutcomeWriter();
+    const test = await prepareContextSettlement({
+      suffix: "unknown-create",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toEqual([]);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "requires-manual-recovery",
+        last_error_code: "work-outcome-unknown"
+      });
+      expect(
+        await followUpIntentStatus({
+          meetingIntelligence: test.meetingIntelligence,
+          meetingId: test.executeInput.meetingId,
+          intentId: test.executeInput.intentId
+        })
+      ).toBe("requires-manual-recovery");
+    } finally {
+      await test.database.close();
+    }
+  });
+
+  it("preserves both completed receipts when context is revoked after the page write", async () => {
+    let available = true;
+    class RevokedAfterOutcome extends RecordingOperationalOutcomeWriter {
+      override async upsert(input: Parameters<OperationalOutcomeWriter["upsert"]>[0]) {
+        const receipt = await super.upsert(input);
+        available = false;
+        return receipt;
+      }
+    }
+    const workProvider = new RecordingCreateWorkProvider();
+    const writer = new RevokedAfterOutcome();
+    const test = await prepareContextSettlement({
+      suffix: "after-outcome",
+      contextAvailable: () => available,
+      workProvider,
+      writer
+    });
+    try {
+      await expect(test.execution.execute(test.executeInput)).rejects.toMatchObject({
+        code: "organizational-context-unavailable"
+      });
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+      const stages = await test.stages();
+      expect(stages.get("work")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(stages.get("outcome")).toMatchObject({
+        status: "succeeded",
+        last_error_code: null
+      });
+      expect(stages.get("work")?.reference_json).toContain("LUM-99");
+      expect(stages.get("outcome")?.reference_json).toContain("notion");
+      expect(await test.pageLeases()).toEqual([]);
+      available = true;
+      expect(
+        (await test.execution.execute(test.executeInput)).observation.outcome.status
+      ).toBe("succeeded");
+      expect(workProvider.createCalls).toHaveLength(1);
+      expect(writer.writes).toHaveLength(1);
+    } finally {
+      await test.database.close();
+    }
+  });
+});
 
 const workspace: WorkspaceConfig = {
   workspaceId: "workspace_dayova",
@@ -790,6 +1059,7 @@ async function resolveAndApproveOperationalOutcome(input: {
   reviewId: string;
   observationSuffix: string;
   resolution?: ActionItemReconciliationResolution;
+  approve?: boolean;
 }) {
   let reviewId = input.reviewId;
   const reviewQuery = await input.meetingIntelligence.query({
@@ -901,6 +1171,8 @@ async function resolveAndApproveOperationalOutcome(input: {
   if (!intent) {
     throw new Error("expected an Operational Outcome settlement Intent");
   }
+
+  if (input.approve === false) return intent;
 
   const approval = await input.meetingIntelligence.observe({
     workspace,
@@ -5783,4 +6055,583 @@ describe("Action Item reconciliation", () => {
       await database.close();
     }
   });
+});
+
+class ProgrammableCanonicalPatchWriter implements CanonicalKnowledgePatchWriter {
+  readonly providerId = "notion";
+  markdown = "# Handbook\n\n## Luma\nOnly founders use Luma.\n\n## Other\nKeep this.";
+  readonly calls: Array<{
+    externalId: string;
+    expectedMarkdown: string;
+    replacementMarkdown: string;
+  }> = [];
+  beforeWrite: (() => Promise<void>) | undefined;
+  afterWrite: (() => Promise<void>) | undefined;
+  readFailure = false;
+  readComplete(externalId: string) {
+    if (this.readFailure)
+      return Promise.reject(new Error("private API diagnostic must not escape"));
+    return Promise.resolve({
+      reference: {
+        providerId: this.providerId,
+        objectType: "document" as const,
+        externalId,
+        url: `https://notion.so/${externalId}`,
+        version: "current"
+      },
+      markdown: this.markdown
+    });
+  }
+  async replaceExact(input: {
+    externalId: string;
+    expectedMarkdown: string;
+    replacementMarkdown: string;
+  }) {
+    this.calls.push(input);
+    await this.beforeWrite?.();
+    this.markdown = this.markdown.replace(
+      input.expectedMarkdown,
+      () => input.replacementMarkdown
+    );
+    await this.afterWrite?.();
+  }
+}
+
+async function canonicalPatchHarness(
+  suffix: string,
+  writer = new ProgrammableCanonicalPatchWriter(),
+  shared?: Awaited<ReturnType<typeof createHarness>>
+) {
+  const harness = shared ?? (await createHarness());
+  const source = sourceObservation({
+    sourceObjectId: `patch-source-${suffix}`,
+    meetingId: `patch-meeting-${suffix}`
+  });
+  const reviewed = await observeAndReview(harness.meetingIntelligence, source);
+  const review = reviewed.reviews[0];
+  if (!review) throw new Error("Missing patch source review");
+  const intent = await resolveAndApproveOperationalOutcome({
+    meetingIntelligence: harness.meetingIntelligence,
+    meetingId: source.meetingId,
+    reviewId: review.proposal.id,
+    observationSuffix: suffix,
+    resolution: {
+      type: "reject-proposal",
+      reason: "This updates canonical knowledge, not a new work item."
+    },
+    approve: false
+  });
+  const approval = {
+    type: "human-judgment-recorded" as const,
+    observationId: `patch-approval-${suffix}`,
+    workspaceId: workspace.workspaceId,
+    meetingId: source.meetingId,
+    occurredAt: "2026-08-08T10:01:00.000Z",
+    observedAt: "2026-08-08T10:01:00.000Z",
+    participantId: "person_jakob",
+    judgment: {
+      kind: "approve-canonical-knowledge-patch" as const,
+      intentId: intent.id,
+      target: {
+        providerId: "notion",
+        objectType: "document" as const,
+        externalId: "canonical-handbook",
+        url: "https://notion.so/handbook"
+      },
+      expectedMarkdown: "## Luma\nOnly founders use Luma.",
+      replacementMarkdown: "## Luma\nOnly Jakob, Fabius, Philipp and Julius use Luma."
+    }
+  };
+  const outcome = new RecordingOperationalOutcomeWriter();
+  const execution = createFollowUpExecution({
+    ...harness,
+    canonicalKnowledgePatchWriter: writer,
+    operationalOutcomeWriter: outcome
+  });
+  const executeInput = { workspace, meetingId: source.meetingId, intentId: intent.id };
+  return {
+    ...harness,
+    source,
+    approval,
+    intent,
+    writer,
+    outcome,
+    execution,
+    executeInput,
+    async approve() {
+      const result = await harness.meetingIntelligence.observe({
+        workspace,
+        observations: [approval]
+      });
+      expect(result.errors).toEqual([]);
+      return result;
+    },
+    async stages() {
+      return (
+        await harness.database.query<{
+          stage: string;
+          status: string;
+          prepared_patch_json: string | null;
+        }>(
+          "SELECT stage,status,prepared_patch_json FROM operational_outcome_settlement_stages WHERE intent_id=$1",
+          [intent.id]
+        )
+      ).rows;
+    }
+  };
+}
+
+describe("Human-approved canonical knowledge patches", () => {
+  it("authorizes once, patches only the selected document region, and records its Outcome reference", async () => {
+    const h = await canonicalPatchHarness("success");
+    try {
+      await h.approve();
+      expect((await h.approve()).duplicateObservationIds).toEqual([
+        h.approval.observationId
+      ]);
+      const result = await h.execution.execute(h.executeInput);
+      expect(result.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toEqual([
+        {
+          externalId: "canonical-handbook",
+          expectedMarkdown: h.approval.judgment.expectedMarkdown,
+          replacementMarkdown: h.approval.judgment.replacementMarkdown
+        }
+      ]);
+      expect(h.writer.markdown).toBe(
+        "# Handbook\n\n" +
+          h.approval.judgment.replacementMarkdown +
+          "\n\n## Other\nKeep this."
+      );
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({
+          externalId: "canonical-handbook",
+          objectType: "document"
+        })
+      ]);
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it.each(["missing", "duplicate", "incomplete"])(
+    "does not write a %s selected region",
+    async (mode) => {
+      const h = await canonicalPatchHarness(mode);
+      try {
+        await h.approve();
+        if (mode === "missing") h.writer.markdown = "A different region";
+        if (mode === "duplicate") h.writer.markdown += h.writer.markdown;
+        if (mode === "incomplete") h.writer.readFailure = true;
+        const result = await h.execution.execute(h.executeInput);
+        expect(result.observation.outcome).toMatchObject({
+          status: "failed",
+          retryable: false,
+          requiresManualRecovery: false
+        });
+        expect(h.writer.calls).toEqual([]);
+        expect(h.outcome.writes).toEqual([]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toEqual([]);
+        expect(JSON.stringify(result)).not.toContain("private API diagnostic");
+      } finally {
+        await h.database.close();
+      }
+    }
+  );
+
+  it("freezes the approved target and patch against later edits or empty replacements", async () => {
+    const h = await canonicalPatchHarness("immutable");
+    try {
+      const empty = await h.meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            ...h.approval,
+            observationId: "empty-patch",
+            judgment: { ...h.approval.judgment, replacementMarkdown: "" }
+          }
+        ]
+      });
+      expect(empty.errors).toHaveLength(1);
+      await h.approve();
+      const changed = await h.meetingIntelligence.observe({
+        workspace,
+        observations: [
+          {
+            ...h.approval,
+            observationId: "changed-patch",
+            judgment: {
+              ...h.approval.judgment,
+              replacementMarkdown: "Something different"
+            }
+          }
+        ]
+      });
+      expect(changed.errors).toHaveLength(1);
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls[0]?.replacementMarkdown).toBe(
+        h.approval.judgment.replacementMarkdown
+      );
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("persists preparation before send and recovers an applied interrupted write without sending it again", async () => {
+    const h = await canonicalPatchHarness("positive");
+    try {
+      await h.approve();
+      h.writer.beforeWrite = async () => {
+        const stage = (await h.stages()).find((row) => row.stage === "knowledge");
+        expect(stage?.status).toBe("executing");
+        const prepared = JSON.parse(stage?.prepared_patch_json ?? "null") as Record<
+          string,
+          unknown
+        >;
+        expect(prepared["operationToken"]).toBeTypeOf("string");
+        expect(prepared["beforeDigest"]).toBeTypeOf("string");
+        expect(prepared["afterDigest"]).toBeTypeOf("string");
+        expect(prepared).toMatchObject({
+          expectedMarkdown: h.approval.judgment.expectedMarkdown,
+          replacementMarkdown: h.approval.judgment.replacementMarkdown
+        });
+      };
+      h.writer.afterWrite = () =>
+        Promise.reject(new Error("connection lost after provider commit"));
+      expect(
+        (await h.execution.execute(h.executeInput)).observation.outcome
+      ).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true,
+        retryable: false
+      });
+      expect(
+        (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+      ).toHaveLength(1);
+      expect((await h.execution.recover(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      expect(
+        h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences[0]?.externalId
+      ).toBe("canonical-handbook");
+      expect(
+        (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+      ).toEqual([]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it.each(["not-applied", "outside-edit"])(
+    "keeps %s ambiguous recovery manual without repeating the write",
+    async (mode) => {
+      const h = await canonicalPatchHarness(mode);
+      try {
+        await h.approve();
+        if (mode === "not-applied")
+          h.writer.beforeWrite = () => Promise.reject(new Error("send was interrupted"));
+        else
+          h.writer.afterWrite = () => {
+            h.writer.markdown += "\nConcurrent unrelated edit";
+            return Promise.reject(new Error("connection lost"));
+          };
+        expect(
+          (await h.execution.execute(h.executeInput)).observation.outcome
+        ).toMatchObject({ requiresManualRecovery: true });
+        expect(
+          (await h.execution.recover(h.executeInput)).observation.outcome
+        ).toMatchObject({ requiresManualRecovery: true });
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toEqual([]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toHaveLength(1);
+      } finally {
+        await h.database.close();
+      }
+    }
+  );
+
+  it("serializes different approved source settlements on the same physical canonical target", async () => {
+    const first = await canonicalPatchHarness("serial-first");
+    try {
+      const second = await canonicalPatchHarness("serial-second", first.writer, first);
+      await first.approve();
+      await second.approve();
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      first.writer.beforeWrite = async () => {
+        entered();
+        await gate;
+      };
+      const ongoing = first.execution.execute(first.executeInput);
+      await started;
+      expect(
+        (await second.execution.execute(second.executeInput)).observation.outcome.status
+      ).toBe("partially-succeeded");
+      expect(first.writer.calls).toHaveLength(1);
+      release();
+      expect((await ongoing).observation.outcome.status).toBe("succeeded");
+      expect(
+        (await second.execution.recover(second.executeInput)).observation.outcome.status
+      ).toBe("failed");
+      expect(first.writer.calls).toHaveLength(1);
+    } finally {
+      await first.database.close();
+    }
+  });
+
+  it("does not permit an exact-region request to replace the whole page", async () => {
+    const h = await canonicalPatchHarness("whole-page");
+    try {
+      h.approval.judgment.expectedMarkdown = h.writer.markdown;
+      await h.approve();
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "failed"
+      );
+      expect(h.writer.calls).toEqual([]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("retains a completed canonical reference when the later Outcome write is interrupted", async () => {
+    const h = await canonicalPatchHarness("outcome-partial");
+    try {
+      await h.approve();
+      const upsert = h.outcome.upsert.bind(h.outcome);
+      let first = true;
+      h.outcome.upsert = (request) => {
+        if (first) {
+          first = false;
+          return Promise.reject(
+            new OperationalOutcomeWriteNotAppliedError("Outcome not applied")
+          );
+        }
+        return upsert(request);
+      };
+      const partial = await h.execution.execute(h.executeInput);
+      expect(partial.observation.outcome.status).toBe("partially-succeeded");
+      if (partial.observation.outcome.status !== "partially-succeeded")
+        throw new Error("Expected partial outcome");
+      expect(
+        partial.observation.outcome.externalReferences.some(
+          (ref) => ref.externalId === "canonical-handbook"
+        )
+      ).toBe(true);
+      expect((await h.execution.recover(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      expect(
+        h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences[0]?.externalId
+      ).toBe("canonical-handbook");
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("allows unrelated edits made before the complete preflight read", async () => {
+    const h = await canonicalPatchHarness("outside-before");
+    try {
+      await h.approve();
+      h.writer.markdown += "\nUnrelated fresh text.";
+      expect((await h.execution.execute(h.executeInput)).observation.outcome.status).toBe(
+        "succeeded"
+      );
+      expect(h.writer.markdown).toContain("Unrelated fresh text.");
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("retains the canonical receipt when the subsequent Outcome claim fails in persistence", async () => {
+    const h = await canonicalPatchHarness("outcome-claim-failure");
+    try {
+      await h.approve();
+      // The real stage transaction cannot claim its Outcome stage. Earlier
+      // canonical preparation and its positive result still commit normally.
+      await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+        ADD CONSTRAINT test_refuse_outcome_claim
+        CHECK (stage <> 'outcome' OR status <> 'executing')`);
+      const failed = await h.execution.execute(h.executeInput);
+      expect(failed.observation.outcome).toMatchObject({
+        status: "failed",
+        retryable: false,
+        requiresManualRecovery: true,
+        externalReferences: [
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]
+      });
+      expect(JSON.stringify(failed)).not.toContain("test_refuse_outcome_claim");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toEqual([]);
+      expect(await h.stages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: "knowledge", status: "succeeded" }),
+          expect.objectContaining({ stage: "outcome", status: "pending" })
+        ])
+      );
+      await expect(h.execution.execute(h.executeInput)).rejects.toThrow(
+        "explicit recovery"
+      );
+      expect(h.writer.calls).toHaveLength(1);
+      await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+        DROP CONSTRAINT test_refuse_outcome_claim`);
+      const recovered = await h.execution.recover(h.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toHaveLength(1);
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({ externalId: "canonical-handbook" })
+      ]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it("retains a newly proven canonical receipt when the recovery Meeting snapshot is unavailable", async () => {
+    const h = await canonicalPatchHarness("recovery-snapshot-failure");
+    try {
+      await h.approve();
+      h.writer.afterWrite = () =>
+        Promise.reject(new Error("Connection lost after commit"));
+      expect(
+        (await h.execution.execute(h.executeInput)).observation.outcome
+      ).toMatchObject({
+        status: "failed",
+        requiresManualRecovery: true
+      });
+      const query = h.meetingIntelligence.query.bind(h.meetingIntelligence);
+      let refuseSnapshot = true;
+      h.meetingIntelligence.query = (request) => {
+        if (refuseSnapshot && request.query.type === "snapshot") {
+          refuseSnapshot = false;
+          return Promise.reject(new Error("private snapshot diagnostic"));
+        }
+        return query(request);
+      };
+      const interrupted = await h.execution.recover(h.executeInput);
+      expect(interrupted.observation.outcome).toMatchObject({
+        status: "failed",
+        retryable: false,
+        requiresManualRecovery: true,
+        externalReferences: [
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]
+      });
+      expect(JSON.stringify(interrupted)).not.toContain("private snapshot diagnostic");
+      expect(await h.stages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: "knowledge", status: "succeeded" }),
+          expect.objectContaining({ stage: "outcome", status: "pending" })
+        ])
+      );
+      expect(h.outcome.writes).toEqual([]);
+      const recovered = await h.execution.recover(h.executeInput);
+      expect(recovered.observation.outcome.status).toBe("succeeded");
+      expect(h.writer.calls).toHaveLength(1);
+      expect(h.outcome.writes).toHaveLength(1);
+      expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+        expect.objectContaining({ externalId: "canonical-handbook" })
+      ]);
+    } finally {
+      await h.database.close();
+    }
+  });
+
+  it.each(["proof-recording", "release-and-reread"])(
+    "retains an exact positive canonical proof through a %s persistence failure",
+    async (failure) => {
+      const h = await canonicalPatchHarness(`positive-${failure}-failure`);
+      const query = h.database.query.bind(h.database);
+      let unavailable = false;
+      try {
+        await h.approve();
+        if (failure === "proof-recording") {
+          await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+            ADD CONSTRAINT test_refuse_canonical_terminal_record
+            CHECK (stage <> 'knowledge' OR status IN ('pending','executing'))`);
+        } else {
+          h.writer.afterWrite = () => {
+            unavailable = true;
+            return Promise.resolve();
+          };
+          // Let the positive receipt commit, then interrupt target release,
+          // error recording, and the fallback reread while leaving later
+          // Meeting receipt persistence available.
+          h.database.query = <T>(...args: Parameters<typeof h.database.query>) => {
+            if (
+              unavailable &&
+              (args[0].includes("DELETE FROM operational_outcome_page_leases") ||
+                args[0].includes(
+                  "last_error_code='canonical-knowledge-patch-unresolved'"
+                ) ||
+                args[0].includes("SELECT plan_json"))
+            ) {
+              return Promise.reject(new Error("private canonical store diagnostic"));
+            }
+            return query<T>(...args);
+          };
+        }
+        const result = await h.execution.execute(h.executeInput);
+        unavailable = false;
+        expect(result.observation.outcome).toMatchObject({
+          status: "failed",
+          retryable: false,
+          requiresManualRecovery: true,
+          externalReferences: [
+            expect.objectContaining({ externalId: "canonical-handbook" })
+          ]
+        });
+        expect(JSON.stringify(result)).not.toMatch(
+          /private canonical store diagnostic|test_refuse_canonical_terminal_record/
+        );
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toEqual([]);
+        expect(await h.stages()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              stage: "knowledge",
+              status: failure === "proof-recording" ? "executing" : "succeeded"
+            }),
+            expect.objectContaining({ stage: "outcome", status: "pending" })
+          ])
+        );
+        if (failure === "proof-recording") {
+          await h.database.exec(`ALTER TABLE operational_outcome_settlement_stages
+            DROP CONSTRAINT test_refuse_canonical_terminal_record`);
+        }
+        const recovered = await h.execution.recover(h.executeInput);
+        expect(recovered.observation.outcome.status).toBe("succeeded");
+        expect(h.writer.calls).toHaveLength(1);
+        expect(h.outcome.writes).toHaveLength(1);
+        expect(h.outcome.writes[0]?.outcome.entries[0]?.knowledgeReferences).toEqual([
+          expect.objectContaining({ externalId: "canonical-handbook" })
+        ]);
+        expect(
+          (await h.database.query("SELECT * FROM operational_outcome_page_leases")).rows
+        ).toEqual([]);
+      } finally {
+        unavailable = false;
+        h.database.query = query;
+        await h.database.close();
+      }
+    }
+  );
 });

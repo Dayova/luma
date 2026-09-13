@@ -3,11 +3,13 @@
 Linear is Luma's sole canonical provider for executable work. A Meeting Action
 Item remains evidence-grounded domain state; a source-bound reconciliation
 settlement may mutate Linear only after its current source, reconciliation,
-authorization, and ownership state are valid. LUM-7 and LUM-8 are completed
-safety foundations. LUM-11's target-selection and conflict policy is selected,
-while canonical knowledge patch implementation and live proof remain outstanding;
-LUM-6 therefore remains incomplete. This document describes the implemented
-safety foundation, not a completed production workflow.
+authorization, and ownership state are valid. LUM-7 and LUM-8 provide the
+ownership and execution foundations. LUM-11's Human-selected canonical knowledge
+patch is implemented through `/meeting patch`, including exact-region conflict
+checks and durable recovery. See the
+[canonical patch runbook](../operations/canonical-knowledge-patches.md).
+Implementation and deterministic verification do not establish live provider
+access, production activation or completion of the end-to-end live proof.
 
 ## Setup
 
@@ -79,9 +81,9 @@ The SDK is contained behind Luma's owned `LinearApi` facade and `WorkProvider` I
 
 ## Dedicated least-privilege read-only catalog
 
-`LinearReadOnlyWorkCatalog` is a separate production Adapter for an eventual
-source-bound review surface. It is configured with `LINEAR_READONLY_API_KEY`
-and `LINEAR_TEAM_ID`; it never reads or falls back to `LINEAR_API_KEY`, and it
+`LinearReadOnlyWorkCatalog` is the separate production Adapter used by the
+[native Notion review surface](native-notion-review.md). It is configured with
+`LINEAR_READONLY_API_KEY` and `LINEAR_TEAM_ID`; it never reads or falls back to `LINEAR_API_KEY`, and it
 does not accept a `WorkProvider` instance. Create the read-only key with only
 Linear's **Read** permission.
 
@@ -108,9 +110,12 @@ test-only and is not exported from Luma's package entrypoint, so a
 writer-capable Linear adapter cannot be supplied to the production catalog by
 structural typing.
 
-This slice does not wire the catalog into the executable server or authorize a
-native Notion agent. It is intentionally separate from the writer-capable
-`LinearWorkProvider` used by approved Follow-up Execution.
+When native review is configured, the main server supplies this dedicated
+catalog to the shared Meeting Intelligence instance. It remains separate from
+the writer-capable `LinearWorkProvider` used by approved Follow-up Execution.
+Configuring the catalog alone does not activate a native agent or establish its
+founder audience; the native review surface requires its own current source,
+original request and four-founder permission proofs.
 
 ## Read-only reconciliation catalog
 
@@ -150,7 +155,7 @@ provider as the same work item.
 set -a
 source .env
 set +a
-LUMA_LIVE_LINEAR_TESTS=1 pnpm test -- tests/work/linear-work-provider.live.test.ts
+LUMA_LIVE_LINEAR_TESTS=1 pnpm exec vitest run tests/work/linear-work-provider.live.test.ts
 ```
 
 For the dedicated catalog, create a separate Read-permission key and run only

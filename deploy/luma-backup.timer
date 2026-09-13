@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Luma cold backup and off-host restore verification
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Berlin
+RandomizedDelaySec=300
+Persistent=true
+Unit=luma-backup.service
+
+[Install]
+WantedBy=timers.target

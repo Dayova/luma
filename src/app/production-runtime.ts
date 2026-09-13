@@ -1,3 +1,15 @@
+import { nativeNotionReviewConfig } from "./native-notion-review-config.js";
+import {
+  structuredWorkRuntimeConfig,
+  readStructuredWorkTargetPolicy
+} from "./structured-work-runtime.js";
+import { discordDecisionRecordConfigFromEnv } from "../discord/discord-decision-record-runtime.js";
+import { decisionRuntimeConfig } from "./decision-runtime.js";
+import { meetingCaptureRuntimeConfig } from "./meeting-capture-config.js";
+import { granolaOAuthRuntimeConfig } from "./granola-oauth-runtime.js";
+import { discordConsultationConfigFromEnv } from "../discord/discord-consultation-runtime.js";
+import { organizationalContextRuntimeConfig } from "./organizational-context-runtime.js";
+import { notionWebhookRuntimeConfig } from "./notion-webhook-runtime.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
 import { z } from "zod";
@@ -79,10 +91,9 @@ export async function validateProductionEnvironment(
       ([key, value]) =>
         Boolean(value?.trim()) &&
         (key.startsWith("LUMA_NOTION_OBSERVATION_") ||
-          key.startsWith("LUMA_NATIVE_") ||
           key === "LUMA_OBSERVATION_WORKSPACE_ID")
     ),
-    "Observer and native-review configuration must remain outside this deployment."
+    "The separate observer configuration must remain outside this deployment."
   );
 
   try {
@@ -93,7 +104,19 @@ export async function validateProductionEnvironment(
       !context?.parentChannelIds.some((id) => !parents.includes(id)),
       "Context Ask parents must be within the configured Discord channel scope."
     );
+    const nativeReview = nativeNotionReviewConfig(env);
+    const structured = structuredWorkRuntimeConfig(env);
+    const decision = discordDecisionRecordConfigFromEnv(env);
+    decisionRuntimeConfig(env, decision !== undefined);
+    const consultation = discordConsultationConfigFromEnv(env);
+    for (const capture of [decision, consultation?.capture, structured?.discord])
+      check(
+        !capture?.parentChannelIds.some((id) => !parents.includes(id)),
+        "Decision, consultation and structured-work parents must be within the configured Discord channel scope."
+      );
     const workspaceId = required(env, "LUMA_WORKSPACE_ID");
+    if (structured)
+      await readStructuredWorkTargetPolicy(structured.targetsPath, workspaceId);
     const access = createWorkspaceAccessPolicy({
       workspaceId,
       identityDirectory: createIdentityDirectoryFromEnv(env),
@@ -105,6 +128,24 @@ export async function validateProductionEnvironment(
           await access.authorize({ workspaceId, providerId: "discord", providerUserId })
         ),
         "Context Ask users must each uniquely identify an authorized founder."
+      );
+    }
+    for (const capture of [decision, consultation?.capture, structured?.discord]) {
+      if (!capture) continue;
+      const admitted = [];
+      for (const providerUserId of capture.allowedDiscordUserIds) {
+        const person = await access.authorize({
+          workspaceId,
+          providerId: "discord",
+          providerUserId
+        });
+        if (person) admitted.push(person.personId);
+      }
+      check(
+        admitted.length === capture.allowedDiscordUserIds.length &&
+          JSON.stringify([...admitted].sort()) ===
+            JSON.stringify([...dayovaFounderPersonIds].sort()),
+        "Decision Records, consultations and structured work require the exact four uniquely mapped founders."
       );
     }
     const budget = aiUsageBudgetSettingsFromEnv(env);
@@ -121,11 +162,51 @@ export async function validateProductionEnvironment(
       "The selected production model needs an audited price entry."
     );
     aiRequestLimitsFromEnv(env);
+    const organizational = organizationalContextRuntimeConfig(env);
+    const capture = meetingCaptureRuntimeConfig(env);
+    const granola = granolaOAuthRuntimeConfig(env);
+    const webhook = notionWebhookRuntimeConfig(env, workspaceId);
+    if (granola) {
+      check(
+        Boolean(capture?.granolaEnabled),
+        "Granola onboarding requires capture synthesis."
+      );
+      check(
+        new URL(granola.redirectUri).protocol === "https:",
+        "Production Granola login requires a fixed HTTPS callback."
+      );
+      check(
+        !isWithin(granola.keyPath, canonicalDirectory) &&
+          !isWithin(granola.keyPath, releaseDirectory) &&
+          !["/tmp", "/var/tmp", "/run", "/dev", "/proc", "/sys"].some((parent) =>
+            isWithin(granola.keyPath, parent)
+          ),
+        "The Granola credential key requires a protected durable path outside the store and release."
+      );
+      check(
+        !webhook || granola.port !== webhook.port,
+        "Granola and Notion callback listeners require separate ports."
+      );
+    }
+    if (nativeReview) {
+      check(
+        (!webhook || nativeReview.port !== webhook.port) &&
+          (!granola || nativeReview.port !== granola.port),
+        "Native review, Granola and Notion listeners require separate ports."
+      );
+    }
+    if (webhook) {
+      required(env, "NOTION_API_TOKEN");
+      check(
+        organizational?.providers.includes("notion") === true,
+        "Notion webhook intake requires granted imported-source analysis configuration."
+      );
+    }
   } catch (error) {
     if (error instanceof ProductionPreflightError) throw error;
     // Adapter configuration errors may include supplied values. Never print them.
     throw new ProductionPreflightError(
-      "Production channel, identity, model, or budget configuration is invalid."
+      "Production channel, identity, model, budget, or organizational context configuration is invalid."
     );
   }
 }
@@ -152,10 +233,21 @@ export async function verifyProductionDiscordApplication(
         application.id !== developmentDiscordApplicationId,
       "Discord credentials must belong to the configured production application."
     );
-    if (discordContextAskConfigFromEnv(env)) {
+    // Discord application flags, not the Gateway identify intent bitfield.
+    // https://docs.discord.com/developers/resources/application#application-flags
+    check(
+      (application.flags & ((1 << 14) | (1 << 15))) !== 0,
+      "Enable Server Members intent for the production application so Luma can verify channel readers, even when Context Ask is disabled."
+    );
+    if (
+      discordContextAskConfigFromEnv(env) ||
+      discordConsultationConfigFromEnv(env) ||
+      discordDecisionRecordConfigFromEnv(env) ||
+      structuredWorkRuntimeConfig(env)
+    ) {
       check(
         (application.flags & ((1 << 18) | (1 << 19))) !== 0,
-        "Enable Message Content intent for the production application before Context Ask."
+        "Enable Message Content intent for the production application before conversation Ask, consultations, Decision Records or structured work."
       );
     }
   } catch (error) {

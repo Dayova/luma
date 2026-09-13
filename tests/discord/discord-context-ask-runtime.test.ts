@@ -19,10 +19,11 @@ const contextAskConfig: DiscordContextAskConfig = {
 };
 
 describe("Discord Context Ask runtime boundary", () => {
-  it("remains disabled without an explicit enable flag and preserves the Guilds-only intent", () => {
+  it("remains disabled without an explicit enable flag while retaining member audience verification", () => {
     expect(discordContextAskConfigFromEnv({})).toBeUndefined();
     expect(discordGatewayIntentsForContextAsk(undefined)).toEqual([
-      GatewayIntentBits.Guilds
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers
     ]);
   });
 
@@ -67,6 +68,7 @@ describe("Discord Context Ask runtime boundary", () => {
     });
     expect(discordGatewayIntentsForContextAsk(contextAskConfig)).toEqual([
       GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent
     ]);
@@ -173,7 +175,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
   });
 
-  it("keeps the legacy response byte-identical when there are no facts or inferences", () => {
+  it("labels thread-only scope without adding unsupported facts or inferences", () => {
     const result = contextInquiryResult();
     result.facts = [];
     result.inferences = [];
@@ -181,6 +183,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(renderDiscordContextAskResult(result)).toBe(
       [
         "Luma Ask",
+        "Scope: this thread only.",
         "",
         "The release might\\_ship @\u200beveryone: https:\u200b//outside.example",
         "",
@@ -429,6 +432,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(renderDiscordContextAskResult(result)).toBe(
       [
         "Luma Ask",
+        "Scope: this thread only.",
         "",
         "Grounded answer Facts: - forged fact",
         "",

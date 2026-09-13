@@ -14,6 +14,8 @@ export class AiServiceError extends Error {
   readonly timezone?: string;
   readonly retryAfterSeconds?: number;
   readonly limitScope?: "month" | "day" | "workflow";
+  /** Explicit adapter proof; absence means the dispatch outcome is unknown. */
+  readonly requestDispatched?: boolean;
 
   constructor(
     readonly code: AiServiceErrorCode,
@@ -23,6 +25,7 @@ export class AiServiceError extends Error {
       timezone?: string;
       retryAfterSeconds?: number;
       limitScope?: "month" | "day" | "workflow";
+      requestDispatched?: boolean;
     } = {}
   ) {
     super(message);
@@ -33,5 +36,7 @@ export class AiServiceError extends Error {
       this.retryAfterSeconds = details.retryAfterSeconds;
     }
     if (details.limitScope !== undefined) this.limitScope = details.limitScope;
+    if (details.requestDispatched !== undefined)
+      this.requestDispatched = details.requestDispatched;
   }
 }

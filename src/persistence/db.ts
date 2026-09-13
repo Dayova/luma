@@ -1,5 +1,12 @@
+import { migrateConversationConsultations } from "../context-intelligence/consultation-persistence.js";
+import { migrateDecisionIntelligence } from "../decision-intelligence/persistence.js";
+import { migrateDecisionAuthority } from "../decision-intelligence/authority-persistence.js";
+import { migrateOrganizationalContext } from "../organizational-context/persistence.js";
+import { migrateContextRetrieval } from "../context-intelligence/persistence.js";
+import { migrateMeetingContext } from "../meeting-intelligence/context-guard.js";
 import { PGlite } from "@electric-sql/pglite";
 import { openOwnedPgliteDatabase } from "./store-ownership.js";
+import { migrateAiAccountingRecovery } from "./ai-accounting-migration.js";
 
 export type LumaDatabase = PGlite;
 
@@ -24,6 +31,19 @@ export async function createPgliteDatabase(dataDir?: string): Promise<LumaDataba
 
 export async function runMigrations(database: LumaDatabase): Promise<void> {
   await database.exec(`
+    CREATE TABLE IF NOT EXISTS native_review_instructions (
+      workspace_id TEXT NOT NULL,
+      instruction_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      analysis_json TEXT,
+      source_provider_id TEXT NOT NULL,
+      source_object_id TEXT NOT NULL,
+      source_content_hash TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, instruction_id)
+    );
+    CREATE INDEX IF NOT EXISTS native_review_instruction_source_idx ON native_review_instructions (workspace_id,source_provider_id,source_object_id,source_content_hash);
+
     CREATE TABLE IF NOT EXISTS ai_usage_locks (
       workspace_id TEXT PRIMARY KEY,
       accounting_blocked BOOLEAN NOT NULL DEFAULT FALSE
@@ -486,6 +506,14 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE operational_outcome_settlement_stages
       ADD COLUMN IF NOT EXISTS operation_digest TEXT;
 
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD COLUMN IF NOT EXISTS prepared_patch_json TEXT;
+    ALTER TABLE operational_outcome_settlement_stages
+      DROP CONSTRAINT IF EXISTS operational_outcome_settlement_stages_stage_check;
+    ALTER TABLE operational_outcome_settlement_stages
+      ADD CONSTRAINT operational_outcome_settlement_stages_stage_check
+      CHECK (stage IN ('work', 'knowledge', 'outcome'));
+
     CREATE INDEX IF NOT EXISTS operational_outcome_settlements_source_root_idx
       ON operational_outcome_settlements (
         source_provider_id, source_document_id, source_object_id
@@ -746,6 +774,9 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
         REFERENCES logical_meeting_capture_binding_history (workspace_id, binding_id)
     );
 
+    ALTER TABLE logical_meeting_capture_binding_judgments
+      ADD COLUMN IF NOT EXISTS expected_capture_json TEXT;
+
     ALTER TABLE discord_meeting_threads
       ADD COLUMN IF NOT EXISTS start_message_sent_at TEXT;
 
@@ -799,4 +830,11 @@ export async function runMigrations(database: LumaDatabase): Promise<void> {
     ALTER TABLE utterance_versions
       ALTER COLUMN speaker_id DROP NOT NULL;
   `);
+  await migrateOrganizationalContext(database);
+  await migrateAiAccountingRecovery(database);
+  await migrateContextRetrieval(database);
+  await migrateConversationConsultations(database);
+  await migrateDecisionIntelligence(database);
+  await migrateDecisionAuthority(database);
+  await migrateMeetingContext(database);
 }

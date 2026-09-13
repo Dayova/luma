@@ -89,7 +89,7 @@ export async function acquireStoreOwnership(dataDir: string): Promise<{
 
 export async function openOwnedPgliteDatabase(
   dataDir: string,
-  purpose: "runtime" | "isolated-restore-verification"
+  purpose: "runtime" | "isolated-restore-verification" | "accounting-maintenance"
 ): Promise<PGlite> {
   const lease = await acquireStoreOwnership(dataDir);
   let database: PGlite | undefined;
@@ -102,6 +102,19 @@ export async function openOwnedPgliteDatabase(
           ? "Restored store is quarantined; live application startup is forbidden"
           : "Isolated verification requires a quarantined restored store"
       );
+    }
+    if (purpose === "accounting-maintenance") {
+      const receipt: unknown = JSON.parse(
+        await readFile(join(lease.dataDir, CLEAN_CLOSE_FILE), "utf8")
+      );
+      if (
+        !receipt ||
+        typeof receipt !== "object" ||
+        !("format" in receipt) ||
+        receipt.format !== "luma-clean-close-v1"
+      ) {
+        throw new Error("Accounting maintenance requires a cleanly stopped store");
+      }
     }
     await rm(join(lease.dataDir, CLEAN_CLOSE_FILE), { force: true });
     database = new PGlite(lease.dataDir);

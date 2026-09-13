@@ -19,6 +19,127 @@ function configuration(): NodeJS.ProcessEnv {
 }
 
 describe("production deployment preflight", () => {
+  it("admits the shared native review listener only with separate complete credentials and distinct ports", async () => {
+    const native = {
+      ...configuration(),
+      LUMA_NATIVE_REVIEW_ENABLED: "1",
+      LUMA_NATIVE_NOTION_WORKSPACE_ID: "10000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_AGENT_ID: "20000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_PAGE_ID: "30000000-0000-4000-8000-000000000000",
+      LUMA_NATIVE_NOTION_AGENT_READ_TOKEN: "test-agent-reader",
+      LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: "test-admin-reader",
+      LUMA_NATIVE_NOTION_READONLY_API_TOKEN: "test-page-reader",
+      LUMA_NATIVE_NOTION_CREDENTIAL_SCOPE_ID: "native-page",
+      LINEAR_READONLY_API_KEY: "test-linear-reader",
+      LINEAR_TEAM_ID: "team",
+      LUMA_NATIVE_LINEAR_CREDENTIAL_SCOPE_ID: "native-linear",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/sharing.json",
+      LUMA_NATIVE_REVIEW_MCP_BEARER_TOKEN: "test-only-native-bearer-longer-than-32-bytes"
+    };
+    await expect(
+      validateProductionEnvironment(native, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: "" },
+      { LUMA_NATIVE_NOTION_ADMIN_READ_TOKEN: native.LUMA_NATIVE_NOTION_AGENT_READ_TOKEN },
+      { LINEAR_API_KEY: native.LINEAR_READONLY_API_KEY },
+      { LUMA_NATIVE_REVIEW_HTTP_PORT: "70000" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...native, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+    const withGranola = {
+      ...native,
+      LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "1",
+      LUMA_GRANOLA_OAUTH_ENABLED: "1",
+      LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/etc/luma/granola.key",
+      LUMA_GRANOLA_OAUTH_REDIRECT_URI: "https://luma.example/granola/callback",
+      LUMA_SYNTHESIS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_SYNTHESIS_IMPORTED_MEETINGS_DATA_SOURCE_ID:
+        "11111111-1111-4111-8111-111111111111",
+      LUMA_SYNTHESIS_CREDENTIAL_SCOPE_ID: "synthesis-writer",
+      LUMA_SYNTHESIS_SIGNING_KEY: "synthetic-stable-signing-key-over-32-bytes"
+    };
+    await expect(
+      validateProductionEnvironment(withGranola, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    await expect(
+      validateProductionEnvironment(
+        { ...withGranola, LUMA_NATIVE_REVIEW_HTTP_PORT: "3002" },
+        "/opt/luma/releases/revision"
+      )
+    ).rejects.toThrow("separate ports");
+  });
+
+  it("requires governed capture, HTTPS and a separately protected key for Granola onboarding", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "1",
+      LUMA_GRANOLA_OAUTH_ENABLED: "1",
+      LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/etc/luma/granola.key",
+      LUMA_GRANOLA_OAUTH_REDIRECT_URI: "https://luma.example/granola/callback",
+      LUMA_SYNTHESIS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_SYNTHESIS_IMPORTED_MEETINGS_DATA_SOURCE_ID:
+        "11111111-1111-4111-8111-111111111111",
+      LUMA_SYNTHESIS_CREDENTIAL_SCOPE_ID: "synthesis-writer",
+      LUMA_SYNTHESIS_SIGNING_KEY: "synthetic-stable-signing-key-over-32-bytes",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/sharing.json"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_MEETING_CAPTURE_SYNTHESIS_ENABLED: "0" },
+      { LUMA_GRANOLA_OAUTH_REDIRECT_URI: "http://127.0.0.1:3002/callback" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/tmp/granola.key" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/var/lib/luma/pglite/granola.key" },
+      { LUMA_GRANOLA_CREDENTIAL_KEY_PATH: "/opt/luma/releases/revision/granola.key" },
+      { LUMA_SYNTHESIS_NOTION_API_TOKEN: "" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
+  it("validates the shared webhook subscription and analysis configuration before opening runtime resources", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_NOTION_WEBHOOK_ENABLED: "1",
+      LUMA_NOTION_WEBHOOK_WORKSPACE_ID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "cccccccc-dddd-eeee-ffff-000000000000",
+      LUMA_NOTION_WEBHOOK_INTEGRATION_ID: "dddddddd-eeee-ffff-0000-111111111111",
+      LUMA_NOTION_WEBHOOK_VERIFICATION_TOKEN: "synthetic-subscription",
+      NOTION_MEETINGS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+      NOTION_API_TOKEN: "synthetic-source",
+      LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "1",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/context-sharing.json",
+      LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "synthetic-reader",
+      LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "source-read",
+      LUMA_CONTEXT_NOTION_PAGE_IDS: "00000000-0000-0000-0000-000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_NOTION_WEBHOOK_SUBSCRIPTION_ID: "" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PORT: "70000" },
+      { LUMA_NOTION_WEBHOOK_HTTP_PATH: "/notion/webhook?private" },
+      { LUMA_ORGANIZATIONAL_CONTEXT_ENABLED: "0" },
+      { NOTION_API_TOKEN: "" },
+      { LUMA_WORKSPACE_ID: env.LUMA_NOTION_WEBHOOK_WORKSPACE_ID }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
   it("allows temporarily pausing paid AI without disabling the runtime", async () => {
     await expect(
       validateProductionEnvironment(
@@ -72,6 +193,74 @@ describe("production deployment preflight", () => {
     ).rejects.toThrow("founder");
   });
 
+  it("requires the complete consultation configuration, four mapped founders and common parent scope", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_DISCORD_CONSULTATION_ENABLED: "1",
+      LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+      LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS: "779381502311137301" },
+      {
+        LUMA_DISCORD_CONSULTATION_ALLOWED_DISCORD_USER_IDS:
+          "779381502311137301,726409024894926869,1492911575806251219,777777777777777777"
+      },
+      { LUMA_DISCORD_CONSULTATION_PARENT_CHANNEL_IDS: "777777777777777777" },
+      { LUMA_DISCORD_TEAM_ROLE_ID: "" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
+
+  it("requires all four mapped founders and the common parent scope for explicit recording", async () => {
+    const env = {
+      ...configuration(),
+      LUMA_DECISION_RECORDS_DATA_SOURCE_ID: "00000000-0000-0000-0000-000000000002",
+      LUMA_DECISION_RECORDS_CREDENTIAL_SCOPE_ID: "decision-write",
+      LUMA_DECISION_RECORDS_NOTION_API_TOKEN: "synthetic-writer",
+      LUMA_DECISION_RECORDS_SIGNING_KEY: "synthetic-key-longer-than-thirty-two-bytes",
+      LUMA_DECISION_AUTHORITY_POLICY_PATH: "/etc/luma/decision-authority.json",
+      LUMA_CONTEXT_SHARING_POLICY_PATH: "/etc/luma/context-sharing.json",
+      LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "synthetic-reader",
+      LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID: "source-read",
+      LUMA_CONTEXT_NOTION_PAGE_IDS: "00000000-0000-0000-0000-000000000001",
+      LUMA_DISCORD_DECISION_RECORDS_ENABLED: "1",
+      LUMA_DISCORD_DECISION_RECORDS_PARENT_CHANNEL_IDS: "1507049196006408352",
+      LUMA_DISCORD_DECISION_RECORDS_ALLOWED_DISCORD_USER_IDS:
+        "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841"
+    };
+    await expect(
+      validateProductionEnvironment(env, "/opt/luma/releases/revision")
+    ).resolves.toBeUndefined();
+    for (const change of [
+      { LUMA_DISCORD_DECISION_RECORDS_ALLOWED_DISCORD_USER_IDS: "779381502311137301" },
+      {
+        LUMA_DISCORD_DECISION_RECORDS_ALLOWED_DISCORD_USER_IDS:
+          "779381502311137301,726409024894926869,1492911575806251219,777777777777777777"
+      },
+      { LUMA_DISCORD_DECISION_RECORDS_PARENT_CHANNEL_IDS: "777777777777777777" },
+      { LUMA_DECISION_RECORDS_SIGNING_KEY: "short" },
+      { LUMA_CONTEXT_NOTION_READONLY_API_TOKEN: "" },
+      { LUMA_DECISION_AUTHORITY_POLICY_PATH: "relative.json" }
+    ])
+      await expect(
+        validateProductionEnvironment(
+          { ...env, ...change },
+          "/opt/luma/releases/revision"
+        )
+      ).rejects.toThrow();
+  });
+
   it("does not disclose malformed identity configuration", async () => {
     const secret = "sensitive-config-value";
     const error = await validateProductionEnvironment(
@@ -112,41 +301,129 @@ describe("production Discord application proof", () => {
     const fetchApplication = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
-        new Response(JSON.stringify({ id: "999999999999999999", flags: 0 }))
+        new Response(JSON.stringify({ id: "999999999999999999", flags: 1 << 15 }))
       );
     await expect(
       verifyProductionDiscordApplication(configuration(), fetchApplication)
     ).resolves.toBeUndefined();
     fetchApplication.mockResolvedValue(
-      new Response(JSON.stringify({ id: "1526147284822392952", flags: 0 }))
+      new Response(JSON.stringify({ id: "1526147284822392952", flags: 1 << 15 }))
     );
     await expect(
       verifyProductionDiscordApplication(configuration(), fetchApplication)
     ).rejects.toThrow("production application");
   });
 
-  it("requires Message Content intent when bounded Context Ask is enabled", async () => {
-    const env: NodeJS.ProcessEnv = {
-      ...configuration(),
-      LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
-      LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "1507049196006408352",
-      LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301"
-    };
-    const fetchApplication = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 0 }))
+  it.each([0, 1 << 1, 1 << 13, 1 << 19])(
+    "requires Server Members approval even with Context Ask disabled (flags %i)",
+    async (flags) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "0"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).rejects.toThrow("Server Members");
+    }
+  );
+
+  it.each([1 << 14, 1 << 15])(
+    "accepts either Discord Server Members application approval flag %i",
+    async (flags) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "0"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each([1 << 18, 1 << 19])(
+    "additionally requires Message Content approval for Context Ask (flag %i)",
+    async (messageContentFlag) => {
+      const env: NodeJS.ProcessEnv = {
+        ...configuration(),
+        LUMA_DISCORD_CONTEXT_ASK_ENABLED: "1",
+        LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: "1507049196006408352",
+        LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS: "779381502311137301"
+      };
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 15 }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).rejects.toThrow("Message Content");
+      fetchApplication.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: env["DISCORD_CLIENT_ID"],
+            flags: (1 << 15) | messageContentFlag
+          })
+        )
       );
-    await expect(
-      verifyProductionDiscordApplication(env, fetchApplication)
-    ).rejects.toThrow("Message Content");
-    fetchApplication.mockResolvedValue(
-      new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 19 }))
-    );
-    await expect(
-      verifyProductionDiscordApplication(env, fetchApplication)
-    ).resolves.toBeUndefined();
-  });
+      await expect(
+        verifyProductionDiscordApplication(env, fetchApplication)
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each(["DECISION_RECORDS", "CONSULTATION"])(
+    "requires Message Content for enabled %s even when Ask is disabled",
+    async (capability) => {
+      const env = {
+        ...configuration(),
+        [`LUMA_DISCORD_${capability}_ENABLED`]: "1",
+        [`LUMA_DISCORD_${capability}_PARENT_CHANNEL_IDS`]: "1507049196006408352",
+        [`LUMA_DISCORD_${capability}_ALLOWED_DISCORD_USER_IDS`]:
+          "779381502311137301,726409024894926869,1492911575806251219,1376219174723911841",
+        LUMA_DISCORD_TEAM_ROLE_ID: "500000000000000001"
+      };
+      const read = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: 1 << 15 }))
+        );
+      await expect(verifyProductionDiscordApplication(env, read)).rejects.toThrow(
+        "Message Content"
+      );
+      read.mockResolvedValue(
+        new Response(
+          JSON.stringify({ id: env["DISCORD_CLIENT_ID"], flags: (1 << 15) | (1 << 19) })
+        )
+      );
+      await expect(
+        verifyProductionDiscordApplication(env, read)
+      ).resolves.toBeUndefined();
+    }
+  );
+
+  it.each([undefined, "32768", -1, 32768.5])(
+    "refuses an absent or malformed application intent proof (%s)",
+    async (flags) => {
+      const fetchApplication = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ id: "999999999999999999", flags }))
+        );
+      await expect(
+        verifyProductionDiscordApplication(configuration(), fetchApplication)
+      ).rejects.toThrow("verification failed");
+    }
+  );
 
   it("does not print provider failures or supplied credentials", async () => {
     const fetchApplication = vi

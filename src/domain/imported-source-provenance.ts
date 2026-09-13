@@ -12,7 +12,9 @@ import { opaqueIdentifierSegment } from "./opaque-id.js";
  * source revision. Ingestion uses these values to construct an Observation;
  * Meeting Intelligence uses the same values to verify that Observation.
  */
-export function importedSourceMeetingId(source: ImportedMeetingSource): MeetingId {
+export function importedSourceMeetingId(
+  source: Pick<ImportedMeetingSource, "providerId" | "sourceObjectId">
+): MeetingId {
   return `meeting:source:${opaqueIdentifierSegment(source.providerId)}:${opaqueIdentifierSegment(source.sourceObjectId)}`;
 }
 

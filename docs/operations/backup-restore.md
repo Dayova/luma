@@ -32,7 +32,10 @@ volume from all other consumers. Preserve an immutable copy of that entire volum
 before deliberate recovery. An operator must establish that no former process
 can access the volume, then recover Postgres on a private copy and close it
 successfully using the current factory. Do not fabricate a clean-close receipt.
-This runbook provides cold backup, not automatic crash recovery or failover.
+The [unattended operations package](unattended-operations.md) supplies daily cold
+backup scheduling, verified encrypted off-host delivery, health alerts, and an
+explicit quarantined crash-image rehearsal. It never clears the original lease
+or performs automatic crash promotion or failover.
 
 ## Cold backup
 

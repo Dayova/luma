@@ -1,3 +1,11 @@
+import type { ConversationContextSubject } from "../context-intelligence/interface.js";
+import type { StructuredWorkExecution } from "../structured-work/interface.js";
+import type { ConversationConsultationExecutionRecord } from "../context-intelligence/conversation-consultations.js";
+import type { ConsultationReceipt } from "../consultation/interface.js";
+import type {
+  DecisionExecutionRecord,
+  DecisionSubject
+} from "../domain/decision-records.js";
 import type {
   FollowUpExecutionRecorded,
   FollowUpIntentId,
@@ -28,3 +36,47 @@ export interface FollowUpExecution {
    */
   recover(input: ExecuteFollowUpInput): Promise<ExecuteFollowUpResult>;
 }
+
+/** An explicit Conversation subject is never represented as a synthetic Meeting. */
+export type ExecuteConversationFollowUpInput = {
+  workspace: WorkspaceConfig;
+  subject: ConversationContextSubject;
+  intentId: FollowUpIntentId;
+};
+export type ExecuteConversationFollowUpResult = {
+  observation: ConversationConsultationExecutionRecord;
+  events: Array<{
+    type: "consultation-execution-recorded";
+    record: ConversationConsultationExecutionRecord;
+  }>;
+  idempotencyKey: string;
+};
+export interface ConversationFollowUpExecution {
+  execute(
+    input: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  recover(
+    input: ExecuteConversationFollowUpInput
+  ): Promise<ExecuteConversationFollowUpResult>;
+  readConsultation(input: ExecuteConversationFollowUpInput): Promise<ConsultationReceipt>;
+}
+export type ExecuteDecisionFollowUpInput = {
+  workspace: WorkspaceConfig;
+  subject: DecisionSubject;
+  decisionRequestId: string;
+  /** Only the canonical approved intent is executable. */
+  intentId: string;
+};
+export type ExecuteDecisionFollowUpResult = {
+  record: DecisionExecutionRecord;
+  idempotencyKey: string;
+};
+export interface DecisionFollowUpExecution {
+  execute(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
+  recover(input: ExecuteDecisionFollowUpInput): Promise<ExecuteDecisionFollowUpResult>;
+}
+/** Overloaded execution preserves existing Meeting callers and admits typed Conversations. */
+export type ScopedFollowUpExecution = StructuredWorkExecution &
+  DecisionFollowUpExecution &
+  ConversationFollowUpExecution &
+  FollowUpExecution;

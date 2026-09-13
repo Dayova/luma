@@ -1,3 +1,4 @@
+import type { CaptureSynthesisQueryResult } from "../domain/meeting-capture-synthesis.js";
 import type {
   ActionItemReconciliationReview,
   CurrentActionItemReconciliationReview,
@@ -32,6 +33,7 @@ export type MeetingUpdate = {
 };
 
 export type MeetingQuery =
+  | { type: "capture-synthesis" }
   | {
       type: "snapshot";
     }
@@ -79,9 +81,11 @@ export type GroundedAnswer = {
   text: string;
   evidence: MeetingState["actionItems"][number]["provenance"]["evidence"];
   uncertainty: "none" | "partial" | "insufficient-evidence";
+  contextReceiptIds?: string[];
 };
 
 export type MeetingQueryResult =
+  | CaptureSynthesisQueryResult
   | {
       type: "snapshot";
       state: MeetingState;

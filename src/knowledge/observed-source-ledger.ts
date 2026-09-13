@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  conversationPollSchema,
+  type ConversationPoll
+} from "../domain/conversation-poll.js";
 import type { LumaDatabase } from "../persistence/db.js";
 
 export type SourcePartialReason = {
@@ -105,6 +109,7 @@ export type RawConversationMessage =
       url: string;
       state: "available";
       text: string;
+      poll?: ConversationPoll;
     }
   | {
       id: string;
@@ -1725,6 +1730,13 @@ export function conversationSnapshotContentHash(
   return observedSourceContentHash(canonicalJson(snapshot));
 }
 
+/** Exact original Meeting Note comparison without advancing its durable source head. */
+export function meetingNoteSnapshotContentHash(snapshot: RawMeetingNoteSnapshot): string {
+  if (!isRawMeetingNoteSnapshot(snapshot))
+    throw new Error("Meeting Note snapshot has an invalid shape");
+  return observedSourceContentHash(canonicalJson(snapshot));
+}
+
 function isRawConversation(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -1765,8 +1777,13 @@ function isRawConversationMessage(value: unknown): value is RawConversationMessa
   }
 
   return (
-    (value["state"] === "available" && typeof value["text"] === "string") ||
-    (value["state"] === "deleted" && value["text"] === null)
+    (value["state"] === "available" &&
+      typeof value["text"] === "string" &&
+      (value["poll"] === undefined ||
+        conversationPollSchema.safeParse(value["poll"]).success)) ||
+    (value["state"] === "deleted" &&
+      value["text"] === null &&
+      value["poll"] === undefined)
   );
 }
 

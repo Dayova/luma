@@ -1,3 +1,8 @@
+import type {
+  PublishMeetingSynthesisIntent,
+  LumaSynthesis
+} from "./meeting-capture-synthesis.js";
+
 export type WorkspaceId = string;
 export type MeetingId = string;
 export type ObservationId = string;
@@ -11,6 +16,28 @@ export type OpenQuestionId = string;
 export type RiskId = string;
 export type FollowUpIntentId = string;
 export type TopicId = string;
+
+/** Only exact bound identities cross the intake Interface; source text comes from owned readers. */
+export type MeetingCaptureSetObserved = ObservationBase & {
+  type: "meeting-capture-set-observed";
+  captures: Array<{ captureId: string; sourceRevision: number; contentHash: string }>;
+};
+
+export type CaptureSynthesisJudgmentRecorded = ObservationBase & {
+  type: "capture-synthesis-judgment-recorded";
+  participantId: PersonId;
+  expectedSynthesisRevision: number;
+  claimId: string;
+  judgment:
+    | { kind: "confirm" | "reject" }
+    | { kind: "correct"; text: string }
+    | {
+        kind: "resolve-action";
+        modality: "commitment" | "request";
+        dueDate: string | null;
+        ownerPersonId: PersonId | null;
+      };
+};
 
 export type MeetingLanguageMode = "auto" | "de" | "en" | "multilingual";
 export type UtteranceLanguage = "de" | "en" | "mixed" | "unknown";
@@ -214,7 +241,7 @@ export type ImportedImplementationReference = {
   url: string;
 };
 
-export type ImportedActionItemCandidate = {
+export type ActionItemCandidateFields = {
   id: string;
   lineageKey: string;
   originalText: string;
@@ -237,14 +264,49 @@ export type ImportedActionItemCandidate = {
   sourceBoundImplementationReferences: ImportedImplementationReference[];
   projectHints: string[];
   componentHints: string[];
+  evidence: EvidenceReference[];
+};
+
+export type ImportedActionItemCandidate = ActionItemCandidateFields & {
   source: {
     source: ImportedMeetingSource;
     sourceBlockId: string;
     sourceSection: "action-items-and-notes";
     sourceExcerpt: string;
   };
-  evidence: EvidenceReference[];
 };
+
+/** Derived claim identity, never a provider Meeting Note or a fabricated transcript. */
+export type SynthesisActionItemSource = {
+  providerId: "luma";
+  sourceKind: "capture-synthesis";
+  sourceObjectId: string;
+  sourceRevision: number;
+  contentHash: string;
+  logicalMeetingId: string;
+  claimId: string;
+  claimDigest: string;
+  externalReference: ExternalReference;
+  canonicalAnchorRef: ExternalReference | null;
+  workItemProviderId: string;
+  implementationReferenceProviderId: string;
+  completeness: "complete" | "partial";
+  actionItemsAvailability: "available" | "unavailable";
+  producedAt: string;
+  humanNoDeadline: boolean;
+  humanActionReviewed: boolean;
+};
+
+export type SynthesisActionItemCandidate = ActionItemCandidateFields & {
+  source: {
+    source: SynthesisActionItemSource;
+    sourceBlockId: string;
+    sourceSection: "luma-synthesis";
+    sourceExcerpt: string;
+  };
+};
+export type ActionItemCandidate =
+  ImportedActionItemCandidate | SynthesisActionItemCandidate;
 
 export type ReconciliationWorkItemSnapshot = {
   providerId: string;
@@ -359,7 +421,7 @@ export type ActionItemReconciliationReview = {
   catalogProviderId: string;
   candidateId: string;
   candidateLineageKey: string;
-  candidate: ImportedActionItemCandidate;
+  candidate: ActionItemCandidate;
   /** Immutable effective ownership snapshot used for this exact review. */
   ownership: ActionItemOwnershipAttribution;
   /** Source and hydrated canonical-work Evidence that grounds this proposal. */
@@ -539,7 +601,25 @@ export type MeetingItemDraft = {
   evidence: EvidenceReference[];
 };
 
+export type CanonicalKnowledgePatchProposal = {
+  id: string;
+  target: ExternalReference & { objectType: "document" };
+  expectedMarkdown: string;
+  replacementMarkdown: string;
+  approvedBy: PersonId;
+  approvedAt: string;
+  evidence: EvidenceReference[];
+};
+
 export type HumanJudgment =
+  | {
+      /** Explicit instruction authorizes this exact patch and its source settlement. */
+      kind: "approve-canonical-knowledge-patch";
+      intentId: FollowUpIntentId;
+      target: ExternalReference & { objectType: "document" };
+      expectedMarkdown: string;
+      replacementMarkdown: string;
+    }
   | {
       kind: "confirm";
       meetingItemId: MeetingItemId;
@@ -657,6 +737,8 @@ export type ExternalActivityObserved = ObservationBase & {
 };
 
 export type MeetingObservation =
+  | MeetingCaptureSetObserved
+  | CaptureSynthesisJudgmentRecorded
   | MeetingStarted
   | MeetingEnded
   | UtteranceCommitted
@@ -692,6 +774,9 @@ export type EvidenceReference = {
 
 export type Provenance = {
   evidence: EvidenceReference[];
+  /** Durable organizational retrieval dependencies; not a sharing grant. */
+  contextReceiptIds?: string[];
+  contextCoverage?: { complete: boolean };
   confidence: Confidence;
   producedAtRevision: number;
   analysisVersion: string;
@@ -824,6 +909,7 @@ export type ActionItemReconciliationIntentBinding = {
 export type SettleOperationalOutcomeIntent = {
   id: FollowUpIntentId;
   type: "settle-operational-outcome";
+  canonicalKnowledgePatch?: CanonicalKnowledgePatchProposal;
   reconciliation: ActionItemReconciliationIntentBinding;
   relatedMeetingItemIds: MeetingItemId[];
   status: FollowUpIntentStatus;
@@ -873,6 +959,7 @@ export type CommentOnCodeChangeIntent = {
 };
 
 export type FollowUpIntent =
+  | PublishMeetingSynthesisIntent
   | RecordMeetingIntent
   | UpdateKnowledgeIntent
   | SettleOperationalOutcomeIntent
@@ -903,8 +990,17 @@ export type MeetingState = {
   humanJudgmentItemIds: MeetingItemId[];
   followUpIntentions: FollowUpIntent[];
   importedSources: ImportedMeetingSource[];
-  importedActionItemCandidates: ImportedActionItemCandidate[];
+  /** Immutable original recipient grants for governed imported source material. */
+  importedSourceAnalysisReceiptIds?: string[];
+  /** Historical storage field; each member explicitly distinguishes raw and derived sources. */
+  importedActionItemCandidates: ActionItemCandidate[];
   currentImportedActionItemCandidateIds: string[];
+  /** Exact derived state backing these candidates; raw captures remain in LogicalMeetings. */
+  captureSynthesisActionSource?: {
+    revision: number;
+    sourceSetDigest: string;
+    canonicalAnchorRef: ExternalReference | null;
+  };
   actionItemReconciliationReviews: ActionItemReconciliationReview[];
   actionItemReconciliationHumanResolutions: ActionItemReconciliationHumanResolution[];
   actionItemOwnershipHumanResolutions: ActionItemOwnershipHumanResolution[];
@@ -920,6 +1016,14 @@ export type MeetingState = {
   actionItemReconciliationCreatedWorkMappings: ActionItemReconciliationCreatedWorkMapping[];
   lastObservationAt: string;
   lastAnalyzedAt: string | null;
+  /** Current read projection only; canonical observations and revisions are retained. */
+  contextAvailability?: MeetingContextAvailability;
+};
+
+export type MeetingContextAvailability = {
+  status: "complete" | "partial" | "unavailable" | "not-configured";
+  withheldItemCount: number;
+  warnings: string[];
 };
 
 export type ExternalActivity = {
@@ -1011,9 +1115,12 @@ export type ParticipantBrief = {
   decisionsAffectingWork: Decision[];
   unresolvedQuestions: OpenQuestion[];
   outputLanguage: "de" | "en";
+  contextAvailability?: MeetingContextAvailability;
 };
 
 export type MeetingConclusion = {
+  /** Separately derived capture understanding, never disguised as raw speech or canonical Decisions. */
+  captureSynthesis?: LumaSynthesis;
   workspaceId: WorkspaceId;
   meetingId: MeetingId;
   revision: number;
@@ -1031,6 +1138,7 @@ export type MeetingConclusion = {
   outputLanguage: "de" | "en";
   provenance: Provenance;
   createdAt: string;
+  contextAvailability?: MeetingContextAvailability;
 };
 
 export type MeetingIntelligenceError =
@@ -1066,6 +1174,12 @@ export type MeetingIntelligenceError =
     }
   | {
       code: "source-verification-unavailable";
+      observationId: ObservationId;
+      message: string;
+      retryable: true;
+    }
+  | {
+      code: "publication-unavailable";
       observationId: ObservationId;
       message: string;
       retryable: true;

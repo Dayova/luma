@@ -97,6 +97,7 @@ type CandidateRow = {
 };
 
 type JudgmentRow = {
+  expected_capture_json: string | null;
   capture_id: string;
   actor_person_id: string;
   judgment_type: "bind" | "make-separate";
@@ -686,6 +687,21 @@ export function createLogicalMeetings(
           );
         }
 
+        if (
+          judgment.expectedCapture &&
+          (judgment.expectedCapture.sourceRevision !==
+            currentCapture.revision.sourceRevision ||
+            judgment.expectedCapture.contentHash !==
+              currentCapture.revision.contentHash ||
+            judgment.expectedCapture.bindingId !== current.binding_id)
+        ) {
+          return rejected(
+            "superseded-capture-revision",
+            "The capture revision or prior binding changed after this Human review.",
+            false
+          );
+        }
+
         const createdAt = now().toISOString();
         let logicalMeetingId: LogicalMeetingId;
         let state: CaptureBindingState;
@@ -779,8 +795,8 @@ export function createLogicalMeetings(
           `INSERT INTO logical_meeting_capture_binding_judgments (
              workspace_id, judgment_id, capture_id, actor_person_id,
              judgment_type, requested_logical_meeting_id, reason, observed_at,
-             binding_id, created_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+             binding_id, created_at, expected_capture_json
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
             judgment.workspaceId,
             judgment.judgmentId,
@@ -793,7 +809,8 @@ export function createLogicalMeetings(
             judgment.reason,
             judgment.observedAt,
             binding.binding_id,
-            createdAt
+            createdAt,
+            judgment.expectedCapture ? canonicalJson(judgment.expectedCapture) : null
           ]
         );
         await touchLogicalMeeting(
@@ -2509,7 +2526,7 @@ async function judgmentById(
 ): Promise<JudgmentRow | null> {
   const result = await database.query<JudgmentRow>(
     `SELECT capture_id, actor_person_id, judgment_type,
-            requested_logical_meeting_id, observed_at, reason, binding_id
+            requested_logical_meeting_id, observed_at, reason, binding_id, expected_capture_json
        FROM logical_meeting_capture_binding_judgments
       WHERE workspace_id = $1 AND judgment_id = $2
       FOR UPDATE`,
@@ -2532,7 +2549,9 @@ function sameHumanJudgment(
         ? next.judgment.logicalMeetingId
         : next.judgment.rejectedLogicalMeetingId) &&
     stored.observed_at === next.observedAt &&
-    stored.reason === next.reason
+    stored.reason === next.reason &&
+    stored.expected_capture_json ===
+      (next.expectedCapture ? canonicalJson(next.expectedCapture) : null)
   );
 }
 
@@ -2931,6 +2950,15 @@ function validateHumanJudgment(judgment: HumanCaptureBindingJudgment): string | 
   ) {
     return "A Human capture-binding judgment is missing its immutable envelope.";
   }
+
+  if (
+    judgment.expectedCapture &&
+    (!Number.isSafeInteger(judgment.expectedCapture.sourceRevision) ||
+      judgment.expectedCapture.sourceRevision < 1 ||
+      !isNonBlankString(judgment.expectedCapture.contentHash) ||
+      !isNonBlankString(judgment.expectedCapture.bindingId))
+  )
+    return "A Human capture-binding precondition must name an exact source revision and prior binding.";
 
   if (
     judgment.reason !== null &&

@@ -1,3 +1,4 @@
+import { discordAudienceFixture } from "./discord-audience-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
 import {
@@ -5,7 +6,8 @@ import {
   Collection,
   Events,
   MessageType,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  Routes
 } from "discord.js";
 import { conversationSnapshotContentHash } from "../../src/knowledge/observed-source-ledger.js";
 import { createDiscordJsTransport } from "../../src/discord/discord-js-adapter.js";
@@ -18,6 +20,10 @@ const sdk = vi.hoisted(() => ({
     void _values;
     return false;
   },
+  get: vi.fn(),
+  post: vi.fn(),
+  clientOptions: vi.fn<(options: Discord.ClientOptions) => void>(),
+  register: vi.fn<(route: string, options: unknown) => void>(),
   fetch: vi.fn<(id: string, options?: unknown) => Promise<unknown>>()
 }));
 
@@ -29,8 +35,10 @@ vi.mock("discord.js", async (importOriginal) => {
     Client: class extends EventEmitter {
       user = { id: "bot" };
       channels = { fetch: sdk.fetch };
-      constructor() {
+      rest = { get: sdk.get, post: sdk.post };
+      constructor(options: Discord.ClientOptions) {
         super();
+        sdk.clientOptions(options);
         sdk.emit = this.emit.bind(this);
       }
       login(): Promise<void> {
@@ -45,7 +53,8 @@ vi.mock("discord.js", async (importOriginal) => {
       setToken() {
         return this;
       }
-      put(): Promise<void> {
+      put(route: string, options: unknown): Promise<void> {
+        sdk.register(route, options);
         return Promise.resolve();
       }
     }
@@ -66,7 +75,12 @@ function channel(id: string, type: ChannelType, parentId: string | null = null) 
   };
 }
 
+let audience: ReturnType<typeof discordAudienceFixture>;
 beforeEach(() => {
+  audience = discordAudienceFixture({
+    channel: (id) => sdk.channels.get(id) as ReturnType<typeof channel> | undefined
+  });
+  sdk.get.mockImplementation(audience.read);
   sdk.channels.clear();
   sdk.channels.set("parent", channel("parent", ChannelType.GuildText));
   sdk.channels.set("thread", channel("thread", ChannelType.PublicThread, "parent"));
@@ -74,6 +88,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function transport() {
@@ -82,6 +97,7 @@ function transport() {
     clientId: "application",
     guildId: "guild",
     allowedParentChannelIds: ["parent"],
+    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],
@@ -114,7 +130,340 @@ function mention() {
 }
 
 describe("Discord production channel resolution and delivery", () => {
-  it.each(["unchanged", "edited", "deleted", "history-revoked", "anchor-edited"])(
+  it.each(["command", "context-ask"] as const)(
+    "drains final source proof and delivery for an admitted %s before disconnecting",
+    async (entrypoint) => {
+      const live = transport();
+      let finishProof: () => void = () => undefined;
+      const proof = new Promise<void>((resolve) => {
+        finishProof = resolve;
+      });
+      const requireCurrent = vi.fn(() => proof);
+      const command = vi.fn(() =>
+        Promise.resolve({ content: "Reviewed result", requireCurrent })
+      );
+      const ask = vi.fn(() =>
+        Promise.resolve({
+          content: "Reviewed result",
+          idempotencyKey: "shutdown-proof",
+          requireCurrent
+        })
+      );
+      await live.connect(command, ask);
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "meeting",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "interaction",
+        channelId: "parent",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-08T12:00:00Z"),
+        options: { getSubcommand: () => "usage" },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      const message = mention();
+      if (entrypoint === "command") sdk.emit(Events.InteractionCreate, interaction);
+      else sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(requireCurrent).toHaveBeenCalledOnce());
+      let stopped = false;
+      const stopping = live.disconnect().then(() => {
+        stopped = true;
+      });
+      sdk.emit(Events.InteractionCreate, interaction);
+      sdk.emit(Events.MessageCreate, message);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(command).toHaveBeenCalledTimes(entrypoint === "command" ? 1 : 0);
+      expect(ask).toHaveBeenCalledTimes(entrypoint === "context-ask" ? 1 : 0);
+      expect(stopped).toBe(false);
+      expect(interaction.editReply).not.toHaveBeenCalled();
+      expect(message.reply).not.toHaveBeenCalled();
+      finishProof();
+      await stopping;
+      expect(
+        entrypoint === "command" ? interaction.editReply : message.reply
+      ).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("registers and maps explicit consultation commands on the single Gateway with mutation retries disabled", async () => {
+    const live = createDiscordJsTransport({
+      token: "test",
+      clientId: "application",
+      guildId: "guild",
+      allowedParentChannelIds: ["parent"],
+      authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+      consultations: {
+        teamRoleId: "role",
+        capture: {
+          parentChannelIds: ["parent"],
+          allowedDiscordUserIds: ["founder"],
+          maxMessages: 50,
+          maxEvidenceChars: 32000,
+          minIntervalMs: 60000
+        }
+      }
+    });
+    const handler = vi.fn(() => Promise.resolve({ content: "Canonical receipt" }));
+    await live.connect(handler);
+    expect(sdk.clientOptions).toHaveBeenCalledOnce();
+    expect(sdk.clientOptions.mock.calls[0]?.[0].rest?.retries).toBe(0);
+    expect(sdk.clientOptions.mock.calls[0]?.[0].intents).toContain(32768); // MessageContent for ordinary founder source messages.
+    expect(sdk.register.mock.calls[0]?.[1]).toMatchObject({
+      body: [
+        expect.objectContaining({ name: "meeting" }),
+        expect.objectContaining({ name: "consultation" })
+      ]
+    });
+    const strings: Record<string, string> = {
+      source_message: "message",
+      purpose: "Gather founder views",
+      question: "Release now?",
+      options: "Pilot | Release",
+      replaces: "previous"
+    };
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "consultation",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "thread",
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-11T10:00:00Z"),
+      options: {
+        getSubcommand: () => "start",
+        getString: (key: string) => strings[key] ?? null,
+        getInteger: () => null,
+        getUser: () => ({ id: "founder" })
+      },
+      deferReply: vi.fn(async () => {}),
+      editReply: vi.fn(async () => {})
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "consultation-start",
+        sourceMessageId: "message",
+        purpose: "Gather founder views",
+        question: "Release now?",
+        options: ["Pilot", "Release"],
+        durationHours: 24,
+        ownerDiscordUserId: "founder",
+        replacesConsultationId: "previous"
+      })
+    );
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Canonical receipt",
+      allowedMentions: { parse: [] }
+    });
+    const provider = live.createConsultationProvider?.({
+      resolveRecipients: () => Promise.resolve(["founder"])
+    });
+    expect(provider?.providerId).toBe("discord");
+    expect(sdk.clientOptions).toHaveBeenCalledOnce();
+    await live.disconnect();
+  });
+  it.each([
+    "human",
+    "luma",
+    "missing-results",
+    "foreign-count",
+    "other-bot",
+    "past-guest",
+    "revised",
+    "unreadable",
+    "stalled"
+  ])(
+    "captures fresh native poll Evidence through the SDK transport: %s",
+    async (variant) => {
+      const live = transport();
+      const anchor = {
+        ...mention(),
+        content: "<@bot> What did we decide?",
+        type: MessageType.Default,
+        author: { id: "founder", bot: false, username: "Founder" },
+        url: "https://discord.com/channels/guild/thread/message",
+        attachments: new Map(),
+        embeds: [],
+        stickers: new Map(),
+        components: [],
+        poll: null,
+        messageSnapshots: new Map(),
+        flags: { has: () => false },
+        editedAt: null,
+        reference: null
+      };
+      const bot = variant === "luma" || variant === "other-bot";
+      const creator =
+        variant === "luma"
+          ? "bot"
+          : variant === "other-bot"
+            ? "other-bot"
+            : variant === "past-guest"
+              ? "guest"
+              : "founder";
+      const historical = {
+        ...anchor,
+        id: "poll",
+        content: "",
+        mentions: { users: new Map() },
+        author: { id: creator, bot, username: creator },
+        createdAt: new Date("2026-09-08T11:00:00Z"),
+        url: "https://discord.com/channels/guild/thread/poll",
+        // SDK defaults are deliberately misleading: raw results are authoritative.
+        poll: { resultsFinalized: false, answers: new Map([[2, { voteCount: 0 }]]) }
+      };
+      const rawPoll = {
+        question: { text: "Ship?" },
+        answers: [
+          { answer_id: 2, poll_media: { text: "Yes" } },
+          { answer_id: 8, poll_media: { text: "Pause" } }
+        ],
+        expiry: "2026-09-07T12:00:00Z",
+        allow_multiselect: true,
+        layout_type: 1,
+        ...(variant === "missing-results"
+          ? {}
+          : {
+              results: {
+                is_finalized: false,
+                answer_counts: [{ id: variant === "foreign-count" ? 99 : 2, count: 3 }]
+              }
+            })
+      };
+      const raw = {
+        id: "poll",
+        channel_id: "thread",
+        author: historical.author,
+        content: variant === "revised" ? "Changed" : "",
+        edited_timestamp: null,
+        poll: rawPoll
+      };
+      sdk.get.mockImplementation(
+        (
+          route: Parameters<typeof audience.read>[0],
+          options: Parameters<typeof audience.read>[1]
+        ) => {
+          if (route === Routes.channelMessage("thread", "poll")) {
+            if (variant === "unreadable")
+              return Promise.reject(new Error("Unknown message"));
+            if (variant === "stalled") return new Promise(() => undefined);
+            return Promise.resolve(raw);
+          }
+          return audience.read(route, options);
+        }
+      );
+      sdk.channels.set("thread", {
+        ...channel("thread", ChannelType.PublicThread, "parent"),
+        isThread: () => true,
+        url: "https://discord.com/channels/guild/thread",
+        messages: {
+          fetch: (input: object) =>
+            Promise.resolve(
+              "message" in input ? anchor : new Collection([[historical.id, historical]])
+            )
+        }
+      });
+      if (variant === "stalled") vi.useFakeTimers();
+      const pending = live.capture({
+        workspaceId: "workspace",
+        subject: {
+          type: "conversation-thread",
+          providerId: "discord",
+          conversationObjectId: "thread",
+          anchorMessageId: "message"
+        },
+        question: "What did we decide?"
+      });
+      if (variant === "stalled") await vi.advanceTimersByTimeAsync(5_001);
+      const captured = await pending;
+      const evidence = captured.snapshot.messages.find(
+        (message) => message.id === "poll"
+      );
+      if (
+        ["other-bot", "past-guest", "revised", "unreadable", "stalled"].includes(variant)
+      ) {
+        expect(captured.snapshot.completeness.state).toBe("partial");
+        expect(evidence).toBeUndefined();
+      } else {
+        expect(captured.snapshot.completeness.state).toBe("complete");
+        expect(evidence).toMatchObject({
+          state: "available",
+          text: "",
+          poll: {
+            wordingOrigin: variant === "luma" ? "luma-generated" : "human",
+            results:
+              variant === "missing-results"
+                ? { status: "unknown", reason: "missing" }
+                : variant === "foreign-count"
+                  ? { status: "unknown", reason: "malformed" }
+                  : {
+                      status: "provisional",
+                      counts: [
+                        { optionId: "2", votes: 3 },
+                        { optionId: "8", votes: 0 }
+                      ]
+                    }
+          }
+        });
+      }
+      if (["other-bot", "past-guest"].includes(variant))
+        expect(
+          sdk.get.mock.calls.some(
+            ([route]) => route === Routes.channelMessage("thread", "poll")
+          )
+        ).toBe(false);
+      await live.disconnect();
+    }
+  );
+  it.each([true, false])(
+    "fences organizational context at final delivery without invoking the handler twice: %s",
+    async (current) => {
+      const live = transport();
+      const message = mention();
+      const fence = vi.fn(() =>
+        current
+          ? Promise.resolve()
+          : Promise.reject(new Error("Source revoked after answering"))
+      );
+      const handler = vi.fn(() =>
+        Promise.resolve({
+          content: "Old organizational claim",
+          idempotencyKey: "context-result",
+          requireCurrent: fence
+        })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      expect(fence).toHaveBeenCalledOnce();
+      expect(handler).toHaveBeenCalledOnce();
+      const sent = message.reply.mock.calls[0]?.[0];
+      expect(sent).toHaveProperty(
+        "content",
+        current
+          ? expect.stringContaining("Old organizational claim")
+          : expect.stringContaining("organizational context changed")
+      );
+      if (!current)
+        expect(sent).not.toHaveProperty(
+          "content",
+          expect.stringContaining("Old organizational claim")
+        );
+      await live.disconnect();
+    }
+  );
+  it.each([
+    "unchanged",
+    "edited",
+    "deleted",
+    "history-revoked",
+    "anchor-edited",
+    "audience-expanded"
+  ])(
     "revalidates answer evidence and reading permission at final delivery: %s",
     async (change) => {
       const live = transport();
@@ -183,6 +532,11 @@ describe("Discord production channel resolution and delivery", () => {
       if (change === "deleted") deleted = true;
       if (change === "history-revoked") historyReadable = false;
       if (change === "anchor-edited") anchor.content = "<@bot> A different question";
+      if (change === "audience-expanded")
+        audience.state.members.push({
+          user: { id: "new-admin", bot: false },
+          roles: ["admin"]
+        });
       finish({
         content: "Internal old answer",
         idempotencyKey: "answer",
@@ -191,6 +545,12 @@ describe("Discord production channel resolution and delivery", () => {
           contentHash: conversationSnapshotContentHash(captured.snapshot)
         }
       });
+      if (change === "audience-expanded") {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(anchor.reply).not.toHaveBeenCalled();
+        await live.disconnect();
+        return;
+      }
       await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledOnce());
       const sent = anchor.reply.mock.calls[0]?.[0];
       if (change === "unchanged")
@@ -214,6 +574,109 @@ describe("Discord production channel resolution and delivery", () => {
     }
   );
 
+  it("refuses a capture whose audience expands while Discord returns messages", async () => {
+    const live = transport();
+    const anchor = {
+      ...mention(),
+      content: "<@bot> What did we decide?",
+      type: MessageType.Default,
+      author: { id: "founder", bot: false, username: "Founder" },
+      url: "https://discord.com/channels/guild/thread/message",
+      attachments: new Map(),
+      embeds: [],
+      stickers: new Map(),
+      components: [],
+      poll: null,
+      messageSnapshots: new Map(),
+      flags: { has: () => false },
+      editedAt: null,
+      reference: null
+    };
+    const messageFetch = vi.fn<(input: unknown) => Promise<unknown>>((input) => {
+      if (input && typeof input === "object" && "message" in input)
+        return Promise.resolve(anchor);
+      audience.state.members.push({
+        user: { id: "new-admin", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve(new Collection());
+    });
+    sdk.channels.set("thread", {
+      ...channel("thread", ChannelType.PublicThread, "parent"),
+      isThread: () => true,
+      url: "https://discord.com/channels/guild/thread",
+      messages: { fetch: messageFetch }
+    });
+    await expect(
+      live.capture({
+        workspaceId: "workspace",
+        subject: {
+          type: "conversation-thread",
+          providerId: "discord",
+          conversationObjectId: "thread",
+          anchorMessageId: "message"
+        },
+        question: "What did we decide?"
+      })
+    ).rejects.toThrow("not enabled");
+    expect(messageFetch).toHaveBeenCalled();
+  });
+
+  it.each(["guest-role", "everyone", "administrator"])(
+    "withholds an old answer replay if %s gains access at the final context fence",
+    async (grant) => {
+      const live = transport();
+      const message = mention();
+      const contextFence = vi.fn(() => Promise.resolve());
+      const retainedResponse = {
+        content: "Retained internal answer",
+        idempotencyKey: "same-answer",
+        requireCurrent: contextFence
+      };
+      const handler = vi.fn(() => Promise.resolve(retainedResponse));
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      contextFence.mockImplementationOnce(() => {
+        audience.state.members.push({
+          user: { id: "outsider", bot: false },
+          roles: [grant === "administrator" ? "admin" : "guest"]
+        });
+        if (grant !== "administrator")
+          audience.state.overwrites.push({
+            id: grant === "everyone" ? "guild" : "guest",
+            type: 0,
+            allow: String(PermissionFlagsBits.ViewChannel),
+            deny: "0"
+          });
+        return Promise.resolve();
+      });
+      sdk.emit(Events.MessageCreate, message);
+      await vi.waitFor(() => expect(contextFence).toHaveBeenCalledTimes(2));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(message.reply).toHaveBeenCalledOnce();
+      await live.disconnect();
+    }
+  );
+
+  it("resolves the audience without an unbounded SDK channel-cache lookup", async () => {
+    const live = transport();
+    sdk.fetch.mockImplementation(() => new Promise(() => undefined));
+    expect(await live.resolveChannel({ channelId: "thread" })).toEqual({
+      id: "thread",
+      guildId: "guild",
+      kind: "public-thread",
+      parentChannelId: "parent"
+    });
+    expect(sdk.fetch).not.toHaveBeenCalled();
+    audience.state.members.push({
+      user: { id: "new-admin", bot: false },
+      roles: ["admin"]
+    });
+    expect(await live.resolveChannel({ channelId: "thread" })).toBeNull();
+  });
+
   it("freshly resolves stable channel identity and supported parent type", async () => {
     const live = transport();
     expect(await live.resolveChannel({ channelId: "thread" })).toEqual({
@@ -222,8 +685,8 @@ describe("Discord production channel resolution and delivery", () => {
       kind: "public-thread",
       parentChannelId: "parent"
     });
-    expect(sdk.fetch).toHaveBeenCalledWith("thread", { force: true });
-    expect(sdk.fetch).toHaveBeenCalledWith("parent", { force: true });
+    expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything());
+    expect(sdk.get).toHaveBeenCalledWith(Routes.channel("parent"), expect.anything());
     sdk.channels.set("parent", {
       ...channel("parent", ChannelType.GuildText),
       name: "renamed work channel"
@@ -249,7 +712,7 @@ describe("Discord production channel resolution and delivery", () => {
     const message = mention();
     sdk.emit(Events.MessageCreate, message);
     await vi.waitFor(() =>
-      expect(sdk.fetch).toHaveBeenCalledWith("excluded", { force: true })
+      expect(sdk.get).toHaveBeenCalledWith(Routes.channel("excluded"), expect.anything())
     );
     expect(handler).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
@@ -273,15 +736,48 @@ describe("Discord production channel resolution and delivery", () => {
       sdk.emit(Events.MessageCreate, message);
       await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
       sdk.channels.delete("thread");
-      sdk.fetch.mockClear();
+      sdk.get.mockClear();
       finish();
       await vi.waitFor(() =>
-        expect(sdk.fetch).toHaveBeenCalledWith("thread", { force: true })
+        expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything())
       );
       expect(message.reply).not.toHaveBeenCalled();
       await live.disconnect();
     }
   );
+
+  it("withholds a completed slash-command response if its channel gains a guest before editReply", async () => {
+    const live = transport();
+    const handler = vi.fn(() => {
+      audience.state.members.push({
+        user: { id: "outsider", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve({ content: "Confidential completed command result" });
+    });
+    await live.connect(handler);
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "meeting",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "parent",
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-08T12:00:00Z"),
+      options: { getSubcommand: () => "usage" },
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi.fn(() => Promise.resolve())
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    expect(interaction.editReply).toHaveBeenCalledWith({
+      content: "Luma is not enabled in this Discord channel.",
+      allowedMentions: { parse: [] }
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    await live.disconnect();
+  });
 
   it("blocks direct lifecycle publication outside scope before history or send", async () => {
     const live = transport();
@@ -299,6 +795,28 @@ describe("Discord production channel resolution and delivery", () => {
     await expect(
       live.createThread({ parentChannelId: "excluded", name: "internal title" })
     ).rejects.toThrow();
+  });
+
+  it("rechecks the real audience after asynchronous receipt recovery before sending", async () => {
+    const live = transport();
+    const destination = channel("thread", ChannelType.PublicThread, "parent");
+    destination.messages.fetch.mockImplementation(() => {
+      audience.state.members.push({
+        user: { id: "new-admin", bot: false },
+        roles: ["admin"]
+      });
+      return Promise.resolve(new Collection());
+    });
+    sdk.channels.set("thread", destination);
+    await expect(
+      live.sendMessage({
+        channelId: "thread",
+        content: "internal receipt",
+        idempotencyKey: "receipt"
+      })
+    ).rejects.toThrow("not enabled");
+    expect(destination.messages.fetch).toHaveBeenCalled();
+    expect(destination.send).not.toHaveBeenCalled();
   });
 
   it("rechecks scope after asynchronous receipt recovery before sending", async () => {
@@ -319,4 +837,262 @@ describe("Discord production channel resolution and delivery", () => {
     expect(destination.messages.fetch).toHaveBeenCalled();
     expect(destination.send).not.toHaveBeenCalled();
   });
+});
+
+describe("Discord explicit Decision Record entry", () => {
+  function decisionTransport() {
+    return createDiscordJsTransport({
+      token: "test",
+      clientId: "application",
+      guildId: "guild",
+      allowedParentChannelIds: ["parent"],
+      authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+      decisionRecords: {
+        parentChannelIds: ["parent"],
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32_000,
+        minIntervalMs: 60_000
+      }
+    });
+  }
+  it("routes original explicit instructions with a separate purpose while ignoring questions, quotes and guests", async () => {
+    const live = decisionTransport();
+    const handler = vi.fn(() =>
+      Promise.resolve({ content: "Retained decision result", idempotencyKey: "decision" })
+    );
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    expect(sdk.clientOptions.mock.calls[0]?.[0].rest?.retries).toBe(0);
+    expect(JSON.stringify(sdk.register.mock.calls[0]?.[1])).toContain(
+      '"name":"decision-record"'
+    );
+    const candidate = mention();
+    candidate.content = "<@bot> record this decision";
+    const question = { ...mention(), content: "<@bot> Should we record this decision?" };
+    const quote = { ...mention(), content: "> <@bot> record this decision" };
+    const guest = { ...candidate, author: { id: "guest", bot: false } };
+    const bot = { ...candidate, author: { id: "founder", bot: true } };
+    const foreign = { ...candidate, guildId: "other" };
+    const negated = {
+      ...mention(),
+      content: "<@bot> Create a decision record, but not yet"
+    };
+    for (const excluded of [question, quote, guest, bot, foreign, negated])
+      sdk.emit(Events.MessageCreate, excluded);
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        question: "record this decision",
+        purpose: "decision-record",
+        actorDiscordUserId: "founder",
+        messageId: "message"
+      })
+    );
+    expect(candidate.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedMentions: { parse: [], repliedUser: false },
+        enforceNonce: true
+      })
+    );
+    await live.disconnect();
+  });
+  it.each(["structured-only", "decision-fallback", "ask-fallback"] as const)(
+    "keeps deterministic usage reachable with %s admission",
+    async (mode) => {
+      const scope = {
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32000,
+        minIntervalMs: 60000
+      };
+      const live = createDiscordJsTransport({
+        token: "test-only",
+        clientId: "application",
+        guildId: "guild",
+        allowedParentChannelIds: ["parent", "structured-parent"],
+        authorizeHumanReader: (id) => Promise.resolve(id === "founder"),
+        structuredWork: {
+          ...scope,
+          parentChannelIds: [mode === "structured-only" ? "parent" : "structured-parent"]
+        },
+        ...(mode === "decision-fallback"
+          ? { decisionRecords: { ...scope, parentChannelIds: ["parent"] } }
+          : {}),
+        ...(mode === "ask-fallback"
+          ? { contextAsk: { ...scope, parentChannelIds: ["parent"] } }
+          : {})
+      });
+      const handler = vi.fn(() =>
+        Promise.resolve({ content: "Usage without AI", idempotencyKey: "usage" })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      const candidate = mention();
+      sdk.emit(Events.MessageCreate, candidate);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ question: "usage" })
+      );
+      expect(handler.mock.calls[0]).toEqual([
+        expect.objectContaining(
+          mode === "structured-only"
+            ? { purpose: "structured-work" }
+            : mode === "decision-fallback"
+              ? { purpose: "decision-record" }
+              : { question: "usage" }
+        )
+      ]);
+      if (mode === "ask-fallback")
+        expect(handler.mock.calls[0]).toEqual([
+          expect.not.objectContaining({ purpose: "structured-work" })
+        ]);
+      if (mode === "ask-fallback")
+        expect(handler.mock.calls[0]).toEqual([
+          expect.not.objectContaining({ purpose: "decision-record" })
+        ]);
+      await live.disconnect();
+    }
+  );
+
+  it("keeps deterministic usage mentions reachable with Decision Records enabled and Ask off", async () => {
+    const live = decisionTransport();
+    const handler = vi.fn(() =>
+      Promise.resolve({ content: "Usage without AI", idempotencyKey: "usage" })
+    );
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = mention();
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ purpose: "decision-record", question: "usage" })
+    );
+    await live.disconnect();
+  });
+  it.each(["usage", "status"])(
+    "keeps %s reachable in an Ask-only channel when Decision Records use another scope",
+    async (question) => {
+      const scope = {
+        allowedDiscordUserIds: ["founder"],
+        maxMessages: 50,
+        maxEvidenceChars: 32_000,
+        minIntervalMs: 60_000
+      };
+      const live = createDiscordJsTransport({
+        token: "test",
+        clientId: "application",
+        guildId: "guild",
+        allowedParentChannelIds: ["parent", "decision-parent"],
+        authorizeHumanReader: (id) => Promise.resolve(id === "founder"),
+        contextAsk: { ...scope, parentChannelIds: ["parent"] },
+        decisionRecords: { ...scope, parentChannelIds: ["decision-parent"] }
+      });
+      const handler = vi.fn(() =>
+        Promise.resolve({ content: "Usage without AI", idempotencyKey: question })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      const candidate = { ...mention(), content: `<@bot> ${question}` };
+      sdk.emit(Events.MessageCreate, candidate);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ question })
+      );
+      expect(handler.mock.calls[0]).toEqual([
+        expect.not.objectContaining({ purpose: "decision-record" })
+      ]);
+      await live.disconnect();
+    }
+  );
+  it("keeps an explicit-looking message read-only when only Ask is enabled", async () => {
+    const live = transport();
+    const handler = vi.fn(() => Promise.resolve(null));
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = mention();
+    candidate.content = "<@bot> create a decision record based on the discussion above";
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => handler.mock.calls.length).toBe(1);
+    expect(handler.mock.calls[0]).toEqual([
+      expect.not.objectContaining({ purpose: "decision-record" })
+    ]);
+    expect(JSON.stringify(sdk.register.mock.calls[0]?.[1])).not.toContain(
+      '"name":"decision-record"'
+    );
+    await live.disconnect();
+  });
+  it("withholds the stale receipt when its owned final source proof fails", async () => {
+    const live = decisionTransport();
+    await live.connect(
+      () => Promise.resolve({ content: "unused" }),
+      () =>
+        Promise.resolve({
+          content: "private old decision",
+          idempotencyKey: "decision",
+          requireCurrent: () =>
+            Promise.reject(new Error("source or Human correction changed"))
+        })
+    );
+    const candidate = mention();
+    candidate.content = "<@bot> record this decision";
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    expect(JSON.stringify(candidate.reply.mock.calls)).not.toContain(
+      "private old decision"
+    );
+    expect(JSON.stringify(candidate.reply.mock.calls)).toContain(
+      "changed or is no longer readable"
+    );
+    await live.disconnect();
+  });
+  it.each(["status", "recover", "meeting", "accept"])(
+    "registers and maps source-bound /decision-record %s",
+    async (subcommand) => {
+      const live = decisionTransport();
+      const handler = vi.fn(() => Promise.resolve({ content: "Retained result" }));
+      await live.connect(handler);
+      const fields: Record<string, string> = {
+        source_message: "message",
+        request_id: "decision-request",
+        instruction: "Ich entscheide: Luma bleibt intern. Bitte festhalten.",
+        target_record: "canonical-decision-id",
+        review_token: "a".repeat(64),
+        confirmation: "Ich bestätige diese genaue Entscheidung."
+      };
+      const interaction = {
+        isChatInputCommand: () => true,
+        commandName: "decision-record",
+        inGuild: () => true,
+        guildId: "guild",
+        id: "interaction",
+        channelId: "thread",
+        user: { id: "founder" },
+        createdAt: new Date("2026-09-11T10:00:00Z"),
+        options: {
+          getSubcommand: () => subcommand,
+          getString: (key: string) => fields[key] ?? null,
+          getInteger: () => null
+        },
+        deferReply: vi.fn(() => Promise.resolve()),
+        editReply: vi.fn(() => Promise.resolve())
+      };
+      sdk.emit(Events.InteractionCreate, interaction);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      expect(handler).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          type: `decision-record-${subcommand}`,
+          ...(subcommand === "meeting"
+            ? {
+                instruction: fields["instruction"],
+                targetRecordId: "canonical-decision-id"
+              }
+            : {
+                sourceMessageId: "message",
+                requestId: "decision-request",
+                ...(subcommand === "accept"
+                  ? { reviewToken: "a".repeat(64), instruction: fields["confirmation"] }
+                  : {})
+              })
+        })
+      );
+      await live.disconnect();
+    }
+  );
 });

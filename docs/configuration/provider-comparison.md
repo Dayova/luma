@@ -211,3 +211,12 @@ entries must be reconciled with provider usage before interpreting total cost.
 - [DeepSeek JSON output](https://api-docs.deepseek.com/guides/json_mode/)
 - [DeepSeek thinking controls](https://api-docs.deepseek.com/guides/thinking_mode/)
 - [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+
+## Frozen comparison baseline
+
+The recorded September 11 comparison uses the frozen instructions in
+`src/evaluation/provider-comparison/baseline-instructions.ts`. Later production
+context-governance instructions remain in the production analysis contract.
+Keeping the historical baseline separate preserves saved request hashes and
+prevents integration of this evaluator from reverting production safeguards.
+New comparisons must explicitly identify their instruction variant.

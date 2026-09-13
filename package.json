@@ -14,6 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:meeting": "pnpm build && node dist/evals/run.js",
+    "eval:meeting:complete": "pnpm eval:meeting --require-complete",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

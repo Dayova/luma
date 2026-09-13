@@ -1,9 +1,9 @@
+import { COMPARISON_BASELINE_INSTRUCTIONS } from "./baseline-instructions.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   meetingAnalysisJsonSchema,
-  meetingAnalysisSchema,
-  MEETING_INTELLIGENCE_INSTRUCTIONS
+  meetingAnalysisSchema
 } from "../../ai/meeting-analysis-contract.js";
 import type {
   MeetingAnalysisProposalBatch,
@@ -132,7 +132,7 @@ export function comparisonPayload(request: StructuredReasoningRequest<unknown>) 
     context: request.context,
     input: request.input
   });
-  const instructions = `${MEETING_INTELLIGENCE_INSTRUCTIONS}\n\nReturn only JSON matching this schema:\n${JSON.stringify(meetingAnalysisJsonSchema)}`;
+  const instructions = `${COMPARISON_BASELINE_INSTRUCTIONS}\n\nReturn only JSON matching this schema:\n${JSON.stringify(meetingAnalysisJsonSchema)}`;
   return {
     instructions,
     input,

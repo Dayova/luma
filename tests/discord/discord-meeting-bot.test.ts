@@ -1060,6 +1060,10 @@ describe("Discord meeting bot", () => {
         workspaceId: "workspace_dayova",
         inquiryId: "discord:message_context_ask:context-ask",
         question: "What did we decide about the release?",
+        audience: {
+          workspaceId: "workspace_dayova",
+          personIds: ["person_jakob", "person_fabius", "person_philipp", "person_julius"]
+        },
         subject: {
           type: "conversation-thread",
           providerId: "discord",

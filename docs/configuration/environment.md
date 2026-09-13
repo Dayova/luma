@@ -242,7 +242,18 @@ Configure comma-separated numeric IDs of reviewed founder-only text parents in
 permitted; malformed or duplicate IDs fail before resources are allocated.
 Meeting commands and replies require this common scope. Channel names do not
 grant access, and stored threads are rechecked against their current parent.
-This checks channel scope; live reader permissions still need verification.
+Luma also verifies the current human audience using fresh Discord member, role,
+ownership, and channel-overwrite data, including administrator access.
+
+Enable **Server Members Intent** in the Application's **Bot > Privileged Gateway
+Intents** settings, including when Context Ask is disabled. Production preflight
+requires Discord's application approval flag; there is no environment override.
+The current reader proof supports a complete guild list of at most 999 members,
+including bots. A full 1,000-member page, missing intent, unavailable or incomplete
+read, or an unauthorized human reader blocks channel work and shared output.
+Private threads are unsupported. See the
+[current reader verification](../integrations/discord.md#current-reader-verification)
+for the permission calculation and failure behavior.
 
 See `docs/integrations/discord.md` for Application creation, installation permissions, command behavior, and smoke testing. Never reuse the development token in production.
 
@@ -258,7 +269,7 @@ Do not set `LUMA_DISCORD_CONTEXT_ASK_ENABLED=1` in a live Dayova environment
 until the [LUM-4 activation gate](../integrations/discord.md#lum-4-activation-gate)
 is satisfied: its owner has recorded all four policy decisions and the
 required follow-up implementation is delivered.
-The Application's **Message Content** privileged Gateway intent, Discord's
+The Application's additional **Message Content** privileged Gateway intent, Discord's
 own approval where required, and the technical allowlists below are necessary
 prerequisites, not authorization:
 
@@ -379,8 +390,8 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 - Keep SDKs, MCP tools, CLIs, and provider IDs out of Meeting Intelligence domain state.
 - The current Meeting settlement implementation requires an approved,
   source-bound Follow-up Intent and a durable idempotency key. Product policy
-  may later allow an authorized explicit write instruction for safe,
-  unambiguous operations; that broader authorization path is not implemented
-  by the bounded Context Ask slice.
+  allows an authorized explicit instruction to approve safe, unambiguous
+  [structured work](../structured-work.md) and [Decision recording](../integrations/discord-decision-records.md)
+  through their owned execution paths. Context Ask remains read-only.
 
 See `docs/configuration/identity.md` for the built-in Person mappings.

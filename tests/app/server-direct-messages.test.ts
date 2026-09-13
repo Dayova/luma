@@ -20,7 +20,7 @@ describe("application DM composition", () => {
       const accounting = await createPgliteDatabase();
       const budget = createAiUsageBudget({ database: accounting, monthlyLimitUsd: 1 });
       let handler: ((event: DirectMessageEvent) => Promise<void>) | undefined;
-      const sent: string[] = [];
+      const sent: { content: string }[] = [];
       let requests = 0;
       const dm: DiscordDirectMessageTransport = {
         onMessage: (callback) => {
@@ -41,8 +41,18 @@ describe("application DM composition", () => {
           }),
         before: () => Promise.resolve([]),
         send: (reply) => {
-          sent.push(reply.content);
-          return Promise.resolve();
+          const message = { content: reply.content };
+          sent.push(message);
+          return Promise.resolve({
+            edit: (content: string) => {
+              message.content = content;
+              return Promise.resolve();
+            },
+            remove: () => {
+              sent.splice(sent.indexOf(message), 1);
+              return Promise.resolve();
+            }
+          });
         }
       };
       const app = await startServer(
@@ -105,7 +115,7 @@ describe("application DM composition", () => {
         if (!handler) throw new Error("DM handler missing");
         await handler({ channelId: channel, messageId, authorId: user });
         expect(sent).toHaveLength(1);
-        expect(sent[0]).toContain(ai ? "test Luma" : "not configured");
+        expect(sent[0]?.content).toContain(ai ? "test Luma" : "AI setup or access");
         expect(requests).toBe(ai ? 1 : 0);
         const usage = await budget.getStatus("workspace_dayova");
         expect(usage.requestCount).toBe(ai ? 1 : 0);

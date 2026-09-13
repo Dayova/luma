@@ -331,11 +331,13 @@ async function setup() {
       )
     };
     sdk.emit(Events.InteractionCreate, request);
+    // The first edit acknowledges receipt; wait for the final response.
+    // This deadline is shorter than the first periodic progress update (15s).
     await expect
       .poll(() => request.editReply.mock.calls.length, { timeout: 10000 })
-      .toBe(1);
+      .toBeGreaterThanOrEqual(2);
     expect(request.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-    return request.editReply.mock.calls[0]![0].content;
+    return request.editReply.mock.calls.at(-1)![0].content;
   }
   async function connect() {
     const message = await command("connect"),

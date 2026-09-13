@@ -97,28 +97,33 @@ export function createLinearContextCatalog(
       try {
         const terms = input.concepts.map((concept) => concept.trim());
         const identifiers = terms.filter((term) => IDENTIFIER.test(term));
-        // An explicitly referenced issue must not be displaced by broad matches
-        // for words such as "state" or "issue". Scope/grant checks still apply.
-        for (const text of new Set(identifiers.length ? identifiers : terms)) {
-          if (!(await granted(audience))) return unavailable();
-          const results = await reader.searchWorkItems({
-            workspaceId: teamId,
-            text,
-            limit
-          });
-          if (!(await granted(audience))) return unavailable();
-          for (const item of results) {
-            if (
-              identifiers.length &&
-              item.externalId.toLowerCase() !== text.toLowerCase()
-            )
-              continue;
-            const sourceId = sourceIdFor(item);
-            if (!sourceId) return unavailable();
-            if (await granted(audience, item.id)) candidates.set(sourceId, item.id);
+        // Prefer confirmed issue identifiers. Identifier-shaped branch names or
+        // other terms still need semantic search when no exact issue is found.
+        const searched = new Map<string, WorkItem[]>();
+        for (const exactOnly of identifiers.length ? [true, false] : [false]) {
+          if (!exactOnly && candidates.size > 0) break;
+          for (const text of new Set(exactOnly ? identifiers : terms)) {
+            if (!(await granted(audience))) return unavailable();
+            let results = searched.get(text);
+            if (!results) {
+              results = await reader.searchWorkItems({
+                workspaceId: teamId,
+                text,
+                limit
+              });
+              searched.set(text, results);
+            }
+            if (!(await granted(audience))) return unavailable();
+            for (const item of results) {
+              if (exactOnly && item.externalId.toLowerCase() !== text.toLowerCase())
+                continue;
+              const sourceId = sourceIdFor(item);
+              if (!sourceId) return unavailable();
+              if (await granted(audience, item.id)) candidates.set(sourceId, item.id);
+              if (candidates.size >= limit) break;
+            }
             if (candidates.size >= limit) break;
           }
-          if (candidates.size >= limit) break;
         }
         // Recheck every accumulated result after all provider reads. An earlier
         // grant can disappear while another concept or issue is being inspected.

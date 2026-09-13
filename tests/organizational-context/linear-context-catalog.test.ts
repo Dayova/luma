@@ -430,3 +430,18 @@ it("keeps an explicit issue reference ahead of broad question terms", async () =
   await f.catalog.search({ ...searchInput, concepts: ["state", "LUM-4", "issue"] });
   expect(f.search.mock.calls.map(([input]) => input.text)).toEqual(["LUM-4"]);
 });
+
+it.each([false, true])(
+  "falls back from identifier-shaped branch names to semantic matches (initial result: %s)",
+  async (initialMatch) => {
+    const f = fixture();
+    f.search.mockImplementation(({ text }) =>
+      Promise.resolve(text === "release-2026" && !initialMatch ? [] : [issue()])
+    );
+    const result = await f.catalog.search({
+      ...searchInput,
+      concepts: ["release-2026", "release status"]
+    });
+    expect(result.sourceIds).toEqual([`issue:${issueId}:LUM-4`]);
+  }
+);

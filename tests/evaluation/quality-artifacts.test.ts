@@ -18,6 +18,7 @@ it("regrades actual answers without new calls, preserving errors and marking new
   const run = await regradeHistorical(benchmark, reports, "test");
   const luna = summarizeRun(run).find((s) => s.candidate === "openai-gpt-5-6-luna")!;
   expect(run.rows).toHaveLength(288);
+  expect(run.settings.maxRequests).toBe(192);
   expect(luna).toMatchObject({
     validOutputs: 48,
     automaticPasses: 45,

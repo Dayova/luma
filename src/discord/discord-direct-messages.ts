@@ -191,9 +191,9 @@ export async function createDiscordDirectMessages(input: {
         if (
           history.some(
             (m) =>
-              m.unsupported ||
               (m.authorId !== event.authorId && m.authorId !== botId) ||
-              (m.authorId === event.authorId && m.bot)
+              (m.authorId === event.authorId && (m.bot || m.unsupported)) ||
+              (m.authorId === botId && !m.bot)
           )
         )
           throw new DirectMessageInputError(

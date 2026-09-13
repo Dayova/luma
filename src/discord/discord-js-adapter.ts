@@ -425,6 +425,7 @@ export function createDiscordJsTransport(
         const botMentionRoleId =
           !structuredRequest &&
           !decisionRequest &&
+          !candidate.mentionedDiscordUserIds.includes(botUserId) &&
           candidate.mentionedDiscordRoleIds?.length
             ? await resolveBotMentionRoleId()
             : null;
@@ -827,12 +828,21 @@ async function handleInteraction(
       await response.requireCurrent();
       admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
     }
-    await interaction.editReply({
-      allowedMentions: { parse: [] },
-      content: admitted
-        ? truncateDiscordMessage(response.content)
-        : "Luma is not enabled in this Discord channel."
-    });
+    try {
+      await interaction.editReply({
+        allowedMentions: { parse: [] },
+        content: admitted
+          ? truncateDiscordMessage(response.content)
+          : "Luma is not enabled in this Discord channel."
+      });
+    } catch {
+      // An ambiguous final send must not be replaced by a contradictory fallback.
+      reportDiscordDeliveryFailure({
+        code: "discord-command-reply-failed",
+        channelId: interaction.channelId,
+        sourceId: interaction.id
+      });
+    }
   } finally {
     await progress.clear();
   }

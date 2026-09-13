@@ -191,6 +191,29 @@ describe("private founder conversations", () => {
       expect(f.sent.at(-1)?.content).not.toContain("gamma");
     });
   });
+  it.each(["own-bot", "human", "other-bot"])(
+    "handles attachment history without blocking own bot replies: %s",
+    async (kind) => {
+      await withRuntime(async (f, r) => {
+        await r.handle(f.message("Original human context"));
+        f.message(
+          "Attached generated answer",
+          kind === "own-bot" ? bot : kind === "human" ? jakob : "other-bot"
+        );
+        f.messages.at(-1)!.unsupported = true;
+        const before = f.calls();
+        await r.handle(f.message("What did I tell you?"));
+        if (kind === "own-bot") {
+          expect(f.calls()).toBe(before + 1);
+          expect(f.sent.at(-1)?.content).toContain("Original human context");
+          expect(f.sent.at(-1)?.content).not.toContain("Attached generated answer");
+        } else {
+          expect(f.calls()).toBe(before);
+          expect(f.sent.at(-1)?.content).toContain("unsupported");
+        }
+      });
+    }
+  );
   it("starts fresh with /new while retaining earlier source revisions", async () => {
     await withRuntime(async (f, r, database) => {
       await r.handle(f.message("Old context alpha"));

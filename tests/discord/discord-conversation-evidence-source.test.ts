@@ -69,6 +69,24 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("captures a direct bot mention even if an unrelated role lookup is unavailable", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    reader.anchor!.content = "<@bot_luma> Ask <@&other-role>";
+    reader.anchor!.mentionedDiscordRoleIds = ["other-role"];
+    const source = createDiscordConversationEvidenceSource({
+      reader,
+      guildId: "guild_dayova",
+      config: contextAskConfig,
+      botUserId: () => "bot_luma",
+      botMentionRoleId: () => Promise.reject(new Error("Role lookup unavailable"))
+    });
+    const captured = await source.capture({
+      ...captureInput(),
+      question: "Ask <@&other-role>"
+    });
+    expect(captured.snapshot.messages.at(-1)?.text).toBe(reader.anchor!.content);
+  });
+
   it("captures a bot-role question and rejects revoked identity, removed metadata, and mutation purposes", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     const content = "What did we decide?\n<@&role_luma>";

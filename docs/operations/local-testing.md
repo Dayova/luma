@@ -215,7 +215,10 @@ replaces the earlier single-channel test restriction, which did not reflect Jako
    humans can read the channel; Message Content enables bounded mentioned questions.
 2. Give that development bot View Channel, Send Messages, Read Message History,
    Create Public Threads, and Send Messages in Threads in each configured channel.
-   The four founders must be the only human readers. No Administrator grant is needed.
+   The four founders must be the only human readers. Server Members Intent supplies
+   member data; it does not grant View Channel. Verify effective `@everyone`, role
+   and member overwrites using the [current-reader checks](../integrations/discord.md#current-reader-verification).
+   No Administrator grant is needed.
 3. On the local page, click **Check Discord setup**. It checks credentials and
    intents. Each channel is checked independently. Verified channels are enabled;
    blocked channels are named in the setup result and excluded from the runtime.

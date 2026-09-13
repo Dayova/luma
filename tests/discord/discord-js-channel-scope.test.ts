@@ -774,6 +774,39 @@ describe("Discord production channel resolution and delivery", () => {
     }
   );
 
+  it("does not replace a final slash reply after ambiguous delivery failure", async () => {
+    const live = transport();
+    await live.connect(() => Promise.resolve({ content: "Completed result" }));
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "meeting",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "parent",
+      deferred: true,
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-08T12:00:00Z"),
+      options: { getSubcommand: () => "usage" },
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Ambiguous send"))
+        .mockResolvedValue(undefined)
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() =>
+      expect(interaction.editReply.mock.calls.length).toBeGreaterThanOrEqual(2)
+    );
+    await live.disconnect();
+    expect(interaction.editReply).toHaveBeenCalledTimes(2);
+    expect(interaction.editReply.mock.calls[1]?.[0]).toHaveProperty(
+      "content",
+      "Completed result"
+    );
+  });
+
   it("withholds a completed slash-command response if its channel gains a guest before editReply", async () => {
     const live = transport();
     const handler = vi.fn(() => {

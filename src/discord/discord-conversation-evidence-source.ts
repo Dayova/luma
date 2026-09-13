@@ -292,7 +292,9 @@ async function readAnchor(
 
   const botUserId = input.botUserId();
   const resolvedRoleId =
-    purpose === undefined && anchor?.mentionedDiscordRoleIds?.length
+    purpose === undefined &&
+    (!botUserId || !anchor?.mentionedDiscordUserIds.includes(botUserId)) &&
+    anchor?.mentionedDiscordRoleIds?.length
       ? await input.botMentionRoleId?.()
       : null;
   const botMentionRoleId =

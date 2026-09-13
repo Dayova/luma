@@ -188,7 +188,7 @@ export function createLocalDiscord(options: {
               ? verifiedChannels.join(",")
               : "",
             LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS: verifiedChannels.join(","),
-            LUMA_DISCORD_CONTEXT_ASK_ENABLED: apiKey && channelsReady ? "1" : "0",
+            LUMA_DISCORD_CONTEXT_ASK_ENABLED: channelsReady ? "1" : "0",
             ...(apiKey ? { OPENAI_API_KEY: apiKey } : {})
           },
           { aiUsageBudget: options.budget }
@@ -199,7 +199,7 @@ export function createLocalDiscord(options: {
         problem =
           (apiKey
             ? `Development bot running with real AI. Send it a DM without tagging it. Discord and this page share the $1 monthly allowance.${channelsReady ? " Channels are enabled." : " Channel access remains disabled."}`
-            : "Development bot running. DMs support usage and /help now. Load an API key here, then start again for real AI answers. Channel access depends on the setup check.") +
+            : "Development bot running. Mentioned thread questions explain the missing API key; DMs support usage and /help. Load a key here, then start again for real AI answers.") +
           (blockedChannels.length ? ` ${setup}` : "");
       } catch {
         ready = false;

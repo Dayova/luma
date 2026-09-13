@@ -134,46 +134,50 @@ describe("local Discord testing", () => {
       await database.close();
     }
   });
-  it("starts the real runtime composition with the same budget and stops it cleanly", async () => {
-    const database = await createPgliteDatabase();
-    const budget = createAiUsageBudget({ database, monthlyLimitUsd: 1 });
-    let connected = false;
-    try {
-      const discord = createLocalDiscord({
-        directory: "/local",
-        budget,
-        readConfig: () => Promise.resolve(env),
-        fetch: api((1 << 15) | (1 << 19)),
-        startRuntime: (config, dependencies) => {
-          expect(config?.["OPENAI_API_KEY"]).toBe("memory-key");
-          expect(dependencies?.aiUsageBudget).toBe(budget);
-          connected = true;
-          return Promise.resolve({
-            gatewayConnected: () => connected,
-            stop: () => {
-              connected = false;
-              return Promise.resolve();
-            }
-          });
-        }
-      });
-      await discord.start("memory-key");
-      expect(discord.status()).toMatchObject({
-        started: true,
-        connected: true,
-        aiEnabled: true
-      });
-      await discord.stop();
-      expect(discord.status()).toMatchObject({
-        started: false,
-        connected: false,
-        aiEnabled: false
-      });
-      expect(connected).toBe(false);
-    } finally {
-      await database.close();
+  it.each(["memory-key", ""])(
+    "keeps mention handling enabled and shares the budget (key: %s)",
+    async (key) => {
+      const database = await createPgliteDatabase();
+      const budget = createAiUsageBudget({ database, monthlyLimitUsd: 1 });
+      let connected = false;
+      try {
+        const discord = createLocalDiscord({
+          directory: "/local",
+          budget,
+          readConfig: () => Promise.resolve(env),
+          fetch: api((1 << 15) | (1 << 19)),
+          startRuntime: (config, dependencies) => {
+            expect(config?.["OPENAI_API_KEY"]).toBe(key || undefined);
+            expect(config?.["LUMA_DISCORD_CONTEXT_ASK_ENABLED"]).toBe("1");
+            expect(dependencies?.aiUsageBudget).toBe(budget);
+            connected = true;
+            return Promise.resolve({
+              gatewayConnected: () => connected,
+              stop: () => {
+                connected = false;
+                return Promise.resolve();
+              }
+            });
+          }
+        });
+        await discord.start(key);
+        expect(discord.status()).toMatchObject({
+          started: true,
+          connected: true,
+          aiEnabled: Boolean(key)
+        });
+        await discord.stop();
+        expect(discord.status()).toMatchObject({
+          started: false,
+          connected: false,
+          aiEnabled: false
+        });
+        expect(connected).toBe(false);
+      } finally {
+        await database.close();
+      }
     }
-  });
+  );
 });
 
 it.each([false, true])(

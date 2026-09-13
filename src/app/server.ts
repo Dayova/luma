@@ -216,10 +216,6 @@ export async function startServer(
       "Granola onboarding requires the configured capture synthesis runtime"
     );
 
-  if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
-    throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
-  }
-
   const identityDirectory = createIdentityDirectoryFromEnv(env);
   const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
   const webhookConfig = notionWebhookRuntimeConfig(env, workspaceId);
@@ -723,21 +719,30 @@ export async function startServer(
         : {})
     });
     const contextIntelligence = discordContextAskConfig
-      ? createContextIntelligence({
-          database,
-          ...(automaticDecisions
-            ? { onProcessedSource: automaticDecisions.conversation }
-            : {}),
-          ...(organizationalContext ? { organizationalContext } : {}),
-          ledger: observedSourceLedger,
-          conversationEvidenceSource: discordTransport,
-          answerer: createContextAnswerer({
-            apiKey: requireEnv(env, "OPENAI_API_KEY"),
-            model: openAIReasoningModelName,
-            budget: aiUsage,
-            limits: aiRequestLimits
+      ? !hasAnyEnv(env, ["OPENAI_API_KEY"])
+        ? {
+            inquire: () =>
+              Promise.reject(
+                new AiServiceError("not-configured", "Missing API key", {
+                  requestDispatched: false
+                })
+              )
+          }
+        : createContextIntelligence({
+            database,
+            ...(automaticDecisions
+              ? { onProcessedSource: automaticDecisions.conversation }
+              : {}),
+            ...(organizationalContext ? { organizationalContext } : {}),
+            ledger: observedSourceLedger,
+            conversationEvidenceSource: discordTransport,
+            answerer: createContextAnswerer({
+              apiKey: requireEnv(env, "OPENAI_API_KEY"),
+              model: openAIReasoningModelName,
+              budget: aiUsage,
+              limits: aiRequestLimits
+            })
           })
-        })
       : undefined;
     const bot = createDiscordMeetingBot({
       database,

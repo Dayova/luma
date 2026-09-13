@@ -224,7 +224,7 @@ replaces the earlier single-channel test restriction, which did not reflect Jako
 4. Load your OpenAI key and click **Start Discord bot**. The key stays in memory;
    Discord and browser AI calls share one durable **$1 monthly budget**. Without
    a key, DM help/usage work and AI answers report missing configuration; mentioned
-   AI questions are disabled. Loading/removing a key stops the bot; start again
+   thread questions receive a configuration explanation instead of being silently ignored. Loading/removing a key stops the bot; start again
    to apply the new configuration.
 5. For private testing, send **Dayova Luma Dev** a DM without a mention. Send
    `/help`, `usage`, or a text question. Each founder has isolated private context;

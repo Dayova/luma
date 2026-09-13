@@ -26,7 +26,7 @@ export function renderAiServiceFailure(error: unknown): string {
     case "unavailable":
       return "Luma's AI provider is temporarily unavailable. Please try again later. /meeting usage remains available.";
     case "not-configured":
-      return "Luma's AI provider or pricing is not configured for safe paid use. A founder needs to check the configuration. /meeting usage remains available.";
+      return "Luma's AI provider is not configured for safe paid use (API key or pricing missing). For local testing, load the API key on Luma's local page and start the Discord bot again. No AI call was made. /meeting usage remains available.";
     case "request-too-large":
       return "This request exceeds Luma's safe AI request limit. Please ask a narrower question or use a shorter evidence window. /meeting usage remains available.";
     case "request-indeterminate":

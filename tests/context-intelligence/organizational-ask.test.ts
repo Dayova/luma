@@ -1,3 +1,4 @@
+import { ContextVerificationError } from "../../src/organizational-context/interface.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
@@ -437,4 +438,37 @@ describe("Context Ask with governed organizational retrieval", () => {
       code: "openai-context-answer-evidence-invalid"
     });
   });
+});
+
+it("uses issue links from the captured thread when the question refers to the issue implicitly", async () => {
+  const f = await harness();
+  const message = f.snapshot.messages[0]!;
+  if (message.state !== "available") throw new Error("Expected available source");
+  message.text =
+    "Philipp: Antrag gestellt. https://linear.app/dayova/issue/DAY-173/convert-membership";
+  const ask = {
+    ...inquiry(),
+    question: "Reflected der State im Linear Issue die Angaben von Philipp?"
+  };
+  const result = await f.context.inquire(ask);
+  expect(result.organizationalContext?.request.concepts[0]).toBe("DAY-173");
+  await f.context.requireCurrent!(ask);
+  expect(await createContextIntelligence(f.dependencies).inquire(ask)).toEqual(result);
+  expect(f.requests).toHaveLength(1);
+});
+
+it("distinguishes a verification timeout from a changed source and retains the completed answer", async () => {
+  const f = await harness();
+  await f.context.inquire(inquiry());
+  f.dependencies.organizationalContext.requireCurrent = () =>
+    Promise.reject(new ContextVerificationError("timeout"));
+  await expect(f.context.requireCurrent!(inquiry())).rejects.toMatchObject({
+    code: "context-inquiry-verification-timeout",
+    retryable: true
+  });
+  expect(f.requests).toHaveLength(1);
+  expect(
+    (await f.database.query("SELECT result_is_deliverable FROM context_inquiries"))
+      .rows[0]
+  ).toMatchObject({ result_is_deliverable: true });
 });

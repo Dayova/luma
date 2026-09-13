@@ -1,3 +1,4 @@
+import { renderContextVerificationFailure } from "./discord-context-failure.js";
 import { handleDiscordStructuredWorkMention } from "./discord-structured-work-mention.js";
 import {
   handleDiscordStructuredWorkCommand,
@@ -580,7 +581,9 @@ async function answerConversationThread(
         "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state."
       );
     }
-    return reply(renderAiServiceFailure(error));
+    return reply(
+      renderContextVerificationFailure(error) ?? renderAiServiceFailure(error)
+    );
   }
 }
 

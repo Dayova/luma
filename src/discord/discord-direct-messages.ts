@@ -1,3 +1,4 @@
+import { renderContextVerificationFailure } from "./discord-context-failure.js";
 import {
   startDiscordRequestProgress,
   type DiscordProgressMessage
@@ -350,7 +351,9 @@ export async function createDiscordDirectMessages(input: {
         content =
           error instanceof DirectMessageInputError
             ? error.message
-            : renderAiServiceFailure(error).replaceAll("/meeting usage", "usage");
+            : (
+                renderContextVerificationFailure(error) ?? renderAiServiceFailure(error)
+              ).replaceAll("/meeting usage", "usage");
       }
       await progress.stop();
       // Do not turn an ambiguous final send into a contradictory fallback.

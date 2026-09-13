@@ -2,11 +2,15 @@ import {
   retainProcessedConversationAdmission,
   type ProcessedConversationSourceEvent
 } from "./processed-conversation-source.js";
-import type { OrganizationalContext } from "../organizational-context/interface.js";
+import {
+  ContextVerificationError,
+  type OrganizationalContext
+} from "../organizational-context/interface.js";
 import { conversationPollSchema } from "../domain/conversation-poll.js";
 import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
 import {
   contextRetrievalRequest,
+  conversationRetrievalConcepts,
   contextRetrievalFor,
   contextBindingHash,
   isContextRetrieval,
@@ -87,6 +91,7 @@ export class ContextIntelligenceError extends Error {
       | "context-inquiry-replay-unavailable"
       | "context-inquiry-source-changed"
       | "context-inquiry-context-changed"
+      | "context-inquiry-verification-timeout"
       | "conversation-capture-invalid"
       | "conversation-capture-unavailable"
       | "context-answer-invalid"
@@ -240,7 +245,8 @@ async function inquire(
   ) {
     const request = contextRetrievalRequest(
       immutableInquiry,
-      input.organizationalContextLimits
+      input.organizationalContextLimits,
+      immutableRecorded.snapshot
     );
     retrieval = contextRetrievalFor(
       request,
@@ -371,7 +377,13 @@ async function requireCurrentRetrieval(
   if (!context) throw contextChanged();
   try {
     await context.requireCurrent(structuredClone(retrieval.request), retrieval.receiptId);
-  } catch {
+  } catch (error) {
+    if (error instanceof ContextVerificationError && error.reason === "timeout")
+      throw new ContextIntelligenceError(
+        "context-inquiry-verification-timeout",
+        true,
+        "The final organizational source check timed out."
+      );
     throw contextChanged();
   }
 }
@@ -700,8 +712,14 @@ async function existingContextInquiryResult(input: {
         context.request.subject.type !== "conversation" ||
         context.request.subject.id !== input.inquiry.subject.conversationObjectId ||
         context.request.purpose !== "answer-question" ||
-        JSON.stringify(context.request.concepts) !==
-          JSON.stringify(retrievalConcepts([input.inquiry.question])) ||
+        // Accept exact legacy question-only requests as well as the current,
+        // source-bound discovery policy. Both retain their original receipt proof.
+        (JSON.stringify(context.request.concepts) !==
+          JSON.stringify(
+            conversationRetrievalConcepts(input.inquiry.question, recorded.snapshot)
+          ) &&
+          JSON.stringify(context.request.concepts) !==
+            JSON.stringify(retrievalConcepts([input.inquiry.question]))) ||
         JSON.stringify(context.request.time) !==
           JSON.stringify(input.inquiry.contextTime ?? { mode: "current" })
       : input.row.context_request_json !== null ||

@@ -412,3 +412,29 @@ describe("governed organizational retrieval", () => {
     ).rejects.toBeInstanceOf(OrganizationalContextUnavailableError);
   });
 });
+
+it("rechecks ten unchanged sources within the verification window despite normal provider latency", async () => {
+  const f = await setup(Array.from({ length: 10 }, (_, i) => source(String(i))));
+  const bundle = await f.context.retrieve(request);
+  const original = f.port.read.bind(f.port);
+  let active = 0,
+    maximum = 0,
+    completed = 0;
+  f.port.read = async (input) => {
+    active++;
+    maximum = Math.max(maximum, active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1700));
+      return await original(input);
+    } finally {
+      active--;
+      completed++;
+    }
+  };
+  await expect(
+    f.context.requireCurrent(request, bundle.receiptId)
+  ).resolves.toBeUndefined();
+  expect(maximum).toBeGreaterThan(1);
+  expect(maximum).toBeLessThanOrEqual(4);
+  expect(completed).toBe(10);
+}, 25000);

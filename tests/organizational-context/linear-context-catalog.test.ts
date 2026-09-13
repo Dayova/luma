@@ -424,3 +424,9 @@ describe("Linear organizational context catalog", () => {
     }
   );
 });
+
+it("keeps an explicit issue reference ahead of broad question terms", async () => {
+  const f = fixture();
+  await f.catalog.search({ ...searchInput, concepts: ["state", "LUM-4", "issue"] });
+  expect(f.search.mock.calls.map(([input]) => input.text)).toEqual(["LUM-4"]);
+});

@@ -1,3 +1,5 @@
+import { renderContextVerificationFailure } from "./discord-context-failure.js";
+import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
 import { discordAnswerDelivery } from "./discord-answer-delivery.js";
 import { startDiscordRequestProgress } from "./discord-request-progress.js";
 import { z } from "zod";
@@ -909,9 +911,14 @@ async function handleContextAskMention(input: {
     if (response.requireCurrent) {
       try {
         await response.requireCurrent();
-      } catch {
+      } catch (error) {
+        const code =
+          error instanceof ContextIntelligenceError ? error.code : "unclassified";
+        // Operational diagnostics only: never record provider errors, source text or secrets.
+        console.warn("Luma final context check withheld a reply", { code });
         response = {
           content:
+            renderContextVerificationFailure(error) ??
             "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
           idempotencyKey: response.idempotencyKey
         };
@@ -991,10 +998,89 @@ async function replyToContextAskMessage(
   });
 }
 
-function createDiscordJsConversationReader(
+export function createDiscordJsConversationReader(
   client: Client,
   authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"]
 ): DiscordConversationReader {
+  async function capturedMessage(
+    thread: ThreadChannel,
+    message: Message,
+    readPoll = true
+  ): Promise<DiscordConversationMessage> {
+    if (message.type !== MessageType.ThreadStarterMessage)
+      return discordConversationMessageWithPoll(
+        client,
+        message,
+        authorizeHumanReader,
+        readPoll
+      );
+    const reference = message.reference;
+    if (
+      !thread.parentId ||
+      reference?.channelId !== thread.parentId ||
+      reference.messageId !== thread.id ||
+      (reference.guildId && reference.guildId !== thread.guildId)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-invalid",
+        "The original thread message cannot be verified"
+      );
+    // Fetch the parent independently and freshly. Never trust the embedded copy.
+    const parent = await client.channels.fetch(thread.parentId, { force: true });
+    const permissions =
+      client.user && parent?.type === ChannelType.GuildText
+        ? parent.permissionsFor(client.user)
+        : null;
+    if (
+      !parent ||
+      parent.type !== ChannelType.GuildText ||
+      parent.guildId !== thread.guildId ||
+      !permissions?.has(PermissionFlagsBits.ViewChannel) ||
+      !permissions.has(PermissionFlagsBits.ReadMessageHistory)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-unavailable",
+        "The original thread message is not readable"
+      );
+    const original = await parent.messages.fetch({
+      message: reference.messageId,
+      force: true
+    });
+    if (
+      original.id !== thread.id ||
+      original.channelId !== parent.id ||
+      original.guildId !== thread.guildId ||
+      original.type === MessageType.ThreadStarterMessage ||
+      (original.author.bot && original.author.id !== client.user?.id)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-unavailable",
+        "The original thread author or message is not available"
+      );
+    if (!original.author.bot) {
+      try {
+        const authorized = await waitForDiscordOperation(
+          authorizeHumanReader(original.author.id),
+          AbortSignal.timeout(5_000)
+        );
+        if (!authorized) throw new Error("Author unavailable");
+      } catch {
+        throw new DiscordJsAdapterError(
+          "discord-thread-starter-unavailable",
+          "The original thread author could not be verified"
+        );
+      }
+    }
+    const mapped = await discordConversationMessageWithPoll(
+      client,
+      original,
+      authorizeHumanReader,
+      readPoll
+    );
+    // It belongs to this conversation, but its ID, author and citation URL retain
+    // their original parent-message provenance. Capture re-fetches it on delivery.
+    return { ...mapped, channelId: thread.id };
+  }
   return {
     async readThread({
       conversationObjectId
@@ -1019,11 +1105,7 @@ function createDiscordJsConversationReader(
 
       try {
         const message = await thread.messages.fetch({ message: messageId, force: true });
-        return await discordConversationMessageWithPoll(
-          client,
-          message,
-          authorizeHumanReader
-        );
+        return await capturedMessage(thread, message);
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
           return null;
@@ -1053,12 +1135,7 @@ function createDiscordJsConversationReader(
           [...messages.values()].map((message) => {
             if (message.poll) pollsRead += 1;
             // Bound added poll reads to ten per already-bounded history page.
-            return discordConversationMessageWithPoll(
-              client,
-              message,
-              authorizeHumanReader,
-              pollsRead <= 10
-            );
+            return capturedMessage(thread, message, pollsRead <= 10);
           })
         ),
         hasMore: messages.size === limit

@@ -95,7 +95,11 @@ export function createLinearContextCatalog(
       const limit = Math.min(input.limit, MAX_RESULTS);
       const candidates = new Map<string, string>();
       try {
-        for (const text of new Set(input.concepts.map((concept) => concept.trim()))) {
+        const terms = input.concepts.map((concept) => concept.trim());
+        const identifiers = terms.filter((term) => IDENTIFIER.test(term));
+        // An explicitly referenced issue must not be displaced by broad matches
+        // for words such as "state" or "issue". Scope/grant checks still apply.
+        for (const text of new Set(identifiers.length ? identifiers : terms)) {
           if (!(await granted(audience))) return unavailable();
           const results = await reader.searchWorkItems({
             workspaceId: teamId,
@@ -104,6 +108,11 @@ export function createLinearContextCatalog(
           });
           if (!(await granted(audience))) return unavailable();
           for (const item of results) {
+            if (
+              identifiers.length &&
+              item.externalId.toLowerCase() !== text.toLowerCase()
+            )
+              continue;
             const sourceId = sourceIdFor(item);
             if (!sourceId) return unavailable();
             if (await granted(audience, item.id)) candidates.set(sourceId, item.id);

@@ -1,3 +1,4 @@
+import { ContextIntelligenceError } from "../../src/context-intelligence/context-intelligence.js";
 import { discordAudienceFixture } from "./discord-audience-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
@@ -91,13 +92,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function transport() {
+function transport(
+  authorizeHumanReader = (userId: string): Promise<boolean> =>
+    Promise.resolve(userId === "founder")
+) {
   return createDiscordJsTransport({
     token: "test-only",
     clientId: "application",
     guildId: "guild",
     allowedParentChannelIds: ["parent"],
-    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+    authorizeHumanReader,
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],
@@ -1120,3 +1124,143 @@ describe("Discord explicit Decision Record entry", () => {
     }
   );
 });
+
+it("reports a verification timeout without claiming that the source changed or delivering claims", async () => {
+  const live = transport();
+  const message = mention();
+  await live.connect(
+    () => Promise.resolve({ content: "unused" }),
+    () =>
+      Promise.resolve({
+        content: "Private claim",
+        idempotencyKey: "timeout",
+        requireCurrent: () =>
+          Promise.reject(
+            new ContextIntelligenceError(
+              "context-inquiry-verification-timeout",
+              true,
+              "SECRET"
+            )
+          )
+      })
+  );
+  sdk.emit(Events.MessageCreate, message);
+  await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
+  const sent = message.reply.mock.calls[1]?.[0];
+  expect(sent).toHaveProperty(
+    "content",
+    expect.stringContaining("source check timed out")
+  );
+  expect(JSON.stringify(sent)).not.toContain("SECRET");
+  expect(JSON.stringify(sent)).not.toContain("Private claim");
+  expect(sent).not.toHaveProperty("files");
+  await live.disconnect();
+});
+
+it.each(["available", "deleted", "foreign-parent", "bot-starter", "stalled-author"])(
+  "captures the referenced parent message for a thread starter: %s",
+  async (state) => {
+    const live = transport((userId) =>
+      userId === "stalled-founder"
+        ? new Promise<boolean>(() => undefined)
+        : Promise.resolve(userId === "founder")
+    );
+    const base = {
+      ...mention(),
+      type: MessageType.Default,
+      author: { id: "founder", bot: false, username: "Founder" },
+      attachments: new Map(),
+      embeds: [],
+      stickers: new Map(),
+      components: [],
+      poll: null,
+      messageSnapshots: new Map(),
+      flags: { has: () => false },
+      editedAt: null,
+      reference: null
+    };
+    const original = {
+      ...base,
+      id: "thread",
+      channelId: "parent",
+      author:
+        state === "bot-starter"
+          ? { id: "bot", bot: true, username: "Luma" }
+          : state === "stalled-author"
+            ? { id: "stalled-founder", bot: false, username: "Founder" }
+            : base.author,
+      content: "https://linear.app/dayova/issue/DAY-173/convert — Antrag gestellt",
+      url: "https://discord.com/channels/guild/parent/thread",
+      createdAt: new Date("2026-09-08T10:00:00Z")
+    };
+    const starter = {
+      ...base,
+      id: "starter",
+      createdAt: new Date("2026-09-08T11:00:00Z"),
+      channelId: "thread",
+      system: true,
+      type: MessageType.ThreadStarterMessage,
+      content: "",
+      reference: {
+        guildId: "guild",
+        channelId: state === "foreign-parent" ? "outside" : "parent",
+        messageId: "thread"
+      }
+    };
+    const parent = sdk.channels.get("parent") as ReturnType<typeof channel>;
+    parent.messages.fetch = vi.fn(() =>
+      state === "deleted"
+        ? Promise.reject(new Error("Source deleted"))
+        : Promise.resolve(original)
+    ) as unknown as typeof parent.messages.fetch;
+    sdk.channels.set("thread", {
+      ...channel("thread", ChannelType.PublicThread, "parent"),
+      isThread: () => true,
+      messages: { fetch: () => Promise.resolve(new Collection([["starter", starter]])) }
+    });
+    await live.connect(() => Promise.resolve({ content: "unused" }));
+    const source = live;
+    // Capture uses the native reader and requires an actual mention anchor.
+    const thread = sdk.channels.get("thread") as {
+      messages: { fetch: (value: unknown) => Promise<unknown> };
+    };
+    thread.messages.fetch = (value) =>
+      Promise.resolve(
+        typeof value === "object" && value !== null && "message" in value
+          ? {
+              ...base,
+              id: "message",
+              channelId: "thread",
+              url: "https://discord.com/channels/guild/thread/message"
+            }
+          : new Collection([["starter", starter]])
+      );
+    const captured = await source.capture({
+      workspaceId: "dayova",
+      subject: {
+        type: "conversation-thread",
+        providerId: "discord",
+        conversationObjectId: "thread",
+        anchorMessageId: "message"
+      }
+    });
+    if (state === "available") {
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        true
+      );
+      expect(captured.snapshot.messages[0]?.url).toBe(original.url);
+    } else if (state === "bot-starter") {
+      expect(captured.snapshot.completeness.state).toBe("complete");
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        false
+      );
+    } else {
+      expect(captured.snapshot.completeness.state).toBe("partial");
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        false
+      );
+    }
+    await live.disconnect();
+  },
+  10_000
+);

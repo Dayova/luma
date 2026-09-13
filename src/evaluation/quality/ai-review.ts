@@ -1,9 +1,9 @@
 import { z } from "zod";
 import {
   meetingAnalysisSchema,
-  meetingAnalysisJsonSchema,
-  MEETING_INTELLIGENCE_INSTRUCTIONS
+  meetingAnalysisJsonSchema
 } from "../../ai/meeting-analysis-contract.js";
+import { COMPARISON_BASELINE_INSTRUCTIONS } from "../provider-comparison/baseline-instructions.js";
 import { qualityCaseSchema, semanticReviewSchema, digest, gradeCase } from "./grading.js";
 import { parseQualityRun } from "./artifacts.js";
 import { prepareReviewPacket } from "./report.js";
@@ -172,7 +172,7 @@ export function createAIReviewPacket(
     contextHash: digest(context),
     context,
     contract: {
-      instructions: MEETING_INTELLIGENCE_INSTRUCTIONS,
+      instructions: COMPARISON_BASELINE_INSTRUCTIONS,
       schema: meetingAnalysisJsonSchema
     },
     entries: entries.sort((a, b) => a.answerId.localeCompare(b.answerId))

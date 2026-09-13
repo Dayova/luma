@@ -279,3 +279,8 @@ still matches; a changed utterance or prompt requires a new run. The original
 embedded benchmark and scores remain in the source report. The committed corpus
 is revision `2026-09-11-v2.1`, which fixes the conditional-candidate false positive
 found during the first v2 development run.
+
+Historical regrades retain the combined request ceiling from their source reports.
+Older archived regrades may show the former importer default of 400 in that metadata;
+read the source reports for their original ceilings. This correction does not rewrite
+saved outputs or prior judgments.

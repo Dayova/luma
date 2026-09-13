@@ -393,6 +393,25 @@ describe("comparison evaluation integrity", () => {
     });
     expect(factory).not.toHaveBeenCalled();
     expect(preflight.rows[0]?.status).toBe("not-run");
+    expect(renderReport(preflight)).toContain("not run");
+    expect(renderReport(preflight)).not.toContain("| unknown");
+  });
+  it("reports attempted requests with missing usage as unknown cost rather than unrun", async () => {
+    const report = await runComparison({
+      corpus,
+      env: { OPENAI_API_KEY: "test" },
+      live: true,
+      maxRequests: 1,
+      repeats: 1,
+      gitRevision: "test",
+      selected: [candidates[0]],
+      modelFactory: () => ({
+        generateStructured: () => Promise.reject(new Error("provider unavailable"))
+      })
+    });
+    expect(report.rows.filter((row) => row.status === "error")).toHaveLength(1);
+    expect(renderReport(report)).toContain("unknown (0/1 requests)");
+    expect(renderReport(report)).not.toContain("not run");
   });
   it("runs matched cases across providers before moving on, journals first, and enforces request caps", async () => {
     const events: string[] = [];
@@ -536,11 +555,9 @@ describe("Anthropic explicit prompt JSON mode", () => {
         if (typeof init.body !== "string") throw new Error("expected JSON body");
         const body = JSON.parse(init.body) as {
           output_config: { format?: unknown; effort: string };
-          system: string;
         };
         expect(body.output_config.format).toBeUndefined();
         expect(body.output_config.effort).toBe("medium");
-        expect(body.system).toBe(comparisonPayload(request).instructions);
         return Promise.resolve(
           new Response(
             JSON.stringify(

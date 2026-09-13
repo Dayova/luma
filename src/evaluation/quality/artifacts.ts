@@ -249,7 +249,7 @@ export async function regradeHistorical(
       LUMA_EVAL_ANTHROPIC_OUTPUT: first.anthropicOutputMode
     },
     live: false,
-    maxRequests: 400,
+    maxRequests: reports.reduce((sum, report) => sum + report.limits.maxRequests, 0),
     repeats: first.limits.repeats,
     seed: 0,
     gitRevision,

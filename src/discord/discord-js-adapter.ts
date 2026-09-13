@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createDiscordJsDirectMessages } from "./discord-js-direct-messages.js";
 import {
   discordDirectMessagesEnabled,
@@ -221,12 +222,34 @@ export function createDiscordJsTransport(
     }
     return disconnecting ?? Promise.resolve();
   }
+  async function resolveBotMentionRoleId(): Promise<string | null> {
+    const botUserId = client.user?.id;
+    if (!botUserId) return null;
+    const roles = z
+      .array(
+        z.object({
+          id: z.string(),
+          managed: z.boolean().optional(),
+          tags: z.object({ bot_id: z.string().optional() }).optional()
+        })
+      )
+      .parse(
+        await client.rest.get(Routes.guildRoles(config.guildId), {
+          signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(5_000)])
+        })
+      );
+    const matches = roles.filter(
+      (role) => role.managed === true && role.tags?.bot_id === botUserId
+    );
+    return matches.length === 1 ? matches[0]!.id : null;
+  }
   const rawConversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
         reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
         guildId: config.guildId,
         config: config.contextAsk,
-        botUserId: () => client.user?.id ?? null
+        botUserId: () => client.user?.id ?? null,
+        botMentionRoleId: resolveBotMentionRoleId
       })
     : null;
   const rawConsultationEvidenceSource = config.consultations
@@ -374,49 +397,73 @@ export function createDiscordJsTransport(
     if (!captureConfig) return;
 
     const candidate = discordContextAskMessageCandidate(message);
-    let ask = discordContextAskMentionFromCandidate({
-      candidate,
-      botUserId,
-      guildId: config.guildId,
-      config: captureConfig
-    });
-
-    // Usage is a deterministic shared service and may use any separately
-    // enabled scope without granting that scope another capability's writes.
-    if (!ask && usageRequest) {
-      for (const fallback of [
-        { config: config.decisionRecords, decision: true },
-        { config: config.contextAsk, decision: false }
-      ]) {
-        if (!fallback.config) continue;
-        ask = discordContextAskMentionFromCandidate({
+    if (
+      candidate.guildId !== config.guildId ||
+      candidate.authorKind !== "human" ||
+      candidate.channelKind !== "public-thread" ||
+      !candidate.parentChannelId ||
+      ![
+        captureConfig,
+        ...(usageRequest ? [config.decisionRecords, config.contextAsk] : [])
+      ].some(
+        (scope) =>
+          scope?.parentChannelIds.includes(candidate.parentChannelId!) &&
+          scope.allowedDiscordUserIds.includes(candidate.actorDiscordUserId)
+      )
+    )
+      return;
+    trackDelivery(
+      (async () => {
+        const botMentionRoleId =
+          !structuredRequest &&
+          !decisionRequest &&
+          candidate.mentionedDiscordRoleIds?.length
+            ? await resolveBotMentionRoleId()
+            : null;
+        let ask = discordContextAskMentionFromCandidate({
           candidate,
           botUserId,
+          botMentionRoleId,
           guildId: config.guildId,
-          config: fallback.config
+          config: captureConfig
         });
-        if (ask) {
-          decisionRequest = fallback.decision;
-          structuredRequest = false;
-          break;
+
+        // Usage is a deterministic shared service and may use any separately
+        // enabled scope without granting that scope another capability's writes.
+        if (!ask && usageRequest) {
+          for (const fallback of [
+            { config: config.decisionRecords, decision: true },
+            { config: config.contextAsk, decision: false }
+          ]) {
+            if (!fallback.config) continue;
+            ask = discordContextAskMentionFromCandidate({
+              candidate,
+              botUserId,
+              guildId: config.guildId,
+              config: fallback.config
+            });
+            if (ask) {
+              decisionRequest = fallback.decision;
+              structuredRequest = false;
+              break;
+            }
+          }
         }
-      }
-    }
 
-    if (!ask) {
-      return;
-    }
-    if (structuredRequest) ask.purpose = "structured-work";
-    else if (decisionRequest) ask.purpose = "decision-record";
+        if (!ask) {
+          return;
+        }
+        if (structuredRequest) ask.purpose = "structured-work";
+        else if (decisionRequest) ask.purpose = "decision-record";
 
-    trackDelivery(
-      handleContextAskMention({
-        message,
-        handler,
-        ask,
-        channelScope,
-        conversationEvidenceSource
-      }).catch(() => {
+        await handleContextAskMention({
+          message,
+          handler,
+          ask,
+          channelScope,
+          conversationEvidenceSource
+        });
+      })().catch(() => {
         reportDiscordDeliveryFailure({
           code: "discord-context-ask-reply-failed",
           channelId: message.channelId,
@@ -847,6 +894,7 @@ function discordContextAskMessageCandidate(
     authorKind: discordAuthorKind(message),
     actorDiscordUserId: message.author.id,
     mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    mentionedDiscordRoleIds: [...(message.mentions.roles?.keys() ?? [])],
     content: message.content,
     occurredAt: message.createdAt.toISOString()
   };
@@ -1040,6 +1088,7 @@ function discordConversationMessage(message: Message): DiscordConversationMessag
     },
     authorKind: discordAuthorKind(message),
     mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    mentionedDiscordRoleIds: [...(message.mentions.roles?.keys() ?? [])],
     content: message.content,
     createdAt: message.createdAt.toISOString(),
     editedAt: message.editedAt?.toISOString() ?? null,

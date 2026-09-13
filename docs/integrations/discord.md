@@ -366,8 +366,11 @@ stores an immutable human-text conversation-evidence revision, and replies in
 the same thread with a cited, read-only answer only when that boundary is
 complete. The exact bot mention may appear at the beginning, in the middle,
 or at the end of the message, including on its own final line. Discord must
-identify Luma as a mentioned user; a display name or mention of another user
-does not trigger it. Bots, webhooks, system messages, private threads, and
+identify Luma as a mentioned user, or identify its managed bot role. The role
+alias is verified against Discord's current `managed` and `tags.bot_id` metadata
+at admission and again when capturing the anchor; a matching role name alone
+never suffices. Other users and roles do not trigger it. Role aliases apply to
+read-only Ask; explicit mutation instructions retain their leading bot-user mention. Bots, webhooks, system messages, private threads, and
 channels outside the reviewed scope are ignored without capture. DMs use
 the separate founder-only DM interface.
 

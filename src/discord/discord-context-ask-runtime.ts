@@ -66,6 +66,7 @@ export type DiscordContextAskMessageCandidate = {
   authorKind: "human" | "bot" | "webhook" | "system";
   actorDiscordUserId: string;
   mentionedDiscordUserIds: readonly string[];
+  mentionedDiscordRoleIds?: readonly string[];
   content: string;
   occurredAt: string;
 };
@@ -207,10 +208,17 @@ export function discordContextAskConfigFromEnv(
 export function discordContextAskMentionFromCandidate(input: {
   candidate: DiscordContextAskMessageCandidate;
   botUserId: string;
+  /** Verified managed role whose Discord bot_id matches this bot. */
+  botMentionRoleId?: string | null;
   guildId: string;
   config: DiscordContextAskConfig;
 }): DiscordContextAskMention | null {
   const { candidate } = input;
+  const botMentionRoleId =
+    input.botMentionRoleId &&
+    candidate.mentionedDiscordRoleIds?.includes(input.botMentionRoleId)
+      ? input.botMentionRoleId
+      : null;
 
   if (
     candidate.guildId !== input.guildId ||
@@ -219,12 +227,16 @@ export function discordContextAskMentionFromCandidate(input: {
     !candidate.parentChannelId ||
     !input.config.parentChannelIds.includes(candidate.parentChannelId) ||
     !input.config.allowedDiscordUserIds.includes(candidate.actorDiscordUserId) ||
-    !candidate.mentionedDiscordUserIds.includes(input.botUserId)
+    (!candidate.mentionedDiscordUserIds.includes(input.botUserId) && !botMentionRoleId)
   ) {
     return null;
   }
 
-  const question = questionFromDiscordBotMention(candidate.content, input.botUserId);
+  const question = questionFromDiscordBotMention(
+    candidate.content,
+    input.botUserId,
+    botMentionRoleId
+  );
 
   if (!question) {
     return null;
@@ -254,9 +266,13 @@ export function questionAfterLeadingDiscordBotMention(
 /** Extract the question around exact bot mentions; callers also verify Discord's mention metadata. */
 export function questionFromDiscordBotMention(
   content: string,
-  botUserId: string
+  botUserId: string,
+  botMentionRoleId?: string | null
 ): string | null {
-  const mention = new RegExp(`<@!?${escapeRegularExpression(botUserId)}>`, "gu");
+  const role = botMentionRoleId
+    ? `|<@&${escapeRegularExpression(botMentionRoleId)}>`
+    : "";
+  const mention = new RegExp(`<@!?${escapeRegularExpression(botUserId)}>${role}`, "gu");
   if (!mention.test(content)) return null;
   const question = content.replace(mention, "").trim();
   return question.length > 0 ? question : null;

@@ -69,6 +69,38 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("captures a bot-role question and rejects revoked identity, removed metadata, and mutation purposes", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    const content = "What did we decide?\n<@&role_luma>";
+    reader.anchor!.content = content;
+    reader.anchor!.mentionedDiscordUserIds = [];
+    reader.anchor!.mentionedDiscordRoleIds = ["role_luma"];
+    let verifiedRole: string | null = "role_luma";
+    const source = createDiscordConversationEvidenceSource({
+      reader,
+      guildId: "guild_dayova",
+      config: contextAskConfig,
+      botUserId: () => "bot_luma",
+      botMentionRoleId: () => Promise.resolve(verifiedRole)
+    });
+    const request = { ...captureInput(), question: "What did we decide?" };
+    expect((await source.capture(request)).snapshot.messages.at(-1)?.text).toBe(content);
+    for (const purpose of ["structured-work", "decision-record"] as const) {
+      await expect(source.capture({ ...request, purpose })).rejects.toMatchObject({
+        code: "discord-conversation-anchor-unavailable"
+      });
+    }
+    verifiedRole = "role_other_bot";
+    await expect(source.capture(request)).rejects.toMatchObject({
+      code: "discord-conversation-anchor-unavailable"
+    });
+    verifiedRole = "role_luma";
+    reader.anchor!.mentionedDiscordRoleIds = [];
+    await expect(source.capture(request)).rejects.toMatchObject({
+      code: "discord-conversation-anchor-unavailable"
+    });
+  });
+
   it("captures a trailing mention and still rejects a changed question on reread", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     const content = "What did we decide?\n<@bot_luma>";

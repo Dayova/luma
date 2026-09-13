@@ -100,7 +100,8 @@ type Options = {
   modelFactory?: (
     candidate: Candidate,
     key: string,
-    onResponse: (facts: ResponseFacts) => void
+    onResponse: (facts: ResponseFacts) => void,
+    promptInstructions: string | undefined
   ) => ReasoningModel;
 };
 
@@ -215,7 +216,12 @@ export async function runQualityEvaluation(options: Options): Promise<QualityRun
         row.response = facts;
       };
       const model =
-        options.modelFactory?.(candidate, key, onResponse) ??
+        options.modelFactory?.(
+          candidate,
+          key,
+          onResponse,
+          modelSpec.promptInstructions
+        ) ??
         createComparisonReasoningModel({
           candidate,
           apiKey: key,

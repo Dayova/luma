@@ -18,6 +18,7 @@ import {
   createComparisonReasoningModel,
   defaultLimits
 } from "../../src/evaluation/provider-comparison/providers.js";
+import { promptTuningEnvironment } from "../../src/evaluation/quality/prompt-tuning-profile.js";
 import { requestForFixture } from "../../src/evaluation/provider-comparison/corpus.js";
 const json = (path: string): unknown => JSON.parse(readFileSync(path, "utf8")) as unknown;
 const benchmark = benchmarkSchema.parse(
@@ -62,6 +63,31 @@ it("binds each prompt variant to its request and refuses relabeling saved output
   expect(replay.rows.map((r) => r.requestHash)).toEqual(
     run.rows.map((r) => r.requestHash)
   );
+});
+
+it("makes frozen prompt variants available to programmable model adapters", async () => {
+  const observedVariants = new Set<boolean>();
+  const run = await runQualityEvaluation({
+    benchmark: { ...benchmark, cases: benchmark.cases.slice(0, 1) },
+    models: [
+      { ...model, label: "baseline" },
+      { ...model, label: "tuned", promptInstructions: "Frozen experiment instruction." }
+    ],
+    env: { OPENAI_API_KEY: "test-only" },
+    live: true,
+    maxRequests: 2,
+    repeats: 1,
+    seed: 56,
+    gitRevision: "test",
+    modelFactory: (_candidate, _key, _onResponse, promptInstructions) => ({
+      generateStructured: () => {
+        observedVariants.add(promptInstructions !== undefined);
+        return Promise.reject(new Error("No real provider request"));
+      }
+    })
+  });
+  expect(observedVariants).toEqual(new Set([false, true]));
+  expect(new Set(run.rows.map((row) => row.requestHash)).size).toBe(2);
 });
 
 it.each(candidates)(
@@ -149,4 +175,36 @@ it("reproduces frozen selections and blinds prompt variants in semantic review",
   expect(JSON.stringify(packet)).not.toContain("promptInstructions");
   expect(JSON.stringify(packet)).not.toContain("shared-v1");
   expect(JSON.stringify(packet)).not.toContain("expectations");
+});
+
+it.each([
+  {},
+  {
+    LUMA_EVAL_GOOGLE_BACKEND: "developer",
+    LUMA_EVAL_ANTHROPIC_OUTPUT: "native-schema",
+    VERTEX_PROJECT_ID: "other-project"
+  }
+])("keeps the frozen experiment provider controls in preflight", async (environment) => {
+  const env = {
+    ...environment,
+    VERTEX_API_KEY: "test-only",
+    ANTHROPIC_API_KEY: "test-only"
+  };
+  const original = { ...env };
+  const run = await runQualityEvaluation({
+    benchmark,
+    models: modelSpecsSchema
+      .parse(json("evals/models/provider-quality.json"))
+      .filter((m) => ["google", "anthropic"].includes(m.provider)),
+    env: promptTuningEnvironment(env),
+    live: false,
+    maxRequests: 8,
+    repeats: 1,
+    seed: 56,
+    gitRevision: "test"
+  });
+  expect(run.settings.googleEndpoint).toEqual({ backend: "vertex" });
+  expect(run.settings.anthropicOutputMode).toBe("prompt-json");
+  expect(run.rows.every((row) => row.status === "not-run")).toBe(true);
+  expect(env).toEqual(original);
 });

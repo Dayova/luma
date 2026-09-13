@@ -230,8 +230,8 @@ replaces the earlier single-channel test restriction, which did not reflect Jako
    `/help`, `usage`, or a text question. Each founder has isolated private context;
    `/new` starts fresh without deleting earlier history. The same $1 budget applies.
    For channel testing, use `/meeting start` with a test title in any enabled founder text channel. In the
-   resulting thread use `/meeting note` with a short test note, then begin a
-   message with `@Dayova Luma Dev` followed by a question. Use `/meeting usage`
+   resulting thread use `/meeting note` with a short test note, then send a question
+   mentioning `@Dayova Luma Dev` anywhere in the message. Use `/meeting usage`
    for usage and `/meeting stop` to conclude. The browser's **Refresh status and
    usage** button shows updated shared accounting. Discord meetings remain in
    Discord; the browser meeting picker lists pasted local meetings only.

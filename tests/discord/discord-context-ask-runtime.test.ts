@@ -74,7 +74,7 @@ describe("Discord Context Ask runtime boundary", () => {
     ]);
   });
 
-  it("admits only an allowlisted human's leading mention in an allowlisted public thread", () => {
+  it("admits only an allowlisted human's direct mention in an allowlisted public thread", () => {
     const accepted = discordContextAskMentionFromCandidate({
       candidate: {
         messageId: "message_ask",
@@ -110,7 +110,7 @@ describe("Discord Context Ask runtime boundary", () => {
       { parentChannelId: "channel_elsewhere" },
       { actorDiscordUserId: "user_unknown" },
       { mentionedDiscordUserIds: [] },
-      { content: "Please ask <@bot_luma> about this" },
+      { content: "Please ask <@someone_else> about this" },
       { content: "<@bot_luma>" }
     ]) {
       expect(
@@ -134,6 +134,32 @@ describe("Discord Context Ask runtime boundary", () => {
         })
       ).toBeNull();
     }
+  });
+
+  it.each([
+    ["<@bot_luma> What did we decide?", "What did we decide?"],
+    ["What did we decide?\n<@bot_luma>", "What did we decide?"],
+    ["What did <@!bot_luma> we decide?", "What did  we decide?"],
+    ["<@bot_luma> What did we decide? <@bot_luma>", "What did we decide?"]
+  ])("accepts the exact bot mention anywhere: %s", (content, question) => {
+    const actual = discordContextAskMentionFromCandidate({
+      candidate: {
+        messageId: "ask",
+        guildId: "guild_dayova",
+        channelId: "thread_context",
+        parentChannelId: "channel_context",
+        channelKind: "public-thread",
+        authorKind: "human",
+        actorDiscordUserId: "user_jakob",
+        mentionedDiscordUserIds: ["bot_luma"],
+        content,
+        occurredAt: "2026-09-13T15:15:00Z"
+      },
+      botUserId: "bot_luma",
+      guildId: "guild_dayova",
+      config: contextAskConfig
+    });
+    expect(actual?.question).toBe(question);
   });
 
   it("rate-limits separate Ask messages without relying on the model path", () => {

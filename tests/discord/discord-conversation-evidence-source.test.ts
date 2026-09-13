@@ -69,6 +69,20 @@ class ProgrammableDiscordConversationReader implements DiscordConversationReader
 }
 
 describe("DiscordConversationEvidenceSource", () => {
+  it("captures a trailing mention and still rejects a changed question on reread", async () => {
+    const reader = new ProgrammableDiscordConversationReader();
+    const content = "What did we decide?\n<@bot_luma>";
+    reader.anchor!.content = content;
+    const source = createSource(reader);
+    const request = { ...captureInput(), question: "What did we decide?" };
+    const captured = await source.capture(request);
+    expect(captured.snapshot.messages.at(-1)?.text).toBe(content);
+    reader.anchor!.content = "What should we decide?\n<@bot_luma>";
+    await expect(source.capture(request)).rejects.toMatchObject({
+      code: "discord-conversation-anchor-unavailable"
+    });
+  });
+
   it("captures an ordinary founder anchor only for explicit consultation purpose, preserving the Ask mention contract", async () => {
     const reader = new ProgrammableDiscordConversationReader();
     reader.anchor = humanMessage({
@@ -122,6 +136,10 @@ describe("DiscordConversationEvidenceSource", () => {
           purpose,
           question: "update the existing decision"
         })
+      ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
+      reader.anchor!.content = "record this decision <@bot_luma>";
+      await expect(
+        source.capture({ ...captureInput(), purpose, question: "record this decision" })
       ).rejects.toMatchObject({ code: "discord-conversation-anchor-unavailable" });
       reader.anchor!.content = "record this decision";
       reader.anchor!.mentionedDiscordUserIds = [];

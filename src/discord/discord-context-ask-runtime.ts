@@ -224,10 +224,7 @@ export function discordContextAskMentionFromCandidate(input: {
     return null;
   }
 
-  const question = questionAfterLeadingDiscordBotMention(
-    candidate.content,
-    input.botUserId
-  );
+  const question = questionFromDiscordBotMention(candidate.content, input.botUserId);
 
   if (!question) {
     return null;
@@ -244,21 +241,24 @@ export function discordContextAskMentionFromCandidate(input: {
   };
 }
 
-/** Returns null unless content starts with this exact bot mention. */
+/** Keep the existing explicit leading-instruction boundary for mutation capabilities. */
 export function questionAfterLeadingDiscordBotMention(
   content: string,
   botUserId: string
 ): string | null {
-  const leadingMention = new RegExp(
-    `^\\s*<@!?${escapeRegularExpression(botUserId)}>\\s*`
-  );
+  const leading = new RegExp(`^\\s*<@!?${escapeRegularExpression(botUserId)}>\\s*`);
+  if (!leading.test(content)) return null;
+  return content.replace(leading, "").trim() || null;
+}
 
-  if (!leadingMention.test(content)) {
-    return null;
-  }
-
-  const question = content.replace(leadingMention, "").trim();
-
+/** Extract the question around exact bot mentions; callers also verify Discord's mention metadata. */
+export function questionFromDiscordBotMention(
+  content: string,
+  botUserId: string
+): string | null {
+  const mention = new RegExp(`<@!?${escapeRegularExpression(botUserId)}>`, "gu");
+  if (!mention.test(content)) return null;
+  const question = content.replace(mention, "").trim();
   return question.length > 0 ? question : null;
 }
 

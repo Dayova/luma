@@ -12,6 +12,7 @@ import type {
 import {
   MAX_DISCORD_CONTEXT_ASK_EVIDENCE_CHARS,
   MAX_DISCORD_CONTEXT_ASK_MESSAGES,
+  questionFromDiscordBotMention,
   questionAfterLeadingDiscordBotMention,
   type DiscordContextAskConfig
 } from "./discord-context-ask-runtime.js";
@@ -287,6 +288,10 @@ async function readAnchor(
   });
 
   const botUserId = input.botUserId();
+  const questionFromMention =
+    purpose === "decision-record" || purpose === "structured-work"
+      ? questionAfterLeadingDiscordBotMention
+      : questionFromDiscordBotMention;
 
   if (
     !anchor ||
@@ -298,9 +303,9 @@ async function readAnchor(
     (purpose === "consultation"
       ? !anchor.content.trim() || (question !== undefined && anchor.content !== question)
       : !anchor.mentionedDiscordUserIds.includes(botUserId) ||
-        !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
+        !questionFromMention(anchor.content, botUserId) ||
         (question !== undefined &&
-          questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question))
+          questionFromMention(anchor.content, botUserId) !== question))
   ) {
     throw new DiscordConversationEvidenceError(
       "discord-conversation-anchor-unavailable",

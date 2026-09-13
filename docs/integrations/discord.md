@@ -364,10 +364,12 @@ In an allowlisted **public thread**, an allowlisted person can write:
 Luma captures current thread history from its beginning through the mention,
 stores an immutable human-text conversation-evidence revision, and replies in
 the same thread with a cited, read-only answer only when that boundary is
-complete. The user mention
-must be leading and exact; nonleading mentions, bots, webhooks, system
-messages, private threads, DMs, and channels outside the reviewed scope are
-ignored without capture.
+complete. The exact bot mention may appear at the beginning, in the middle,
+or at the end of the message, including on its own final line. Discord must
+identify Luma as a mentioned user; a display name or mention of another user
+does not trigger it. Bots, webhooks, system messages, private threads, and
+channels outside the reviewed scope are ignored without capture. DMs use
+the separate founder-only DM interface.
 
 The snapshot reader does not retain continuous Discord edit/delete events. New
 questions read current history; repeated deliveries reuse a stored answer only

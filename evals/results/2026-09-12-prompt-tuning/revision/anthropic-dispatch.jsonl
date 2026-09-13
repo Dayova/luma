@@ -1,0 +1,4 @@
+{"at":"2026-09-12T15:39:55.764Z","candidate":"anthropic-revision-v2","caseId":"revised-decision","repetition":1,"requestHash":"15ff2ec58963d2bafbfc429f846a07cf6d321ff2df3fa3e428ef4e30e985fbde"}
+{"at":"2026-09-12T15:40:00.657Z","candidate":"anthropic-revision-v2","caseId":"conditional-rollout-accepted","repetition":1,"requestHash":"2e752350baa64d88be4f6c3a96a382264dbe4b0e80a4b7271ea23b25d9c3b34f"}
+{"at":"2026-09-12T15:40:21.699Z","candidate":"anthropic-revision-v2","caseId":"quoted-owner-is-not-commitment","repetition":1,"requestHash":"42fdc703427e5901d295c7ea21c5c9dd758cbfd2b959aeaa03f7f22f77f16807"}
+{"at":"2026-09-12T15:40:34.969Z","candidate":"anthropic-revision-v2","caseId":"mixed-code-uncertainty","repetition":1,"requestHash":"9bb64c504bc08afb9c0c50b2366bc7752dda7a07fb757575512ab11cb93ed8be"}

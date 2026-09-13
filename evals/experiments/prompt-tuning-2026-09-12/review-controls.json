@@ -1,0 +1,687 @@
+{
+  "version": 1,
+  "provenance": "agent-authored-calibration-not-human-gold",
+  "controls": [
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-071",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_una",
+              "text": "We need someone to investigate cache-reader.ts."
+            },
+            {
+              "speakerId": "person_unidentified_speaker",
+              "text": "I accept investigating cache-reader.ts by 22 September 2026, but I am not promising a fix."
+            },
+            {
+              "speakerId": "person_una",
+              "text": "We heard the acceptance, but who was speaking? I did not accept that work."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-071",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Investigate cache-reader.ts; do not implement a fix.",
+            "ownerId": null,
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-071:2"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "identity",
+            "question": "Who made the accepted investigation commitment?",
+            "raisedBy": "person_una",
+            "evidenceIds": ["evidence:meeting-071:3"],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-072",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_una",
+              "text": "We need someone to investigate cache-reader.ts."
+            },
+            {
+              "speakerId": "person_unidentified_speaker",
+              "text": "I accept investigating cache-reader.ts by 22 September 2026, but I am not promising a fix."
+            },
+            {
+              "speakerId": "person_una",
+              "text": "We heard the acceptance, but who was speaking? I did not accept that work."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-072",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Investigate cache-reader.ts; do not implement a fix.",
+            "ownerId": "person_una",
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-072:2"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "identity",
+            "question": "Who made the accepted investigation commitment?",
+            "raisedBy": "person_una",
+            "evidenceIds": ["evidence:meeting-072:3"],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "participant-attribution",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-073",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_lee",
+              "text": "The error could be in cache-reader.ts or the upstream service. Neither cause is verified."
+            },
+            {
+              "speakerId": "person_una",
+              "text": "I will investigate both possibilities by 22 September 2026. This is an investigation only, no repair commitment."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-073",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Investigate whether cache-reader.ts or the upstream service caused the error.",
+            "ownerId": "person_una",
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-073:1", "evidence:meeting-073:2"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-074",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_lee",
+              "text": "The error could be in cache-reader.ts or the upstream service. Neither cause is verified."
+            },
+            {
+              "speakerId": "person_una",
+              "text": "I will investigate both possibilities by 22 September 2026. This is an investigation only, no repair commitment."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-074",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Fix the defect in cache-reader.ts.",
+            "ownerId": "person_una",
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-074:1", "evidence:meeting-074:2"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-075",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_una",
+              "text": "I will write the cache-reader.ts documentation by 22 September 2026."
+            },
+            {
+              "speakerId": "person_lee",
+              "text": "Is that documentation deadline accepted or just a wish?"
+            },
+            {
+              "speakerId": "person_una",
+              "text": "Accepted. I confirm 22 September 2026 as my firm documentation deadline."
+            },
+            {
+              "speakerId": "person_lee",
+              "text": "Will the future launch receive approval? That remains unanswered; it does not affect the accepted documentation deadline."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-075",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Write the cache-reader.ts documentation.",
+            "ownerId": "person_una",
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-075:1", "evidence:meeting-075:3"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "approval",
+            "question": "Will the future launch receive approval?",
+            "raisedBy": "person_lee",
+            "evidenceIds": ["evidence:meeting-075:4"],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "pass"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    },
+    {
+      "case": {
+        "fixture": {
+          "id": "meeting-076",
+          "language": "en",
+          "occurredAt": "2026-09-12T10:00:00Z",
+          "timezone": "Europe/Berlin",
+          "utterances": [
+            {
+              "speakerId": "person_una",
+              "text": "I will write the cache-reader.ts documentation by 22 September 2026."
+            },
+            {
+              "speakerId": "person_lee",
+              "text": "Is that documentation deadline accepted or just a wish?"
+            },
+            {
+              "speakerId": "person_una",
+              "text": "Accepted. I confirm 22 September 2026 as my firm documentation deadline."
+            },
+            {
+              "speakerId": "person_lee",
+              "text": "Will the future launch receive approval? That remains unanswered; it does not affect the accepted documentation deadline."
+            }
+          ],
+          "checks": [],
+          "manualReview": "Control expectation withheld."
+        },
+        "groupId": "meeting-076",
+        "cohort": "challenge",
+        "split": "development",
+        "author": "agent",
+        "independentReview": null,
+        "rules": [],
+        "rubric": [
+          {
+            "id": "source-support",
+            "dimension": "grounding",
+            "severity": "critical",
+            "question": "Is every assertion supported by the cited utterances, including presuppositions inside questions and claims in follow-up descriptions? An existing citation ID is not proof of support."
+          },
+          {
+            "id": "commitment-fidelity",
+            "dimension": "modality",
+            "severity": "critical",
+            "question": "Are possibilities, conditions, offers, refusals, commitments and corrections preserved in every output field? Do not infer a confirmed commitment from a suggestion."
+          },
+          {
+            "id": "participant-attribution",
+            "dimension": "attribution",
+            "severity": "critical",
+            "question": "Does the evidence establish each attributed owner, supporter, objector and question raiser? Announcing a group decision is not a personal objection; an unclear speaker is not an identified owner."
+          },
+          {
+            "id": "important-recall",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are all material commitments, final decisions and unresolved questions represented without merging distinct obligations? An empty answer cannot pass when material items exist."
+          },
+          {
+            "id": "duplicate-items",
+            "dimension": "recall",
+            "severity": "major",
+            "question": "Are semantically identical items consolidated while separate owners and obligations remain distinct?"
+          },
+          {
+            "id": "language-dates-identifiers",
+            "dimension": "deadline",
+            "severity": "major",
+            "question": "Are original language, technical identifiers and deadline meaning preserved? Are relative dates grounded in Europe/Berlin evidence, with uncertainty retained where resolution is impossible?"
+          }
+        ]
+      },
+      "output": {
+        "actionItems": [
+          {
+            "stableKey": "investigation",
+            "description": "Write the cache-reader.ts documentation.",
+            "ownerId": "person_una",
+            "dueDate": {
+              "originalPhrase": "22 September 2026",
+              "normalizedDate": "2026-09-22",
+              "confidence": "exact",
+              "timezone": "Europe/Berlin"
+            },
+            "status": "confirmed",
+            "relatedDecisionIds": [],
+            "evidenceIds": ["evidence:meeting-076:1", "evidence:meeting-076:3"],
+            "confidence": "high"
+          }
+        ],
+        "decisions": [],
+        "openQuestions": [
+          {
+            "stableKey": "approval",
+            "question": "Will the future launch receive approval?",
+            "raisedBy": "person_lee",
+            "evidenceIds": ["evidence:meeting-076:4"],
+            "confidence": "high"
+          },
+          {
+            "stableKey": "deadline",
+            "question": "Is 22 September 2026 an accepted deadline for the documentation?",
+            "raisedBy": "person_lee",
+            "evidenceIds": ["evidence:meeting-076:2"],
+            "confidence": "high"
+          }
+        ],
+        "risks": [],
+        "followUpIntentions": []
+      },
+      "expectations": [
+        {
+          "rubricId": "source-support",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "commitment-fidelity",
+          "verdict": "fail"
+        },
+        {
+          "rubricId": "important-recall",
+          "verdict": "pass"
+        }
+      ]
+    }
+  ]
+}

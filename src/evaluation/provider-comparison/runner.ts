@@ -204,7 +204,7 @@ export function renderReport(report: Report): string {
       .map((r) => r.response?.estimatedUncachedCostUsd)
       .filter((v): v is number => typeof v === "number");
     lines.push(
-      `| ${candidate.id} / ${candidate.model} | ${completed.length} / ${rows.length} | ${rows.filter((r) => r.status === "error").length} | ${rows.filter((r) => r.status === "missing-credential").length} | ${checks.length ? `${checks.filter((c) => c.passed).length} / ${checks.length}` : "not measured"} | ${latencies.length ? `${latencies[Math.floor((latencies.length - 1) / 2)]} ms` : "not measured"} | ${knownCosts.length ? `$${knownCosts.reduce((sum, v) => sum + v, 0).toFixed(6)} (${knownCosts.length}/${dispatched.length} requests)` : "unknown / not run"} |`
+      `| ${candidate.id} / ${candidate.model} | ${completed.length} / ${rows.length} | ${rows.filter((r) => r.status === "error").length} | ${rows.filter((r) => r.status === "missing-credential").length} | ${checks.length ? `${checks.filter((c) => c.passed).length} / ${checks.length}` : "not measured"} | ${latencies.length ? `${latencies[Math.floor((latencies.length - 1) / 2)]} ms` : "not measured"} | ${knownCosts.length ? `$${knownCosts.reduce((sum, v) => sum + v, 0).toFixed(6)} (${knownCosts.length}/${dispatched.length} requests)` : dispatched.length ? `unknown (0/${dispatched.length} requests)` : "not run"} |`
     );
   }
   lines.push(

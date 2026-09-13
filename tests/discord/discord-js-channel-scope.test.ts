@@ -1,3 +1,4 @@
+import { ContextIntelligenceError } from "../../src/context-intelligence/context-intelligence.js";
 import { discordAudienceFixture } from "./discord-audience-fixture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Discord from "discord.js";
@@ -91,13 +92,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function transport() {
+function transport(
+  authorizeHumanReader = (userId: string): Promise<boolean> =>
+    Promise.resolve(userId === "founder")
+) {
   return createDiscordJsTransport({
     token: "test-only",
     clientId: "application",
     guildId: "guild",
     allowedParentChannelIds: ["parent"],
-    authorizeHumanReader: (userId) => Promise.resolve(userId === "founder"),
+    authorizeHumanReader,
     contextAsk: {
       parentChannelIds: ["parent"],
       allowedDiscordUserIds: ["founder"],
@@ -177,13 +181,15 @@ describe("Discord production channel resolution and delivery", () => {
       expect(command).toHaveBeenCalledTimes(entrypoint === "command" ? 1 : 0);
       expect(ask).toHaveBeenCalledTimes(entrypoint === "context-ask" ? 1 : 0);
       expect(stopped).toBe(false);
-      expect(interaction.editReply).not.toHaveBeenCalled();
-      expect(message.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledTimes(
+        entrypoint === "command" ? 1 : 0
+      );
+      expect(message.reply).toHaveBeenCalledTimes(entrypoint === "command" ? 0 : 1);
       finishProof();
       await stopping;
       expect(
         entrypoint === "command" ? interaction.editReply : message.reply
-      ).toHaveBeenCalledOnce();
+      ).toHaveBeenCalledTimes(2);
     }
   );
 
@@ -242,7 +248,7 @@ describe("Discord production channel resolution and delivery", () => {
       editReply: vi.fn(async () => {})
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledTimes(2));
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "consultation-start",
@@ -431,23 +437,33 @@ describe("Discord production channel resolution and delivery", () => {
       );
       const handler = vi.fn(() =>
         Promise.resolve({
-          content: "Old organizational claim",
+          content: "Old organizational claim" + " context".repeat(300),
           idempotencyKey: "context-result",
           requireCurrent: fence
         })
       );
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       sdk.emit(Events.MessageCreate, message);
-      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
       expect(fence).toHaveBeenCalledOnce();
       expect(handler).toHaveBeenCalledOnce();
-      const sent = message.reply.mock.calls[0]?.[0];
+      const sent = message.reply.mock.calls[1]?.[0];
       expect(sent).toHaveProperty(
         "content",
         current
-          ? expect.stringContaining("Old organizational claim")
-          : expect.stringContaining("organizational context changed")
+          ? expect.stringContaining("attached luma-answer.txt")
+          : expect.stringContaining("verification may have failed")
       );
+      if (current) {
+        expect(sent).toHaveProperty("files", [
+          {
+            attachment: Buffer.from("Old organizational claim" + " context".repeat(300)),
+            name: "luma-answer.txt"
+          }
+        ]);
+      } else {
+        expect(sent).not.toHaveProperty("files");
+      }
       if (!current)
         expect(sent).not.toHaveProperty(
           "content",
@@ -547,12 +563,16 @@ describe("Discord production channel resolution and delivery", () => {
       });
       if (change === "audience-expanded") {
         await new Promise<void>((resolve) => setImmediate(resolve));
-        expect(anchor.reply).not.toHaveBeenCalled();
+        expect(anchor.reply).toHaveBeenCalledTimes(1);
+        expect(anchor.reply.mock.calls[0]?.[0]).toHaveProperty(
+          "content",
+          expect.stringContaining("Nachricht erhalten")
+        );
         await live.disconnect();
         return;
       }
-      await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledOnce());
-      const sent = anchor.reply.mock.calls[0]?.[0];
+      await vi.waitFor(() => expect(anchor.reply).toHaveBeenCalledTimes(2));
+      const sent = anchor.reply.mock.calls[1]?.[0];
       if (change === "unchanged")
         expect(sent).toHaveProperty(
           "content",
@@ -561,7 +581,7 @@ describe("Discord production channel resolution and delivery", () => {
       else {
         expect(sent).toHaveProperty(
           "content",
-          expect.stringContaining("conversation changed or is no longer readable")
+          expect.stringContaining("could not verify the current conversation")
         );
         expect(sent).not.toHaveProperty(
           "content",
@@ -636,7 +656,7 @@ describe("Discord production channel resolution and delivery", () => {
       const handler = vi.fn(() => Promise.resolve(retainedResponse));
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       sdk.emit(Events.MessageCreate, message);
-      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
       contextFence.mockImplementationOnce(() => {
         audience.state.members.push({
           user: { id: "outsider", bot: false },
@@ -655,7 +675,11 @@ describe("Discord production channel resolution and delivery", () => {
       await vi.waitFor(() => expect(contextFence).toHaveBeenCalledTimes(2));
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(handler).toHaveBeenCalledTimes(2);
-      expect(message.reply).toHaveBeenCalledOnce();
+      expect(message.reply).toHaveBeenCalledTimes(3);
+      expect(message.reply.mock.calls[2]?.[0]).toHaveProperty(
+        "content",
+        expect.stringContaining("Nachricht erhalten")
+      );
       await live.disconnect();
     }
   );
@@ -741,10 +765,47 @@ describe("Discord production channel resolution and delivery", () => {
       await vi.waitFor(() =>
         expect(sdk.get).toHaveBeenCalledWith(Routes.channel("thread"), expect.anything())
       );
-      expect(message.reply).not.toHaveBeenCalled();
+      expect(message.reply).toHaveBeenCalledTimes(1);
+      expect(message.reply.mock.calls[0]?.[0]).toHaveProperty(
+        "content",
+        expect.stringContaining("Nachricht erhalten")
+      );
       await live.disconnect();
     }
   );
+
+  it("does not replace a final slash reply after ambiguous delivery failure", async () => {
+    const live = transport();
+    await live.connect(() => Promise.resolve({ content: "Completed result" }));
+    const interaction = {
+      isChatInputCommand: () => true,
+      commandName: "meeting",
+      inGuild: () => true,
+      guildId: "guild",
+      id: "interaction",
+      channelId: "parent",
+      deferred: true,
+      user: { id: "founder" },
+      createdAt: new Date("2026-09-08T12:00:00Z"),
+      options: { getSubcommand: () => "usage" },
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("Ambiguous send"))
+        .mockResolvedValue(undefined)
+    };
+    sdk.emit(Events.InteractionCreate, interaction);
+    await vi.waitFor(() =>
+      expect(interaction.editReply.mock.calls.length).toBeGreaterThanOrEqual(2)
+    );
+    await live.disconnect();
+    expect(interaction.editReply).toHaveBeenCalledTimes(2);
+    expect(interaction.editReply.mock.calls[1]?.[0]).toHaveProperty(
+      "content",
+      "Completed result"
+    );
+  });
 
   it("withholds a completed slash-command response if its channel gains a guest before editReply", async () => {
     const live = transport();
@@ -770,7 +831,7 @@ describe("Discord production channel resolution and delivery", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(interaction.editReply).toHaveBeenCalledTimes(2));
     expect(interaction.editReply).toHaveBeenCalledWith({
       content: "Luma is not enabled in this Discord channel.",
       allowedMentions: { parse: [] }
@@ -880,7 +941,7 @@ describe("Discord explicit Decision Record entry", () => {
     for (const excluded of [question, quote, guest, bot, foreign, negated])
       sdk.emit(Events.MessageCreate, excluded);
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         question: "record this decision",
@@ -929,7 +990,7 @@ describe("Discord explicit Decision Record entry", () => {
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       const candidate = mention();
       sdk.emit(Events.MessageCreate, candidate);
-      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ question: "usage" })
       );
@@ -962,7 +1023,7 @@ describe("Discord explicit Decision Record entry", () => {
     await live.connect(() => Promise.resolve({ content: "unused" }), handler);
     const candidate = mention();
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ purpose: "decision-record", question: "usage" })
     );
@@ -992,7 +1053,7 @@ describe("Discord explicit Decision Record entry", () => {
       await live.connect(() => Promise.resolve({ content: "unused" }), handler);
       const candidate = { ...mention(), content: `<@bot> ${question}` };
       sdk.emit(Events.MessageCreate, candidate);
-      await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+      await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ question })
       );
@@ -1033,12 +1094,12 @@ describe("Discord explicit Decision Record entry", () => {
     const candidate = mention();
     candidate.content = "<@bot> record this decision";
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     expect(JSON.stringify(candidate.reply.mock.calls)).not.toContain(
       "private old decision"
     );
     expect(JSON.stringify(candidate.reply.mock.calls)).toContain(
-      "changed or is no longer readable"
+      "verification may have failed"
     );
     await live.disconnect();
   });
@@ -1074,7 +1135,7 @@ describe("Discord explicit Decision Record entry", () => {
         editReply: vi.fn(() => Promise.resolve())
       };
       sdk.emit(Events.InteractionCreate, interaction);
-      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           type: `decision-record-${subcommand}`,
@@ -1096,3 +1157,143 @@ describe("Discord explicit Decision Record entry", () => {
     }
   );
 });
+
+it("reports a verification timeout without claiming that the source changed or delivering claims", async () => {
+  const live = transport();
+  const message = mention();
+  await live.connect(
+    () => Promise.resolve({ content: "unused" }),
+    () =>
+      Promise.resolve({
+        content: "Private claim",
+        idempotencyKey: "timeout",
+        requireCurrent: () =>
+          Promise.reject(
+            new ContextIntelligenceError(
+              "context-inquiry-verification-timeout",
+              true,
+              "SECRET"
+            )
+          )
+      })
+  );
+  sdk.emit(Events.MessageCreate, message);
+  await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
+  const sent = message.reply.mock.calls[1]?.[0];
+  expect(sent).toHaveProperty(
+    "content",
+    expect.stringContaining("source check timed out")
+  );
+  expect(JSON.stringify(sent)).not.toContain("SECRET");
+  expect(JSON.stringify(sent)).not.toContain("Private claim");
+  expect(sent).not.toHaveProperty("files");
+  await live.disconnect();
+});
+
+it.each(["available", "deleted", "foreign-parent", "bot-starter", "stalled-author"])(
+  "captures the referenced parent message for a thread starter: %s",
+  async (state) => {
+    const live = transport((userId) =>
+      userId === "stalled-founder"
+        ? new Promise<boolean>(() => undefined)
+        : Promise.resolve(userId === "founder")
+    );
+    const base = {
+      ...mention(),
+      type: MessageType.Default,
+      author: { id: "founder", bot: false, username: "Founder" },
+      attachments: new Map(),
+      embeds: [],
+      stickers: new Map(),
+      components: [],
+      poll: null,
+      messageSnapshots: new Map(),
+      flags: { has: () => false },
+      editedAt: null,
+      reference: null
+    };
+    const original = {
+      ...base,
+      id: "thread",
+      channelId: "parent",
+      author:
+        state === "bot-starter"
+          ? { id: "bot", bot: true, username: "Luma" }
+          : state === "stalled-author"
+            ? { id: "stalled-founder", bot: false, username: "Founder" }
+            : base.author,
+      content: "https://linear.app/dayova/issue/DAY-173/convert — Antrag gestellt",
+      url: "https://discord.com/channels/guild/parent/thread",
+      createdAt: new Date("2026-09-08T10:00:00Z")
+    };
+    const starter = {
+      ...base,
+      id: "starter",
+      createdAt: new Date("2026-09-08T11:00:00Z"),
+      channelId: "thread",
+      system: true,
+      type: MessageType.ThreadStarterMessage,
+      content: "",
+      reference: {
+        guildId: "guild",
+        channelId: state === "foreign-parent" ? "outside" : "parent",
+        messageId: "thread"
+      }
+    };
+    const parent = sdk.channels.get("parent") as ReturnType<typeof channel>;
+    parent.messages.fetch = vi.fn(() =>
+      state === "deleted"
+        ? Promise.reject(new Error("Source deleted"))
+        : Promise.resolve(original)
+    ) as unknown as typeof parent.messages.fetch;
+    sdk.channels.set("thread", {
+      ...channel("thread", ChannelType.PublicThread, "parent"),
+      isThread: () => true,
+      messages: { fetch: () => Promise.resolve(new Collection([["starter", starter]])) }
+    });
+    await live.connect(() => Promise.resolve({ content: "unused" }));
+    const source = live;
+    // Capture uses the native reader and requires an actual mention anchor.
+    const thread = sdk.channels.get("thread") as {
+      messages: { fetch: (value: unknown) => Promise<unknown> };
+    };
+    thread.messages.fetch = (value) =>
+      Promise.resolve(
+        typeof value === "object" && value !== null && "message" in value
+          ? {
+              ...base,
+              id: "message",
+              channelId: "thread",
+              url: "https://discord.com/channels/guild/thread/message"
+            }
+          : new Collection([["starter", starter]])
+      );
+    const captured = await source.capture({
+      workspaceId: "dayova",
+      subject: {
+        type: "conversation-thread",
+        providerId: "discord",
+        conversationObjectId: "thread",
+        anchorMessageId: "message"
+      }
+    });
+    if (state === "available") {
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        true
+      );
+      expect(captured.snapshot.messages[0]?.url).toBe(original.url);
+    } else if (state === "bot-starter") {
+      expect(captured.snapshot.completeness.state).toBe("complete");
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        false
+      );
+    } else {
+      expect(captured.snapshot.completeness.state).toBe("partial");
+      expect(captured.snapshot.messages.some((m) => m.text?.includes("DAY-173"))).toBe(
+        false
+      );
+    }
+    await live.disconnect();
+  },
+  10_000
+);

@@ -95,21 +95,35 @@ export function createLinearContextCatalog(
       const limit = Math.min(input.limit, MAX_RESULTS);
       const candidates = new Map<string, string>();
       try {
-        for (const text of new Set(input.concepts.map((concept) => concept.trim()))) {
-          if (!(await granted(audience))) return unavailable();
-          const results = await reader.searchWorkItems({
-            workspaceId: teamId,
-            text,
-            limit
-          });
-          if (!(await granted(audience))) return unavailable();
-          for (const item of results) {
-            const sourceId = sourceIdFor(item);
-            if (!sourceId) return unavailable();
-            if (await granted(audience, item.id)) candidates.set(sourceId, item.id);
+        const terms = input.concepts.map((concept) => concept.trim());
+        const identifiers = terms.filter((term) => IDENTIFIER.test(term));
+        // Prefer confirmed issue identifiers. Identifier-shaped branch names or
+        // other terms still need semantic search when no exact issue is found.
+        const searched = new Map<string, WorkItem[]>();
+        for (const exactOnly of identifiers.length ? [true, false] : [false]) {
+          if (!exactOnly && candidates.size > 0) break;
+          for (const text of new Set(exactOnly ? identifiers : terms)) {
+            if (!(await granted(audience))) return unavailable();
+            let results = searched.get(text);
+            if (!results) {
+              results = await reader.searchWorkItems({
+                workspaceId: teamId,
+                text,
+                limit
+              });
+              searched.set(text, results);
+            }
+            if (!(await granted(audience))) return unavailable();
+            for (const item of results) {
+              if (exactOnly && item.externalId.toLowerCase() !== text.toLowerCase())
+                continue;
+              const sourceId = sourceIdFor(item);
+              if (!sourceId) return unavailable();
+              if (await granted(audience, item.id)) candidates.set(sourceId, item.id);
+              if (candidates.size >= limit) break;
+            }
             if (candidates.size >= limit) break;
           }
-          if (candidates.size >= limit) break;
         }
         // Recheck every accumulated result after all provider reads. An earlier
         // grant can disappear while another concept or issue is being inspected.

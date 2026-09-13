@@ -111,3 +111,15 @@ export interface ContextReceiptVerifier {
 export interface ExternalContextReceiptVerifier extends ContextReceiptVerifier {
   withMeetingLeaves?(leaves: MeetingContextProofLeaves): ContextReceiptVerifier;
 }
+
+/** A failed freshness check never authorizes delivery of retained source content. */
+export class ContextVerificationError extends Error {
+  constructor(readonly reason: "timeout" | "changed-or-unavailable") {
+    super(
+      reason === "timeout"
+        ? "Organizational source verification timed out."
+        : "Organizational context changed or is no longer authorized; retrieve it again."
+    );
+    this.name = "ContextVerificationError";
+  }
+}

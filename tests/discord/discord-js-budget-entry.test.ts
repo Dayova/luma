@@ -107,7 +107,7 @@ function message(id: string) {
     author: { id: "founder", bot: false },
     system: false,
     webhookId: null,
-    mentions: { users: new Map([["bot_luma", {}]]) },
+    mentions: { users: new Map([["bot_luma", {}]]), roles: new Map<string, object>() },
     content: "<@bot_luma> usage",
     createdAt: new Date("2026-09-08T12:00:00Z"),
     channel: {
@@ -116,11 +116,131 @@ function message(id: string) {
       type: ChannelType.PublicThread,
       isSendable: () => true
     },
-    reply: vi.fn(() => Promise.resolve())
+    reply: vi.fn(() =>
+      Promise.resolve({
+        edit: vi.fn(() => Promise.resolve()),
+        delete: vi.fn(() => Promise.resolve())
+      })
+    )
   };
 }
 
 describe("Discord SDK budget entry points", () => {
+  it("replies to a trailing mention of its own managed bot role", async () => {
+    const audience = discordAudienceFixture({ botId: "bot_luma" });
+    sdk.get.mockImplementation(
+      (
+        route: Parameters<typeof audience.read>[0],
+        options: Parameters<typeof audience.read>[1]
+      ) => {
+        return route === "/guilds/guild/roles"
+          ? Promise.resolve([
+              ...audience.state.roles,
+              {
+                id: "role_luma",
+                managed: true,
+                tags: { bot_id: "bot_luma" },
+                permissions: "0"
+              }
+            ])
+          : audience.read(route, options);
+      }
+    );
+    const live = transport();
+    const handler = vi.fn(() =>
+      Promise.resolve({ content: "AI not configured", idempotencyKey: "role-test" })
+    );
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = message("role-mention");
+    candidate.content =
+      "Reflected der State im Linear Issue die Angaben von Philipp?\n<@&role_luma>";
+    candidate.mentions.users.clear();
+    candidate.mentions.roles.set("role_luma", {});
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "Reflected der State im Linear Issue die Angaben von Philipp?"
+      })
+    );
+    await live.disconnect();
+  });
+
+  it.each([
+    { managed: false, tags: { bot_id: "bot_luma" } },
+    { managed: true, tags: { bot_id: "other_bot" } },
+    { managed: true, tags: {} }
+  ])(
+    "does not activate for a same-name role without its managed bot identity: %j",
+    async (role) => {
+      const audience = discordAudienceFixture({ botId: "bot_luma" });
+      sdk.get.mockImplementation(
+        (
+          route: Parameters<typeof audience.read>[0],
+          options: Parameters<typeof audience.read>[1]
+        ) => {
+          return route === "/guilds/guild/roles"
+            ? Promise.resolve([
+                ...audience.state.roles,
+                { id: "role_luma", name: "Luma", permissions: "0", ...role }
+              ])
+            : audience.read(route, options);
+        }
+      );
+      const live = transport();
+      const handler = vi.fn(() =>
+        Promise.resolve({ content: "unused", idempotencyKey: "unused" })
+      );
+      await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+      const candidate = message("other-role");
+      candidate.content = "What did we decide? <@&role_luma>";
+      candidate.mentions.users.clear();
+      candidate.mentions.roles.set("role_luma", {});
+      sdk.emit(Events.MessageCreate, candidate);
+      await live.disconnect();
+      expect(handler).not.toHaveBeenCalled();
+      expect(candidate.reply).not.toHaveBeenCalled();
+    }
+  );
+
+  it("sends a text receipt while the real handler is still pending, then the final answer", async () => {
+    const live = transport();
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const handler = vi.fn(async () => {
+      await pending;
+      return { content: "Actual answer", idempotencyKey: "answer" };
+    });
+    await live.connect(() => Promise.resolve({ content: "unused" }), handler);
+    const candidate = message("pending");
+    sdk.emit(Events.MessageCreate, candidate);
+    await expect.poll(() => handler.mock.calls.length).toBe(1);
+    expect(candidate.reply).toHaveBeenCalledTimes(1);
+    expect(candidate.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Nachricht erhalten") as unknown
+      })
+    );
+    release();
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
+    expect(candidate.reply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("Actual answer") as unknown
+      })
+    );
+    await live.disconnect();
+    const temporary = await (candidate.reply.mock.results[0]!.value as ReturnType<
+      typeof candidate.reply
+    >);
+    const final = await (candidate.reply.mock.results[1]!.value as ReturnType<
+      typeof candidate.reply
+    >);
+    expect(temporary.delete).toHaveBeenCalledOnce();
+    expect(final.delete).not.toHaveBeenCalled();
+  });
+
   it("registers and routes /meeting usage as a deterministic command", async () => {
     const live = transport();
     const handler = vi.fn<(command: DiscordCommand) => Promise<DiscordCommandResponse>>(
@@ -141,7 +261,7 @@ describe("Discord SDK budget entry points", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ type: "usage", actorDiscordUserId: "founder" })
     );
@@ -159,8 +279,8 @@ describe("Discord SDK budget entry points", () => {
     const second = message("two");
     sdk.emit(Events.MessageCreate, first);
     sdk.emit(Events.MessageCreate, second);
-    await expect.poll(() => second.reply.mock.calls.length).toBe(1);
-    expect(first.reply).toHaveBeenCalledOnce();
+    await expect.poll(() => second.reply.mock.calls.length).toBe(2);
+    expect(first.reply).toHaveBeenCalledTimes(2);
     expect(handler).toHaveBeenCalledTimes(2);
     expect(second.reply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -182,9 +302,9 @@ describe("Discord SDK budget entry points", () => {
     const candidate = message("one");
     candidate.reply.mockRejectedValue(new Error("Discord send outcome unknown"));
     sdk.emit(Events.MessageCreate, candidate);
-    await expect.poll(() => candidate.reply.mock.calls.length).toBe(1);
+    await expect.poll(() => candidate.reply.mock.calls.length).toBe(2);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(candidate.reply).toHaveBeenCalledOnce();
+    expect(candidate.reply).toHaveBeenCalledTimes(2);
     expect(operationalLog).toHaveBeenCalledWith("Luma Discord delivery failed", {
       code: "discord-context-ask-reply-failed",
       channelId: "thread",
@@ -232,7 +352,7 @@ describe("Discord SDK founder review entry points", () => {
         editReply: vi.fn(() => Promise.resolve())
       };
       sdk.emit(Events.InteractionCreate, interaction);
-      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+      await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
       expect(handler).toHaveBeenCalledWith(
         expect.objectContaining({ type: command, actorDiscordUserId: "founder" })
       );
@@ -284,7 +404,7 @@ describe("Discord SDK founder review entry points", () => {
       editReply: vi.fn(() => Promise.resolve())
     };
     sdk.emit(Events.InteractionCreate, interaction);
-    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(1);
+    await expect.poll(() => interaction.editReply.mock.calls.length).toBe(2);
     expect(JSON.stringify(interaction.editReply.mock.calls)).not.toContain(
       "Private source wording"
     );

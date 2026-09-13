@@ -1,4 +1,8 @@
 import {
+  createDiscordDirectMessages,
+  discordDirectMessagesEnabled
+} from "../discord/discord-direct-messages.js";
+import {
   nativeNotionReviewConfig,
   createNativeNotionReviewResources
 } from "./native-notion-review-config.js";
@@ -117,6 +121,7 @@ export class LumaStartupCancelledError extends Error {
  * Keeping them injectable lets this wiring be verified without provider calls.
  */
 type StartServerDependencies = {
+  aiUsageBudget?: AiUsageBudget;
   createNativeNotionReviewResources?: typeof createNativeNotionReviewResources;
   createStructuredWorkRuntime?: typeof createStructuredWorkRuntime;
   createWorkProvider?: typeof createLinearWorkProviderFromEnv;
@@ -211,10 +216,6 @@ export async function startServer(
       "Granola onboarding requires the configured capture synthesis runtime"
     );
 
-  if (discordContextAskConfig && !hasAnyEnv(env, ["OPENAI_API_KEY"])) {
-    throw new Error("OPENAI_API_KEY is required when Discord Context Ask is enabled");
-  }
-
   const identityDirectory = createIdentityDirectoryFromEnv(env);
   const workspaceId = env["LUMA_WORKSPACE_ID"] ?? "workspace_dayova";
   const webhookConfig = notionWebhookRuntimeConfig(env, workspaceId);
@@ -297,17 +298,19 @@ export async function startServer(
     // A database initialization already in flight must finish before we can
     // close its owned resources; never race away from an unreturned handle.
     startupSignal?.throwIfAborted();
-    const aiUsage = createAiUsageBudget({
-      ...aiBudgetSettings,
-      database,
-      configured:
-        isAiModelPriced(openAIReasoningModelName) &&
-        hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
-        (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
-          discordContextAskConfig !== undefined ||
-          decisionRecordConfig !== undefined ||
-          structuredWorkConfig !== undefined)
-    });
+    const aiUsage =
+      dependencies.aiUsageBudget ??
+      createAiUsageBudget({
+        ...aiBudgetSettings,
+        database,
+        configured:
+          isAiModelPriced(openAIReasoningModelName) &&
+          hasAnyEnv(env, ["OPENAI_API_KEY"]) &&
+          (env["LUMA_REASONING_MODEL_PROVIDER"]?.trim() !== "disabled" ||
+            discordContextAskConfig !== undefined ||
+            decisionRecordConfig !== undefined ||
+            structuredWorkConfig !== undefined)
+      });
     const contextAudience = (requestedWorkspaceId: string) =>
       Promise.resolve(
         requestedWorkspaceId === workspaceId
@@ -716,21 +719,30 @@ export async function startServer(
         : {})
     });
     const contextIntelligence = discordContextAskConfig
-      ? createContextIntelligence({
-          database,
-          ...(automaticDecisions
-            ? { onProcessedSource: automaticDecisions.conversation }
-            : {}),
-          ...(organizationalContext ? { organizationalContext } : {}),
-          ledger: observedSourceLedger,
-          conversationEvidenceSource: discordTransport,
-          answerer: createContextAnswerer({
-            apiKey: requireEnv(env, "OPENAI_API_KEY"),
-            model: openAIReasoningModelName,
-            budget: aiUsage,
-            limits: aiRequestLimits
+      ? !hasAnyEnv(env, ["OPENAI_API_KEY"])
+        ? {
+            inquire: () =>
+              Promise.reject(
+                new AiServiceError("not-configured", "Missing API key", {
+                  requestDispatched: false
+                })
+              )
+          }
+        : createContextIntelligence({
+            database,
+            ...(automaticDecisions
+              ? { onProcessedSource: automaticDecisions.conversation }
+              : {}),
+            ...(organizationalContext ? { organizationalContext } : {}),
+            ledger: observedSourceLedger,
+            conversationEvidenceSource: discordTransport,
+            answerer: createContextAnswerer({
+              apiKey: requireEnv(env, "OPENAI_API_KEY"),
+              model: openAIReasoningModelName,
+              budget: aiUsage,
+              limits: aiRequestLimits
+            })
           })
-        })
       : undefined;
     const bot = createDiscordMeetingBot({
       database,
@@ -833,6 +845,43 @@ export async function startServer(
         : {})
     });
 
+    if (discordDirectMessagesEnabled(env)) {
+      if (!discordTransport.directMessages)
+        throw new Error("Discord transport does not support DMs");
+      const directMessages = await createDiscordDirectMessages({
+        workspaceId,
+        database,
+        transport: discordTransport.directMessages,
+        budget: aiUsage,
+        authorize: async (providerUserId) =>
+          (
+            await accessPolicy.authorize({
+              workspaceId,
+              providerId: "discord",
+              providerUserId
+            })
+          )?.personId ?? null,
+        answerer: hasAnyEnv(env, ["OPENAI_API_KEY"])
+          ? createContextAnswerer({
+              apiKey: requireEnv(env, "OPENAI_API_KEY"),
+              model: openAIReasoningModelName,
+              budget: aiUsage,
+              limits: aiRequestLimits
+            })
+          : {
+              answer: () =>
+                Promise.reject(
+                  new AiServiceError(
+                    "not-configured",
+                    "Load an API key before asking Luma.",
+                    { requestDispatched: false }
+                  )
+                )
+            },
+        ...(organizationalContext ? { organizationalContext } : {})
+      });
+      discordTransport.directMessages.onMessage(directMessages.handle);
+    }
     transportOwnedByBot = true;
     startupAdmissionStops.push(() => bot.stop());
     startupCleanup.push(() => bot.stop());

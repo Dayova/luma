@@ -12,6 +12,7 @@ import type {
 import {
   MAX_DISCORD_CONTEXT_ASK_EVIDENCE_CHARS,
   MAX_DISCORD_CONTEXT_ASK_MESSAGES,
+  questionFromDiscordBotMention,
   questionAfterLeadingDiscordBotMention,
   type DiscordContextAskConfig
 } from "./discord-context-ask-runtime.js";
@@ -41,6 +42,7 @@ export type DiscordConversationMessage = {
   };
   authorKind: "human" | "bot" | "webhook" | "system";
   mentionedDiscordUserIds: readonly string[];
+  mentionedDiscordRoleIds?: readonly string[];
   content: string;
   createdAt: string;
   editedAt: string | null;
@@ -78,6 +80,8 @@ export type CreateDiscordConversationEvidenceSourceInput = {
   guildId: string;
   config: DiscordContextAskConfig;
   botUserId: () => string | null;
+  /** Freshly resolves only the managed role belonging to this bot. */
+  botMentionRoleId?: () => Promise<string | null>;
   now?: () => Date;
 };
 
@@ -287,6 +291,22 @@ async function readAnchor(
   });
 
   const botUserId = input.botUserId();
+  const resolvedRoleId =
+    purpose === undefined &&
+    (!botUserId || !anchor?.mentionedDiscordUserIds.includes(botUserId)) &&
+    anchor?.mentionedDiscordRoleIds?.length
+      ? await input.botMentionRoleId?.()
+      : null;
+  const botMentionRoleId =
+    resolvedRoleId && anchor?.mentionedDiscordRoleIds?.includes(resolvedRoleId)
+      ? resolvedRoleId
+      : null;
+  const extractedQuestion =
+    anchor && botUserId
+      ? purpose === "decision-record" || purpose === "structured-work"
+        ? questionAfterLeadingDiscordBotMention(anchor.content, botUserId)
+        : questionFromDiscordBotMention(anchor.content, botUserId, botMentionRoleId)
+      : null;
 
   if (
     !anchor ||
@@ -297,10 +317,9 @@ async function readAnchor(
     !botUserId ||
     (purpose === "consultation"
       ? !anchor.content.trim() || (question !== undefined && anchor.content !== question)
-      : !anchor.mentionedDiscordUserIds.includes(botUserId) ||
-        !questionAfterLeadingDiscordBotMention(anchor.content, botUserId) ||
-        (question !== undefined &&
-          questionAfterLeadingDiscordBotMention(anchor.content, botUserId) !== question))
+      : (!anchor.mentionedDiscordUserIds.includes(botUserId) && !botMentionRoleId) ||
+        !extractedQuestion ||
+        (question !== undefined && extractedQuestion !== question))
   ) {
     throw new DiscordConversationEvidenceError(
       "discord-conversation-anchor-unavailable",

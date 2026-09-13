@@ -15,7 +15,7 @@ export const MAX_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS = 3_600_000;
 
 const DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH = 1_500;
 const DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER =
-  "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question.";
+  "Luma could not validate or display the answer with its evidence. No unverified answer is being displayed. Check usage before another attempt; a founder should inspect the answer and rendering diagnostics.";
 const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER =
   "Luma cannot answer reliably from the captured evidence.";
 const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_TOO_LONG = [
@@ -66,6 +66,7 @@ export type DiscordContextAskMessageCandidate = {
   authorKind: "human" | "bot" | "webhook" | "system";
   actorDiscordUserId: string;
   mentionedDiscordUserIds: readonly string[];
+  mentionedDiscordRoleIds?: readonly string[];
   content: string;
   occurredAt: string;
 };
@@ -207,10 +208,17 @@ export function discordContextAskConfigFromEnv(
 export function discordContextAskMentionFromCandidate(input: {
   candidate: DiscordContextAskMessageCandidate;
   botUserId: string;
+  /** Verified managed role whose Discord bot_id matches this bot. */
+  botMentionRoleId?: string | null;
   guildId: string;
   config: DiscordContextAskConfig;
 }): DiscordContextAskMention | null {
   const { candidate } = input;
+  const botMentionRoleId =
+    input.botMentionRoleId &&
+    candidate.mentionedDiscordRoleIds?.includes(input.botMentionRoleId)
+      ? input.botMentionRoleId
+      : null;
 
   if (
     candidate.guildId !== input.guildId ||
@@ -219,14 +227,15 @@ export function discordContextAskMentionFromCandidate(input: {
     !candidate.parentChannelId ||
     !input.config.parentChannelIds.includes(candidate.parentChannelId) ||
     !input.config.allowedDiscordUserIds.includes(candidate.actorDiscordUserId) ||
-    !candidate.mentionedDiscordUserIds.includes(input.botUserId)
+    (!candidate.mentionedDiscordUserIds.includes(input.botUserId) && !botMentionRoleId)
   ) {
     return null;
   }
 
-  const question = questionAfterLeadingDiscordBotMention(
+  const question = questionFromDiscordBotMention(
     candidate.content,
-    input.botUserId
+    input.botUserId,
+    botMentionRoleId
   );
 
   if (!question) {
@@ -244,21 +253,28 @@ export function discordContextAskMentionFromCandidate(input: {
   };
 }
 
-/** Returns null unless content starts with this exact bot mention. */
+/** Keep the existing explicit leading-instruction boundary for mutation capabilities. */
 export function questionAfterLeadingDiscordBotMention(
   content: string,
   botUserId: string
 ): string | null {
-  const leadingMention = new RegExp(
-    `^\\s*<@!?${escapeRegularExpression(botUserId)}>\\s*`
-  );
+  const leading = new RegExp(`^\\s*<@!?${escapeRegularExpression(botUserId)}>\\s*`);
+  if (!leading.test(content)) return null;
+  return content.replace(leading, "").trim() || null;
+}
 
-  if (!leadingMention.test(content)) {
-    return null;
-  }
-
-  const question = content.replace(leadingMention, "").trim();
-
+/** Extract the question around exact bot mentions; callers also verify Discord's mention metadata. */
+export function questionFromDiscordBotMention(
+  content: string,
+  botUserId: string,
+  botMentionRoleId?: string | null
+): string | null {
+  const role = botMentionRoleId
+    ? `|<@&${escapeRegularExpression(botMentionRoleId)}>`
+    : "";
+  const mention = new RegExp(`<@!?${escapeRegularExpression(botUserId)}>${role}`, "gu");
+  if (!mention.test(content)) return null;
+  const question = content.replace(mention, "").trim();
   return question.length > 0 ? question : null;
 }
 
@@ -319,8 +335,16 @@ export function createDiscordContextAskRateLimiter(config: {
  * captured Discord Evidence. Facts and inferences remain visibly distinct.
  * A too-long answer is not truncated into a claim.
  */
-export function renderDiscordContextAskResult(result: ContextInquiryResult): string {
-  const capturedEvidence = capturedDiscordEvidenceById(result.evidence);
+export function renderDiscordContextAskResult(
+  result: ContextInquiryResult,
+  surface: "thread" | "direct-message" = "thread"
+): string {
+  const capturedEvidence = capturedDiscordEvidenceById(
+    result.evidence,
+    surface === "direct-message" ? result.subject.conversationObjectId : undefined
+  );
+  const scopeName =
+    surface === "direct-message" ? "this private conversation" : "this thread";
   const organizationalEvidence = capturedOrganizationalEvidenceById(result);
   const answerOrganizationalEvidence = organizationalCitations(
     result.answer,
@@ -342,8 +366,8 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
   const lines = [
     "Luma Ask",
     result.organizationalContext
-      ? `Scope: this thread and ${result.organizationalContext.coverage.selected} organizational source(s); coverage ${result.organizationalContext.coverage.complete ? "complete within configured catalogs" : "partial"}.`
-      : "Scope: this thread only.",
+      ? `Scope: ${scopeName} and ${result.organizationalContext.coverage.selected} organizational source(s); coverage ${result.organizationalContext.coverage.complete ? "complete within configured catalogs" : "partial"}.`
+      : `Scope: ${scopeName} only.`,
     "",
     escapeDiscordInlineText(result.answer.text)
   ];
@@ -390,7 +414,7 @@ export function renderDiscordContextAskResult(result: ContextInquiryResult): str
     lines.push(...result.unresolved.map((item) => `- ${escapeDiscordInlineText(item)}`));
   }
 
-  return renderDiscordResponse(lines);
+  return lines.join("\n");
 }
 
 /**
@@ -426,7 +450,7 @@ function renderInsufficientEvidenceResult(result: ContextInquiryResult): string 
 
 function renderDiscordResponse(
   lines: readonly string[],
-  tooLongResponse = "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
+  tooLongResponse: string
 ): string {
   const rendered = lines.join("\n");
 
@@ -478,12 +502,21 @@ function renderEvidenceLines(
 }
 
 function capturedDiscordEvidenceById(
-  evidence: readonly ContextEvidence[]
+  evidence: readonly ContextEvidence[],
+  privateChannelId?: string
 ): ReadonlyMap<string, ContextEvidence> {
   const capturedEvidence = new Map<string, ContextEvidence>();
 
   for (const item of evidence) {
-    if (item.state === "available" && isDiscordMessageUrl(item.url)) {
+    if (
+      item.state === "available" &&
+      (privateChannelId
+        ? item.providerId === "discord-dm" &&
+          item.conversationObjectId === privateChannelId &&
+          item.url ===
+            `https://discord.com/channels/@me/${privateChannelId}/${item.messageId}`
+        : isDiscordMessageUrl(item.url))
+    ) {
       capturedEvidence.set(item.evidenceId, item);
     }
   }

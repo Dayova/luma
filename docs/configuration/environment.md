@@ -314,66 +314,67 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 
 ## Variable Reference
 
-| Variable                                             | Required          | Owner                    | Purpose                                                                      |
-| ---------------------------------------------------- | ----------------- | ------------------------ | ---------------------------------------------------------------------------- |
-| `NODE_ENV`                                           | No                | App                      | `development`, `test`, or `production`; defaults to development.             |
-| `LUMA_DEFAULT_WORKSPACE_TIMEZONE`                    | No                | App                      | Defaults to `Europe/Berlin`; used for relative dates.                        |
-| `LUMA_WORKSPACE_ID`                                  | No                | App                      | Defaults to `workspace_dayova`.                                              |
-| `LUMA_PGLITE_DATA_DIR`                               | No                | Persistence              | Durable local database directory; defaults to `.luma/pglite`.                |
-| `DATABASE_URL`                                       | Planned           | Persistence              | Future production PostgreSQL connection.                                     |
-| `LINEAR_API_KEY`                                     | With Linear       | Linear WorkProvider      | API credential for issue reads and mutations.                                |
-| `LINEAR_READONLY_API_KEY`                            | Read-only catalog | Linear read-only catalog | Separate Read-permission credential; never falls back to `LINEAR_API_KEY`.   |
-| `LINEAR_TEAM_ID`                                     | With Linear       | Linear WorkProvider      | Team receiving approved work items.                                          |
-| `LINEAR_API_URL`                                     | No                | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                                |
-| `LUMA_LINEAR_PROVIDER_ID`                            | No                | Linear WorkProvider      | External reference namespace; defaults to `linear`.                          |
-| `NOTION_API_TOKEN`                                   | With Notion       | Notion KnowledgeProvider | Internal integration secret.                                                 |
-| `NOTION_MEETINGS_DATA_SOURCE_ID`                     | With Notion       | Notion KnowledgeProvider | Parent data source for raw Notion Meeting Notes.                             |
-| `NOTION_MEETINGS_TITLE_PROPERTY`                     | No                | Notion KnowledgeProvider | Defaults to `Name`.                                                          |
-| `NOTION_MEETINGS_ATTENDEES_PROPERTY`                 | No                | Notion KnowledgeProvider | Defaults to `Attendees`.                                                     |
-| `LUMA_NOTION_PROVIDER_ID`                            | No                | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.                          |
-| `LUMA_NOTION_MEETING_SYNC_INTERVAL_MS`               | No                | Meeting Notes source     | Full canonical source scan interval in milliseconds; defaults to `60000`.    |
-| `LUMA_OBSERVATION_WORKSPACE_ID`                      | Notion observer   | Luma observation host    | Required logical Luma workspace; distinct from Notion's provider workspace.  |
-| `LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN`         | Notion observer   | Canonical source reader  | Dedicated read-content token; never falls back to `NOTION_API_TOKEN`.        |
-| `LUMA_NOTION_OBSERVATION_MEETINGS_DATA_SOURCE_ID`    | Notion observer   | Canonical source reader  | Exact canonical Meetings data-source UUID.                                   |
-| `LUMA_NOTION_OBSERVATION_WORKSPACE_ID`               | Notion observer   | Webhook ingress          | Notion provider workspace UUID, not Luma's logical workspace ID.             |
-| `LUMA_NOTION_OBSERVATION_SUBSCRIPTION_ID`            | Notion observer   | Webhook ingress          | Activated Notion subscription UUID.                                          |
-| `LUMA_NOTION_OBSERVATION_INTEGRATION_ID`             | Notion observer   | Webhook ingress          | Activated Notion integration UUID.                                           |
-| `LUMA_NOTION_OBSERVATION_WEBHOOK_VERIFICATION_TOKEN` | Notion observer   | Webhook ingress          | Subscription secret supplied from a secret store.                            |
-| `LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR`            | Notion observer   | Persistence              | Dedicated durable observer store; never the Discord/server PGlite directory. |
-| `LUMA_NOTION_OBSERVATION_HTTP_HOST`                  | No                | Webhook listener         | Defaults to loopback `127.0.0.1`.                                            |
-| `LUMA_NOTION_OBSERVATION_HTTP_PORT`                  | No                | Webhook listener         | `1`–`65535`; defaults to `3001`.                                             |
-| `LUMA_NOTION_OBSERVATION_HTTP_PATH`                  | No                | Webhook listener         | Exact path; defaults to `/notion/webhook`.                                   |
-| `LUMA_NOTION_OBSERVATION_SYNC_INTERVAL_MS`           | No                | Canonical recovery       | `1000`–`3600000`; defaults to `60000`.                                       |
-| `LUMA_NOTION_OBSERVATION_LINEAR_API_URL`             | No                | Read-only catalog        | Optional Linear GraphQL endpoint override for the observer only.             |
-| `LUMA_NOTION_OBSERVATION_LINEAR_PROVIDER_ID`         | No                | Read-only catalog        | Optional provider namespace; defaults to `linear`.                           |
-| `LUMA_NATIVE_NOTION_READONLY_API_TOKEN`              | Exact-page proof  | Native exact-page reader | Separate read-only page credential; never falls back to `NOTION_API_TOKEN`.  |
-| `LUMA_NATIVE_NOTION_PAGE_ID`                         | Exact-page proof  | Native exact-page reader | One opaque Meeting Note page identity; no data source or search scope.       |
-| `LUMA_LIVE_NATIVE_NOTION_READONLY_TESTS`             | No; exact `1`     | Tests                    | Opt-in non-mutating one-page exact-reader smoke test.                        |
-| `OPENAI_API_KEY`                                     | For analysis      | ReasoningModel           | OpenAI API credential.                                                       |
-| `LUMA_REASONING_MODEL_PROVIDER`                      | No                | ReasoningModel           | `openai` by default; `disabled` defers analysis.                             |
-| `LUMA_REASONING_MODEL_NAME`                          | No                | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                                  |
-| `DISCORD_TOKEN`                                      | For bot           | Discord Adapter          | Secret Gateway and REST token.                                               |
-| `DISCORD_CLIENT_ID`                                  | For bot           | Discord Adapter          | Discord Application ID.                                                      |
-| `DISCORD_GUILD_ID`                                   | For bot           | Discord Adapter          | Server receiving guild-scoped commands.                                      |
-| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.               |
-| `LUMA_DISCORD_CONTEXT_ASK_ENABLED`                   | No; exact `1`     | Discord Context Ask      | Enables the separately scoped, read-only thread Ask runtime.                 |
-| `LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS`        | With Context Ask  | Discord Context Ask      | Comma-separated parent-channel allowlist for public threads.                 |
-| `LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS`  | With Context Ask  | Discord Context Ask      | Comma-separated Discord-user allowlist for mentions.                         |
-| `LUMA_DISCORD_CONTEXT_ASK_MAX_MESSAGES`              | With Context Ask  | Discord Context Ask      | Bounded captured messages, default `50`, hard ceiling `500`.                 |
-| `LUMA_DISCORD_CONTEXT_ASK_MAX_EVIDENCE_CHARS`        | With Context Ask  | Discord Context Ask      | Bounded captured text, default `32000`, hard ceiling `64000`.                |
-| `LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS`           | With Context Ask  | Discord Context Ask      | Per-user/per-thread admission interval, `1000`–`3600000`, default `60000`.   |
-| `LUMA_IDENTITY_PEOPLE_JSON`                          | No                | Identity Directory       | Extends or overrides built-in provider identities.                           |
-| `GITHUB_REPOSITORY`                                  | GitHub only       | GitHub Adapter           | Target as `owner/repo`.                                                      |
-| `GITHUB_APP_ID`                                      | GitHub App auth   | GitHub Adapter           | App identity used for JWT auth.                                              |
-| `GITHUB_APP_INSTALLATION_ID`                         | GitHub App auth   | GitHub Adapter           | Installation receiving access tokens.                                        |
-| `GITHUB_APP_PRIVATE_KEY`                             | GitHub App auth   | GitHub Adapter           | PEM with real or escaped newlines.                                           |
-| `GITHUB_APP_PRIVATE_KEY_BASE64`                      | Alternative       | GitHub Adapter           | Single-line alternative to the PEM variable.                                 |
-| `GITHUB_TOKEN`                                       | Local fallback    | GitHub Adapter           | User-attributed token, optionally from `gh`.                                 |
-| `LUMA_GITHUB_CODE_PROVIDER_ID`                       | Planned           | GitHub CodeProvider      | Separate GitHub code-context namespace.                                      |
-| `LUMA_LIVE_LINEAR_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                 |
-| `LUMA_LIVE_LINEAR_READONLY_TESTS`                    | No                | Tests                    | Set to `1` with a Read-permission key for the bounded read-only smoke test.  |
-| `LUMA_LIVE_NOTION_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                 |
-| `LUMA_LIVE_GITHUB_TESTS`                             | No                | Tests                    | Set to `1` for the GitHub compatibility smoke test.                          |
+| Variable                                             | Required          | Owner                    | Purpose                                                                                              |
+| ---------------------------------------------------- | ----------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                                           | No                | App                      | `development`, `test`, or `production`; defaults to development.                                     |
+| `LUMA_DEFAULT_WORKSPACE_TIMEZONE`                    | No                | App                      | Defaults to `Europe/Berlin`; used for relative dates.                                                |
+| `LUMA_WORKSPACE_ID`                                  | No                | App                      | Defaults to `workspace_dayova`.                                                                      |
+| `LUMA_PGLITE_DATA_DIR`                               | No                | Persistence              | Durable local database directory; defaults to `.luma/pglite`.                                        |
+| `DATABASE_URL`                                       | Planned           | Persistence              | Future production PostgreSQL connection.                                                             |
+| `LINEAR_API_KEY`                                     | With Linear       | Linear WorkProvider      | API credential for issue reads and mutations.                                                        |
+| `LINEAR_READONLY_API_KEY`                            | Read-only catalog | Linear read-only catalog | Separate Read-permission credential; never falls back to `LINEAR_API_KEY`.                           |
+| `LINEAR_TEAM_ID`                                     | With Linear       | Linear WorkProvider      | Team receiving approved work items.                                                                  |
+| `LINEAR_API_URL`                                     | No                | Linear WorkProvider      | Defaults to `https://api.linear.app/graphql`.                                                        |
+| `LUMA_LINEAR_PROVIDER_ID`                            | No                | Linear WorkProvider      | External reference namespace; defaults to `linear`.                                                  |
+| `NOTION_API_TOKEN`                                   | With Notion       | Notion KnowledgeProvider | Internal integration secret.                                                                         |
+| `NOTION_MEETINGS_DATA_SOURCE_ID`                     | With Notion       | Notion KnowledgeProvider | Parent data source for raw Notion Meeting Notes.                                                     |
+| `NOTION_MEETINGS_TITLE_PROPERTY`                     | No                | Notion KnowledgeProvider | Defaults to `Name`.                                                                                  |
+| `NOTION_MEETINGS_ATTENDEES_PROPERTY`                 | No                | Notion KnowledgeProvider | Defaults to `Attendees`.                                                                             |
+| `LUMA_NOTION_PROVIDER_ID`                            | No                | Notion KnowledgeProvider | External reference namespace; defaults to `notion`.                                                  |
+| `LUMA_NOTION_MEETING_SYNC_INTERVAL_MS`               | No                | Meeting Notes source     | Full canonical source scan interval in milliseconds; defaults to `60000`.                            |
+| `LUMA_OBSERVATION_WORKSPACE_ID`                      | Notion observer   | Luma observation host    | Required logical Luma workspace; distinct from Notion's provider workspace.                          |
+| `LUMA_NOTION_OBSERVATION_READONLY_API_TOKEN`         | Notion observer   | Canonical source reader  | Dedicated read-content token; never falls back to `NOTION_API_TOKEN`.                                |
+| `LUMA_NOTION_OBSERVATION_MEETINGS_DATA_SOURCE_ID`    | Notion observer   | Canonical source reader  | Exact canonical Meetings data-source UUID.                                                           |
+| `LUMA_NOTION_OBSERVATION_WORKSPACE_ID`               | Notion observer   | Webhook ingress          | Notion provider workspace UUID, not Luma's logical workspace ID.                                     |
+| `LUMA_NOTION_OBSERVATION_SUBSCRIPTION_ID`            | Notion observer   | Webhook ingress          | Activated Notion subscription UUID.                                                                  |
+| `LUMA_NOTION_OBSERVATION_INTEGRATION_ID`             | Notion observer   | Webhook ingress          | Activated Notion integration UUID.                                                                   |
+| `LUMA_NOTION_OBSERVATION_WEBHOOK_VERIFICATION_TOKEN` | Notion observer   | Webhook ingress          | Subscription secret supplied from a secret store.                                                    |
+| `LUMA_NOTION_OBSERVATION_PGLITE_DATA_DIR`            | Notion observer   | Persistence              | Dedicated durable observer store; never the Discord/server PGlite directory.                         |
+| `LUMA_NOTION_OBSERVATION_HTTP_HOST`                  | No                | Webhook listener         | Defaults to loopback `127.0.0.1`.                                                                    |
+| `LUMA_NOTION_OBSERVATION_HTTP_PORT`                  | No                | Webhook listener         | `1`–`65535`; defaults to `3001`.                                                                     |
+| `LUMA_NOTION_OBSERVATION_HTTP_PATH`                  | No                | Webhook listener         | Exact path; defaults to `/notion/webhook`.                                                           |
+| `LUMA_NOTION_OBSERVATION_SYNC_INTERVAL_MS`           | No                | Canonical recovery       | `1000`–`3600000`; defaults to `60000`.                                                               |
+| `LUMA_NOTION_OBSERVATION_LINEAR_API_URL`             | No                | Read-only catalog        | Optional Linear GraphQL endpoint override for the observer only.                                     |
+| `LUMA_NOTION_OBSERVATION_LINEAR_PROVIDER_ID`         | No                | Read-only catalog        | Optional provider namespace; defaults to `linear`.                                                   |
+| `LUMA_NATIVE_NOTION_READONLY_API_TOKEN`              | Exact-page proof  | Native exact-page reader | Separate read-only page credential; never falls back to `NOTION_API_TOKEN`.                          |
+| `LUMA_NATIVE_NOTION_PAGE_ID`                         | Exact-page proof  | Native exact-page reader | One opaque Meeting Note page identity; no data source or search scope.                               |
+| `LUMA_LIVE_NATIVE_NOTION_READONLY_TESTS`             | No; exact `1`     | Tests                    | Opt-in non-mutating one-page exact-reader smoke test.                                                |
+| `OPENAI_API_KEY`                                     | For analysis      | ReasoningModel           | OpenAI API credential.                                                                               |
+| `LUMA_REASONING_MODEL_PROVIDER`                      | No                | ReasoningModel           | `openai` by default; `disabled` defers analysis.                                                     |
+| `LUMA_REASONING_MODEL_NAME`                          | No                | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                                                          |
+| `DISCORD_TOKEN`                                      | For bot           | Discord Adapter          | Secret Gateway and REST token.                                                                       |
+| `DISCORD_CLIENT_ID`                                  | For bot           | Discord Adapter          | Discord Application ID.                                                                              |
+| `DISCORD_GUILD_ID`                                   | For bot           | Discord Adapter          | Server receiving guild-scoped commands.                                                              |
+| `LUMA_DISCORD_ALLOWED_PARENT_CHANNEL_IDS`            | For channel work  | Discord Adapter and bot  | Common numeric text-parent IDs; blank denies all channel work.                                       |
+| `LUMA_DISCORD_DM_ENABLED`                            | No; exact `1`     | Discord private Ask      | Enables one-to-one text DMs for the four mapped founders; shares the AI budget, no automatic writes. |
+| `LUMA_DISCORD_CONTEXT_ASK_ENABLED`                   | No; exact `1`     | Discord Context Ask      | Enables the separately scoped, read-only thread Ask runtime.                                         |
+| `LUMA_DISCORD_CONTEXT_ASK_PARENT_CHANNEL_IDS`        | With Context Ask  | Discord Context Ask      | Comma-separated parent-channel allowlist for public threads.                                         |
+| `LUMA_DISCORD_CONTEXT_ASK_ALLOWED_DISCORD_USER_IDS`  | With Context Ask  | Discord Context Ask      | Comma-separated Discord-user allowlist for mentions.                                                 |
+| `LUMA_DISCORD_CONTEXT_ASK_MAX_MESSAGES`              | With Context Ask  | Discord Context Ask      | Bounded captured messages, default `50`, hard ceiling `500`.                                         |
+| `LUMA_DISCORD_CONTEXT_ASK_MAX_EVIDENCE_CHARS`        | With Context Ask  | Discord Context Ask      | Bounded captured text, default `32000`, hard ceiling `64000`.                                        |
+| `LUMA_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS`           | With Context Ask  | Discord Context Ask      | Per-user/per-thread admission interval, `1000`–`3600000`, default `60000`.                           |
+| `LUMA_IDENTITY_PEOPLE_JSON`                          | No                | Identity Directory       | Extends or overrides built-in provider identities.                                                   |
+| `GITHUB_REPOSITORY`                                  | GitHub only       | GitHub Adapter           | Target as `owner/repo`.                                                                              |
+| `GITHUB_APP_ID`                                      | GitHub App auth   | GitHub Adapter           | App identity used for JWT auth.                                                                      |
+| `GITHUB_APP_INSTALLATION_ID`                         | GitHub App auth   | GitHub Adapter           | Installation receiving access tokens.                                                                |
+| `GITHUB_APP_PRIVATE_KEY`                             | GitHub App auth   | GitHub Adapter           | PEM with real or escaped newlines.                                                                   |
+| `GITHUB_APP_PRIVATE_KEY_BASE64`                      | Alternative       | GitHub Adapter           | Single-line alternative to the PEM variable.                                                         |
+| `GITHUB_TOKEN`                                       | Local fallback    | GitHub Adapter           | User-attributed token, optionally from `gh`.                                                         |
+| `LUMA_GITHUB_CODE_PROVIDER_ID`                       | Planned           | GitHub CodeProvider      | Separate GitHub code-context namespace.                                                              |
+| `LUMA_LIVE_LINEAR_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                                         |
+| `LUMA_LIVE_LINEAR_READONLY_TESTS`                    | No                | Tests                    | Set to `1` with a Read-permission key for the bounded read-only smoke test.                          |
+| `LUMA_LIVE_NOTION_TESTS`                             | No                | Tests                    | Set to `1` for non-mutating live validation.                                                         |
+| `LUMA_LIVE_GITHUB_TESTS`                             | No                | Tests                    | Set to `1` for the GitHub compatibility smoke test.                                                  |
 
 ## Security Rules
 

@@ -74,7 +74,7 @@ describe("Discord Context Ask runtime boundary", () => {
     ]);
   });
 
-  it("admits only an allowlisted human's leading mention in an allowlisted public thread", () => {
+  it("admits only an allowlisted human's direct mention in an allowlisted public thread", () => {
     const accepted = discordContextAskMentionFromCandidate({
       candidate: {
         messageId: "message_ask",
@@ -110,7 +110,7 @@ describe("Discord Context Ask runtime boundary", () => {
       { parentChannelId: "channel_elsewhere" },
       { actorDiscordUserId: "user_unknown" },
       { mentionedDiscordUserIds: [] },
-      { content: "Please ask <@bot_luma> about this" },
+      { content: "Please ask <@someone_else> about this" },
       { content: "<@bot_luma>" }
     ]) {
       expect(
@@ -134,6 +134,32 @@ describe("Discord Context Ask runtime boundary", () => {
         })
       ).toBeNull();
     }
+  });
+
+  it.each([
+    ["<@bot_luma> What did we decide?", "What did we decide?"],
+    ["What did we decide?\n<@bot_luma>", "What did we decide?"],
+    ["What did <@!bot_luma> we decide?", "What did  we decide?"],
+    ["<@bot_luma> What did we decide? <@bot_luma>", "What did we decide?"]
+  ])("accepts the exact bot mention anywhere: %s", (content, question) => {
+    const actual = discordContextAskMentionFromCandidate({
+      candidate: {
+        messageId: "ask",
+        guildId: "guild_dayova",
+        channelId: "thread_context",
+        parentChannelId: "channel_context",
+        channelKind: "public-thread",
+        authorKind: "human",
+        actorDiscordUserId: "user_jakob",
+        mentionedDiscordUserIds: ["bot_luma"],
+        content,
+        occurredAt: "2026-09-13T15:15:00Z"
+      },
+      botUserId: "bot_luma",
+      guildId: "guild_dayova",
+      config: contextAskConfig
+    });
+    expect(actual?.question).toBe(question);
   });
 
   it("rate-limits separate Ask messages without relying on the model path", () => {
@@ -262,7 +288,7 @@ describe("Discord Context Ask runtime boundary", () => {
     };
 
     expect(renderDiscordContextAskResult(result)).toBe(
-      "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question."
+      "Luma could not validate or display the answer with its evidence. No unverified answer is being displayed. Check usage before another attempt; a founder should inspect the answer and rendering diagnostics."
     );
   });
 
@@ -478,7 +504,7 @@ describe("Discord Context Ask runtime boundary", () => {
     expect(rendered).not.toContain("<https://discord.com/channels/1/2/999>");
   });
 
-  it("uses the existing safe fallback instead of truncating fact or inference claims", () => {
+  it("retains long grounded claims and sources for attachment delivery", () => {
     const result = contextInquiryResult();
     result.facts = [
       {
@@ -487,9 +513,10 @@ describe("Discord Context Ask runtime boundary", () => {
       }
     ];
 
-    expect(renderDiscordContextAskResult(result)).toBe(
-      "Luma's grounded answer is too long for a safe Discord reply. Please ask a narrower question."
-    );
+    const rendered = renderDiscordContextAskResult(result);
+    expect(rendered).toContain("A".repeat(1_501));
+    expect(rendered).toContain("https://discord.com/channels/1/2/3");
+    expect(rendered).not.toContain("Please ask a narrower question");
   });
 });
 

@@ -1,3 +1,17 @@
+import { renderAiServiceFailure } from "../presentation/ai-failure.js";
+import {
+  CONTEXT_VERIFICATION_UNCONFIRMED,
+  renderContextVerificationFailure
+} from "../presentation/context-failure.js";
+import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
+import { discordAnswerDelivery } from "./discord-answer-delivery.js";
+import { startDiscordRequestProgress } from "./discord-request-progress.js";
+import { z } from "zod";
+import { createDiscordJsDirectMessages } from "./discord-js-direct-messages.js";
+import {
+  discordDirectMessagesEnabled,
+  type DiscordDirectMessageTransport
+} from "./discord-direct-messages.js";
 import { isExplicitStructuredWorkInstruction } from "../structured-work/explicit-instruction.js";
 import { discordStructuredWorkConfigFromEnv } from "./discord-structured-work-runtime.js";
 import { createDiscordConsultationProvider } from "./discord-consultation-provider.js";
@@ -37,6 +51,7 @@ import {
   Events,
   GatewayIntentBits,
   MessageFlags,
+  Partials,
   MessageType,
   PermissionFlagsBits,
   REST,
@@ -90,12 +105,14 @@ export type DiscordJsTransportConfig = {
   decisionRecords?: DiscordContextAskConfig;
   structuredWork?: DiscordContextAskConfig;
   granola?: boolean;
+  directMessages?: boolean;
 };
 
 /** One shared Gateway client backs command, mention, and evidence paths. */
 export type DiscordJsTransport = DiscordTransport &
   ConversationEvidenceSource & {
     gatewayConnected?(): boolean;
+    directMessages?: DiscordDirectMessageTransport;
     createConsultationProvider?(input: {
       resolveRecipients: (personIds: readonly string[]) => Promise<string[] | null>;
     }): ConsultationProvider;
@@ -131,7 +148,10 @@ export function createDiscordJsTransport(
   const lifetime = new AbortController();
   const restOptions = {
     ...DefaultRestOptions,
-    ...(config.consultations || config.decisionRecords || config.structuredWork
+    ...(config.consultations ||
+    config.decisionRecords ||
+    config.structuredWork ||
+    config.directMessages
       ? { retries: 0 }
       : {}),
     makeRequest: (
@@ -148,10 +168,19 @@ export function createDiscordJsTransport(
       config.contextAsk ??
         config.consultations?.capture ??
         config.decisionRecords ??
-        config.structuredWork
+        config.structuredWork,
+      config.directMessages
     ),
+    ...(config.directMessages ? { partials: [Partials.Channel] } : {}),
     rest: restOptions
   });
+  const directMessages = config.directMessages
+    ? createDiscordJsDirectMessages({
+        client,
+        signal: lifetime.signal,
+        authorize: config.authorizeHumanReader
+      })
+    : undefined;
   const liveAudience = createDiscordLiveAudience({
     reader: { get: (route, options) => client.rest.get(route, options) },
     guildId: config.guildId,
@@ -188,6 +217,7 @@ export function createDiscordJsTransport(
       // transport for final source/audience proofs and their replies.
       commandHandler = null;
       contextAskHandler = null;
+      directMessages?.stopAdmission();
       const pending = [...admittedDeliveries];
       if (!pending.length) lifetime.abort();
       disconnecting = (async () => {
@@ -200,12 +230,34 @@ export function createDiscordJsTransport(
     }
     return disconnecting ?? Promise.resolve();
   }
+  async function resolveBotMentionRoleId(): Promise<string | null> {
+    const botUserId = client.user?.id;
+    if (!botUserId) return null;
+    const roles = z
+      .array(
+        z.object({
+          id: z.string(),
+          managed: z.boolean().optional(),
+          tags: z.object({ bot_id: z.string().optional() }).optional()
+        })
+      )
+      .parse(
+        await client.rest.get(Routes.guildRoles(config.guildId), {
+          signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(5_000)])
+        })
+      );
+    const matches = roles.filter(
+      (role) => role.managed === true && role.tags?.bot_id === botUserId
+    );
+    return matches.length === 1 ? matches[0]!.id : null;
+  }
   const rawConversationEvidenceSource = config.contextAsk
     ? createDiscordConversationEvidenceSource({
         reader: createDiscordJsConversationReader(client, config.authorizeHumanReader),
         guildId: config.guildId,
         config: config.contextAsk,
-        botUserId: () => client.user?.id ?? null
+        botUserId: () => client.user?.id ?? null,
+        botMentionRoleId: resolveBotMentionRoleId
       })
     : null;
   const rawConsultationEvidenceSource = config.consultations
@@ -290,7 +342,7 @@ export function createDiscordJsTransport(
             error instanceof DiscordDecisionPermissionInputError ||
             error instanceof DiscordDecisionPermissionUnavailableError
               ? error.message
-              : "Luma could not process the command right now. Please try again later.";
+              : renderAiServiceFailure(error);
 
           if (interaction.deferred || interaction.replied) {
             await interaction.editReply({ content });
@@ -313,6 +365,18 @@ export function createDiscordJsTransport(
   });
 
   client.on(Events.MessageCreate, (message) => {
+    if (directMessages && !disconnected && message.guildId === null) {
+      trackDelivery(
+        directMessages.deliver(message).catch(() => {
+          reportDiscordDeliveryFailure({
+            code: "discord-dm-reply-failed",
+            channelId: message.channelId,
+            sourceId: message.id
+          });
+        })
+      );
+      return;
+    }
     const handler = contextAskHandler;
     const botUserId = client.user?.id;
 
@@ -341,49 +405,74 @@ export function createDiscordJsTransport(
     if (!captureConfig) return;
 
     const candidate = discordContextAskMessageCandidate(message);
-    let ask = discordContextAskMentionFromCandidate({
-      candidate,
-      botUserId,
-      guildId: config.guildId,
-      config: captureConfig
-    });
-
-    // Usage is a deterministic shared service and may use any separately
-    // enabled scope without granting that scope another capability's writes.
-    if (!ask && usageRequest) {
-      for (const fallback of [
-        { config: config.decisionRecords, decision: true },
-        { config: config.contextAsk, decision: false }
-      ]) {
-        if (!fallback.config) continue;
-        ask = discordContextAskMentionFromCandidate({
+    if (
+      candidate.guildId !== config.guildId ||
+      candidate.authorKind !== "human" ||
+      candidate.channelKind !== "public-thread" ||
+      !candidate.parentChannelId ||
+      ![
+        captureConfig,
+        ...(usageRequest ? [config.decisionRecords, config.contextAsk] : [])
+      ].some(
+        (scope) =>
+          scope?.parentChannelIds.includes(candidate.parentChannelId!) &&
+          scope.allowedDiscordUserIds.includes(candidate.actorDiscordUserId)
+      )
+    )
+      return;
+    trackDelivery(
+      (async () => {
+        const botMentionRoleId =
+          !structuredRequest &&
+          !decisionRequest &&
+          !candidate.mentionedDiscordUserIds.includes(botUserId) &&
+          candidate.mentionedDiscordRoleIds?.length
+            ? await resolveBotMentionRoleId()
+            : null;
+        let ask = discordContextAskMentionFromCandidate({
           candidate,
           botUserId,
+          botMentionRoleId,
           guildId: config.guildId,
-          config: fallback.config
+          config: captureConfig
         });
-        if (ask) {
-          decisionRequest = fallback.decision;
-          structuredRequest = false;
-          break;
+
+        // Usage is a deterministic shared service and may use any separately
+        // enabled scope without granting that scope another capability's writes.
+        if (!ask && usageRequest) {
+          for (const fallback of [
+            { config: config.decisionRecords, decision: true },
+            { config: config.contextAsk, decision: false }
+          ]) {
+            if (!fallback.config) continue;
+            ask = discordContextAskMentionFromCandidate({
+              candidate,
+              botUserId,
+              guildId: config.guildId,
+              config: fallback.config
+            });
+            if (ask) {
+              decisionRequest = fallback.decision;
+              structuredRequest = false;
+              break;
+            }
+          }
         }
-      }
-    }
 
-    if (!ask) {
-      return;
-    }
-    if (structuredRequest) ask.purpose = "structured-work";
-    else if (decisionRequest) ask.purpose = "decision-record";
+        if (!ask) {
+          return;
+        }
+        if (structuredRequest) ask.purpose = "structured-work";
+        else if (decisionRequest) ask.purpose = "decision-record";
 
-    trackDelivery(
-      handleContextAskMention({
-        message,
-        handler,
-        ask,
-        channelScope,
-        conversationEvidenceSource
-      }).catch(() => {
+        await handleContextAskMention({
+          message,
+          handler,
+          ask,
+          channelScope,
+          conversationEvidenceSource
+        });
+      })().catch(() => {
         reportDiscordDeliveryFailure({
           code: "discord-context-ask-reply-failed",
           channelId: message.channelId,
@@ -395,6 +484,7 @@ export function createDiscordJsTransport(
 
   return {
     gatewayConnected: () => !disconnected && client.isReady(),
+    ...(directMessages ? { directMessages: directMessages.port } : {}),
     ...(config.consultations
       ? {
           createConsultationProvider: ({
@@ -610,6 +700,7 @@ export function createDiscordJsTransportFromEnv(
   });
   return createDiscordJsTransport({
     granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
+    directMessages: discordDirectMessagesEnabled(env),
     authorizeHumanReader: async (providerUserId) =>
       Boolean(
         await accessPolicy.authorize({
@@ -636,9 +727,10 @@ export function createDiscordJsTransportFromEnv(
 }
 
 export function discordGatewayIntentsForContextAsk(
-  contextAsk: DiscordContextAskConfig | undefined
+  contextAsk: DiscordContextAskConfig | undefined,
+  directMessages = false
 ): GatewayIntentBits[] {
-  return contextAsk
+  const intents = contextAsk
     ? [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
@@ -646,6 +738,7 @@ export function discordGatewayIntentsForContextAsk(
         GatewayIntentBits.MessageContent
       ]
     : [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers];
+  return directMessages ? [...intents, GatewayIntentBits.DirectMessages] : intents;
 }
 
 async function registerMeetingCommand(
@@ -718,18 +811,41 @@ async function handleInteraction(
   await interaction.deferReply({
     flags: MessageFlags.Ephemeral
   });
-  const response = await commandHandler(toDiscordCommand(interaction));
-  let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
-  if (admitted && response.requireCurrent) {
-    await response.requireCurrent();
-    admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
-  }
-  await interaction.editReply({
-    allowedMentions: { parse: [] },
-    content: admitted
-      ? truncateDiscordMessage(response.content)
-      : "Luma is not enabled in this Discord channel."
+  const progress = startDiscordRequestProgress({
+    async send(update) {
+      await interaction.editReply({
+        content: update.content,
+        allowedMentions: { parse: [] }
+      });
+    }
   });
+  await progress.ready;
+  try {
+    const response = await commandHandler(toDiscordCommand(interaction));
+    await progress.stop();
+    let admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+    if (admitted && response.requireCurrent) {
+      await response.requireCurrent();
+      admitted = await channelScope.resolveAllowedChannel(interaction.channelId);
+    }
+    try {
+      await interaction.editReply({
+        allowedMentions: { parse: [] },
+        content: admitted
+          ? truncateDiscordMessage(response.content)
+          : "Luma is not enabled in this Discord channel."
+      });
+    } catch {
+      // An ambiguous final send must not be replaced by a contradictory fallback.
+      reportDiscordDeliveryFailure({
+        code: "discord-command-reply-failed",
+        channelId: interaction.channelId,
+        sourceId: interaction.id
+      });
+    }
+  } finally {
+    await progress.clear();
+  }
 }
 
 async function handleContextAskMention(input: {
@@ -747,52 +863,84 @@ async function handleContextAskMention(input: {
     );
   };
   if (!(await mayReply())) return;
-  let response: DiscordContextAskResponse | null;
+  const progress = startDiscordRequestProgress({
+    async send(update) {
+      if (update.sequence > 0 && !(await mayReply())) return;
+      const receipt = await replyToContextAskMessage(input.message, {
+        content: update.content,
+        idempotencyKey: `discord:${input.message.id}:progress:${update.sequence}`
+      });
+      if (!receipt) throw new Error("Discord did not acknowledge the status message");
+      return {
+        async edit(content: string) {
+          if (!(await mayReply())) return;
+          await receipt.edit({
+            content,
+            allowedMentions: { parse: [], repliedUser: false }
+          });
+        },
+        async remove() {
+          await receipt.delete();
+        }
+      };
+    }
+  });
+  await progress.ready;
   try {
-    response = await input.handler(input.ask);
-  } catch {
-    response = {
-      content: "Luma could not answer this thread right now. Please try again later.",
-      idempotencyKey: `discord:${input.message.id}:context-ask:reply`
-    };
-  }
-  // A failed or ambiguous send must not trigger a second, contradictory reply.
-  if (!response || !(await mayReply())) return;
-  if (response.sourceProof) {
-    const proof = response.sourceProof;
-    if (
-      !input.conversationEvidenceSource ||
-      proof.subject.providerId !== "discord" ||
-      proof.subject.conversationObjectId !== input.ask.channelId ||
-      proof.subject.anchorMessageId !== input.ask.messageId ||
-      proof.question !== input.ask.question
-    )
-      return;
+    let response: DiscordContextAskResponse | null;
     try {
-      await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
-    } catch {
-      // Retain the old result for audit, but do not republish its old claims.
+      response = await input.handler(input.ask);
+    } catch (error) {
       response = {
-        content:
-          "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
-        idempotencyKey: response.idempotencyKey
+        content: renderContextVerificationFailure(error) ?? renderAiServiceFailure(error),
+        idempotencyKey: `discord:${input.message.id}:context-ask:reply`
       };
     }
-    if (!(await mayReply())) return;
-  }
-  if (response.requireCurrent) {
-    try {
-      await response.requireCurrent();
-    } catch {
-      response = {
-        content:
-          "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
-        idempotencyKey: response.idempotencyKey
-      };
+    // Drain status delivery before the final source and audience checks.
+    await progress.stop();
+    // A failed or ambiguous send must not trigger a second, contradictory reply.
+    if (!response || !(await mayReply())) return;
+    if (response.sourceProof) {
+      const proof = response.sourceProof;
+      if (
+        !input.conversationEvidenceSource ||
+        proof.subject.providerId !== "discord" ||
+        proof.subject.conversationObjectId !== input.ask.channelId ||
+        proof.subject.anchorMessageId !== input.ask.messageId ||
+        proof.question !== input.ask.question
+      )
+        return;
+      try {
+        await requireCurrentConversationEvidence(input.conversationEvidenceSource, proof);
+      } catch {
+        // Retain the old result for audit, but do not republish its old claims.
+        response = {
+          content: CONTEXT_VERIFICATION_UNCONFIRMED,
+          idempotencyKey: response.idempotencyKey
+        };
+      }
+      if (!(await mayReply())) return;
     }
-    if (!(await mayReply())) return;
+    if (response.requireCurrent) {
+      try {
+        await response.requireCurrent();
+      } catch (error) {
+        const code =
+          error instanceof ContextIntelligenceError ? error.code : "unclassified";
+        // Operational diagnostics only: never record provider errors, source text or secrets.
+        console.warn("Luma final context check withheld a reply", { code });
+        response = {
+          content:
+            renderContextVerificationFailure(error) ?? CONTEXT_VERIFICATION_UNCONFIRMED,
+          idempotencyKey: response.idempotencyKey
+        };
+      }
+      if (!(await mayReply())) return;
+    }
+    await replyToContextAskMessage(input.message, response);
+  } finally {
+    await progress.clear();
   }
-  await replyToContextAskMessage(input.message, response);
 }
 
 function discordContextAskMessageCandidate(
@@ -810,6 +958,7 @@ function discordContextAskMessageCandidate(
     authorKind: discordAuthorKind(message),
     actorDiscordUserId: message.author.id,
     mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    mentionedDiscordRoleIds: [...(message.mentions.roles?.keys() ?? [])],
     content: message.content,
     occurredAt: message.createdAt.toISOString()
   };
@@ -830,7 +979,7 @@ function discordAuthorKind(message: Message): "human" | "bot" | "webhook" | "sys
 async function replyToContextAskMessage(
   message: Message,
   response: DiscordContextAskResponse
-): Promise<void> {
+): Promise<Message> {
   const channel = message.channel;
 
   if (!channel.isSendable()) {
@@ -845,8 +994,12 @@ async function replyToContextAskMessage(
   // Discord deduplicates an enforced nonce for the same author within its
   // bounded deduplication window. Do not scan later thread history merely to
   // discover an earlier Context reply.
-  await message.reply({
-    content: renderDiscordMessage(response.content, discordMessageMarker(nonce)),
+  const delivery = discordAnswerDelivery(response.content);
+  return message.reply({
+    content: renderDiscordMessage(delivery.content, discordMessageMarker(nonce)),
+    ...(delivery.attachment
+      ? { files: [{ attachment: delivery.attachment, name: "luma-answer.txt" }] }
+      : {}),
     allowedMentions: {
       parse: [],
       repliedUser: false
@@ -857,10 +1010,89 @@ async function replyToContextAskMessage(
   });
 }
 
-function createDiscordJsConversationReader(
+export function createDiscordJsConversationReader(
   client: Client,
   authorizeHumanReader: DiscordJsTransportConfig["authorizeHumanReader"]
 ): DiscordConversationReader {
+  async function capturedMessage(
+    thread: ThreadChannel,
+    message: Message,
+    readPoll = true
+  ): Promise<DiscordConversationMessage> {
+    if (message.type !== MessageType.ThreadStarterMessage)
+      return discordConversationMessageWithPoll(
+        client,
+        message,
+        authorizeHumanReader,
+        readPoll
+      );
+    const reference = message.reference;
+    if (
+      !thread.parentId ||
+      reference?.channelId !== thread.parentId ||
+      reference.messageId !== thread.id ||
+      (reference.guildId && reference.guildId !== thread.guildId)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-invalid",
+        "The original thread message cannot be verified"
+      );
+    // Fetch the parent independently and freshly. Never trust the embedded copy.
+    const parent = await client.channels.fetch(thread.parentId, { force: true });
+    const permissions =
+      client.user && parent?.type === ChannelType.GuildText
+        ? parent.permissionsFor(client.user)
+        : null;
+    if (
+      !parent ||
+      parent.type !== ChannelType.GuildText ||
+      parent.guildId !== thread.guildId ||
+      !permissions?.has(PermissionFlagsBits.ViewChannel) ||
+      !permissions.has(PermissionFlagsBits.ReadMessageHistory)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-unavailable",
+        "The original thread message is not readable"
+      );
+    const original = await parent.messages.fetch({
+      message: reference.messageId,
+      force: true
+    });
+    if (
+      original.id !== thread.id ||
+      original.channelId !== parent.id ||
+      original.guildId !== thread.guildId ||
+      original.type === MessageType.ThreadStarterMessage ||
+      (original.author.bot && original.author.id !== client.user?.id)
+    )
+      throw new DiscordJsAdapterError(
+        "discord-thread-starter-unavailable",
+        "The original thread author or message is not available"
+      );
+    if (!original.author.bot) {
+      try {
+        const authorized = await waitForDiscordOperation(
+          authorizeHumanReader(original.author.id),
+          AbortSignal.timeout(5_000)
+        );
+        if (!authorized) throw new Error("Author unavailable");
+      } catch {
+        throw new DiscordJsAdapterError(
+          "discord-thread-starter-unavailable",
+          "The original thread author could not be verified"
+        );
+      }
+    }
+    const mapped = await discordConversationMessageWithPoll(
+      client,
+      original,
+      authorizeHumanReader,
+      readPoll
+    );
+    // It belongs to this conversation, but its ID, author and citation URL retain
+    // their original parent-message provenance. Capture re-fetches it on delivery.
+    return { ...mapped, channelId: thread.id };
+  }
   return {
     async readThread({
       conversationObjectId
@@ -885,11 +1117,7 @@ function createDiscordJsConversationReader(
 
       try {
         const message = await thread.messages.fetch({ message: messageId, force: true });
-        return await discordConversationMessageWithPoll(
-          client,
-          message,
-          authorizeHumanReader
-        );
+        return await capturedMessage(thread, message);
       } catch (error: unknown) {
         if (discordApiErrorCode(error) === 10_008) {
           return null;
@@ -919,12 +1147,7 @@ function createDiscordJsConversationReader(
           [...messages.values()].map((message) => {
             if (message.poll) pollsRead += 1;
             // Bound added poll reads to ten per already-bounded history page.
-            return discordConversationMessageWithPoll(
-              client,
-              message,
-              authorizeHumanReader,
-              pollsRead <= 10
-            );
+            return capturedMessage(thread, message, pollsRead <= 10);
           })
         ),
         hasMore: messages.size === limit
@@ -1003,6 +1226,7 @@ function discordConversationMessage(message: Message): DiscordConversationMessag
     },
     authorKind: discordAuthorKind(message),
     mentionedDiscordUserIds: [...message.mentions.users.keys()],
+    mentionedDiscordRoleIds: [...(message.mentions.roles?.keys() ?? [])],
     content: message.content,
     createdAt: message.createdAt.toISOString(),
     editedAt: message.editedAt?.toISOString() ?? null,
@@ -2135,7 +2359,10 @@ const meetingCommand = new SlashCommandBuilder()
   );
 
 function reportDiscordDeliveryFailure(event: {
-  code: "discord-command-reply-failed" | "discord-context-ask-reply-failed";
+  code:
+    | "discord-command-reply-failed"
+    | "discord-context-ask-reply-failed"
+    | "discord-dm-reply-failed";
   channelId: string;
   sourceId: string;
 }): void {

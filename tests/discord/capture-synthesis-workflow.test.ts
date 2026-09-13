@@ -397,10 +397,12 @@ async function setup(actionMode = false) {
       )
     };
     sdk.emit(Events.InteractionCreate, interaction);
+    // The first edit acknowledges receipt; wait for the final response.
+    // This deadline is shorter than the first periodic progress update (15s).
     await expect
       .poll(() => interaction.editReply.mock.calls.length, { timeout: 10000 })
-      .toBe(1);
-    return interaction.editReply.mock.calls[0]![0].content;
+      .toBeGreaterThanOrEqual(2);
+    return interaction.editReply.mock.calls.at(-1)![0].content;
   }
   async function add(id: string, source = capture(id)) {
     const result = await logicalMeetings.resolveCapture({

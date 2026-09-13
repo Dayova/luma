@@ -1,3 +1,4 @@
+import type { RawConversationSnapshot } from "../knowledge/observed-source-ledger.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { retrievalConcepts } from "../organizational-context/retrieval-concepts.js";
@@ -84,7 +85,8 @@ export function isContextRetrieval(value: unknown): value is ContextRetrieval {
 
 export function contextRetrievalRequest(
   inquiry: ContextInquiry,
-  limits?: { limit: number; maxCharacters: number }
+  limits?: { limit: number; maxCharacters: number },
+  snapshot?: RawConversationSnapshot
 ): OrganizationalContextRequest {
   if (!inquiry.audience)
     throw new Error("Organizational retrieval requires actual response recipients");
@@ -95,7 +97,7 @@ export function contextRetrievalRequest(
     },
     subject: { type: "conversation", id: inquiry.subject.conversationObjectId },
     purpose: "answer-question",
-    concepts: retrievalConcepts([inquiry.question]),
+    concepts: conversationRetrievalConcepts(inquiry.question, snapshot),
     time: inquiry.contextTime ?? { mode: "current" },
     limit: limits?.limit ?? 8,
     maxCharacters: limits?.maxCharacters ?? 8_000
@@ -132,4 +134,28 @@ export function retrievalWarnings(context?: ContextRetrieval): ContextInquiryWar
         }
       ]
     : [];
+}
+
+/** Explicit references are discovery hints, never permission grants or trusted claims. */
+export function conversationRetrievalConcepts(
+  question: string,
+  snapshot?: RawConversationSnapshot
+): string[] {
+  const references: string[] = [];
+  const texts = [
+    question,
+    ...(snapshot?.messages ?? [])
+      .slice()
+      .reverse()
+      .flatMap((message) => (message.state === "available" ? [message.text] : []))
+  ];
+  for (const [index, text] of texts.entries()) {
+    for (const match of text.matchAll(/\b[A-Z][A-Z0-9_]{0,63}-[1-9][0-9]{0,14}\b/giu)) {
+      if (!references.includes(match[0].toUpperCase()))
+        references.push(match[0].toUpperCase());
+      if (references.length === 4) break;
+    }
+    if (references.length === 4 || (index === 0 && references.length > 0)) break;
+  }
+  return [...new Set([...references, ...retrievalConcepts([question])])].slice(0, 8);
 }

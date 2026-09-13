@@ -1,3 +1,4 @@
+import { normalizeAiServiceError } from "../../src/ai/ai-request.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiServiceError } from "../../src/ai/ai-service-error.js";
 import type { AiUsageStatus } from "../../src/ai/ai-usage-budget.js";
@@ -240,9 +241,9 @@ describe("Discord AI usage and failure experience", () => {
     ["provider-quota", "billing or quota limit"],
     ["rate-limited", "Try again in 12 seconds"],
     ["timeout", "cost may still be pending"],
-    ["unavailable", "temporarily unavailable"],
-    ["not-configured", "not configured"],
-    ["request-too-large", "narrower question"],
+    ["unavailable", "does not establish the cause"],
+    ["not-configured", "AI setup or access"],
+    ["request-too-large", "includes retrieved evidence"],
     ["request-indeterminate", "not started a duplicate"]
   ] as const)("explains %s safely in an eligible mention", async (code, expected) => {
     const { transport } = await fixture(
@@ -392,6 +393,24 @@ describe("Discord AI usage and failure experience", () => {
     );
     expect(availableDaily).toContain("Daily cap resets: 9 Sept 2026, 00:00");
     expect(availableDaily).toContain("Monthly cap resets: 1 Oct 2026, 00:00");
+  });
+
+  it.each([401, 403])(
+    "does not describe rejected credentials/access (%s) as a missing key or an undispatched request",
+    (status) => {
+      const rendered = renderAiServiceFailure(
+        normalizeAiServiceError({ status, message: "SECRET" })
+      );
+      expect(rendered).toContain("key, model access");
+      expect(rendered).not.toMatch(/key.*missing|No AI call was made|SECRET/);
+    }
+  );
+
+  it("does not claim an unknown workflow failure proves a provider outage", () => {
+    const rendered = renderAiServiceFailure(normalizeAiServiceError(new Error("SECRET")));
+    expect(rendered).toContain("does not establish the cause");
+    expect(rendered).toContain("pending charge");
+    expect(rendered).not.toMatch(/provider is.*unavailable|SECRET/);
   });
 
   it("does not leak arbitrary exception text", () => {

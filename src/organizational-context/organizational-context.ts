@@ -1,3 +1,4 @@
+import { ContextVerificationError } from "./interface.js";
 import { createMeetingReceiptGraph } from "./meeting-receipt-graph.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { LumaDatabase } from "../persistence/db.js";
@@ -41,11 +42,9 @@ type Candidate = {
 const MAX_CANDIDATES = 100;
 const MAX_SOURCE_CHARACTERS = 100_000;
 
-export class OrganizationalContextUnavailableError extends Error {
-  constructor() {
-    super(
-      "Organizational context changed or is no longer authorized; retrieve it again."
-    );
+export class OrganizationalContextUnavailableError extends ContextVerificationError {
+  constructor(reason: "timeout" | "changed-or-unavailable" = "changed-or-unavailable") {
+    super(reason);
     this.name = "OrganizationalContextUnavailableError";
   }
 }
@@ -70,7 +69,8 @@ export function createOrganizationalContext(input: {
     sourceId: string,
     deadlineAt = Number.POSITIVE_INFINITY
   ) => {
-    if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
+    if (Date.now() >= deadlineAt)
+      throw new OrganizationalContextUnavailableError("timeout");
     const source = await deadline(
       catalog.read({
         audience: structuredClone(request.audience),
@@ -479,7 +479,8 @@ async function verifyReceipt(
     sourceId: string,
     deadlineAt: number
   ) => {
-    if (Date.now() >= deadlineAt) throw new OrganizationalContextUnavailableError();
+    if (Date.now() >= deadlineAt)
+      throw new OrganizationalContextUnavailableError("timeout");
     const source = await deadline(
       catalog.read({
         audience: structuredClone(bound.audience),
@@ -558,7 +559,8 @@ async function verifyReceipt(
         throw new OrganizationalContextUnavailableError();
       continue;
     }
-    if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
+    if (Date.now() >= readDeadline)
+      throw new OrganizationalContextUnavailableError("timeout");
     const catalog = catalogs.get(search.catalogId);
     if (!catalog) throw new OrganizationalContextUnavailableError();
     let current: Awaited<ReturnType<ContextCatalog["search"]>>;
@@ -573,7 +575,9 @@ async function verifyReceipt(
         }),
         Math.min(input.timeoutMs ?? 5_000, readDeadline - Date.now())
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof ContextVerificationError && error.reason === "timeout")
+        throw error;
       if (search.failed) continue;
       throw new OrganizationalContextUnavailableError();
     }
@@ -585,20 +589,23 @@ async function verifyReceipt(
       throw new OrganizationalContextUnavailableError();
   }
   for (const outcome of receipt.unavailableReads) {
-    if (Date.now() >= readDeadline) throw new OrganizationalContextUnavailableError();
+    if (Date.now() >= readDeadline)
+      throw new OrganizationalContextUnavailableError("timeout");
     const catalog = catalogs.get(outcome.catalogId);
     if (!catalog) throw new OrganizationalContextUnavailableError();
     let current: ContextSource | null;
     try {
       current = await read(catalog, request, outcome.sourceId, readDeadline);
-    } catch {
+    } catch (error) {
+      if (error instanceof ContextVerificationError && error.reason === "timeout")
+        throw error;
       if (outcome.status === "unavailable") continue;
       throw new OrganizationalContextUnavailableError();
     }
     if (current || outcome.status !== "ineligible")
       throw new OrganizationalContextUnavailableError();
   }
-  for (const proof of receipt.sources) {
+  const verifySource = async (proof: Proof) => {
     const catalog = catalogs.get(proof.catalogId);
     if (!catalog) throw new OrganizationalContextUnavailableError();
     try {
@@ -611,10 +618,37 @@ async function verifyReceipt(
         digest(current) !== proof.snapshotId
       )
         throw new OrganizationalContextUnavailableError();
-    } catch {
+    } catch (error) {
+      if (error instanceof ContextVerificationError) throw error;
       throw new OrganizationalContextUnavailableError();
     }
-  }
+  };
+  // Meeting graph checks share graph budgets and remain sequential. Independent
+  // provider checks then use four workers under the same original deadline.
+  const meetingProofs = receipt.sources.filter(
+    (proof) => catalogs.get(proof.catalogId)?.dependencyKind === "meeting"
+  );
+  const independentProofs = receipt.sources.filter(
+    (proof) => catalogs.get(proof.catalogId)?.dependencyKind !== "meeting"
+  );
+  for (const proof of meetingProofs) await verifySource(proof);
+  let next = 0;
+  let failure: Error | undefined;
+  await Promise.all(
+    Array.from({ length: Math.min(4, independentProofs.length) }, async () => {
+      while (!failure) {
+        const proof = independentProofs[next++];
+        if (!proof) return;
+        try {
+          await verifySource(proof);
+        } catch (error) {
+          failure =
+            error instanceof Error ? error : new OrganizationalContextUnavailableError();
+        }
+      }
+    })
+  );
+  if (failure) throw failure;
   return bundle;
 }
 
@@ -711,7 +745,7 @@ async function deadline<T>(operation: Promise<T>, milliseconds: number): Promise
       operation,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
-          () => reject(new Error("Context read timed out")),
+          () => reject(new OrganizationalContextUnavailableError("timeout")),
           milliseconds
         );
       })

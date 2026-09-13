@@ -1,3 +1,4 @@
+import { renderContextVerificationFailure } from "../presentation/context-failure.js";
 import { handleDiscordStructuredWorkMention } from "./discord-structured-work-mention.js";
 import {
   handleDiscordStructuredWorkCommand,
@@ -78,7 +79,6 @@ import type {
   ContextInquiry
 } from "../context-intelligence/interface.js";
 import type { ConversationEvidenceProof } from "../context-intelligence/conversation-evidence-source.js";
-import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
 import {
   createDiscordContextAskRateLimiter,
   renderDiscordContextAskResult,
@@ -562,25 +562,9 @@ async function answerConversationThread(
           ask.messageId
         )
       );
-    if (
-      error instanceof ContextIntelligenceError &&
-      (error.code === "context-answer-already-attempted" ||
-        error.code === "context-answer-invalid" ||
-        error.code === "context-answer-unavailable")
-    )
-      return reply(
-        "Luma already attempted this question but has no deliverable answer. It has not repeated the possible paid request. Check @Luma usage; post a new question for a new attempt."
-      );
-    if (
-      error instanceof ContextIntelligenceError &&
-      (error.code === "context-inquiry-source-changed" ||
-        error.code === "context-inquiry-context-changed")
-    ) {
-      return reply(
-        "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state."
-      );
-    }
-    return reply(renderAiServiceFailure(error));
+    return reply(
+      renderContextVerificationFailure(error) ?? renderAiServiceFailure(error)
+    );
   }
 }
 
@@ -2613,7 +2597,7 @@ function renderScopedMeetingAnswer(
   evidence: Array<{ source: string; sourceObjectId: string }>
 ): string {
   if (text.length > 1600)
-    return "This Meeting answer is too large to display safely. Ask about a narrower topic.";
+    return "Luma generated a Meeting answer but could not display it within this reply’s size limit. A founder needs to review the output handling. Check usage before requesting another answer.";
   const references: string[] = [];
   const unique = [
     ...new Set(

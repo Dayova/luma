@@ -93,7 +93,8 @@ In the [Discord Developer Portal](https://discord.com/developers/applications):
    production preflight rejects a missing approval even when Context Ask is off.
 7. If the optional Context Ask configuration is deliberately enabled, also turn
    on **Message Content Intent** and obtain any required approval. Presence,
-   reaction, and DM intents are not required.
+   and reaction intents are not required. The optional DM capability requests
+   Direct Messages and partial DM channels in the SDK.
 
 Discord identifies Server Members approval using application flags
 `GATEWAY_GUILD_MEMBERS` (`1 << 14`) or `GATEWAY_GUILD_MEMBERS_LIMITED`
@@ -221,13 +222,15 @@ not a live permission audit or an instruction to ingest all channel history.
 | `team-chat`             | Founders and bots                         | Candidate work threads                   |
 | `team-chat-development` | Founders and bots                         | Candidate work threads                   |
 | `resources`             | Founders and bots                         | Candidate work threads                   |
-| `team-off-topic`        | Founders and bots                         | Excluded initially                       |
+| `team-off-topic`        | Founders and bots                         | Candidate work threads                   |
 | `team-voice`            | Founders and bots                         | Future candidate; voice is unimplemented |
 | `gäste`                 | Also people with the Gäste role           | Excluded                                 |
 
-Resolve the selected parents to verified IDs during rollout. The three work
-channels are the initial pilot candidates; actual collection remains disabled
-until the source notice, retention, and reader-permission gates are satisfied.
+Resolve the selected parents to verified IDs during rollout. All four founder text
+channels are in the requested scope, including `team-off-topic`. Do not narrow local
+testing to `team-chat-development` alone. Jakob confirmed the four founders
+consented; per-channel reader and bot-access checks still apply at runtime.
+This does not enable continuous background collection.
 The indented thread titles in the supplied screenshot are examples, not fixed
 source bindings. Context Ask currently works in selected public threads under
 these parents, not in parent-channel conversations. Here, a public thread can
@@ -361,10 +364,15 @@ In an allowlisted **public thread**, an allowlisted person can write:
 Luma captures current thread history from its beginning through the mention,
 stores an immutable human-text conversation-evidence revision, and replies in
 the same thread with a cited, read-only answer only when that boundary is
-complete. The user mention
-must be leading and exact; nonleading mentions, bots, webhooks, system
-messages, private threads, DMs, and channels outside the reviewed scope are
-ignored without capture.
+complete. The exact bot mention may appear at the beginning, in the middle,
+or at the end of the message, including on its own final line. Discord must
+identify Luma as a mentioned user, or identify its managed bot role. The role
+alias is verified against Discord's current `managed` and `tags.bot_id` metadata
+at admission and again when capturing the anchor; a matching role name alone
+never suffices. Other users and roles do not trigger it. Role aliases apply to
+read-only Ask; explicit mutation instructions retain their leading bot-user mention. Bots, webhooks, system messages, private threads, and
+channels outside the reviewed scope are ignored without capture. DMs use
+the separate founder-only DM interface.
 
 The snapshot reader does not retain continuous Discord edit/delete events. New
 questions read current history; repeated deliveries reuse a stored answer only
@@ -387,6 +395,43 @@ canonical writes require its current standing recording permission and normal
 source, authority and execution checks. See [Decision Records in Discord](discord-decision-records.md).
 
 Replies use an anchor-derived [enforced Discord nonce](https://docs.discord.com/developers/resources/message#create-message), which deduplicates recent Gateway repeats within Discord's bounded nonce window. This tracer slice does not yet provide a durable Discord reply outbox for exactly-once delivery across an arbitrarily delayed restart.
+
+### Private messages (opt-in)
+
+Set `LUMA_DISCORD_DM_ENABLED=1` to enable **one-to-one text DMs** from the four
+uniquely mapped founders. The local AI page enables this for the development bot.
+Send the bot a normal DM; no mention, slash-command registration or founder-channel
+visibility is needed to ask privately. Group DMs, bots, webhooks and other people
+are ignored before capture or model use. This does not enable server-channel Ask.
+
+- `usage` or `/usage`: show the shared AI budget without a model call.
+- `/help`: show private conversation instructions.
+- `/new`: establish a new conversation boundary without deleting earlier history.
+- Any other text: ask using the current private conversation's Human evidence.
+
+DM history is bounded to 50 messages including Luma replies and 32,000 Human text
+characters. Replies are excluded from Human evidence. If the boundary is too long,
+missing, edited, or includes unsupported attachments/polls/voice content, Luma
+explains how to start fresh with `/new` and paste relevant text. An accepted `/new`
+boundary is retained durably and rechecked against Discord. Context does not merge
+between founders. DM captures use a separate `discord-dm` source namespace and are
+not published to shared channels or registered as a shared retrieval catalog.
+
+When organizational retrieval is configured, it uses the single DM recipient as
+its audience and the existing source grants/currentness checks. DM handling has no
+Follow-up execution path: requests to publish or edit external records do not grant
+write authority. Without an API key, help and usage work and AI questions receive a
+configuration message. Budget, quota and provider failures produce private status
+responses; the bot never silently falls back to invented answers.
+
+The Gateway needs Direct Messages and `Partials.Channel` to receive uncached DMs.
+The shared bot still requests its normal Guilds/Server Members intents. Message
+Content intent is not added for DMs alone. Before every answer, Luma rechecks the
+exact one-to-one recipient and the captured source; source changes withhold old
+claims. Current retained answers prevent another paid interpretation on replay.
+Replies use Discord's enforced nonce deduplication window; arbitrarily delayed
+Gateway replay may still repeat a cached reply. AI questions are limited to one
+active request per DM and a 10-second per-founder interval; status remains free.
 
 ### Catch Up
 
@@ -473,3 +518,39 @@ It has no path to Meeting Intelligence, Follow-up Execution, WorkProvider, or
 KnowledgeProvider operations. A later Discord Verify, Reconcile, or Execute
 capability must reuse the shared Luma core rather than bypassing it from the
 Discord Adapter.
+
+## Fast text feedback
+
+Admitted thread mentions and founder DMs receive an immediate text receipt:
+“Nachricht erhalten. Ich prüfe deine Anfrage.” This acknowledges receipt, not
+completion, a model call, a search, or reading all related knowledge. If work
+is still pending after 15 seconds, Luma sends a short elapsed-time update,
+then at most once every 30 seconds until the request finishes. Slash commands
+use the same text in their ephemeral response, which the final result replaces.
+
+Thread/DM status messages are separate from the final answer or concrete
+operational failure. They cost no AI tokens, use distinct deterministic Discord
+nonces, suppress mentions, and remain excluded from human Evidence. Founder and
+channel checks run before receipts; later channel updates and DM sends recheck
+access. Pending updates are drained before the final response, and timers stop
+on success, failure, or suppressed delivery. A failed status send never retries
+an ambiguous message or prevents the underlying request from being handled.
+
+### Local provider connections
+
+The real-AI local page can explicitly connect Linear, Notion and GitHub to the
+same production context adapters used by Discord Ask and founder DMs. Its free
+read check shows actual sources before any AI request. Optional separate writer
+credentials enable only the existing approved follow-up execution capabilities.
+See [local provider testing](../operations/local-testing.md#real-linear-notion-and-github-connections).
+Connection changes stop the development bot; restart it to apply them.
+
+### Transient request status
+
+Thread mentions and founder DMs use a single temporary text receipt. While a
+request is pending, elapsed-time updates edit that same message. After final
+delivery (or request termination), Luma removes only its own temporary receipt;
+answers, concrete errors, and substantive output remain. Slash-command status
+is ephemeral and is replaced by the final result. If Discord refuses deletion,
+Luma attempts to reduce the receipt to “Bearbeitung beendet.” A Discord outage
+can prevent cleanup; no unrelated or Human message is targeted.

@@ -63,7 +63,7 @@ const settingsSchema = z
   .object({
     seed: z.number().int().safe(),
     repeats: z.number().int().min(1).max(5),
-    maxRequests: z.number().int().min(1).max(400),
+    maxRequests: z.number().int().min(1).max(1600),
     limits,
     googleEndpoint: endpoint,
     anthropicOutputMode: outputMode,
@@ -111,6 +111,8 @@ const savedRun = z
 /** Reports are data. Never trust a serialized grade; recompute it and validate its attached review. */
 export function parseQualityRun(input: unknown): QualityRun {
   const run = savedRun.parse(input);
+  if (run.mode !== "historical-regrade" && run.settings.maxRequests > 400)
+    throw new Error("Live or preflight request ceiling exceeds 400");
   if (
     run.benchmarkHash !== digest(run.benchmark) ||
     run.planHash !==
@@ -182,7 +184,7 @@ const legacySchema = z.object({
   corpusProvenance: z.literal("agent-authored-synthetic-not-human-labeled"),
   pricingVerifiedAt: z.string(),
   limits: limits.extend({
-    maxRequests: natural,
+    maxRequests: z.number().int().min(1).max(200),
     repeats: z.number().int().min(1).max(5)
   }),
   googleEndpoint: endpoint,
@@ -249,7 +251,8 @@ export async function regradeHistorical(
       LUMA_EVAL_ANTHROPIC_OUTPUT: first.anthropicOutputMode
     },
     live: false,
-    maxRequests: reports.reduce((sum, report) => sum + report.limits.maxRequests, 0),
+    // This is a credential-free preflight plan; historical metadata is bound below.
+    maxRequests: 1,
     repeats: first.limits.repeats,
     seed: 0,
     gitRevision,
@@ -259,8 +262,11 @@ export async function regradeHistorical(
       maxInputBytes: first.limits.maxInputBytes
     }
   });
-  run.mode = "historical-regrade";
-  run.sourceReports = inputs.map(digest);
+  bindHistoricalPlan(
+    run,
+    reports.reduce((sum, report) => sum + report.limits.maxRequests, 0),
+    inputs.map(digest)
+  );
   for (const row of run.rows) row.status = "not-run";
   const seen = new Set<string>();
   for (const report of reports)
@@ -322,14 +328,14 @@ export async function regradeQuality(
       LUMA_EVAL_ANTHROPIC_OUTPUT: source.settings.anthropicOutputMode
     },
     live: false,
-    maxRequests: source.settings.maxRequests,
+    // Replaying saved answers never enlarges the live dispatch allowance.
+    maxRequests: 1,
     repeats: source.settings.repeats,
     seed: source.settings.seed,
     limits: source.settings.limits,
     gitRevision
   });
-  run.mode = "historical-regrade";
-  run.sourceReports = [digest(input)];
+  bindHistoricalPlan(run, source.settings.maxRequests, [digest(input)]);
   for (const row of run.rows) {
     row.status = "not-run";
     const old = source.rows.find(
@@ -356,4 +362,16 @@ export async function regradeQuality(
     });
   }
   return parseQualityRun(run);
+}
+
+/** Bind aggregate historical limits only after preparing a non-dispatching plan. */
+function bindHistoricalPlan(run: QualityRun, maxRequests: number, sources: string[]) {
+  run.mode = "historical-regrade";
+  run.sourceReports = sources;
+  run.settings.maxRequests = maxRequests;
+  run.planHash = digest({
+    benchmarkHash: run.benchmarkHash,
+    models: run.models,
+    settings: run.settings
+  });
 }

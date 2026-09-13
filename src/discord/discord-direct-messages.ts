@@ -1,4 +1,7 @@
-import { startDiscordRequestProgress } from "./discord-request-progress.js";
+import {
+  startDiscordRequestProgress,
+  type DiscordProgressMessage
+} from "./discord-request-progress.js";
 import type { LumaDatabase } from "../persistence/db.js";
 import type { AiUsageBudget } from "../ai/ai-usage-budget.js";
 import type { ContextInquiry } from "../context-intelligence/interface.js";
@@ -46,7 +49,7 @@ export interface DiscordDirectMessageTransport {
     recipientId: string;
     content: string;
     idempotencyKey: string;
-  }): Promise<void>;
+  }): Promise<DiscordProgressMessage | void>;
 }
 export function discordDirectMessagesEnabled(env: NodeJS.ProcessEnv): boolean {
   const value = env["LUMA_DISCORD_DM_ENABLED"]?.trim();
@@ -94,7 +97,7 @@ export async function createDiscordDirectMessages(input: {
     idempotencyKey = `discord-dm:${event.messageId}:reply`
   ) {
     if (!(await admit(event))) return;
-    await transport.send({
+    return transport.send({
       channelId: event.channelId,
       recipientId: event.authorId,
       content,
@@ -353,7 +356,7 @@ export async function createDiscordDirectMessages(input: {
       // Do not turn an ambiguous final send into a contradictory fallback.
       await send(event, content);
     } finally {
-      await progress.stop();
+      await progress.clear();
       if (held) busy.delete(event.channelId);
     }
   }

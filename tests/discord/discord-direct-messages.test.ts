@@ -30,6 +30,7 @@ function setup() {
     content: string;
     idempotencyKey: string;
   }[] = [];
+  const visible = new Map<string, string>();
   let calls = 0;
   let duringAnswer: (() => void) | undefined;
   let failure: Error | undefined;
@@ -71,7 +72,17 @@ function setup() {
       ),
     send: (response) => {
       sent.push(response);
-      return Promise.resolve();
+      visible.set(response.idempotencyKey, response.content);
+      return Promise.resolve({
+        edit: (content: string) => {
+          visible.set(response.idempotencyKey, content);
+          return Promise.resolve();
+        },
+        remove: () => {
+          visible.delete(response.idempotencyKey);
+          return Promise.resolve();
+        }
+      });
     }
   };
   function message(text: string, authorId = jakob, channelId = channel) {
@@ -94,6 +105,7 @@ function setup() {
     answerer,
     message,
     sent,
+    visible,
     messages,
     recipients,
     now: () => time,
@@ -145,6 +157,7 @@ describe("private founder conversations", () => {
         expect(f.calls()).toBe(1);
         expect(f.sent).toHaveLength(2);
         expect(f.sent[0]?.content).toContain("Nachricht erhalten");
+        expect([...f.visible.values()]).toEqual([f.sent[1]!.content]);
         expect(f.sent[1]).toMatchObject({
           channelId: channel,
           recipientId: user,
@@ -232,6 +245,7 @@ describe("private founder conversations", () => {
       expect(f.sent[0]?.content).toContain("Nachricht erhalten");
       expect(f.sent[1]?.content).not.toContain("Discord unavailable");
       expect(f.sent[1]?.content).not.toContain("Nachricht erhalten");
+      expect([...f.visible.values()]).toEqual([f.sent[1]!.content]);
       expect(f.calls()).toBe(0);
     });
   });

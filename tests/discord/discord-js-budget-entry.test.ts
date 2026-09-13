@@ -116,7 +116,12 @@ function message(id: string) {
       type: ChannelType.PublicThread,
       isSendable: () => true
     },
-    reply: vi.fn(() => Promise.resolve())
+    reply: vi.fn(() =>
+      Promise.resolve({
+        edit: vi.fn(() => Promise.resolve()),
+        delete: vi.fn(() => Promise.resolve())
+      })
+    )
   };
 }
 
@@ -226,6 +231,14 @@ describe("Discord SDK budget entry points", () => {
       })
     );
     await live.disconnect();
+    const temporary = await (candidate.reply.mock.results[0]!.value as ReturnType<
+      typeof candidate.reply
+    >);
+    const final = await (candidate.reply.mock.results[1]!.value as ReturnType<
+      typeof candidate.reply
+    >);
+    expect(temporary.delete).toHaveBeenCalledOnce();
+    expect(final.delete).not.toHaveBeenCalled();
   });
 
   it("registers and routes /meeting usage as a deterministic command", async () => {

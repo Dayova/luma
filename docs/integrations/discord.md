@@ -544,3 +544,13 @@ read check shows actual sources before any AI request. Optional separate writer
 credentials enable only the existing approved follow-up execution capabilities.
 See [local provider testing](../operations/local-testing.md#real-linear-notion-and-github-connections).
 Connection changes stop the development bot; restart it to apply them.
+
+### Transient request status
+
+Thread mentions and founder DMs use a single temporary text receipt. While a
+request is pending, elapsed-time updates edit that same message. After final
+delivery (or request termination), Luma removes only its own temporary receipt;
+answers, concrete errors, and substantive output remain. Slash-command status
+is ephemeral and is replaced by the final result. If Discord refuses deletion,
+Luma attempts to reduce the receipt to “Bearbeitung beendet.” A Discord outage
+can prevent cleanup; no unrelated or Human message is targeted.

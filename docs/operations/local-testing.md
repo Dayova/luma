@@ -302,3 +302,13 @@ it does not configure the separate structured-work or decision-record databases.
 Changing connection settings stops the bot so it cannot keep using an old token.
 Disable write adapters or remove the connection when finished. No write or AI
 request is made merely by applying these settings.
+
+### Transient request status
+
+Thread mentions and founder DMs use a single temporary text receipt. While a
+request is pending, elapsed-time updates edit that same message. After final
+delivery (or request termination), Luma removes only its own temporary receipt;
+answers, concrete errors, and substantive output remain. Slash-command status
+is ephemeral and is replaced by the final result. If Discord refuses deletion,
+Luma attempts to reduce the receipt to “Bearbeitung beendet.” A Discord outage
+can prevent cleanup; no unrelated or Human message is targeted.

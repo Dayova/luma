@@ -12,6 +12,8 @@ const sdk = vi.hoisted(() => ({
   options: undefined as Discord.ClientOptions | undefined,
   get: vi.fn(),
   post: vi.fn(),
+  patch: vi.fn(),
+  delete: vi.fn(),
   destroy: vi.fn<() => Promise<void>>()
 }));
 vi.mock("discord.js", async (original) => {
@@ -21,7 +23,7 @@ vi.mock("discord.js", async (original) => {
     ...actual,
     Client: class extends Emitter {
       user = { id: "1526147284822392952" };
-      rest = { get: sdk.get, post: sdk.post };
+      rest = { get: sdk.get, post: sdk.post, patch: sdk.patch, delete: sdk.delete };
       constructor(options: Discord.ClientOptions) {
         super();
         sdk.emitter = this;
@@ -50,7 +52,11 @@ vi.mock("discord.js", async (original) => {
 });
 beforeEach(() => {
   vi.resetAllMocks();
-  sdk.post.mockResolvedValue({});
+  sdk.post.mockResolvedValue({
+    id: "1550000000000000999",
+    channel_id: channel,
+    author: { id: bot }
+  });
   sdk.destroy.mockResolvedValue(undefined);
   sdk.get.mockImplementation((route: string) =>
     Promise.resolve(
@@ -172,4 +178,51 @@ describe("native Discord DM transport", () => {
     expect(admitted).toBe(1);
     expect(sdk.destroy).toHaveBeenCalledTimes(1);
   });
+});
+
+it("edits and removes only the acknowledged bot-owned status message", async () => {
+  const transport = await start();
+  try {
+    const statusId = "1550000000000000999";
+    sdk.post.mockResolvedValue({
+      id: statusId,
+      channel_id: channel,
+      author: { id: bot }
+    });
+    const receipt = await transport.directMessages!.send({
+      channelId: channel,
+      recipientId: founder,
+      content: "Working",
+      idempotencyKey: "status"
+    });
+    expect(receipt).toBeDefined();
+    await receipt!.edit("Still working");
+    await receipt!.remove();
+    expect(sdk.patch).toHaveBeenCalledWith(
+      `/channels/${channel}/messages/${statusId}`,
+      expect.objectContaining({
+        body: { content: "Still working", allowed_mentions: { parse: [] } }
+      })
+    );
+    expect(sdk.delete).toHaveBeenCalledWith(
+      `/channels/${channel}/messages/${statusId}`,
+      expect.anything()
+    );
+    sdk.post.mockResolvedValue({
+      id: messageId,
+      channel_id: channel,
+      author: { id: founder }
+    });
+    await expect(
+      transport.directMessages!.send({
+        channelId: channel,
+        recipientId: founder,
+        content: "Working",
+        idempotencyKey: "other-status"
+      })
+    ).rejects.toThrow("did not acknowledge");
+    expect(sdk.delete).toHaveBeenCalledTimes(1);
+  } finally {
+    await transport.disconnect();
+  }
 });

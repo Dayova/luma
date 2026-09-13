@@ -827,7 +827,7 @@ async function handleInteraction(
         : "Luma is not enabled in this Discord channel."
     });
   } finally {
-    await progress.stop();
+    await progress.clear();
   }
 }
 
@@ -849,10 +849,23 @@ async function handleContextAskMention(input: {
   const progress = startDiscordRequestProgress({
     async send(update) {
       if (update.sequence > 0 && !(await mayReply())) return;
-      await replyToContextAskMessage(input.message, {
+      const receipt = await replyToContextAskMessage(input.message, {
         content: update.content,
         idempotencyKey: `discord:${input.message.id}:progress:${update.sequence}`
       });
+      if (!receipt) throw new Error("Discord did not acknowledge the status message");
+      return {
+        async edit(content: string) {
+          if (!(await mayReply())) return;
+          await receipt.edit({
+            content,
+            allowedMentions: { parse: [], repliedUser: false }
+          });
+        },
+        async remove() {
+          await receipt.delete();
+        }
+      };
     }
   });
   await progress.ready;
@@ -906,7 +919,7 @@ async function handleContextAskMention(input: {
     }
     await replyToContextAskMessage(input.message, response);
   } finally {
-    await progress.stop();
+    await progress.clear();
   }
 }
 
@@ -946,7 +959,7 @@ function discordAuthorKind(message: Message): "human" | "bot" | "webhook" | "sys
 async function replyToContextAskMessage(
   message: Message,
   response: DiscordContextAskResponse
-): Promise<void> {
+): Promise<Message> {
   const channel = message.channel;
 
   if (!channel.isSendable()) {
@@ -961,7 +974,7 @@ async function replyToContextAskMessage(
   // Discord deduplicates an enforced nonce for the same author within its
   // bounded deduplication window. Do not scan later thread history merely to
   // discover an earlier Context reply.
-  await message.reply({
+  return message.reply({
     content: renderDiscordMessage(response.content, discordMessageMarker(nonce)),
     allowedMentions: {
       parse: [],

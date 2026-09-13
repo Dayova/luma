@@ -100,7 +100,7 @@ export function createDiscordJsDirectMessages(input: {
     async send(request) {
       if ((await recipient(request.channelId)) !== request.recipientId)
         throw new Error("DM recipient changed");
-      await client.rest.post(Routes.channelMessages(request.channelId), {
+      const sent = await client.rest.post(Routes.channelMessages(request.channelId), {
         signal,
         body: {
           content: request.content.slice(0, 2000),
@@ -113,6 +113,33 @@ export function createDiscordJsDirectMessages(input: {
           enforce_nonce: true
         }
       });
+      const result = z
+        .object({
+          id: z.string().regex(/^\d{17,20}$/u),
+          channel_id: z.string(),
+          author: z.object({ id: z.string() })
+        })
+        .safeParse(sent);
+      if (
+        !result.success ||
+        result.data.channel_id !== request.channelId ||
+        result.data.author.id !== client.user?.id
+      )
+        throw new Error("Discord did not acknowledge the bot-owned message");
+      const route = Routes.channelMessage(request.channelId, result.data.id);
+      return {
+        async edit(content: string) {
+          if ((await recipient(request.channelId)) !== request.recipientId)
+            throw new Error("DM recipient changed");
+          await client.rest.patch(route, {
+            signal,
+            body: { content: content.slice(0, 2000), allowed_mentions: { parse: [] } }
+          });
+        },
+        async remove() {
+          await client.rest.delete(route, { signal });
+        }
+      };
     }
   };
   return {

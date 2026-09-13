@@ -60,3 +60,68 @@ describe("Discord text progress", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+it("updates one temporary message and removes it without touching the final answer", async () => {
+  vi.useFakeTimers();
+  const chat = new Map<string, string>();
+  const progress = startDiscordRequestProgress({
+    send: ({ content }) => {
+      chat.set("status", content);
+      return Promise.resolve({
+        edit: (text: string) => {
+          chat.set("status", text);
+          return Promise.resolve();
+        },
+        remove: () => {
+          chat.delete("status");
+          return Promise.resolve();
+        }
+      });
+    }
+  });
+  await progress.ready;
+  await vi.advanceTimersByTimeAsync(45_000);
+  expect(chat.size).toBe(1);
+  expect(chat.get("status")).toContain("45 Sekunden");
+  await progress.stop();
+  expect(chat.has("status")).toBe(true);
+  chat.set("final", "Here is the answer and its relevant caveat.");
+  await progress.clear();
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect([...chat.values()]).toEqual(["Here is the answer and its relevant caveat."]);
+});
+
+it("drains a late edit before cleanup and never removes the same receipt twice", async () => {
+  vi.useFakeTimers();
+  let release = () => {};
+  const remove = vi.fn(() => Promise.resolve());
+  const edit = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      })
+  );
+  const send = vi.fn(() => Promise.resolve({ edit, remove }));
+  const progress = startDiscordRequestProgress({ send });
+  await progress.ready;
+  await vi.advanceTimersByTimeAsync(15_000);
+  const clearing = progress.clear();
+  expect(remove).not.toHaveBeenCalled();
+  release();
+  await clearing;
+  await progress.clear();
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(remove).toHaveBeenCalledOnce();
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it("retires a status compactly if Discord refuses deletion, without failing the answer", async () => {
+  const edit = vi.fn(() => Promise.resolve());
+  const progress = startDiscordRequestProgress({
+    send: () =>
+      Promise.resolve({ edit, remove: () => Promise.reject(new Error("cannot delete")) })
+  });
+  await progress.ready;
+  await expect(progress.clear()).resolves.toBeUndefined();
+  expect(edit).toHaveBeenCalledWith("Bearbeitung beendet.");
+});

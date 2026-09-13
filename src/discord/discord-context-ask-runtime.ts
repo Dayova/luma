@@ -15,7 +15,7 @@ export const MAX_DISCORD_CONTEXT_ASK_MIN_INTERVAL_MS = 3_600_000;
 
 const DISCORD_CONTEXT_ASK_SAFE_RESPONSE_MAX_LENGTH = 1_500;
 const DISCORD_CONTEXT_ASK_UNGROUNDED_ANSWER =
-  "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question.";
+  "Luma could not validate or display the answer with its evidence. No unverified answer is being displayed. Check usage before another attempt; a founder should inspect the answer and rendering diagnostics.";
 const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_ANSWER =
   "Luma cannot answer reliably from the captured evidence.";
 const DISCORD_CONTEXT_ASK_INSUFFICIENT_EVIDENCE_TOO_LONG = [

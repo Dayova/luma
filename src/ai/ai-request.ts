@@ -310,7 +310,7 @@ export function normalizeAiServiceError(error: unknown): AiServiceError {
     );
   return new AiServiceError(
     "unavailable",
-    "The AI provider is unavailable. The request's possible charge remains reserved."
+    "The AI workflow failed for an unconfirmed reason. Check usage for any pending charge before retrying."
   );
 }
 

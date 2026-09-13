@@ -2,37 +2,8 @@ import { AiServiceError } from "../ai/ai-service-error.js";
 import type { MeetingIntelligenceError } from "../domain/model.js";
 import type { AiUsageStatus } from "../ai/ai-usage-budget.js";
 
-/** Fixed operational copy never includes provider exceptions or source content. */
-export function renderAiServiceFailure(error: unknown): string {
-  if (!(error instanceof AiServiceError)) {
-    return "Luma could not answer this request right now. Please try again later. You can check /meeting usage without an AI call.";
-  }
-  switch (error.code) {
-    case "budget-exhausted": {
-      if (error.limitScope === "workflow") {
-        return "This request reached Luma's workflow cost or attempt limit, so no new AI call was made. Please ask a narrower question or have a founder review the pending workflow. /meeting usage remains available.";
-      }
-      const scope = error.limitScope === "day" ? "daily safety" : "shared AI";
-      return `Luma's ${scope} budget cannot cover this request, so no new AI call was made.${error.resetAt ? ` This budget resets ${formatReset(error.resetAt, error.timezone ?? "UTC")}.` : ""} Check /meeting usage; a founder can review the provisional limit.`;
-    }
-    case "provider-quota":
-      return "Luma's AI provider has reached a billing or quota limit. A founder needs to check the provider account; the monthly Luma budget reset may not resolve it. /meeting usage remains available.";
-    case "rate-limited": {
-      const retry = error.retryAfterSeconds;
-      return `Luma's AI provider is temporarily rate limited. ${retry && Number.isFinite(retry) && retry > 0 ? `Try again in ${Math.ceil(retry)} seconds.` : "Please try again shortly."} /meeting usage remains available.`;
-    }
-    case "timeout":
-      return "Luma's AI request timed out, so no answer is available. Its cost may still be pending; check /meeting usage before retrying.";
-    case "unavailable":
-      return "Luma's AI provider is temporarily unavailable. Please try again later. /meeting usage remains available.";
-    case "not-configured":
-      return "Luma's AI provider is not configured for safe paid use (API key or pricing missing). For local testing, load the API key on Luma's local page and start the Discord bot again. No AI call was made. /meeting usage remains available.";
-    case "request-too-large":
-      return "This request exceeds Luma's safe AI request limit. Please ask a narrower question or use a shorter evidence window. /meeting usage remains available.";
-    case "request-indeterminate":
-      return "Luma cannot yet confirm the outcome or cost of this AI request. It has not started a duplicate paid request. A founder can check /meeting usage and reconcile the pending request.";
-  }
-}
+import { renderAiServiceFailure } from "../presentation/ai-failure.js";
+export { renderAiServiceFailure } from "../presentation/ai-failure.js";
 
 export function renderAiUsageStatus(status: AiUsageStatus): string {
   const lines = [

@@ -1,4 +1,4 @@
-import { renderContextVerificationFailure } from "./discord-context-failure.js";
+import { renderContextVerificationFailure } from "../presentation/context-failure.js";
 import {
   startDiscordRequestProgress,
   type DiscordProgressMessage
@@ -114,7 +114,7 @@ export async function createDiscordDirectMessages(input: {
       message.channelId !== event.channelId
     )
       throw new DirectMessageInputError(
-        "This message is no longer available. Send a new DM."
+        "Luma could not verify the original DM or its author. Check that the message is still available before sending a new question."
       );
     return message;
   }
@@ -129,7 +129,7 @@ export async function createDiscordDirectMessages(input: {
           !(await admit(event))
         )
           throw new DirectMessageInputError(
-            "Private conversation access is unavailable."
+            "Luma could not verify access to this private conversation. A founder should check the DM setup before retrying."
           );
         const message = await anchor(event);
         if (message.text !== request.question)
@@ -206,7 +206,9 @@ export async function createDiscordDirectMessages(input: {
           );
         const personId = await admit(event);
         if (!personId)
-          throw new DirectMessageInputError("Private conversation access changed.");
+          throw new DirectMessageInputError(
+            "Luma could not verify current access to this private conversation. A founder should check the DM setup before retrying."
+          );
         const messages: RawConversationMessage[] = human.map((m, ordinal) => ({
           id: m.id,
           ordinal,

@@ -239,7 +239,8 @@ describe("real-AI local mode with deterministic external response clients", () =
       await session.execute(analysisInput);
       mock.fail(new Error("secret-provider-error-body"));
       const failed = await session.execute({ type: "ask", text: "What is decided?" });
-      expect(failed.error).not.toBeNull();
+      expect(failed.error?.message).toContain("does not establish the cause");
+      expect(failed.error?.message).toContain("local usage panel");
       expect(JSON.stringify(failed)).not.toContain("secret-provider-error-body");
       expect(failed.usage.unknownUsd).toBeGreaterThan(0);
       await session.execute({ type: "ask", text: "What is decided?" });

@@ -288,7 +288,7 @@ describe("Discord Context Ask runtime boundary", () => {
     };
 
     expect(renderDiscordContextAskResult(result)).toBe(
-      "Luma could not safely render a grounded answer from the captured evidence. Please ask a narrower question."
+      "Luma could not validate or display the answer with its evidence. No unverified answer is being displayed. Check usage before another attempt; a founder should inspect the answer and rendering diagnostics."
     );
   });
 

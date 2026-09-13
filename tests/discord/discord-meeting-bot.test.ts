@@ -626,7 +626,7 @@ describe("Discord meeting bot", () => {
     await bot.start();
     await expect(transport.execute(command)).resolves.toEqual({
       content:
-        "Luma could not answer this request right now. Please try again later. You can check /meeting usage without an AI call."
+        "Luma could not complete this request, and the cause has not been confirmed. Check the saved result and /meeting usage before retrying; an earlier AI call or action may have completed."
     });
     expect(transport.createdThreads).toHaveLength(0);
     await expect(
@@ -1184,7 +1184,7 @@ describe("Discord meeting bot", () => {
 
     expect(response).toEqual({
       content:
-        "Luma could not answer this request right now. Please try again later. You can check /meeting usage without an AI call.",
+        "Luma could not complete this request, and the cause has not been confirmed. Check the saved result and /meeting usage before retrying; an earlier AI call or action may have completed.",
       idempotencyKey: "discord:message_provider_failure:context-ask:reply"
     });
   });

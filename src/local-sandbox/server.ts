@@ -8,15 +8,23 @@ type Session = {
   close(): Promise<void>;
 };
 
+class LocalRequestError extends Error {}
+
 async function readCommand(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   request.setEncoding("utf8");
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);
     if (Buffer.byteLength(body) > maxBytes)
-      throw new Error("Request exceeds the local input limit");
+      throw new LocalRequestError("Request exceeds the local input limit");
   }
-  return JSON.parse(body) as unknown;
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new LocalRequestError(
+      "The local request is not valid JSON. No command was started."
+    );
+  }
 }
 
 export async function startSandboxServer(options: {
@@ -85,8 +93,11 @@ export async function startSandboxServer(options: {
               : await options.session.execute(input);
         send(200, result);
       } catch (error) {
-        send(400, {
-          error: error instanceof Error ? error.message : "Sandbox operation failed"
+        send(error instanceof LocalRequestError ? 400 : 500, {
+          error:
+            error instanceof LocalRequestError
+              ? error.message
+              : "Luma could not complete the local operation. Its outcome has not been verified. Refresh to inspect saved state and usage before resubmitting."
         });
       } finally {
         busy = false;

@@ -153,3 +153,38 @@ describe("local offline sandbox", () => {
     expect(evaluate).toHaveBeenCalledTimes(1);
   });
 });
+
+it("reports an internal HTTP failure without exposing exceptions or claiming the operation did not happen", async () => {
+  const server = await startSandboxServer({
+    session: {
+      view: () => Promise.reject(new Error("SECRET provider response")),
+      execute: () => Promise.reject(new Error("SECRET partial action")),
+      close: () => Promise.resolve()
+    }
+  });
+  try {
+    for (const endpoint of ["state", "command"]) {
+      const response = await fetch(`${server.origin}/api/${endpoint}`, {
+        method: "POST",
+        headers: { Origin: server.origin, "Content-Type": "application/json" },
+        body: "{}"
+      });
+      expect(response.status).toBe(500);
+      const body = await response.text();
+      expect(body).toContain("outcome has not been verified");
+      expect(body).toContain("saved state and usage");
+      expect(body).not.toMatch(/SECRET|No command was started/);
+    }
+    const invalid = await fetch(`${server.origin}/api/command`, {
+      method: "POST",
+      headers: { Origin: server.origin, "Content-Type": "application/json" },
+      body: '{"SECRET"'
+    });
+    expect(invalid.status).toBe(400);
+    const body = await invalid.text();
+    expect(body).toContain("No command was started");
+    expect(body).not.toContain("SECRET");
+  } finally {
+    await server.close();
+  }
+});

@@ -452,7 +452,7 @@ describe("Discord production channel resolution and delivery", () => {
         "content",
         current
           ? expect.stringContaining("attached luma-answer.txt")
-          : expect.stringContaining("organizational context changed")
+          : expect.stringContaining("verification may have failed")
       );
       if (current) {
         expect(sent).toHaveProperty("files", [
@@ -581,7 +581,7 @@ describe("Discord production channel resolution and delivery", () => {
       else {
         expect(sent).toHaveProperty(
           "content",
-          expect.stringContaining("conversation changed or is no longer readable")
+          expect.stringContaining("could not verify the current conversation")
         );
         expect(sent).not.toHaveProperty(
           "content",
@@ -1066,7 +1066,7 @@ describe("Discord explicit Decision Record entry", () => {
       "private old decision"
     );
     expect(JSON.stringify(candidate.reply.mock.calls)).toContain(
-      "changed or is no longer readable"
+      "verification may have failed"
     );
     await live.disconnect();
   });

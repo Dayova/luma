@@ -1,4 +1,8 @@
-import { renderContextVerificationFailure } from "./discord-context-failure.js";
+import { renderAiServiceFailure } from "../presentation/ai-failure.js";
+import {
+  CONTEXT_VERIFICATION_UNCONFIRMED,
+  renderContextVerificationFailure
+} from "../presentation/context-failure.js";
 import { ContextIntelligenceError } from "../context-intelligence/context-intelligence.js";
 import { discordAnswerDelivery } from "./discord-answer-delivery.js";
 import { startDiscordRequestProgress } from "./discord-request-progress.js";
@@ -338,7 +342,7 @@ export function createDiscordJsTransport(
             error instanceof DiscordDecisionPermissionInputError ||
             error instanceof DiscordDecisionPermissionUnavailableError
               ? error.message
-              : "Luma could not process the command right now. Please try again later.";
+              : renderAiServiceFailure(error);
 
           if (interaction.deferred || interaction.replied) {
             await interaction.editReply({ content });
@@ -876,9 +880,9 @@ async function handleContextAskMention(input: {
     let response: DiscordContextAskResponse | null;
     try {
       response = await input.handler(input.ask);
-    } catch {
+    } catch (error) {
       response = {
-        content: "Luma could not answer this thread right now. Please try again later.",
+        content: renderContextVerificationFailure(error) ?? renderAiServiceFailure(error),
         idempotencyKey: `discord:${input.message.id}:context-ask:reply`
       };
     }
@@ -901,8 +905,7 @@ async function handleContextAskMention(input: {
       } catch {
         // Retain the old result for audit, but do not republish its old claims.
         response = {
-          content:
-            "The conversation changed or is no longer readable. Post a new @Luma question to use its current state.",
+          content: CONTEXT_VERIFICATION_UNCONFIRMED,
           idempotencyKey: response.idempotencyKey
         };
       }
@@ -918,8 +921,7 @@ async function handleContextAskMention(input: {
         console.warn("Luma final context check withheld a reply", { code });
         response = {
           content:
-            renderContextVerificationFailure(error) ??
-            "The conversation or organizational context changed or is no longer readable. Post a new @Luma question to use its current state.",
+            renderContextVerificationFailure(error) ?? CONTEXT_VERIFICATION_UNCONFIRMED,
           idempotencyKey: response.idempotencyKey
         };
       }

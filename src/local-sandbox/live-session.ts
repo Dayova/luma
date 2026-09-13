@@ -1,3 +1,5 @@
+import { renderAiServiceFailure } from "../presentation/ai-failure.js";
+import { renderContextVerificationFailure } from "../presentation/context-failure.js";
 import {
   createLocalIntegrations,
   localIntegrationSchema,
@@ -583,10 +585,17 @@ export async function createLiveSandboxSession(options: {
           cause instanceof LocalInputError || cause instanceof LocalIntegrationError
             ? { code: "input", message: cause.message }
             : cause instanceof AiServiceError
-              ? { code: cause.code, message: cause.message }
+              ? {
+                  code: cause.code,
+                  message: renderAiServiceFailure(cause).replaceAll(
+                    "/meeting usage",
+                    "the local usage panel"
+                  )
+                }
               : {
                   code: "operation-failed",
                   message:
+                    renderContextVerificationFailure(cause) ??
                     "Luma could not complete this operation. Inspect the retained state and usage. An already-attempted question is not sent again automatically."
                 };
       }

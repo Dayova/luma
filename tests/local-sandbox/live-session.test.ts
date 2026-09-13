@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createPgliteDatabase } from "../../src/persistence/db.js";
 import { createLiveSandboxSession } from "../../src/local-sandbox/live-session.js";
+import { createLocalIntegrations } from "../../src/local-sandbox/integrations.js";
 import { createAiUsageBudget } from "../../src/ai/ai-usage-budget.js";
 import type { OpenAIResponseRequest } from "../../src/ai/openai-reasoning-model.js";
 
@@ -304,4 +305,118 @@ describe("real-AI local mode with deterministic external response clients", () =
       await session.close();
     }
   });
+});
+
+it("uses connected sources in local analysis and answers, with a free connection check before AI", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "luma-connected-test-"));
+  const mock = clients();
+  const integrations = createLocalIntegrations({
+    directory,
+    catalogs: ({ env }) =>
+      Promise.resolve(
+        env["LUMA_CONTEXT_LINEAR_READONLY_API_KEY"]
+          ? [
+              {
+                id: "linear:test",
+                search: () =>
+                  Promise.resolve({
+                    sourceIds: ["day173"],
+                    complete: true,
+                    warnings: []
+                  }),
+                read: () =>
+                  Promise.resolve({
+                    id: "day173",
+                    kind: "work-item",
+                    title: "DAY-173",
+                    content: "Application submitted; awaiting confirmation.",
+                    version: "1",
+                    updatedAt: now().toISOString(),
+                    externalReference: {
+                      providerId: "linear",
+                      objectType: "work-item",
+                      externalId: "DAY-173",
+                      url: "https://linear.app/dayova/issue/DAY-173"
+                    },
+                    standing: "current",
+                    authority: "source"
+                  })
+              }
+            ]
+          : []
+      )
+  });
+  const session = await createLiveSandboxSession({
+    database: await createPgliteDatabase(),
+    integrations,
+    now,
+    clients: {
+      reasoning: mock.ports.reasoning,
+      answer: {
+        create: (request) => {
+          const evidence = z
+            .object({
+              organizationalEvidence: z.array(z.object({ evidenceId: z.string() })).min(1)
+            })
+            .parse(JSON.parse(request.input));
+          return Promise.resolve(
+            response({
+              answer: {
+                text: "DAY-173 is awaiting confirmation.",
+                evidenceIds: [evidence.organizationalEvidence[0]!.evidenceId]
+              },
+              facts: [],
+              inferences: [],
+              unresolved: []
+            })
+          );
+        }
+      }
+    }
+  });
+  try {
+    const configured = await session.execute({
+      type: "integration-connect",
+      connection: {
+        provider: "linear",
+        token: "dedicated-test-read-token",
+        teamId: "12345678-1234-4234-8234-123456789abc"
+      }
+    });
+    expect(configured.error).toBeNull();
+    expect(JSON.stringify(configured)).not.toContain("dedicated-test-read-token");
+    const checked = await session.execute({
+      type: "integration-check",
+      provider: "linear",
+      query: "DAY-173"
+    });
+    expect(checked.result).toMatchObject({ aiCalls: 0, sources: [{ title: "DAY-173" }] });
+    expect(checked.usage.requestCount).toBe(0);
+    expect(mock.requests).toHaveLength(0);
+    const analyzed = await session.execute(analysisInput);
+    expect(analyzed.error).toBeNull();
+    expect(analyzed.result).toMatchObject({ analysisStatus: "completed" });
+    const answer = await session.execute({
+      type: "ask",
+      text: "What is the state of DAY-173?"
+    });
+    expect(answer.error).toBeNull();
+    expect(answer.result).toMatchObject({
+      type: "answer",
+      answer: {
+        text: "DAY-173 is awaiting confirmation.",
+        organizationalEvidence: [{ title: "DAY-173" }]
+      }
+    });
+    await session.execute({ type: "integration-remove", provider: "linear" });
+    const unavailable = await session.execute({
+      type: "integration-check",
+      provider: "linear",
+      query: "DAY-173"
+    });
+    expect(unavailable.error?.message).toContain("Configure this provider first");
+  } finally {
+    await session.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

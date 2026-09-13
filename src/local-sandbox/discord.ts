@@ -44,6 +44,7 @@ export function createLocalDiscord(options: {
   directory: string;
   budget: AiUsageBudget;
   readConfig?: () => Promise<NodeJS.ProcessEnv>;
+  integrationEnvironment?: () => NodeJS.ProcessEnv;
   fetch?: typeof fetch;
   startRuntime?: typeof startServer;
 }) {
@@ -63,7 +64,32 @@ export function createLocalDiscord(options: {
     const raw = options.readConfig
       ? await options.readConfig()
       : parseEnv(await readFile(join(options.directory, "discord.env"), "utf8"));
-    return localDiscordEnvironment(raw, options.directory, "");
+    const providerEnv = options.integrationEnvironment?.() ?? {};
+    const allowed = [
+      "LUMA_ORGANIZATIONAL_CONTEXT_ENABLED",
+      "LUMA_CONTEXT_SHARING_POLICY_PATH",
+      "LUMA_CONTEXT_LINEAR_READONLY_API_KEY",
+      "LUMA_CONTEXT_LINEAR_CREDENTIAL_SCOPE_ID",
+      "LUMA_CONTEXT_LINEAR_TEAM_ID",
+      "LUMA_CONTEXT_NOTION_READONLY_API_TOKEN",
+      "LUMA_CONTEXT_NOTION_CREDENTIAL_SCOPE_ID",
+      "LUMA_CONTEXT_NOTION_PAGE_IDS",
+      "LUMA_GITHUB_CODE_READONLY_TOKEN",
+      "LUMA_GITHUB_CODE_CREDENTIAL_SCOPE_ID",
+      "LUMA_GITHUB_CODE_REPOSITORIES",
+      "LINEAR_API_KEY",
+      "LINEAR_TEAM_ID",
+      "NOTION_API_TOKEN",
+      "NOTION_MEETINGS_DATA_SOURCE_ID"
+    ];
+    return {
+      ...Object.fromEntries(
+        allowed
+          .filter((key) => providerEnv[key] !== undefined)
+          .map((key) => [key, providerEnv[key]])
+      ),
+      ...localDiscordEnvironment(raw, options.directory, "")
+    };
   }
   async function verify(env: ReturnType<typeof localDiscordEnvironment>) {
     const get = async (route: string, signal: AbortSignal) => {

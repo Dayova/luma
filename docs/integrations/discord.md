@@ -535,3 +535,12 @@ channel checks run before receipts; later channel updates and DM sends recheck
 access. Pending updates are drained before the final response, and timers stop
 on success, failure, or suppressed delivery. A failed status send never retries
 an ambiguous message or prevents the underlying request from being handled.
+
+### Local provider connections
+
+The real-AI local page can explicitly connect Linear, Notion and GitHub to the
+same production context adapters used by Discord Ask and founder DMs. Its free
+read check shows actual sources before any AI request. Optional separate writer
+credentials enable only the existing approved follow-up execution capabilities.
+See [local provider testing](../operations/local-testing.md#real-linear-notion-and-github-connections).
+Connection changes stop the development bot; restart it to apply them.

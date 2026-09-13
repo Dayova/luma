@@ -123,8 +123,8 @@ This isolated local ledger does not aggregate a future separate production
 instance or another app. Count its usage within the agreed USD 30 total when
 production is enabled; do not run two independent USD 30 budgets. The USD 1
 local allowance is a conservative initial test allocation, not an increase of
-the overall allowance. Discord testing below shares this same budget; Linear and
-Notion write adapters are not composed.
+the overall allowance. Discord testing below shares this same budget. Linear and Notion write adapters
+are available only when explicitly configured and enabled.
 Opening a stored meeting, replaying accepted source Evidence and concluding
 operate on retained state without paid AI; replay does not retry failed analysis.
 
@@ -238,9 +238,9 @@ replaces the earlier single-channel test restriction, which did not reflect Jako
 6. Click **Stop Discord bot** when finished. Closing the tab alone leaves it
    running. `pnpm local:down` stops both pages and the bot cleanly.
 
-The bot can post replies and meeting threads in the verified channels. No Notion,
-Linear, Granola or GitHub connections are loaded; canonical external writes,
-continuous chat collection and voice capture are not enabled. A mentioned question
+The bot can post replies and meeting threads in the verified channels. Explicit
+Linear, Notion and GitHub connections from the local page are also loaded.
+Granola, continuous chat collection and voice capture are not enabled. A mentioned question
 reads its bounded thread through that mention. Stored Discord meeting/evidence
 state lives in `~/.luma/local-ai/discord-store`; its shared AI accounting remains
 in `~/.luma/local-ai/store`. Preserve both stores together for backup/recovery.
@@ -250,3 +250,55 @@ DMs do not require the private channel visibility grant; channel testing does.
 Live AI acceptance still requires an API key. A
 passing offline or programmable-adapter test does not establish successful live
 Discord delivery or real model quality.
+
+## Real Linear, Notion and GitHub connections
+
+On the real-AI page, open **Connect real sources**. This uses the production
+provider catalogs in pasted-meeting analysis, browser questions and the local
+Discord bot; no deployment or hosting purchase is needed.
+
+- **Linear:** enter a dedicated read-only API key and the team's UUID.
+- **Notion:** enter an integration token with read-content capability and the
+  UUIDs of the pages you want to search. Share each selected page with that
+  integration. Page UUIDs come from their Notion URLs; this scope does not
+  automatically grant an entire workspace or every descendant page.
+- **GitHub:** enter a dedicated read-only token scoped to the selected repositories
+  (for example `Dayova/luma`). Grant the read capabilities needed by the existing
+  code and pull-request adapters.
+
+Click **Apply connection**, then **Test read · no AI** with an issue identifier
+such as `DAY-173` or words present in the selected document/repository. A successful
+check shows actual source excerpts. No OpenAI key is needed and no AI call is
+made. Configuring a token alone does not verify access; an empty search is not
+reported as a verified connection. These reads still use the providers' APIs and
+rate limits.
+
+Load the OpenAI key to analyze a conversation or ask a source-backed question.
+For Discord, start the bot after applying connections, then mention it in a
+founder thread or use a founder DM. Browser questions require a selected local
+meeting; Discord can use the actual thread around the mention. Answers include
+retrieved source references. The existing local AI allowance applies unchanged.
+
+Credentials stay in server memory and are cleared when the local service stops.
+Reloading the browser preserves the session. Production `.env` credentials and
+Codex connector credentials are not imported. The local sharing policy contains
+only resource scopes and founder IDs, is owner-readable/writable, and is revoked
+when a connection is removed or the session closes. All four founders are
+recipients of the selected organizational sources; personal DM conversation
+history remains private to its founder.
+
+### Optional real write testing
+
+For Linear, supply a separate write API key for the selected team. For Notion,
+supply a separate write integration token and the meetings **data source UUID**;
+share that data source with the write integration. Then click **Enable configured
+write adapters** and restart Discord. The ordinary read credentials are never
+used as fallback write credentials.
+
+This enables the existing WorkProvider / KnowledgeProvider follow-up execution
+for approved Linear task and Notion meeting-document actions. It changes the real
+workspace. It does not turn every chat question into permission to write, and
+it does not configure the separate structured-work or decision-record databases.
+Changing connection settings stops the bot so it cannot keep using an old token.
+Disable write adapters or remove the connection when finished. No write or AI
+request is made merely by applying these settings.

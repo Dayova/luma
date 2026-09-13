@@ -1,3 +1,10 @@
+import {
+  createLocalIntegrations,
+  localIntegrationSchema,
+  LocalIntegrationError,
+  type LocalIntegrations
+} from "./integrations.js";
+import { createOrganizationalContext } from "../organizational-context/organizational-context.js";
 import { createLocalDiscord } from "./discord.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -30,6 +37,26 @@ const founders = [
   "person_julius"
 ] as const;
 const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("integration-connect"),
+      connection: localIntegrationSchema
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("integration-remove"),
+      provider: z.enum(["linear", "notion", "github"])
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("integration-check"),
+      provider: z.enum(["linear", "notion", "github"]),
+      query: z.string().trim().min(1).max(200)
+    })
+    .strict(),
+  z.object({ type: z.literal("integration-writes"), enabled: z.boolean() }).strict(),
   z
     .object({ type: z.literal("connect"), apiKey: z.string().trim().min(20).max(512) })
     .strict(),
@@ -64,11 +91,12 @@ type MeetingRow = {
 };
 class LocalInputError extends Error {}
 
-/** Owns pasted sources and the optional development Discord runtime; canonical writes stay disabled. */
+/** Owns pasted sources, explicitly connected providers, and the development Discord runtime. */
 export async function createLiveSandboxSession(options: {
   database: LumaDatabase;
   discordDirectory?: string;
   apiKey?: string;
+  integrations?: LocalIntegrations;
   /** Only deterministic tests supply response clients. The launcher always uses native adapters. */
   clients?: {
     reasoning: OpenAIResponseClient;
@@ -93,8 +121,23 @@ export async function createLiveSandboxSession(options: {
     timezone: "Europe/Berlin",
     now
   });
+  const integrations =
+    options.integrations ??
+    (options.discordDirectory
+      ? createLocalIntegrations({ directory: options.discordDirectory })
+      : undefined);
+  const organizationalContext = async () => {
+    const catalogs = (await integrations?.catalogs()) ?? [];
+    return catalogs.length
+      ? createOrganizationalContext({ database, catalogs })
+      : undefined;
+  };
   const discord = options.discordDirectory
-    ? createLocalDiscord({ directory: options.discordDirectory, budget })
+    ? createLocalDiscord({
+        directory: options.discordDirectory,
+        budget,
+        integrationEnvironment: () => integrations?.environment() ?? {}
+      })
     : undefined;
   let apiKey = options.apiKey?.trim() || "";
   delete options.apiKey;
@@ -107,8 +150,16 @@ export async function createLiveSandboxSession(options: {
   let error: { code: string; message: string } | null = null;
   const limits = { maxInputTokens: 50000, maxOutputTokens: 4096, timeoutMs: 60000 };
 
-  const intelligence = () =>
-    createMeetingIntelligence({
+  const intelligence = async () => {
+    const context = await organizationalContext();
+    return createMeetingIntelligence({
+      ...(context
+        ? {
+            organizationalContext: context,
+            contextAudience: () =>
+              Promise.resolve({ workspaceId, personIds: [...founders] })
+          }
+        : {}),
       database,
       now,
       reasoningModel: createOpenAIReasoningModel({
@@ -118,6 +169,7 @@ export async function createLiveSandboxSession(options: {
         ...(options.clients ? { client: options.clients.reasoning } : {})
       })
     });
+  };
   async function meeting() {
     const row = selected
       ? (
@@ -197,6 +249,7 @@ export async function createLiveSandboxSession(options: {
     const row = selected ? await meeting() : undefined;
     return {
       mode: "live-ai",
+      integrations: integrations?.status() ?? { writesEnabled: false, providers: [] },
       discord: discord?.status() ?? null,
       model: DEFAULT_OPENAI_REASONING_MODEL,
       connected: !!apiKey || !!options.clients,
@@ -216,6 +269,7 @@ export async function createLiveSandboxSession(options: {
     async close() {
       apiKey = "";
       await discord?.stop();
+      await integrations?.close();
       await database.close();
     },
     async execute(input: unknown) {
@@ -225,10 +279,34 @@ export async function createLiveSandboxSession(options: {
         const parsed = commandSchema.safeParse(input);
         if (!parsed.success)
           throw new LocalInputError(
-            "Invalid input. Use a key of 20–512 characters, source text up to 12,000 characters, and questions up to 2,000 characters."
+            "Invalid input. Provider connections need a read token and valid resource IDs (Linear team UUID, Notion page UUIDs, or GitHub owner/repo). Use a key of 20–512 characters, source text up to 12,000 characters, and questions up to 2,000 characters."
           );
         const command = parsed.data;
         if (
+          command.type === "integration-connect" ||
+          command.type === "integration-remove" ||
+          command.type === "integration-check" ||
+          command.type === "integration-writes"
+        ) {
+          if (!integrations)
+            throw new LocalInputError(
+              "Provider connections are unavailable in this session."
+            );
+          if (command.type === "integration-check")
+            result = await integrations.check(command.provider, command.query);
+          else {
+            await discord?.stop();
+            if (command.type === "integration-connect")
+              await integrations.configure(command.connection);
+            else if (command.type === "integration-remove")
+              await integrations.remove(command.provider);
+            else integrations.setWrites(command.enabled);
+            result = {
+              message:
+                "Provider settings applied. Start the Discord bot to use them. Credentials stay in memory for this session."
+            };
+          }
+        } else if (
           command.type === "discord-check" ||
           command.type === "discord-start" ||
           command.type === "discord-stop"
@@ -272,7 +350,9 @@ export async function createLiveSandboxSession(options: {
             [row.id, row.title, row.text, row.created_at]
           );
           selected = row.id;
-          result = await intelligence().observe({
+          result = await (
+            await intelligence()
+          ).observe({
             workspace: { workspaceId, timezone: "Europe/Berlin" },
             observations: observations(row)
           });
@@ -363,7 +443,14 @@ export async function createLiveSandboxSession(options: {
               .filter((entry) => accepted.has(entry.id));
             const questionId = createHash("sha256")
               .update(
-                JSON.stringify([row.id, JSON.stringify(humanInstructions), command.text])
+                JSON.stringify([
+                  row.id,
+                  JSON.stringify(humanInstructions),
+                  command.text,
+                  ...(integrations && integrations.revision() !== "none"
+                    ? [integrations.revision()]
+                    : [])
+                ])
               )
               .digest("hex");
             await database.query(
@@ -449,7 +536,9 @@ export async function createLiveSandboxSession(options: {
               messages,
               completeness: { state: "complete" }
             };
+            const linkedContext = await organizationalContext();
             const context = createContextIntelligence({
+              ...(linkedContext ? { organizationalContext: linkedContext } : {}),
               database,
               now,
               ledger: createObservedSourceLedger({ database }),
@@ -475,19 +564,23 @@ export async function createLiveSandboxSession(options: {
                 ...(options.clients ? { client: options.clients.answer } : {})
               })
             });
-            result = await context.inquire({
-              type: "ask",
+            const inquiry = {
+              type: "ask" as const,
               workspaceId,
               inquiryId: questionId,
               question: command.text,
-              subject
-            });
+              subject,
+              audience: { workspaceId, personIds: [...founders] }
+            };
+            const answer = await context.inquire(inquiry);
+            await context.requireCurrent?.(inquiry);
+            result = answer;
           }
         }
       } catch (cause) {
         // Never return provider error bodies, API keys or arbitrary thrown input to the browser.
         error =
-          cause instanceof LocalInputError
+          cause instanceof LocalInputError || cause instanceof LocalIntegrationError
             ? { code: "input", message: cause.message }
             : cause instanceof AiServiceError
               ? { code: cause.code, message: cause.message }

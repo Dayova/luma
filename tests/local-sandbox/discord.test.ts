@@ -146,7 +146,18 @@ describe("local Discord testing", () => {
           budget,
           readConfig: () => Promise.resolve(env),
           fetch: api((1 << 15) | (1 << 19)),
+          integrationEnvironment: () => ({
+            LUMA_CONTEXT_LINEAR_READONLY_API_KEY: "explicit-read-token",
+            LINEAR_API_KEY: "explicit-write-token",
+            LUMA_WORKSPACE_ID: "must-not-override",
+            OPENAI_API_KEY: "must-not-override"
+          }),
           startRuntime: (config, dependencies) => {
+            expect(config?.["LUMA_CONTEXT_LINEAR_READONLY_API_KEY"]).toBe(
+              "explicit-read-token"
+            );
+            expect(config?.["LINEAR_API_KEY"]).toBe("explicit-write-token");
+            expect(config?.["LUMA_WORKSPACE_ID"]).toBe("luma-local-ai");
             expect(config?.["OPENAI_API_KEY"]).toBe(key || undefined);
             expect(config?.["LUMA_DISCORD_CONTEXT_ASK_ENABLED"]).toBe("1");
             expect(dependencies?.aiUsageBudget).toBe(budget);

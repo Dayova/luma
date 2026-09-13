@@ -32,7 +32,7 @@ async function main() {
       maxBodyBytes: 65536
     });
     console.log(
-      `\nLuma with real AI: ${server.origin}\nInitial local allowance: USD 1 per Berlin calendar month; Discord is opt-in; no Linear or Notion writes.\nText and accounting persist in ${directory}. Keys stay in memory.\nNothing is sent to OpenAI until you submit an AI request. Ctrl+C stops the server.\n`
+      `\nLuma with real AI: ${server.origin}\nInitial local allowance: USD 1 per Berlin calendar month; Discord is opt-in; provider connections and approved Linear/Notion writes are opt-in.\nText and accounting persist in ${directory}. Keys stay in memory.\nNothing is sent to OpenAI until you submit an AI request. Ctrl+C stops the server.\n`
     );
     return server;
   } catch (error) {

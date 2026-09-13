@@ -154,8 +154,8 @@ counts between providers. Reverify the candidate rate table before later runs.
 ## Fairness and interpretation
 
 All candidates receive the same serialized Evidence, workspace timezone, language
-policy, instructions and full JSON schema. The schema and instructions are
-shared with the production OpenAI adapter; the comparison adds an identical
+policy, instructions and full JSON schema. The schema shares the production analysis contract, while the frozen instructions
+retain the original comparison baseline. The comparison adds an identical
 JSON-schema instruction for all candidates so DeepSeek's JSON mode receives the
 same contract. This is a comparison prompt, not a byte-identical replay of
 production requests. Expected checks and manual rubrics are never sent.
@@ -163,14 +163,14 @@ production requests. Expected checks and manual rubrics are never sent.
 | Candidate          | API                       | Reasoning                          | Output enforcement                     |
 | ------------------ | ------------------------- | ---------------------------------- | -------------------------------------- |
 | `gpt-5.6-luna`     | OpenAI Responses          | medium                             | strict JSON Schema                     |
-| `claude-sonnet-5`  | Anthropic Messages        | adaptive, medium effort            | JSON Schema                            |
+| `claude-sonnet-5`  | Anthropic Messages        | adaptive, medium effort            | prompt JSON plus local validation      |
 | `gemini-3.8-flash` | Google generateContent    | medium                             | JSON Schema                            |
 | `deepseek-flash`   | DeepSeek Chat Completions | enabled, high (its medium mapping) | JSON object mode plus local validation |
 
-These settings do not establish equal reasoning compute. Anthropic/Google receive
-a native schema with string/array minimum and format constraints omitted for
-compatibility; all original constraints remain in the shared prompt and local
-validator. Invalid output is an error, never silently repaired or retried.
+These settings do not establish equal reasoning compute. Google receives a native schema with string/array minimum and format constraints
+omitted for compatibility. Anthropic can use the same native-schema option, but
+the recorded runs use prompt JSON without a native grammar. All original
+constraints remain in the shared prompt and local validator. Invalid output is an error, never silently repaired or retried.
 
 The 16 cases and their expected predicates are **agent-authored synthetic data,
 not human-labeled evaluation ground truth**. They cover commitments, explicit

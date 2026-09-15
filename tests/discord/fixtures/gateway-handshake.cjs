@@ -8,12 +8,14 @@ const { WebSocketShard, DefaultWebSocketManagerOptions } =
 
 (async () => {
   const sockets = new Set();
+  let connectionAttempts = 0;
   let upgraded;
   const upgrade = new Promise((resolve) => {
     upgraded = resolve;
   });
   const server = createServer();
   server.on("connection", (socket) => {
+    connectionAttempts += 1;
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.on("end", () => socket.destroy());
@@ -42,7 +44,8 @@ const { WebSocketShard, DefaultWebSocketManagerOptions } =
   void shard.connect().catch(() => {});
   await upgrade;
   await shard.destroy();
-  await sleep(200);
+  await sleep(800);
+  if (connectionAttempts !== 1) throw new Error("Stopped Gateway connected again");
   if (sockets.size) throw new Error("Retired connecting socket is still open");
   process.stdout.write("retired-handshake-closed\n");
   process.exit(0);

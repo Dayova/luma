@@ -42,6 +42,9 @@ vi.mock("discord.js", async (importOriginal) => {
         sdk.clientOptions(options);
         sdk.emit = this.emit.bind(this);
       }
+      isReady(): boolean {
+        return true;
+      }
       login(): Promise<void> {
         queueMicrotask(() => this.emit(original.Events.ClientReady));
         return Promise.resolve();
@@ -134,6 +137,37 @@ function mention() {
 }
 
 describe("Discord production channel resolution and delivery", () => {
+  it("keeps a disconnected shard unavailable until every failed shard recovers", async () => {
+    const live = transport();
+    await live.connect(() => Promise.resolve({ content: "ok" }));
+    sdk.emit(Events.ShardError, new Error("Opening handshake has timed out"), 0);
+    sdk.emit(Events.ShardDisconnect, { code: 4000 }, 1);
+    expect(live.gatewayConnected?.()).toBe(false);
+    sdk.emit(Events.ShardResume, 0, 0);
+    expect(live.gatewayConnected?.()).toBe(false);
+    sdk.emit(Events.ShardReady, 1, new Set());
+    expect(live.gatewayConnected?.()).toBe(true);
+    sdk.emit(Events.ShardReconnecting, 0);
+    expect(live.gatewayConnected?.()).toBe(false);
+    sdk.emit(Events.ShardReady, 0, new Set());
+    expect(live.gatewayConnected?.()).toBe(true);
+    await live.disconnect();
+  });
+
+  it("survives a Gateway handshake error and reports recovery without restarting the app", async () => {
+    const live = transport();
+    await live.connect(() => Promise.resolve({ content: "ok" }));
+    expect(live.gatewayConnected?.()).toBe(true);
+    expect(() =>
+      sdk.emit(Events.Error, new Error("Opening handshake has timed out"))
+    ).not.toThrow();
+    expect(live.gatewayConnected?.()).toBe(false);
+    sdk.emit(Events.ShardResume, 0, 0);
+    expect(live.gatewayConnected?.()).toBe(true);
+    await live.disconnect();
+    expect(live.gatewayConnected?.()).toBe(false);
+  });
+
   it.each(["command", "context-ask"] as const)(
     "drains final source proof and delivery for an admitted %s before disconnecting",
     async (entrypoint) => {

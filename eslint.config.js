@@ -21,6 +21,18 @@ export default tseslint.config(
     }
   },
   {
+    ...tseslint.configs.disableTypeChecked,
+    files: ["tests/discord/fixtures/gateway-handshake.cjs"],
+    languageOptions: {
+      parserOptions: { project: false },
+      globals: { require: "readonly", process: "readonly", console: "readonly" }
+    },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      "@typescript-eslint/no-require-imports": "off"
+    }
+  },
+  {
     ignores: ["dist/**", "coverage/**", ".agents/**", "eslint.config.js"]
   }
 );

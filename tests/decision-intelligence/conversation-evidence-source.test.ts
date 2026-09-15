@@ -569,7 +569,7 @@ it("withdraws current execution proofs and historical source admission after ret
   const original = await f.source.capture(f.request);
   await f.source.requireCurrent(original);
   expect(
-    await f.source.authorizeRetained!({ source: original, audience: original.audience })
+    await f.source.authorizeRetained({ source: original, audience: original.audience })
   ).toBe(true);
   await f.lifecycle.observe({
     kind: "excluded",
@@ -579,7 +579,7 @@ it("withdraws current execution proofs and historical source admission after ret
   });
   await expect(f.source.requireCurrent(original)).rejects.toThrow();
   expect(
-    await f.source.authorizeRetained!({ source: original, audience: original.audience })
+    await f.source.authorizeRetained({ source: original, audience: original.audience })
   ).toBe(false);
   await expect(f.source.capture(f.request)).rejects.toThrow();
 });

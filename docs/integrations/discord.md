@@ -374,7 +374,8 @@ read-only Ask; explicit mutation instructions retain their leading bot-user ment
 channels outside the reviewed scope are ignored without capture. DMs use
 the separate founder-only DM interface.
 
-The snapshot reader does not retain continuous Discord edit/delete events. New
+The production transport retains observed message lifecycle events for threads
+previously admitted through a configured conversation capability (see below). New
 questions read current history; repeated deliveries reuse a stored answer only
 after rereading its exact boundary and current reading permission. The final
 Discord send checks this again. Changed, removed, or unreadable source produces
@@ -554,3 +555,50 @@ answers, concrete errors, and substantive output remain. Slash-command status
 is ephemeral and is replaced by the final result. If Discord refuses deletion,
 Luma attempts to reduce the receipt to “Bearbeitung beendet.” A Discord outage
 can prevent cleanup; no unrelated or Human message is targeted.
+
+### Retained conversation lifecycle
+
+The production server composes the bounded thread reader with a durable,
+provider-neutral lifecycle journal. A successful scoped capture first admits a
+thread; it does not discover or ingest other threads automatically. From then on,
+Gateway creates and edits retain bounded founder text when the current thread
+reader audience is proven, while positive individual/bulk deletes retain
+content-free tombstones. Partial edits retain unknown text; neither a failed REST
+fetch nor an absent message is a deletion. Bot output and poll-only metadata do
+not become human text revisions. Normal fresh poll verification remains in place.
+
+Events carry provider message/channel identity, provider edit time where supplied,
+observed time, immutable payload, and an idempotency key derived from the Gateway
+session/shard/dispatch sequence. Source rereads also preserve distinct observed
+text revisions. Repeated deliveries do not append duplicate events. No raw Gateway
+packet, credential, attachment, private thread, or unknown author's text is saved
+by this journal. Earlier authorized snapshots remain in the full store.
+
+Every source proof binds the message lifecycle revisions and the latest known
+coverage gap. Edits (including edit-and-revert), positive deletes, exclusions and
+restart/disconnect gaps invalidate old Ask, decision, consultation and structured
+work proofs. Current-source checks run before delivery and execution as before.
+Concurrent changes cause up to three read-only capture attempts, never a second
+paid interpretation. Explicit thread exclusion is durable; a configured source
+parent removed at startup is also excluded durably. Re-adding a channel to an
+allowlist does not silently reinstate excluded retained material. There is no
+automatic re-inclusion command in this release.
+
+Gateway disconnect/reconnect and process startup are recorded as unknown coverage,
+not fabricated deletion or complete event recovery. Clean stop drains admitted
+journal writes before closing the store. A crash can lose an event that had not
+committed, and REST cannot reconstruct intermediate offline edits. A fresh bounded
+question may use freshly checked current messages, with a history-gap warning;
+old proof replay cannot cross the gap. Journal failure blocks source use until the
+store is checked and the runtime restarts. This is an observed history, not a
+complete Discord audit archive or retroactive collection of all old messages.
+
+This thread capability uses the existing Guilds, Guild Members, Guild Messages and
+Message Content intents. Raw dispatch handling covers uncached edits/deletes
+without broadening permissions or adding voice capture. DMs still use their separate
+one-to-one current-source verification and are not subscribed by this guild-thread
+journal. Production activation still requires the separate LUM-58/LUM-59 permissions
+proofs and pilot acceptance; merging LUM-57 alone does not activate collection.
+
+Protocol references: [Discord Gateway sequencing and resume](https://docs.discord.com/developers/events/gateway)
+and [message update/delete dispatches](https://docs.discord.com/developers/events/gateway-events).

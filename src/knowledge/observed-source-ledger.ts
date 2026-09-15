@@ -130,6 +130,8 @@ export type RawConversationMessage =
  * authority to infer that an absent message or conversation was deleted.
  */
 export type RawConversationSnapshot = {
+  /** Durable observed-change proof; history before/between observations is not complete. */
+  lifecycle?: { revision: string; coverage: "observed-only"; gapObserved: boolean };
   schemaVersion: 1;
   conversation: {
     conversationObjectId: string;
@@ -1704,6 +1706,11 @@ function isRawConversationSnapshot(value: unknown): value is RawConversationSnap
     !Array.isArray(value["messages"]) ||
     !Array.from(value["messages"]).every(isRawConversationMessage) ||
     !isRawConversationCompleteness(value["completeness"]) ||
+    (value["lifecycle"] !== undefined &&
+      (!isRecord(value["lifecycle"]) ||
+        !isNonBlankString(value["lifecycle"]["revision"]) ||
+        value["lifecycle"]["coverage"] !== "observed-only" ||
+        typeof value["lifecycle"]["gapObserved"] !== "boolean")) ||
     (value["excludedMessages"] !== undefined &&
       (!Array.isArray(value["excludedMessages"]) ||
         !value["excludedMessages"].every(

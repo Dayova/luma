@@ -1,3 +1,5 @@
+import type { RetainedConversationLifecycle } from "../knowledge/retained-conversation-lifecycle.js";
+import { createDiscordRetainedLifecycle } from "./discord-retained-lifecycle.js";
 import { renderAiServiceFailure } from "../presentation/ai-failure.js";
 import {
   CONTEXT_VERIFICATION_UNCONFIRMED,
@@ -95,6 +97,7 @@ import type {
 const DISCORD_MESSAGE_MAX_LENGTH = 2_000;
 
 export type DiscordJsTransportConfig = {
+  retainedLifecycle?: RetainedConversationLifecycle;
   token: string;
   clientId: string;
   guildId: string;
@@ -189,6 +192,17 @@ export function createDiscordJsTransport(
     authorizeHumanReader: config.authorizeHumanReader
   });
   const resolveChannel = liveAudience.resolveChannel;
+  const retained = config.retainedLifecycle
+    ? createDiscordRetainedLifecycle({
+        client,
+        lifecycle: config.retainedLifecycle,
+        guildId: config.guildId,
+        requireChannel: async (channelId) => {
+          await channelScope.requireChannel(channelId, "public-thread");
+        },
+        authorize: config.authorizeHumanReader
+      })
+    : undefined;
   const channelScope = createDiscordChannelScope({
     guildId: config.guildId,
     allowedParentChannelIds: config.allowedParentChannelIds,
@@ -225,7 +239,11 @@ export function createDiscordJsTransport(
         // Startup and every REST request share this signal. In the absence of
         // admitted work it is aborted synchronously to cancel startup promptly.
         lifetime.abort();
-        await client.destroy();
+        try {
+          await retained?.stop();
+        } finally {
+          await client.destroy();
+        }
       })();
     }
     return disconnecting ?? Promise.resolve();
@@ -307,7 +325,9 @@ export function createDiscordJsTransport(
               throw new Error(
                 "The requested Conversation capture purpose is not enabled"
               );
-            const captured = await source.capture(input);
+            const captured = retained
+              ? await retained.capture(source, input)
+              : await source.capture(input);
             // Check once around the bounded capture, not once per message. No
             // captured content escapes if the channel gained another reader.
             await channelScope.requireChannel(
@@ -524,6 +544,7 @@ export function createDiscordJsTransport(
         }
       : {}),
     async connect(handler, contextHandler, startupSignal) {
+      await retained?.start();
       startupSignal?.throwIfAborted();
       assertConnectedLifetime();
       commandHandler = handler;
@@ -679,7 +700,8 @@ export function createDiscordJsTransport(
 
 export function createDiscordJsTransportFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-  contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env)
+  contextAsk: DiscordContextAskConfig | undefined = discordContextAskConfigFromEnv(env),
+  retainedLifecycle?: RetainedConversationLifecycle
 ): DiscordJsTransport {
   const token = nonBlankEnvValue(env["DISCORD_TOKEN"]);
   const clientId = nonBlankEnvValue(env["DISCORD_CLIENT_ID"]);
@@ -699,6 +721,7 @@ export function createDiscordJsTransportFromEnv(
     authorizedPersonIds: dayovaFounderPersonIds
   });
   return createDiscordJsTransport({
+    ...(retainedLifecycle ? { retainedLifecycle } : {}),
     granola: env["LUMA_GRANOLA_OAUTH_ENABLED"] === "1",
     directMessages: discordDirectMessagesEnabled(env),
     authorizeHumanReader: async (providerUserId) =>

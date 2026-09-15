@@ -24,6 +24,7 @@ const sdk = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   clientOptions: vi.fn<(options: Discord.ClientOptions) => void>(),
+  destroy: vi.fn(),
   register: vi.fn<(route: string, options: unknown) => void>(),
   fetch: vi.fn<(id: string, options?: unknown) => Promise<unknown>>()
 }));
@@ -47,6 +48,7 @@ vi.mock("discord.js", async (importOriginal) => {
         return Promise.resolve();
       }
       destroy(): Promise<void> {
+        sdk.destroy();
         return Promise.resolve();
       }
     },
@@ -1297,3 +1299,22 @@ it.each(["available", "deleted", "foreign-parent", "bot-starter", "stalled-autho
   },
   10_000
 );
+
+it("destroys the Gateway even when the retained lifecycle cannot drain durably", async () => {
+  const live = createDiscordJsTransport({
+    token: "test",
+    clientId: "application",
+    guildId: "guild",
+    allowedParentChannelIds: ["parent"],
+    authorizeHumanReader: () => Promise.resolve(true),
+    retainedLifecycle: {
+      gap: () => Promise.reject(new Error("store write failed")),
+      observe: () => Promise.resolve(),
+      tracks: () => Promise.resolve(false),
+      capture: (source, request) => source.capture(request)
+    }
+  });
+  await expect(live.connect(() => Promise.resolve({ content: "ok" }))).rejects.toThrow();
+  await expect(live.disconnect()).rejects.toThrow();
+  expect(sdk.destroy).toHaveBeenCalledOnce();
+});

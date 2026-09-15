@@ -1,3 +1,4 @@
+import { createRetainedConversationLifecycle } from "../../src/knowledge/retained-conversation-lifecycle.js";
 import { createContextIntelligence } from "../../src/context-intelligence/context-intelligence.js";
 import { createProcessedConversationSources } from "../../src/context-intelligence/processed-conversation-source.js";
 import { createMeetingIntelligence } from "../../src/meeting-intelligence/meeting-intelligence.js";
@@ -24,7 +25,7 @@ afterEach(async () => {
   await database.close();
 });
 
-function fixture() {
+function fixture(retainLifecycle = false) {
   const current = captureFixture();
   const anchor = current.snapshot.messages[0]!;
   if (anchor.state !== "available") throw new Error("fixture");
@@ -61,10 +62,18 @@ function fixture() {
   );
   const ledger = createObservedSourceLedger({ database });
   const processedSources = createProcessedConversationSources({ database, ledger });
+  const lifecycle = createRetainedConversationLifecycle({
+    database,
+    workspaceId: workspace.workspaceId,
+    providerId: "discord",
+    allowedParentIds: ["100000000000000001"]
+  });
   const source = createConversationDecisionEvidenceSource({
     processedSources,
     workspaceId: workspace.workspaceId,
-    conversationEvidenceSource: { capture },
+    conversationEvidenceSource: retainLifecycle
+      ? { capture: (request) => lifecycle.capture({ capture }, request) }
+      : { capture },
     ledger,
     accessPolicy,
     recipientPersonIds: dayovaFounderPersonIds
@@ -80,6 +89,7 @@ function fixture() {
     }
   };
   return {
+    lifecycle,
     source,
     ledger,
     accessPolicy,
@@ -552,4 +562,24 @@ describe("processed original Discord Conversation source", () => {
     expect(detect).toHaveBeenCalledTimes(1);
     expect(f.answer).toHaveBeenCalledTimes(2);
   });
+});
+
+it("withdraws current execution proofs and historical source admission after retained conversation exclusion", async () => {
+  const f = fixture(true);
+  const original = await f.source.capture(f.request);
+  await f.source.requireCurrent(original);
+  expect(
+    await f.source.authorizeRetained({ source: original, audience: original.audience })
+  ).toBe(true);
+  await f.lifecycle.observe({
+    kind: "excluded",
+    eventId: "exclude",
+    observedAt: "2026-09-15T14:00:00.000Z",
+    conversationId: subject.conversationObjectId
+  });
+  await expect(f.source.requireCurrent(original)).rejects.toThrow();
+  expect(
+    await f.source.authorizeRetained({ source: original, audience: original.audience })
+  ).toBe(false);
+  await expect(f.source.capture(f.request)).rejects.toThrow();
 });

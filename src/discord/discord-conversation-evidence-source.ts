@@ -97,8 +97,8 @@ export class DiscordConversationEvidenceError extends Error {
 
 /**
  * Captures a bounded current Discord thread ending at the triggering mention.
- * It deliberately does not infer edits or deletions after capture; that needs
- * a separate retained-event slice.
+ * It never infers edits or deletions from absence. The production transport
+ * composes this reader with the durable retained-event lifecycle.
  */
 export function createDiscordConversationEvidenceSource(
   input: CreateDiscordConversationEvidenceSourceInput

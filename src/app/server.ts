@@ -1,3 +1,5 @@
+import { discordStructuredWorkConfigFromEnv } from "../discord/discord-structured-work-runtime.js";
+import { createRetainedConversationLifecycle } from "../knowledge/retained-conversation-lifecycle.js";
 import {
   createDiscordDirectMessages,
   discordDirectMessagesEnabled
@@ -334,7 +336,23 @@ export async function startServer(
     });
     const workItemProviderId =
       workProvider?.providerId ?? nativeReviewConfig?.workItemProviderId ?? "linear";
-    const discordTransport = createDiscordTransport(env, discordContextAskConfig);
+    const discordTransport = createDiscordTransport(
+      env,
+      discordContextAskConfig,
+      createRetainedConversationLifecycle({
+        database,
+        workspaceId,
+        providerId: "discord",
+        allowedParentIds: [
+          ...new Set([
+            ...(discordContextAskConfig?.parentChannelIds ?? []),
+            ...(consultationConfig?.capture.parentChannelIds ?? []),
+            ...(decisionRecordConfig?.parentChannelIds ?? []),
+            ...(discordStructuredWorkConfigFromEnv(env)?.parentChannelIds ?? [])
+          ])
+        ]
+      })
+    );
     let transportOwnedByBot = false;
     startupCleanup.push(() =>
       transportOwnedByBot ? Promise.resolve() : discordTransport.disconnect()

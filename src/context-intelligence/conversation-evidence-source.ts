@@ -38,7 +38,7 @@ export interface ConversationEvidenceSource {
   capture(input: CaptureConversationEvidenceInput): Promise<CapturedConversationEvidence>;
 }
 
-/** Read-only revalidation; it never mutates retained evidence or runs an Answerer. */
+/** No provider mutation or Answerer; adapters may journal their current observations. */
 export async function requireCurrentConversationEvidence(
   source: ConversationEvidenceSource,
   proof: ConversationEvidenceProof

@@ -271,7 +271,7 @@ async function inquire(
         operation
       )
   );
-  result.warnings.push(...assistantOutputWarning(immutableRecorded.snapshot));
+  result.warnings.push(...sourceObservationWarnings(immutableRecorded.snapshot));
 
   let deliverable = true;
   try {
@@ -850,7 +850,7 @@ function storedContextInquiryMatches(
         expectedEvidence,
         recorded.snapshot
       ),
-      assistantOutputWarning(recorded.snapshot)
+      sourceObservationWarnings(recorded.snapshot)
     );
   }
 
@@ -863,7 +863,7 @@ function storedContextInquiryMatches(
         expectedEvidence,
         "The captured thread has no currently available message text, so Luma cannot answer reliably."
       ),
-      assistantOutputWarning(recorded.snapshot)
+      sourceObservationWarnings(recorded.snapshot)
     );
   }
 
@@ -877,7 +877,7 @@ function storedContextInquiryMatches(
     sameContextWarnings(result.warnings, [
       ...deletedEvidenceWarning(expectedEvidence),
       ...retrievalWarnings(result.organizationalContext),
-      ...assistantOutputWarning(recorded.snapshot)
+      ...sourceObservationWarnings(recorded.snapshot)
     ]) &&
     result.modelMetadata !== undefined
   );
@@ -1213,18 +1213,23 @@ function insufficientEvidenceResult(
   };
 }
 
-function assistantOutputWarning(
+function sourceObservationWarnings(
   snapshot: RawConversationSnapshot
 ): ContextInquiryWarning[] {
+  const warnings: ContextInquiryWarning[] = [];
   const count = snapshot.excludedMessages?.length ?? 0;
-  return count === 0
-    ? []
-    : [
-        {
-          code: "conversation-assistant-output-excluded",
-          message: `${count} prior Luma text message(s) were excluded from Human Evidence.`
-        }
-      ];
+  if (count)
+    warnings.push({
+      code: "conversation-assistant-output-excluded",
+      message: `${count} prior Luma text message(s) were excluded from Human Evidence.`
+    });
+  if (snapshot.lifecycle?.gapObserved)
+    warnings.push({
+      code: "conversation-history-gap",
+      message:
+        "Current messages were checked, but Luma may have missed earlier edits or deletions while disconnected. This is not a complete change history."
+    });
+  return warnings;
 }
 
 function deletedEvidenceWarning(evidence: ContextEvidence[]): ContextInquiryWarning[] {
@@ -1665,6 +1670,7 @@ function isContextInquiryWarning(value: unknown): value is ContextInquiryWarning
     (value["code"] === "conversation-boundary-incomplete" ||
       value["code"] === "conversation-evidence-deleted" ||
       value["code"] === "conversation-assistant-output-excluded" ||
+      value["code"] === "conversation-history-gap" ||
       value["code"] === "context-answer-unavailable" ||
       value["code"] === "organizational-context-partial") &&
     isNonBlankString(value["message"])

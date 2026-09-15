@@ -1,3 +1,4 @@
+import { migrateConversationLifecycle } from "../knowledge/retained-conversation-lifecycle.js";
 import { migrateConversationConsultations } from "../context-intelligence/consultation-persistence.js";
 import { migrateDecisionIntelligence } from "../decision-intelligence/persistence.js";
 import { migrateDecisionAuthority } from "../decision-intelligence/authority-persistence.js";
@@ -30,6 +31,7 @@ export async function createPgliteDatabase(dataDir?: string): Promise<LumaDataba
 }
 
 export async function runMigrations(database: LumaDatabase): Promise<void> {
+  await migrateConversationLifecycle(database);
   await database.exec(`
     CREATE TABLE IF NOT EXISTS native_review_instructions (
       workspace_id TEXT NOT NULL,

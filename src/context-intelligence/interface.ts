@@ -93,6 +93,7 @@ export type ContextInquiryWarning = {
     | "conversation-boundary-incomplete"
     | "conversation-evidence-deleted"
     | "conversation-assistant-output-excluded"
+    | "conversation-history-gap"
     | "organizational-context-partial"
     | "context-answer-unavailable";
   message: string;

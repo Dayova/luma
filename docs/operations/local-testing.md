@@ -315,3 +315,25 @@ answers, concrete errors, and substantive output remain. Slash-command status
 is ephemeral and is replaced by the final result. If Discord refuses deletion,
 Luma attempts to reduce the receipt to “Bearbeitung beendet.” A Discord outage
 can prevent cleanup; no unrelated or Human message is targeted.
+
+## Discord connection failures
+
+The page and Discord connection have separate lifetimes. Gateway client and shard
+errors mark the bot disconnected while the SDK attempts recovery. A successful
+ready/resume event restores connected status; an unrecoverable disconnect requires
+stopping and starting the bot. A connected indicator is not proof that a provider
+request succeeded.
+
+The locked `@discordjs/ws@1.2.3` dependency has a narrow pnpm patch: destroying a
+connecting socket cancels its handshake and retains a terminal error handler.
+Without this, a later handshake timeout can become an unhandled socket error and
+terminate the local page. Keep the patch during installs; the child-process
+Gateway regression must pass before removing it or upgrading the dependency.
+It uses an actual local stalled WebSocket upgrade without Discord credentials.
+
+If an older process crashed, do not delete its store ownership directories or reset
+its AI allowance. Fence the service, preserve complete original stores and leases,
+recover private copies, and review pending accounting and external execution
+records using the [backup and restore procedure](backup-restore.md). Only promote
+reviewed, cleanly closed copies. In-memory credentials are lost on process exit;
+reload them on the local page after recovery.

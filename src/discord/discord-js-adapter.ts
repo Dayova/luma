@@ -200,6 +200,32 @@ export function createDiscordJsTransport(
     | ((ask: DiscordContextAskMention) => Promise<DiscordContextAskResponse | null>)
     | null = null;
   let disconnected = false;
+  let gatewayError = false;
+  const unavailableShards = new Set<number>();
+  client.on(Events.Error, () => {
+    gatewayError = true;
+    console.warn("Luma Discord Gateway error; connection is unavailable");
+  });
+  client.on(Events.ShardError, (_error, shardId) => {
+    unavailableShards.add(shardId);
+    console.warn("Luma Discord Gateway shard error; waiting for reconnection");
+  });
+  client.on(Events.ShardDisconnect, (_event, shardId) => {
+    unavailableShards.add(shardId);
+  });
+  client.on(Events.ShardReconnecting, (shardId) => {
+    unavailableShards.add(shardId);
+  });
+  const shardRecovered = (shardId: number) => {
+    unavailableShards.delete(shardId);
+    gatewayError = false;
+  };
+  client.on(Events.ShardReady, shardRecovered);
+  client.on(Events.ShardResume, shardRecovered);
+  client.on(Events.ClientReady, () => {
+    gatewayError = false;
+    unavailableShards.clear();
+  });
   let disconnecting: Promise<void> | undefined;
   const admittedDeliveries = new Set<Promise<void>>();
   function trackDelivery(operation: Promise<void>): void {
@@ -483,7 +509,8 @@ export function createDiscordJsTransport(
   });
 
   return {
-    gatewayConnected: () => !disconnected && client.isReady(),
+    gatewayConnected: () =>
+      !disconnected && !gatewayError && unavailableShards.size === 0 && client.isReady(),
     ...(directMessages ? { directMessages: directMessages.port } : {}),
     ...(config.consultations
       ? {

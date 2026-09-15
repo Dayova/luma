@@ -1,0 +1,68 @@
+diff --git a/dist/defaultWorker.js b/dist/defaultWorker.js
+index 306d691077f81e96bf977ed13aa1a962e13e5d0c..0f7c162fc945f818bac304e652b596d269310c0d 100644
+--- a/dist/defaultWorker.js
++++ b/dist/defaultWorker.js
+@@ -513,7 +513,11 @@ var WebSocketShard = class extends import_async_event_emitter.AsyncEventEmitter
+         await promise;
+         this.emit("closed" /* Closed */, { code: options.code });
+       }
+-      this.connection.onerror = null;
++      // A retired CONNECTING socket can still emit an asynchronous handshake
++      // error. Keep a terminal handler until it closes, and cancel its request.
++      this.connection.onerror = () => {};
++      if (this.connection.readyState === 0) this.connection.close();
++      this.connection = null;
+     } else {
+       this.debug(["Destroying a shard that has no connection; please open an issue on GitHub"]);
+     }
+diff --git a/dist/defaultWorker.mjs b/dist/defaultWorker.mjs
+index 1302a02537062b489b0be156eccb60a960f015c5..cd392efd1c3c5fc5dec7134cc8a3392525d4502c 100644
+--- a/dist/defaultWorker.mjs
++++ b/dist/defaultWorker.mjs
+@@ -495,7 +495,11 @@ var WebSocketShard = class extends AsyncEventEmitter {
+         await promise;
+         this.emit("closed" /* Closed */, { code: options.code });
+       }
+-      this.connection.onerror = null;
++      // A retired CONNECTING socket can still emit an asynchronous handshake
++      // error. Keep a terminal handler until it closes, and cancel its request.
++      this.connection.onerror = () => {};
++      if (this.connection.readyState === 0) this.connection.close();
++      this.connection = null;
+     } else {
+       this.debug(["Destroying a shard that has no connection; please open an issue on GitHub"]);
+     }
+diff --git a/dist/index.js b/dist/index.js
+index 106b2ec450a248cd5bd7c36c038215145438eade..8abb7a3e41d5ea7603c6ea8e58fe2f02809aaaec 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -752,7 +752,11 @@ var WebSocketShard = class extends import_async_event_emitter.AsyncEventEmitter
+         await promise;
+         this.emit("closed" /* Closed */, { code: options.code });
+       }
+-      this.connection.onerror = null;
++      // A retired CONNECTING socket can still emit an asynchronous handshake
++      // error. Keep a terminal handler until it closes, and cancel its request.
++      this.connection.onerror = () => {};
++      if (this.connection.readyState === 0) this.connection.close();
++      this.connection = null;
+     } else {
+       this.debug(["Destroying a shard that has no connection; please open an issue on GitHub"]);
+     }
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 0ebc06d477ac54303c7542261cc5bcc9a9537519..37ba9b3cfa56cdf06c43666e6eff8eaa8bc0f684 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -713,7 +713,11 @@ var WebSocketShard = class extends AsyncEventEmitter {
+         await promise;
+         this.emit("closed" /* Closed */, { code: options.code });
+       }
+-      this.connection.onerror = null;
++      // A retired CONNECTING socket can still emit an asynchronous handshake
++      // error. Keep a terminal handler until it closes, and cancel its request.
++      this.connection.onerror = () => {};
++      if (this.connection.readyState === 0) this.connection.close();
++      this.connection = null;
+     } else {
+       this.debug(["Destroying a shard that has no connection; please open an issue on GitHub"]);
+     }

@@ -2,7 +2,7 @@
  * The single production default for Luma's current OpenAI reasoning
  * capabilities. Capability-specific routing is a separate product decision.
  */
-export const DEFAULT_OPENAI_REASONING_MODEL = "gpt-5.6-luna";
+export const DEFAULT_OPENAI_REASONING_MODEL = "gpt-6-luna";
 
 /**
  * Resolves the backwards-compatible environment override once at application

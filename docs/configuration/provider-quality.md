@@ -87,6 +87,32 @@ and per-row request hashes bind the exact instruction to its saved outputs.
 Omitting the field preserves the original prompt and historical hashes. No additional API keys are needed for models accessible under the existing
 four provider credentials.
 
+For the GPT-6 Luna release, use the committed
+`evals/models/openai-luna-generation-comparison.json` as the two-candidate
+manifest. It freezes the incumbent and challenger at their verified Standard
+short-context rates. The paired run and internal rollout decision are documented
+in [the evaluation](../evaluations/gpt6-luna-2026-09-25.md). First run an
+offline preflight, then a small paired live smoke test with a dedicated test
+credential and a spending ceiling. A four-request smoke test checks API access
+and output compatibility; it does not establish model quality. The full 24-case
+comparison requires 48 requests for one repetition. For this four-founder
+internal tool, the owner chose GPT-6 Luna after the paired run showed no new
+automated failure and materially lower estimated cost. Human feedback and the
+shared correctness defect remain important during use. Runtime admission now
+prices GPT-6 Luna in the durable budget ledger; unpriced models still fail closed.
+
+[GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) is a
+separate candidate for narrow, difficult workflows only: its published Standard
+text rates are $2/M input and $10/M output, twenty times GPT-6 Luna's per-token
+rates. The existing cross-provider baseline remains useful for catching
+regressions; future model changes should show a practical benefit under the
+provisional $30/month allowance.
+
+```bash
+pnpm eval:quality --models=evals/models/openai-luna-generation-comparison.json
+pnpm eval:quality --live --models=evals/models/openai-luna-generation-comparison.json --max-requests=4 --repeats=1 --seed=53
+```
+
 ```bash
 pnpm eval:quality --models=.luma/quality/models.json
 pnpm eval:quality --live --models=.luma/quality/models.json --max-requests=144 --repeats=3 --seed=53

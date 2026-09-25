@@ -1,0 +1,20 @@
+[
+  {
+    "label": "openai-gpt-5-6-luna-incumbent",
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "inputRate": 0.2,
+    "outputRate": 1.2,
+    "pricing": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+    "pricingVerifiedAt": "2026-09-25"
+  },
+  {
+    "label": "openai-gpt-6-luna-challenger",
+    "provider": "openai",
+    "model": "gpt-6-luna",
+    "inputRate": 0.1,
+    "outputRate": 0.5,
+    "pricing": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+    "pricingVerifiedAt": "2026-09-25"
+  }
+]

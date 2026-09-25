@@ -56,7 +56,7 @@ function fixture() {
   };
   const response = (): AiResponse => ({
     outputText: JSON.stringify(wire),
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     serviceTier: "default",
     status: "completed",
     providerResponseId: "resp_structured",
@@ -322,7 +322,7 @@ describe("production structured-work interpreter and shared budget", () => {
               id: "resp_native_structured",
               object: "response",
               created_at: 1,
-              model: "gpt-5.6-luna",
+              model: "gpt-6-luna",
               status: "completed",
               service_tier: "default",
               output: [

@@ -3,13 +3,41 @@ import type { LumaDatabase } from "../persistence/db.js";
 import { AiServiceError, type AiServiceErrorCode } from "./ai-service-error.js";
 
 const NANOS_PER_USD = 1_000_000_000;
-// Standard, short-context, 30-minute cache prices checked 2026-09-08.
+// Standard, short-context, 30-minute cache prices in USD nanos per token.
 // Reasoning is a subset of output tokens, never an additional charge.
 export const AI_PRICE_VERSION = "openai-standard-2026-09-08";
-const LUNA_PRICE = { input: 200, cachedInput: 20, cacheWrite: 250, output: 1200 };
+const MODEL_PRICES: Record<
+  string,
+  {
+    version: string;
+    input: number;
+    cachedInput: number;
+    cacheWrite: number;
+    output: number;
+  }
+> = {
+  "gpt-5.6-luna": {
+    version: AI_PRICE_VERSION,
+    input: 200,
+    cachedInput: 20,
+    cacheWrite: 250,
+    output: 1200
+  },
+  "gpt-6-luna": {
+    version: "openai-standard-2026-09-25",
+    input: 100,
+    cachedInput: 10,
+    cacheWrite: 125,
+    output: 500
+  }
+};
 
 export function isAiModelPriced(model: string): boolean {
-  return model === "gpt-5.6-luna";
+  return modelPrice(model) !== undefined;
+}
+
+function modelPrice(model: string): (typeof MODEL_PRICES)[string] | undefined {
+  return Object.hasOwn(MODEL_PRICES, model) ? MODEL_PRICES[model] : undefined;
 }
 
 export type AiTokenUsage = {
@@ -157,7 +185,8 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
       if (!configured) {
         throw new AiServiceError("not-configured", "AI usage is not configured.");
       }
-      if (!isAiModelPriced(input.model)) {
+      const price = modelPrice(input.model);
+      if (!price) {
         throw new AiServiceError(
           "not-configured",
           "The selected AI model does not have a verified price configuration."
@@ -174,8 +203,8 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
         );
       }
       const reserved =
-        input.inputTokenUpperBound * LUNA_PRICE.cacheWrite +
-        input.maxOutputTokens * LUNA_PRICE.output;
+        input.inputTokenUpperBound * price.cacheWrite +
+        input.maxOutputTokens * price.output;
       const now = clock();
       const day = localDate(now, settings.timezone);
       const month = day.slice(0, 7);
@@ -256,7 +285,7 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
             workflowId,
             input.capability,
             input.model,
-            AI_PRICE_VERSION,
+            price.version,
             month,
             day,
             reserved,
@@ -280,9 +309,10 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
       );
       const row = rows[0];
       if (!row || row.state === "settled") return;
+      const price = modelPrice(row.model);
       if (
-        row.price_version !== AI_PRICE_VERSION ||
-        !isAiModelPriced(row.model) ||
+        !price ||
+        row.price_version !== price.version ||
         usage.inputTokens > row.input_token_upper_bound ||
         usage.outputTokens > row.max_output_tokens
       ) {
@@ -294,10 +324,10 @@ export function createAiUsageBudget(config: BudgetConfig): AiUsageBudget {
       }
       const charged =
         (usage.inputTokens - usage.cachedInputTokens - usage.cacheWriteTokens) *
-          LUNA_PRICE.input +
-        usage.cachedInputTokens * LUNA_PRICE.cachedInput +
-        usage.cacheWriteTokens * LUNA_PRICE.cacheWrite +
-        usage.outputTokens * LUNA_PRICE.output;
+          price.input +
+        usage.cachedInputTokens * price.cachedInput +
+        usage.cacheWriteTokens * price.cacheWrite +
+        usage.outputTokens * price.output;
       // Settlement is idempotent. Late positive usage can resolve an unknown reservation.
       await config.database.query(
         `UPDATE ai_usage_requests SET state = 'settled', charged_nanos = $2,

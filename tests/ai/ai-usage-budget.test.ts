@@ -58,6 +58,34 @@ describe("durable AI usage budget", () => {
     expect(rows[0]?.price_version).toBe("openai-standard-2026-09-08");
   });
 
+  it("prices GPT-6 Luna separately while settling existing GPT-5.6 Luna reservations", async () => {
+    const budget = createAiUsageBudget({ database });
+    const previous = await budget.reserve(reservation);
+    const current = await budget.reserve({
+      ...reservation,
+      workflowId: "new-model-question",
+      model: "gpt-6-luna"
+    });
+    expect(await budget.getStatus("dayova")).toMatchObject({
+      reservedUsd: 0.000715,
+      requestCount: 2
+    });
+    await budget.settle(previous.reservationId, usage);
+    await budget.settle(current.reservationId, usage);
+    expect(await budget.getStatus("dayova")).toMatchObject({
+      spentUsd: 0.0006085,
+      reservedUsd: 0,
+      requestCount: 2
+    });
+    const { rows } = await database.query<{ model: string; price_version: string }>(
+      "SELECT model,price_version FROM ai_usage_requests ORDER BY model"
+    );
+    expect(rows).toEqual([
+      { model: "gpt-5.6-luna", price_version: "openai-standard-2026-09-08" },
+      { model: "gpt-6-luna", price_version: "openai-standard-2026-09-25" }
+    ]);
+  });
+
   it("serializes final funds across independent budget instances sharing durable persistence", async () => {
     const one = createAiUsageBudget({ database, monthlyLimitUsd: 0.0007 });
     const two = createAiUsageBudget({ database, monthlyLimitUsd: 0.0007 });
@@ -299,6 +327,9 @@ describe("durable AI usage budget", () => {
     const budget = createAiUsageBudget({ database });
     await expect(
       budget.reserve({ ...reservation, model: "unpriced" })
+    ).rejects.toMatchObject({ code: "not-configured" });
+    await expect(
+      budget.reserve({ ...reservation, model: "toString" })
     ).rejects.toMatchObject({ code: "not-configured" });
     expect(await budget.getStatus("dayova")).toMatchObject({ requestCount: 0 });
     expect(

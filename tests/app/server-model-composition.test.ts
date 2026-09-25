@@ -19,12 +19,12 @@ const scenarios = [
   {
     name: "an absent override",
     configuredModel: undefined,
-    expectedModel: "gpt-5.6-luna"
+    expectedModel: "gpt-6-luna"
   },
   {
     name: "a whitespace override",
     configuredModel: "   ",
-    expectedModel: "gpt-5.6-luna"
+    expectedModel: "gpt-6-luna"
   }
 ] as const;
 

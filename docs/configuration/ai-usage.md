@@ -57,9 +57,11 @@ instead of being counted as free; late positive usage can settle them.
 Provider-reported token counts support a **calculated cost estimate**, not an
 invoice. Cached input and cache writes are separate, and reasoning tokens are
 already part of output tokens. Never add reasoning to output again. Missing or
-invalid usage is unknown. The current price table covers Standard short-context
-`gpt-5.6-luna`; an unpriced model fails admission rather than receiving a zero
-price. A model change requires a reviewed price table and quality evidence.
+invalid usage is unknown. The current price table covers Standard short-context `gpt-5.6-luna`
+and `gpt-6-luna`; an unpriced model fails admission rather than receiving a zero
+price. Each reservation retains its model and price version, so reservations
+made before the default changed can still settle at their original rates.
+Review published pricing before adding another model.
 
 If a returned model, pricing tier or usage count contradicts the reservation,
 the workspace stops paid dispatch until an operator reconciles the accounting.
@@ -97,23 +99,23 @@ not a valid way to reset usage.
 
 ## Initial cost estimate
 
-Plan **USD 5–15/month initially** for all four founders using the current model
+Plan **USD 3–10/month initially** for all four founders using the current model
 and text workflows. This is a planning range, not measured consumption. Prices
-were checked on 11 September 2026 against the
+were checked on 25 September 2026 against the
 [official pricing table](https://developers.openai.com/api/docs/pricing) and
-[Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna):
-per million tokens, Standard short-context input is $0.20, cached input $0.02,
-cache writes $0.25 and output $1.20.
+[GPT-6 Luna model page](https://developers.openai.com/api/docs/models/gpt-6-luna):
+per million tokens, Standard short-context input is $0.10, cached input $0.01,
+cache writes $0.125 and output $0.50.
 
 For a transparent example, assume 400 Context Asks per month at 10,000 input and
 4,000 total output tokens each, plus 100 analysis calls at 20,000 input and 8,000
-total output tokens. Pricing all input at the conservative $0.25/M rate and adding
+total output tokens. Pricing all input at the conservative $0.125/M cache-write rate and adding
 a 25% experimentation allowance gives:
 
 ```text
-Ask:      (10,000 × $0.25 + 4,000 × $1.20) / 1,000,000 = $0.0073
-Analysis: (20,000 × $0.25 + 8,000 × $1.20) / 1,000,000 = $0.0146
-Month:    (400 × $0.0073 + 100 × $0.0146) × 1.25       = $5.475
+Ask:      (10,000 × $0.125 + 4,000 × $0.50) / 1,000,000 = $0.00325
+Analysis: (20,000 × $0.125 + 8,000 × $0.50) / 1,000,000 = $0.0065
+Month:    (400 × $0.00325 + 100 × $0.0065) × 1.25       = $2.4375
 ```
 
 All counts and token sizes are assumptions across the whole team. The allowance

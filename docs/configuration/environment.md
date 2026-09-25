@@ -219,10 +219,10 @@ OAuth, a browser/native ingress, or a Notion write. Set the live-test flag to
 ```dotenv
 OPENAI_API_KEY=sk-...
 LUMA_REASONING_MODEL_PROVIDER=openai
-LUMA_REASONING_MODEL_NAME=gpt-5.6-luna
+LUMA_REASONING_MODEL_NAME=gpt-6-luna
 ```
 
-The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-5.6-luna` is the default cost-sensitive model. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default. A model override requires a verified price configuration before paid requests are admitted.
+The OpenAI SDK sits behind Luma's owned `ReasoningModel` Interface. The Adapter uses the Responses API with strict Structured Outputs. `gpt-6-luna` is the default cost-sensitive model. The same resolved setting is passed to both Meeting analysis and the optional bounded Discord Context Ask; blank values use this default. A model override requires a verified price configuration before paid requests are admitted. An existing explicit `LUMA_REASONING_MODEL_NAME=gpt-5.6-luna` setting continues to select the previous model until changed.
 
 Both capabilities share a durable provisional $30/month AI allowance, explicit request bounds and cost accounting. `/meeting usage` remains available without a model call. See [AI usage and the exploratory budget](ai-usage.md) for limits, warnings, recovery behavior, estimation assumptions and live billing prerequisites.
 
@@ -351,7 +351,7 @@ export GITHUB_REPOSITORY="Dayova/dayova-mvp"
 | `LUMA_LIVE_NATIVE_NOTION_READONLY_TESTS`             | No; exact `1`     | Tests                    | Opt-in non-mutating one-page exact-reader smoke test.                                                |
 | `OPENAI_API_KEY`                                     | For analysis      | ReasoningModel           | OpenAI API credential.                                                                               |
 | `LUMA_REASONING_MODEL_PROVIDER`                      | No                | ReasoningModel           | `openai` by default; `disabled` defers analysis.                                                     |
-| `LUMA_REASONING_MODEL_NAME`                          | No                | ReasoningModel           | Defaults to `gpt-5.6-luna`.                                                                          |
+| `LUMA_REASONING_MODEL_NAME`                          | No                | ReasoningModel           | Defaults to `gpt-6-luna`.                                                                            |
 | `DISCORD_TOKEN`                                      | For bot           | Discord Adapter          | Secret Gateway and REST token.                                                                       |
 | `DISCORD_CLIENT_ID`                                  | For bot           | Discord Adapter          | Discord Application ID.                                                                              |
 | `DISCORD_GUILD_ID`                                   | For bot           | Discord Adapter          | Server receiving guild-scoped commands.                                                              |

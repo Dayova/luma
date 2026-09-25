@@ -100,7 +100,7 @@ function clients() {
 function response(output: unknown) {
   return {
     outputText: JSON.stringify(output),
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     serviceTier: "default",
     status: "completed",
     usage: {
@@ -285,7 +285,7 @@ describe("real-AI local mode with deterministic external response clients", () =
         workflowId: `prior-${index}`,
         capability: "test",
         model: "gpt-5.6-luna",
-        inputTokenUpperBound: 50000,
+        inputTokenUpperBound: 52000,
         maxOutputTokens: 128000
       });
       await budget.markUnknown(reservation.reservationId);

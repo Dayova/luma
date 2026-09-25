@@ -82,7 +82,7 @@ click **Use key for this session**. Connecting loads the key but makes no provid
 request. **Analyze with real AI** sends your pasted text to the production OpenAI
 ReasoningModel adapter; **Ask with real AI** uses real Context Intelligence and
 the OpenAI ContextAnswerer. There are no synthetic AI responses in this mode.
-The existing model is `gpt-5.6-luna`; unpriced model overrides are not accepted.
+The default model is `gpt-6-luna`; unpriced model overrides are not accepted.
 
 You can also explicitly export `LUMA_LOCAL_OPENAI_API_KEY` before starting. The
 launcher does not load `.env`, the production store or existing Discord tokens.

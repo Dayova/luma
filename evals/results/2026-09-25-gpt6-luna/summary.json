@@ -1,0 +1,207 @@
+{
+  "version": 2,
+  "benchmarkHash": "ca94819fd6d3ff3308fbf58e76b7551514a2568b6d6da3508670d5b41e026bc7",
+  "planHash": "42c9c053ae9d00ec2c6f64717ca3c40e57e2f0695f59f6b2acb321db45b499dc",
+  "mode": "live",
+  "sourceReports": [],
+  "candidates": [
+    {
+      "candidate": "openai-gpt-5-6-luna-incumbent",
+      "planned": 24,
+      "dispatched": 24,
+      "validOutputs": 24,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "automaticPasses": 23,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 24,
+      "criticalFailures": 1,
+      "knownCostUsd": 0.038741399999999995,
+      "knownCostAttempts": 24,
+      "medianValidLatencyMs": 6638.5,
+      "p95AttemptLatencyMs": 15704,
+      "dimensions": {
+        "modality": {
+          "automaticPassed": 6,
+          "automaticAssessed": 6,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "grounding": {
+          "automaticPassed": 31,
+          "automaticAssessed": 31,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "recall": {
+          "automaticPassed": 17,
+          "automaticAssessed": 17,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 48
+        },
+        "deadline": {
+          "automaticPassed": 7,
+          "automaticAssessed": 7,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "ownership": {
+          "automaticPassed": 20,
+          "automaticAssessed": 20,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        },
+        "decision": {
+          "automaticPassed": 5,
+          "automaticAssessed": 5,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 16,
+          "planned": 16,
+          "automaticPasses": 15,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 8,
+          "reviewedPasses": 0
+        }
+      ]
+    },
+    {
+      "candidate": "openai-gpt-6-luna-challenger",
+      "planned": 24,
+      "dispatched": 24,
+      "validOutputs": 24,
+      "operationalErrors": 0,
+      "unrun": 0,
+      "automaticPasses": 23,
+      "reviewedPasses": 0,
+      "reviewedOutputs": 0,
+      "pendingReview": 24,
+      "criticalFailures": 1,
+      "knownCostUsd": 0.017100100000000003,
+      "knownCostAttempts": 24,
+      "medianValidLatencyMs": 8496,
+      "p95AttemptLatencyMs": 17821,
+      "dimensions": {
+        "modality": {
+          "automaticPassed": 6,
+          "automaticAssessed": 6,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "grounding": {
+          "automaticPassed": 31,
+          "automaticAssessed": 31,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "attribution": {
+          "automaticPassed": 0,
+          "automaticAssessed": 1,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "recall": {
+          "automaticPassed": 17,
+          "automaticAssessed": 17,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 48
+        },
+        "deadline": {
+          "automaticPassed": 7,
+          "automaticAssessed": 7,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 24
+        },
+        "ownership": {
+          "automaticPassed": 20,
+          "automaticAssessed": 20,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        },
+        "decision": {
+          "automaticPassed": 5,
+          "automaticAssessed": 5,
+          "semanticPassed": 0,
+          "semanticFailed": 0,
+          "semanticPending": 0
+        }
+      },
+      "cohorts": [
+        {
+          "cohort": "regression",
+          "cases": 16,
+          "planned": 16,
+          "automaticPasses": 15,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "representative",
+          "cases": 0,
+          "planned": 0,
+          "automaticPasses": 0,
+          "reviewedPasses": 0
+        },
+        {
+          "cohort": "challenge",
+          "cases": 8,
+          "planned": 8,
+          "automaticPasses": 8,
+          "reviewedPasses": 0
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "incumbent": "openai-gpt-5-6-luna-incumbent",
+      "challenger": "openai-gpt-6-luna-challenger",
+      "metric": "automatic-case-success",
+      "groups": 23,
+      "pairedAttempts": 24,
+      "missingPairs": 0,
+      "unreviewedPairs": 24,
+      "automaticDifference": 0,
+      "interval95": [0, 0],
+      "qualityDifference": null,
+      "qualityInterval95": null,
+      "interpretation": "Exploratory challenger-minus-incumbent differences, equally weighted by meeting group. Operational errors count as unsuccessful attempts; unrun pairs prevent an interval. Automatic checks are not semantic correctness. A narrow or zero bootstrap interval does not rule out unseen failure modes or establish equivalence. No automatic model promotion."
+    }
+  ]
+}

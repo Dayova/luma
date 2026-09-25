@@ -87,6 +87,33 @@ and per-row request hashes bind the exact instruction to its saved outputs.
 Omitting the field preserves the original prompt and historical hashes. No additional API keys are needed for models accessible under the existing
 four provider credentials.
 
+For the GPT-6 Luna release, use the committed
+`evals/models/openai-luna-generation-comparison.json` as the two-candidate
+manifest. It freezes the incumbent and challenger at their verified Standard
+short-context rates, without changing the production default. First run an
+offline preflight, then a small paired live smoke test with a dedicated test
+credential and a spending ceiling. A four-request smoke test checks API access
+and output compatibility; it does not establish model quality. The full 24-case
+comparison requires 48 requests for one repetition, followed by blinded review
+of critical errors, German and mixed-language ownership, modality, and grounded
+answers. Keep the incumbent unless the challenger has no material safety or
+quality regression and its observed cost/latency improve the product. Runtime
+admission still rejects `gpt-6-luna` until its per-model pricing is added to the
+durable budget ledger; setting the model environment variable alone cannot
+enable a safe rollout.
+
+[GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) is a
+separate candidate for narrow, difficult workflows only: its published Standard
+text rates are $2/M input and $10/M output, twenty times GPT-6 Luna's per-token
+rates. The existing cross-provider baseline remains useful for catching
+regressions; new models do not enter daily operation without demonstrated
+benefit under the provisional $30/month allowance.
+
+```bash
+pnpm eval:quality --models=evals/models/openai-luna-generation-comparison.json
+pnpm eval:quality --live --models=evals/models/openai-luna-generation-comparison.json --max-requests=4 --repeats=1 --seed=53
+```
+
 ```bash
 pnpm eval:quality --models=.luma/quality/models.json
 pnpm eval:quality --live --models=.luma/quality/models.json --max-requests=144 --repeats=3 --seed=53

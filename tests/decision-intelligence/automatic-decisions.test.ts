@@ -800,7 +800,7 @@ describe("actual automatic model composition and batches", () => {
       create: vi.fn(() =>
         Promise.resolve({
           outputText: JSON.stringify(wireDetection(f)),
-          model: "gpt-5.6-luna",
+          model: "gpt-6-luna",
           serviceTier: "default",
           status: "completed",
           providerResponseId: "repaired",
@@ -955,7 +955,7 @@ describe("actual automatic model composition and batches", () => {
           create: () =>
             Promise.resolve({
               outputText: JSON.stringify(wire),
-              model: "gpt-5.6-luna",
+              model: "gpt-6-luna",
               serviceTier: "default",
               status: "completed",
               providerResponseId: "resp_bad",

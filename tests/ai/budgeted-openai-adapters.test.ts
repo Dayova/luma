@@ -89,7 +89,7 @@ function response(capability: Capability): AiResponse {
             inferences: [],
             unresolved: []
           }),
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     serviceTier: "default",
     status: "completed",
     usage,
@@ -145,7 +145,7 @@ describe.each<Capability>(["meeting", "context"])(
       const budget = createAiUsageBudget({ database });
       await expect(caller(capability, { budget, client })()).rejects.toThrow();
       expect(await budget.getStatus("dayova")).toMatchObject({
-        spentUsd: 0.0000312,
+        spentUsd: 0.0000146,
         reservedUsd: 0,
         unknownUsd: 0,
         requestCount: 1
@@ -154,7 +154,7 @@ describe.each<Capability>(["meeting", "context"])(
       const telemetry = JSON.stringify(rows);
       expect(telemetry).toContain("resp_safe_123");
       expect(telemetry).toContain("req_safe_456");
-      expect(telemetry).toContain("openai-standard-2026-09-08");
+      expect(telemetry).toContain("openai-standard-2026-09-25");
       expect(telemetry).not.toContain("private-evidence");
       expect(telemetry).not.toContain("private-question");
       expect(telemetry).not.toContain("not valid JSON");
@@ -247,7 +247,7 @@ describe.each<Capability>(["meeting", "context"])(
         code: "unavailable"
       });
       expect(await budget.getStatus("dayova")).toMatchObject({
-        spentUsd: 0.0000312,
+        spentUsd: 0.0000146,
         reservedUsd: 0,
         unknownUsd: 0
       });
@@ -268,7 +268,7 @@ describe.each<Capability>(["meeting", "context"])(
         code: "request-too-large"
       });
       expect(await budget.getStatus("dayova")).toMatchObject({
-        spentUsd: 0.0000312,
+        spentUsd: 0.0000146,
         reservedUsd: 0,
         unknownUsd: 0
       });
@@ -333,7 +333,7 @@ describe("OpenAI wire usage and operational failures", () => {
         new Response(
           JSON.stringify({
             id: "resp_output_limit",
-            model: "gpt-5.6-luna",
+            model: "gpt-6-luna",
             service_tier: "default",
             status: "incomplete",
             incomplete_details: { reason: "max_output_tokens" },
@@ -377,7 +377,7 @@ describe("OpenAI wire usage and operational failures", () => {
             : () => createOpenAIContextAnswerer(config).answer(contextRequest);
         await expect(call()).rejects.toMatchObject({ code: "request-too-large" });
         expect(await config.budget.getStatus("dayova")).toMatchObject({
-          spentUsd: 0.0000312,
+          spentUsd: 0.0000146,
           reservedUsd: 0,
           unknownUsd: 0
         });

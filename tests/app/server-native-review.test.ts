@@ -120,7 +120,7 @@ async function fixture(limit = "30", withWriter = false, providerId = "linear") 
         risks: [],
         followUpIntentions: []
       }),
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       serviceTier: "default",
       status: "completed",
       usage: {

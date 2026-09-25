@@ -101,7 +101,7 @@ describe("Context Intelligence Ask", () => {
         dispatches += 1;
         return Promise.resolve({
           outputText,
-          model: "gpt-5.6-luna",
+          model: "gpt-6-luna",
           serviceTier: "default",
           status: "completed",
           usage: {
@@ -197,7 +197,7 @@ describe("Context Intelligence Ask", () => {
                   inferences: [],
                   unresolved: []
                 }),
-                model: "gpt-5.6-luna",
+                model: "gpt-6-luna",
                 serviceTier: "default",
                 status: "completed",
                 usage: {

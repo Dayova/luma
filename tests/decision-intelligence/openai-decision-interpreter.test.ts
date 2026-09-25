@@ -47,7 +47,7 @@ function fixture() {
   const value = { ...wire, candidate };
   const response = (): AiResponse => ({
     outputText: JSON.stringify(value),
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     serviceTier: "default",
     status: "completed",
     usage: {
@@ -120,7 +120,7 @@ describe("budgeted production DecisionInterpreter", () => {
       acceptanceEvidenceIds: []
     });
     expect(await f.budget.getStatus("dayova")).toMatchObject({
-      spentUsd: 0.0000312,
+      spentUsd: 0.0000146,
       reservedUsd: 0,
       unknownUsd: 0,
       requestCount: 1,
@@ -163,7 +163,7 @@ describe("budgeted production DecisionInterpreter", () => {
         requestDispatched: true
       });
       expect(await f.budget.getStatus("dayova")).toMatchObject({
-        spentUsd: 0.0000312,
+        spentUsd: 0.0000146,
         unknownUsd: 0,
         requestCount: 1
       });
@@ -228,7 +228,7 @@ describe("budgeted production DecisionInterpreter", () => {
             id: "resp_native_decision",
             object: "response",
             created_at: 1,
-            model: "gpt-5.6-luna",
+            model: "gpt-6-luna",
             status: "completed",
             service_tier: "default",
             output: [
@@ -265,7 +265,7 @@ describe("budgeted production DecisionInterpreter", () => {
     expect(bodies[0]).toMatchObject({
       store: false,
       service_tier: "default",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       text: {
         format: {
           type: "json_schema",

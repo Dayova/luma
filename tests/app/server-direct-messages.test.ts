@@ -95,7 +95,7 @@ describe("application DM composition", () => {
                       inferences: [],
                       unresolved: []
                     }),
-                    model: "gpt-5.6-luna",
+                    model: "gpt-6-luna",
                     serviceTier: "default",
                     status: "completed",
                     usage: {

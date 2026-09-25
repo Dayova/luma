@@ -442,7 +442,7 @@ describe("MI-owned first-class Decision Records", () => {
             },
             reconciliation: { action: "amend", targetRecordId: target.content.id }
           }),
-          model: "gpt-5.6-luna",
+          model: "gpt-6-luna",
           serviceTier: "default",
           status: "completed",
           usage: {

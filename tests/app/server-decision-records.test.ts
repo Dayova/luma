@@ -243,7 +243,7 @@ async function fixture(monthlyLimit = "30", automatic = false) {
         },
         reconciliation: { action: "create" }
       }),
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       serviceTier: "default",
       status: "completed",
       usage: {

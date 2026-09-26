@@ -7,6 +7,16 @@ Meeting Notes in Notion, and implementation evidence in GitHub. Meetings are
 the first narrow vertical; Discord chats and threads are also first-class
 sources and interaction surfaces over the shared Luma core.
 
+## Product scope
+
+Luma is a small internal tool for Dayova's four founders: Jakob, Fabius,
+Philipp, and Julius. It should help them with their day-to-day work. Keep
+features, model choices, integrations, and operating processes as simple as
+the actual founder use case allows. Add complexity when it solves a concrete
+problem for them, not in anticipation of a larger organization or external
+users. Founder-only access remains the current scope until the team decides
+otherwise.
+
 ## Language
 
 **Meeting**:

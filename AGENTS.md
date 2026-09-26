@@ -18,6 +18,10 @@ When installing or updating `mattpocock/skills`, refresh the lock and revalidate
 
 This is a single-context repo with root `CONTEXT.md` and root `docs/adr/`. See `docs/agents/domain.md`.
 
+### Product scope
+
+Before choosing features, models, integrations, or processes, read the Product scope in root `CONTEXT.md` and keep the work proportional to Luma's current audience.
+
 ## Architecture Rules
 
 - Treat Meeting Intelligence as the deepest Module in the system.
